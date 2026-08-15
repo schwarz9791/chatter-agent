@@ -7,6 +7,15 @@ on:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 
+# 既定のトークン権限は広いので、必要な分だけに絞る
+permissions:
+  contents: read
+
+# 同じブランチへ続けて push したら、古い実行は打ち切る
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 defaults:
   run:
     working-directory: core
@@ -104,6 +113,32 @@ jobs:
             echo "::error::plugin/bin/ のバンドルがソースと一致しません。core/ で npm run build を実行してコミットしてください。"
             exit 1
           fi
+          # git diff は未追跡ファイルを見ない。clean: false なので、将来チャンクや
+          # sourcemap が増えても無検査で紛れ込む。porcelain で追跡外も拾う
+          untracked="$(git status --porcelain -- ../plugin/bin)"
+          if [ -n "$untracked" ]; then
+            echo "::error::plugin/bin/ に未コミットのファイルがあります:"
+            echo "$untracked"
+            exit 1
+          fi
+
+      # バンドラがヘッダを落としていても上の検証は通ってしまう（ソースとは一致するため）。
+      # 配布物そのものに帰属表示と改変告知があることを直接確かめる（Apache-2.0 §4(b)/(d)）
+      - name: Verify attribution survives bundling
+        run: |
+          bundle=../plugin/bin/chatter-agent-speak.mjs
+          for needle in "kazakago" "Modified for chatter-agent" "Apache License"; do
+            if ! grep -qF "$needle" "$bundle"; then
+              echo "::error::配布バンドルに \"$needle\" がありません。tsdown.config.ts の banner を確認してください。"
+              exit 1
+            fi
+          done
+          for f in ../plugin/LICENSE ../plugin/NOTICE; do
+            if [ ! -f "$f" ]; then
+              echo "::error::$f がありません。/plugin install の配布物に含める必要があります。"
+              exit 1
+            fi
+          done
 
   test:
     name: Test

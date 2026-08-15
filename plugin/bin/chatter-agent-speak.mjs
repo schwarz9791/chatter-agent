@@ -1,4 +1,18 @@
 #!/usr/bin/env node
+/**
+ * chatter-agent
+ * Copyright 2026 Masaki Matsumura
+ * Licensed under the Apache License, Version 2.0.
+ *
+ * This bundle includes software developed as part of CC Mascot
+ * (https://github.com/kazakago/cc-mascot), Copyright 2026 kazakago,
+ * licensed under the Apache License, Version 2.0:
+ *
+ *   electron/filters/textFilter.ts @ 46f7def
+ *   electron/services/ruleBasedEmotionClassifier.ts @ 46f7def
+ *
+ * Modified for chatter-agent. See NOTICE and docs/origin.md.
+ */
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -130,7 +144,7 @@ const parsePositiveInt = (raw) => {
 	const n = toInt(raw);
 	return n !== void 0 && n >= 1 ? n : void 0;
 };
-const parseNonEmptyString = (raw) => typeof raw === "string" && raw.trim() ? raw : void 0;
+const parseNonEmptyString = (raw) => typeof raw === "string" && raw.trim() ? raw.trim() : void 0;
 /**
 * キーの定義。satisfies で ChatterAgentConfig の全キーを網羅していることを型で担保する
 * （satisfies は型のみなので erasableSyntaxOnly に抵触しない）。
@@ -217,7 +231,7 @@ function createConfigStore(deps = {}) {
 			return;
 		}
 		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-			warnOnce("file:shape", `[Config] ${filePath} のトップレベルがオブジェクトではありません。既定値を使います`);
+			warnOnce("file:shape", `[Config] ${filePath} のトップレベルがオブジェクトではありません。直前の値を使い続けます`);
 			return;
 		}
 		const record = parsed;
@@ -782,8 +796,21 @@ var RuleBasedEmotionClassifier = class {
 * **`mkdir` の原子性**で実装する。同名ディレクトリの作成は、成功するのが必ず1プロセスだけ。
 */
 const DEFAULT_STALE_MS = 6e4;
-function pidFilePath(lockDir) {
-	return path.join(lockDir, "pid");
+function ownerFilePath(lockDir) {
+	return path.join(lockDir, "owner.json");
+}
+function readOwner(lockDir) {
+	try {
+		const parsed = JSON.parse(fs.readFileSync(ownerFilePath(lockDir), "utf-8"));
+		if (typeof parsed === "object" && parsed !== null) {
+			const { pid, token } = parsed;
+			if (typeof pid === "number" && Number.isInteger(pid) && typeof token === "string") return {
+				pid,
+				token
+			};
+		}
+	} catch {}
+	return null;
 }
 /** そのプロセスが生きているか。権限が無くて確認できない場合は「生きている」に倒す */
 function isProcessAlive(pid) {
@@ -797,24 +824,20 @@ function isProcessAlive(pid) {
 /**
 * 放置されたロックか判定する。
 *
-* 「古い」だけでは足りない（要約などで長く走っているワーカーを殺してしまう）ので、
-* **プロセスが死んでいること**と**十分に古いこと**の両方を要求する。
-* pid が読めない（作成途中 / 壊れている）ロックは、古い場合にだけ奪う。
+* ★ pid の生存確認を経過時間より**先に**行うこと。逆にすると、SIGKILL / SIGHUP / OOM で
+*   死んだプロセスのロックが残ったとき、hook が起動する CLI が丸ごと staleMs のあいだ
+*   無言で return し続ける（その間の発話がすべて遅延する）。
+*
+* 古さによる判定も残す。所有者が読めない（作成途中 / 壊れている）場合に加えて、
+* pid が再利用されて別のプロセスが生きて見えるケースの backstop になる。
 */
 function isStale(lockDir, staleMs, now) {
-	let age;
+	const owner = readOwner(lockDir);
+	if (owner !== null && !isProcessAlive(owner.pid)) return true;
 	try {
-		age = now - fs.statSync(lockDir).mtimeMs;
+		return now - fs.statSync(lockDir).mtimeMs >= staleMs;
 	} catch {
 		return false;
-	}
-	if (age < staleMs) return false;
-	try {
-		const pid = Number.parseInt(fs.readFileSync(pidFilePath(lockDir), "utf-8").trim(), 10);
-		if (!Number.isInteger(pid) || pid <= 0) return true;
-		return !isProcessAlive(pid);
-	} catch {
-		return true;
 	}
 }
 /**
@@ -825,32 +848,45 @@ function acquireLock(lockDir, options = {}) {
 	const staleMs = options.staleMs ?? DEFAULT_STALE_MS;
 	const now = options.now ?? Date.now;
 	const pid = options.pid ?? process.pid;
+	const token = options.token ?? `${pid}-${process.hrtime.bigint()}`;
 	fs.mkdirSync(path.dirname(lockDir), { recursive: true });
 	const tryCreate = () => {
 		try {
 			fs.mkdirSync(lockDir);
 		} catch (err) {
-			if (err.code === "EEXIST") return false;
+			if (err.code === "EEXIST") return null;
 			throw err;
 		}
 		try {
-			fs.writeFileSync(pidFilePath(lockDir), `${pid}\n`);
+			fs.writeFileSync(ownerFilePath(lockDir), `${JSON.stringify({
+				pid,
+				token
+			})}\n`);
 		} catch {}
-		return true;
+		return makeLock(lockDir, token);
 	};
-	if (tryCreate()) return makeLock(lockDir);
+	const first = tryCreate();
+	if (first) return first;
 	if (!isStale(lockDir, staleMs, now())) return null;
-	fs.rmSync(lockDir, {
+	const evicted = `${lockDir}.evicted-${token}`;
+	try {
+		fs.renameSync(lockDir, evicted);
+	} catch {
+		return null;
+	}
+	fs.rmSync(evicted, {
 		recursive: true,
 		force: true
 	});
-	return tryCreate() ? makeLock(lockDir) : null;
+	return tryCreate();
 }
-function makeLock(lockDir) {
+function makeLock(lockDir, token) {
 	let released = false;
 	return { release() {
 		if (released) return;
 		released = true;
+		const owner = readOwner(lockDir);
+		if (owner !== null && owner.token !== token) return;
 		fs.rmSync(lockDir, {
 			recursive: true,
 			force: true
@@ -891,6 +927,10 @@ function buildQuestionTexts(input) {
 function buildPlanApprovalText(input) {
 	const heading = (isRecord$1(input) && typeof input.plan === "string" ? input.plan : "").match(/^#{1,6}\s+(.+)$/m)?.[1].trim();
 	return heading ? `「${heading}」の${PLAN_APPROVAL_TEXT}` : PLAN_APPROVAL_TEXT;
+}
+/** フックの payload に含まれるセッションIDを取り出す（取れなければ null） */
+function getEventSessionId(payload) {
+	return getStringField(payload, "session_id");
 }
 /**
 * フックの payload に含まれるプロンプトIDを取り出す（取れなければ null）
@@ -969,47 +1009,109 @@ function splitIntoSentences(text) {
 }
 
 //#endregion
-//#region src/text/pendingFence.ts
+//#region src/text/unstableTail.ts
 /**
-* 未閉じコードフェンスの保留。
+* まだ確定していない末尾の切り落とし。
 *
 * chatter-agent 固有の要件で、上流 cc-mascot には存在しない。
 *
-* `cleanTextForSpeech` のコードブロック除去は ```` /```[\s\S]*?```/g ```` で、
-* **閉じフェンスが揃って初めて**ブロックを消す。ストリーミング中の raw には
-* 開いたままの ``` が普通に現れるので、そのまま流すとコードが読み上げられる。
+* CLI は毎 delta 起動して終了するため、進捗は「出力済みの文数」でしか持てない。
+* これが成り立つ前提は **既に出した範囲が後から変化しないこと** で、`cleanTextForSpeech` を
+* 伸び続ける raw に繰り返し適用するかぎり、その前提は自動では成立しない。
 *
-* 開いたままのフェンスより後ろを切り落としてから整形すれば、
+* 10段の正規表現のうち、**開始位置が既出範囲にあり、閉じ側が後から届く**ものが危険:
 *
-* - 未閉じの間はコードが漏れない
-* - フェンスが閉じた瞬間にブロック全体が消えても、**既に出した文は変化しない**
+* | 構文 | 何が起きるか |
+* |---|---|
+* | ```` ``` ```` | 閉じフェンスが来るまでコードが読み上げられる |
+* | `<…>` | `>` が届いた瞬間、`<` 以降の**既に発話した文ごと**削除される |
+* | `` `…` `` | 閉じバッククォートが届くと既出テキストから記号が消える |
+* | 表の行 | 行が閉じるまで生の `\| A \| B` が読み上げられ、閉じると消える |
+* | URL | 空白が来るまで削除範囲が伸び続ける |
+* | 16進列 | 7文字目が届いた瞬間に消え、41文字目で戻る |
 *
-* の両方が同時に成立する。後者は「出力済みの文数」で進捗を持つ設計の前提条件になっている。
+* これらの開始位置より後ろを切り落としてから整形すれば、既出範囲は変化しなくなる。
+*
+* ★ 引き換えに**発話が遅れる**。未閉じの `<` がある間、それ以降は保留される。
+*   `final:true` で保留は解ける（もう伸びないので不安定ではなくなる）ため、
+*   遅延の上限は「メッセージが閉じるまで」＝保留中の最終文と同じ。
 */
 const FENCE = "```";
 /**
-* 開いたままのコードフェンスがあれば、その開始位置より後ろを切り落とす。
-* フェンスが揃っていれば元の文字列をそのまま返す。
-*
-* フェンスの数え方は `cleanTextForSpeech` の正規表現に合わせ、
-* 左から順に非重複で ``` を拾い、奇数個目を開き・偶数個目を閉じとして扱う。
-* 行頭かどうかは見ない（正規表現も見ていないため）。
+* まだ確定していない末尾があれば、その開始位置より後ろを切り落とす。
+* すべて確定していれば元の文字列をそのまま返す。
 */
-function truncateAtUnclosedFence(text) {
+function truncateAtUnstableTail(text, options = {}) {
+	const scan = text.replace(/```[\s\S]*?```/g, (block) => block.replace(/[^\n]/g, " "));
+	const always = [unclosedFenceAt(text), incompleteTableRowAt(scan)];
+	const whileStreaming = options.final ? [] : [
+		unclosedTagAt(scan),
+		unclosedInlineCodeAt(scan),
+		trailingUrlAt(scan),
+		trailingHexRunAt(scan)
+	];
+	let cut = text.length;
+	for (const at of [...always, ...whileStreaming]) if (at !== null && at < cut) cut = at;
+	return cut === text.length ? text : text.slice(0, cut);
+}
+/**
+* 開いたままのコードフェンスの開始位置。
+*
+* 数え方は `cleanTextForSpeech` の正規表現に合わせ、左から順に非重複で ``` を拾い、
+* 奇数個目を開き・偶数個目を閉じとして扱う。行頭かどうかは見ない（正規表現も見ていない）。
+*/
+function unclosedFenceAt(text) {
+	return unclosedDelimiterAt(text, FENCE);
+}
+/** 開いたままのインラインバッククォートの開始位置 */
+function unclosedInlineCodeAt(scan) {
+	return unclosedDelimiterAt(scan, "`");
+}
+function unclosedDelimiterAt(text, delimiter) {
 	let searchFrom = 0;
 	let openedAt = -1;
 	let isOpen = false;
 	for (;;) {
-		const found = text.indexOf(FENCE, searchFrom);
+		const found = text.indexOf(delimiter, searchFrom);
 		if (found === -1) break;
 		if (isOpen) isOpen = false;
 		else {
 			isOpen = true;
 			openedAt = found;
 		}
-		searchFrom = found + 3;
+		searchFrom = found + delimiter.length;
 	}
-	return isOpen ? text.slice(0, openedAt) : text;
+	return isOpen ? openedAt : null;
+}
+/**
+* 閉じていない `<` の位置。
+*
+* `/<[^>]+>/g` は左から非重複で拾うので、**最後の `>` より後ろにある最初の `<`** が
+* 閉じ待ちになる。それより前の `<` はすでにどれかの `>` と対になっている。
+*/
+function unclosedTagAt(scan) {
+	const found = scan.indexOf("<", scan.lastIndexOf(">") + 1);
+	return found === -1 ? null : found;
+}
+/**
+* 書きかけの表の行の位置。
+*
+* 除去の正規表現は `/^\|.*\|$/gm` で、行が `|` で閉じて初めて消える。閉じるまでの間は
+* 生の `| A | B` が1文として読み上げられ、閉じた瞬間に消えるので、既出範囲が縮む。
+*/
+function incompleteTableRowAt(scan) {
+	const lineStart = scan.lastIndexOf("\n") + 1;
+	const line = scan.slice(lineStart);
+	if (!line.startsWith("|")) return null;
+	return /^\|.*\|$/.test(line) ? null : lineStart;
+}
+/** 末尾の URL。後続の空白が来るまで削除範囲が伸び続ける */
+function trailingUrlAt(scan) {
+	return scan.match(/https?:\/\/\S*$/)?.index ?? null;
+}
+/** 末尾の16進列。7文字目が届いた瞬間に消え、41文字目で戻る */
+function trailingHexRunAt(scan) {
+	return scan.match(/\b[0-9a-f]+$/)?.index ?? null;
 }
 
 //#endregion
@@ -1027,24 +1129,34 @@ function truncateAtUnclosedFence(text) {
 * この関数が純粋であることが重要で、CLI は毎 delta 起動して終了するため、
 * 状態は「出力済みの文数」だけをディスクに持ち、テキストは毎回ゼロから組み直す。
 */
+/** 文として閉じているか。句点・感嘆符・疑問符か、行が変わっていれば閉じている */
+function endsAtBoundary(text) {
+	return text.length === 0 || /[。！？!?\n\r]\s*$/.test(text);
+}
 /**
 * 全文を組み直し、確定した文のうち未出力のものを返す。
 *
-* 未閉じの ``` 以降を先に切り落とすのが要で、これにより
-* 「開いたままのコードが読み上げられない」と「既に出した文が後から変化しない」が
+* 未確定の末尾（未閉じの ``` や `<` など）を先に切り落とすのが要で、これにより
+* 「開いたままのコードや表が読み上げられない」と「既に出した文が後から変化しない」が
 * 同時に成立する。後者が `emitted`（文数）で進捗を持てる根拠になっている。
 */
 function assembleSentences(input) {
 	const raw = input.deltas.join("");
-	const safe = truncateAtUnclosedFence(raw);
+	const safe = truncateAtUnstableTail(raw, { final: input.final });
 	const cleaned = cleanTextForSpeech(safe);
 	const all = splitIntoSentences(cleaned).filter((sentence) => sentence.length > 0);
-	const limit = input.flushPending ? all.length : Math.max(0, all.length - 1);
-	const emitted = Math.max(input.emitted, limit);
+	const limit = resolveLimit(all.length, input, safe);
+	const clamped = Math.min(input.emitted, all.length);
+	const from = Math.min(clamped, limit);
 	return {
-		sentences: input.emitted < limit ? all.slice(input.emitted, limit) : [],
-		emitted
+		sentences: all.slice(from, limit),
+		emitted: Math.max(clamped, limit)
 	};
+}
+function resolveLimit(total, input, safe) {
+	if (input.final) return total;
+	if (input.flushPending && endsAtBoundary(safe)) return total;
+	return Math.max(0, total - 1);
 }
 
 //#endregion
@@ -1199,8 +1311,18 @@ function readProgress(progressPath) {
 	} catch {}
 	return 0;
 }
+/**
+* 出力済みの文数を記録する。
+*
+* ★ tmp + rename にすること。`writeFileSync` は O_TRUNC してから書くので、その隙に
+*   落ちると 0 バイトのサイドカーが残る。`readProgress` はそれを 0 と読むので、
+*   **メッセージが丸ごと最初から読み直される**。WebSocket の契約は `seq` でしか
+*   重複排除しないため、クライアントは言い直しと新規発話を区別できない。
+*/
 function writeProgress(progressPath, emitted) {
-	fs.writeFileSync(progressPath, `${JSON.stringify({ emitted })}\n`);
+	const tmp = `${progressPath}.tmp`;
+	fs.writeFileSync(tmp, `${JSON.stringify({ emitted })}\n`);
+	fs.renameSync(tmp, progressPath);
 }
 /** 処理し終えた spool を消す。メッセージはサイドカーごと消す */
 function removeEntry(entry) {
@@ -1277,7 +1399,7 @@ function writeWorkerState(statePath, state) {
 *
 * 順序の保証（CLAUDE.md「絶対に守ること」4）:
 * - spool は**到着順**に処理する
-* - ドレインが空振りするまで繰り返す。これが「解放前にもう一度 spool を見る」に当たり、
+* - ドレインが空振りするまで繰り返す。これが「解放完了後にもう一度 spool を見る」に当たり、
 *   走査直後に到着した分の取りこぼしを防ぐ
 */
 /**
@@ -1290,6 +1412,9 @@ const PROMPT_PAIR_WINDOW_MS = 1e4;
 const DUPLICATE_WINDOW_MS = 3e3;
 /** 空振りするまで回すが、万一 spool が育ち続けても抜けられるようにする */
 const MAX_PASSES = 8;
+function sessionIdOf(loaded) {
+	return "content" in loaded ? loaded.content.sessionId : getEventSessionId(loaded.payload);
+}
 function drainSpool(deps) {
 	const now = deps.now ?? Date.now;
 	const orphansRemoved = cleanOrphans(deps.spoolDir, deps.spoolMaxAgeMs, now());
@@ -1300,10 +1425,17 @@ function drainSpool(deps) {
 	for (; passes < MAX_PASSES; passes++) {
 		const entries = scanSpool(deps.spoolDir);
 		if (entries.length === 0) break;
+		const loaded = entries.map((entry) => entry.kind === "message" ? {
+			entry,
+			content: readMessage(entry.filePath)
+		} : {
+			entry,
+			payload: readPromptPayload(entry.filePath)
+		});
 		let changed = false;
-		for (let i = 0; i < entries.length; i++) {
-			const hasNewer = i < entries.length - 1;
-			const outcome = processEntry(entries[i], hasNewer, deps, state, now);
+		for (let i = 0; i < loaded.length; i++) {
+			const item = loaded[i];
+			const outcome = "content" in item ? processMessage(item, hasNewerInSameSession(loaded, i), deps) : processPrompt(item, deps, state, now);
 			written += outcome.written;
 			if (outcome.changed) changed = true;
 			if (outcome.stateDirty) stateDirty = true;
@@ -1317,20 +1449,32 @@ function drainSpool(deps) {
 		orphansRemoved
 	};
 }
+/**
+* このメッセージがもう伸びないと判断してよいか。
+*
+* ★ 「後続エントリが1つでもあるか」で見てはいけない。`getSpoolDir()` にセッション成分が無く、
+*   `MessageDisplay` は matcher 非対応で**全セッションで発火する**ため、Claude Code を2枚開くと
+*   別セッションのメッセージで保留が解け、書きかけの断片が読み上げられて順序も壊れる。
+*
+* session_id が取れないものは判断材料にしない。保留したまま `final` を待つ方が安全。
+*/
+function hasNewerInSameSession(loaded, index) {
+	const sessionId = sessionIdOf(loaded[index]);
+	if (sessionId === null) return false;
+	return loaded.slice(index + 1).some((other) => sessionIdOf(other) === sessionId);
+}
 const NOTHING = {
 	written: 0,
 	changed: false,
 	stateDirty: false
 };
-function processEntry(entry, hasNewer, deps, state, now) {
-	return entry.kind === "message" ? processMessage(entry, hasNewer, deps) : processPrompt(entry, deps, state, now);
-}
-function processMessage(entry, hasNewer, deps) {
-	const content = readMessage(entry.filePath);
+function processMessage(item, hasNewer, deps) {
+	const { entry, content } = item;
 	const emitted = readProgress(entry.progressPath);
 	const result = assembleSentences({
 		deltas: content.deltas,
 		emitted,
+		final: content.final,
 		flushPending: content.final || hasNewer
 	});
 	let written = 0;
@@ -1355,37 +1499,43 @@ function processMessage(entry, hasNewer, deps) {
 		stateDirty: false
 	};
 }
-function processPrompt(entry, deps, state, now) {
-	const payload = readPromptPayload(entry.filePath);
-	removeEntry(entry);
-	if (!deps.speakPrompts || payload === null) return {
-		...NOTHING,
-		changed: true
-	};
+function processPrompt(item, deps, state, now) {
+	const { entry, payload } = item;
+	if (payload === null) return NOTHING;
+	if (!deps.speakPrompts) {
+		removeEntry(entry);
+		return {
+			...NOTHING,
+			changed: true
+		};
+	}
 	const messages = formatPromptEvent(payload);
-	if (messages.length === 0) return {
-		...NOTHING,
-		changed: true
-	};
+	if (messages.length === 0) {
+		removeEntry(entry);
+		return {
+			...NOTHING,
+			changed: true
+		};
+	}
 	let stateDirty = false;
 	const hookName = getEventHookName(payload);
 	const promptId = getEventPromptId(payload);
 	const at = now();
-	if (hookName === "Notification" && promptId !== null && promptId === state.pairedPromptId && at - state.pairedPromptAt < PROMPT_PAIR_WINDOW_MS) {
+	if (hookName === "Notification" && promptId !== null && promptId === state.pairedPromptId && withinWindow(at, state.pairedPromptAt, PROMPT_PAIR_WINDOW_MS)) {
 		state.pairedPromptId = null;
+		removeEntry(entry);
 		return {
 			written: 0,
 			changed: true,
 			stateDirty: true
 		};
 	}
-	let written = 0;
 	const records = [];
-	const sessionId = typeof payload.session_id === "string" ? payload.session_id : null;
+	const sessionId = getEventSessionId(payload);
 	for (const message of messages) {
 		const cleaned = cleanTextForSpeech(message.text);
 		if (!cleaned) continue;
-		if (cleaned === state.lastText && at - state.lastTextAt < DUPLICATE_WINDOW_MS) continue;
+		if (cleaned === state.lastText && withinWindow(at, state.lastTextAt, DUPLICATE_WINDOW_MS)) continue;
 		state.lastText = cleaned;
 		state.lastTextAt = at;
 		stateDirty = true;
@@ -1402,20 +1552,29 @@ function processPrompt(entry, deps, state, now) {
 			});
 		}
 	}
-	if (records.length > 0) {
-		deps.speechLog.append(records);
-		written = records.length;
-	}
+	if (records.length > 0) deps.speechLog.append(records);
+	removeEntry(entry);
 	if (hookName === "PreToolUse" && promptId !== null) {
 		state.pairedPromptId = promptId;
 		state.pairedPromptAt = at;
 		stateDirty = true;
 	}
 	return {
-		written,
+		written: records.length,
 		changed: true,
 		stateDirty
 	};
+}
+/**
+* 抑制の時間窓に入っているか。
+*
+* ★ 経過が負なら窓の外として扱う。両タイムスタンプは `speak.state.json` に永続化されるので、
+*   サスペンド/レジュームや NTP で時計が巻き戻ると、本来ペアでない Notification を
+*   「ペア済み」と誤判定して**通知が二度と出なくなる**。
+*/
+function withinWindow(now, since, windowMs) {
+	const elapsed = now - since;
+	return elapsed >= 0 && elapsed < windowMs;
 }
 
 //#endregion
@@ -1428,16 +1587,38 @@ function processPrompt(entry, deps, state, now) {
 *
 * やることは短い:
 *   1. 無効化されていたら即終了
-*   2. ロックを取る。取れなければ即終了（先行ワーカーが拾う）
+*   2. ロックを取る。取れなければ少し待って数回だけ試す
 *   3. spool をドレインする
 *   4. ロックを解放する
 *
 * **何があっても exit 0 で終える。** hook の失敗が Claude Code の表示を止めてはいけない。
 */
+const LOCK_RETRIES = 3;
+const LOCK_RETRY_DELAY_MS = 120;
+/** 同期で待つ。デタッチ済みのプロセスなので、待っても hook はブロックしない */
+function sleepSync(ms) {
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+/**
+* ロックを取る。取れなければ少し待って試し直す。
+*
+* ★ 一度で諦めてはいけない。先行ワーカーが最後の走査を終えてから解放するまでの窓に
+*   届いた spool は、そのワーカーにも拾われず、こちらが即終了すると誰にも拾われない。
+*   特に `permission_prompt` の Notification は**そのターン最後の hook イベント**なので、
+*   次のドレインを促すものが来ず、ユーザーが答えるまで通知が出ないままになる。
+*/
+function acquireLockWithRetry(lockDir) {
+	for (let attempt = 0;; attempt++) {
+		const lock = acquireLock(lockDir);
+		if (lock) return lock;
+		if (attempt >= LOCK_RETRIES) return null;
+		sleepSync(LOCK_RETRY_DELAY_MS);
+	}
+}
 function main() {
 	if (process.env.CHATTER_AGENT_DISABLE) return;
 	const config = createConfigStore();
-	const lock = acquireLock(getLockDir());
+	const lock = acquireLockWithRetry(getLockDir());
 	if (!lock) return;
 	try {
 		const speechLog = createSpeechLog({

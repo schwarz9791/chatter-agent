@@ -82,8 +82,8 @@ tsdown 等でバンドルし、成果物を `plugin/bin/chatter-agent-speak.mjs`
 cd core
 npm install
 npm run typecheck     # tsc --noEmit
-npm run lint          # eslint .
-npm run format        # prettier --write .
+npm run lint          # oxlint
+npm run format        # oxfmt
 npm run test:run      # vitest run
 npm run test:coverage
 ```
@@ -96,8 +96,27 @@ npm run test:coverage
 - **拡張子は `.mjs` でなければならない。** `plugin/bin/` に `package.json` を置かないので、`.js` だと Node が CJS として読んで壊れる
 - **CLI に npm 依存を持たせない。** バンドルを自己完結させるため、`src/cli/` から到達する範囲は Node 標準モジュールだけで閉じる（`ws` / `chokidar` は `src/server/` 側のみ）
 
-### バージョンの制約
+### ツールチェーン
 
-**`typescript` を 7 系に上げない。** `typescript-eslint@8` の peer が `>=4.8.4 <6.1.0` なので、TS7 にすると `npm install` が ERESOLVE で落ちる。typescript-eslint が TS7 に対応したら上げる。
+lint と format は **oxlint / oxfmt**（Oxc）。eslint / prettier は使わない。バンドラの tsdown も Rolldown/Oxc なので、ツールチェーンが揃っている。
+
+| ツール | 設定ファイル |
+|---|---|
+| `oxlint` | `.oxlintrc.json` — `correctness` カテゴリを error、plugins は typescript / unicorn / oxc |
+| `oxfmt` | `.oxfmtrc.json` — `printWidth: 120` |
+| `tsc` | `tsconfig.json` — 型検査のみ（`noEmit`） |
+| `vitest` | `vitest.config.ts` |
+
+**eslint / typescript-eslint に戻さない。** `typescript-eslint@8` の peer は `>=4.8.4 <6.1.0` で、これが TypeScript のバージョンを縛る。oxlint は自前パーサなので TS のバージョンに追従を強いられない（実際、これを外したことで TS 7 に上げられた）。
+
+**型情報ありの lint は入れていない。** 必要になったら `oxlint-tsgolint` を足す（typescript-eslint の 61 ルール中 59 に対応）。CLI はロックと非同期 I/O を扱うので、`no-floating-promises` が欲しくなったらそのタイミング。
+
+### 移植コードのフォーマットについて
+
+cc-mascot から移植したコードを oxfmt で整形すると、上流との差分が読みにくくなる。特に `emotion/ruleBasedEmotionClassifier.ts` は、上流の辞書改善を手で取り込む余地を残してある（→ [`origin.md`](./origin.md)）。
+
+整形から外したい場合は `.oxfmtrc.json` の `ignorePatterns` に足す。**oxfmt は指定が無ければ `.gitignore` と `.prettierignore` も読む**が、このリポジトリに `.prettierignore` は置いていない。
+
+### その他
 
 `passWithNoTests` は `vitest.config.ts` にある。**テストが1本でも入ったら消すこと。**

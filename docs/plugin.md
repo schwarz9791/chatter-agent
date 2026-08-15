@@ -37,12 +37,29 @@ cc-mascot はログのパスをエンコードして除外していたが、**`s
 
 単一の spool ファイルに追記し続けると、「ワーカーが処理済み部分を削る」ときに hook の追記と競合する。**メッセージごとに別ファイルにして、処理し終えたら丸ごと削除する**ことで、この競合ごと消す。
 
-| 種別 | パス | 書き方 |
-|---|---|---|
-| アシスタントの発言 | `spool/<message_id>.jsonl` | delta ごとに1行追記 |
-| 応答待ち通知 | `spool/prompt-<…>.json` | 1イベントで完結するので単発で置く |
+| 種別 | パス | 書く人 | 書き方 |
+|---|---|---|---|
+| アシスタントの発言 | `spool/<message_id>.jsonl` | hook | delta ごとに1行追記 |
+| 応答待ち通知 | `spool/prompt-<…>.json` | hook | 1イベントで完結するので単発で置く |
+| 出力済みの文数 | `spool/<message_id>.progress.json` | **ワーカー** | hook は触らない |
 
-ワーカーは**到着順（mtime 順）**に処理し、`final:true` を処理し終えたファイルを削除する。
+`.progress.json` はワーカーのサイドカー。CLI は毎 delta 起動して終了するので、「どこまで発話したか」を
+プロセス内に持てず、ここに置いている。`.jsonl` を削除するときに一緒に消える。
+
+ワーカーは**到着順**に処理し、`final:true` を処理し終えたファイルを削除する。
+
+> ★ 到着順は **`birthtime`（ナノ秒）** で決めている。`mtime` は使えない — `<message_id>.jsonl` は
+> delta ごとに追記されて mtime が動き続けるので、`final:true` が 34〜80 秒遅れて届くと先行メッセージが
+> 後発より「新しく」なり、順序が入れ替わる。ミリ秒でも粗すぎて、同じミリ秒に作られたファイルが
+> 同値になる（CI で実際に踏んだ）。
+>
+> **ただし Linux では `birthtimeNs` が当てにならない。** libuv は statx が無い環境で birthtime を
+> ctime から埋めるため、追記のたびに進む値になりうる。根治するならファイル名に順序を埋める
+> （`<ns>-<message_id>.jsonl` など）ことになり、**この命名表と CLI の両方を同時に変える**必要がある。
+> → [#5](https://github.com/schwarz9791/chatter-agent/issues/5)
+
+hook 側で `prompt-<…>.json` を書くときは、**tmp + rename** にするのが望ましい。ワーカーは読めない
+payload を消さずに次のドレインへ回すので書きかけを掴んでも失われないが、余計な往復が減る。
 
 ## hooks.json の3種
 
@@ -81,4 +98,20 @@ echo "$CLAUDE_PLUGIN_ROOT" >> /tmp/x
 
 ## 現在の状態
 
-**`plugin/` は未作成。** 作成したらルート `CLAUDE.md` の状態表を更新すること。
+**hook script（`scripts/` / `hooks.json` / `.claude-plugin/`）は未作成。** 作成したらルート `CLAUDE.md` の状態表を更新すること。
+
+`plugin/` には配布物だけが先に入っている。
+
+```
+plugin/
+├── bin/chatter-agent-speak.mjs   バンドル済み CLI（core/ から生成してコミットする）
+├── LICENSE                       Apache-2.0 全文
+└── NOTICE                        帰属表示
+```
+
+`LICENSE` / `NOTICE` があるのは、`/plugin install` が**このディレクトリだけを複製する**ため。
+リポジトリルートの `NOTICE` は配布物に含まれないので、Apache-2.0 §4(a)/(d) を満たすには
+ここにも要る。バンドル自体にも帰属表示と改変告知を banner で焼き込んでいる
+（→ [`core.md`](./core.md)）。CI がこの3点を検証する。
+
+**`bin/` の中身を手で編集しないこと。** `core/` で `npm run build` して生成する。

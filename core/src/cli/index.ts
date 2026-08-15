@@ -14,7 +14,7 @@
  * **何があっても exit 0 で終える。** hook の失敗が Claude Code の表示を止めてはいけない。
  */
 
-import { createConfigStore } from "../core/config";
+import { createConfigStore, isSpeakDisabled } from "../core/config";
 import {
   getLockDir,
   getSpeechLogPath,
@@ -57,8 +57,9 @@ function acquireLockWithRetry(lockDir: string): Lock | null {
 
 function main(): void {
   // 無限ループ防止の第1層（設計書 §4-3）。要約プロセスはこれを付けて spawn される。
-  // 環境変数は子プロセスの Claude Code とそのフックまで伝播する
-  if (process.env.CHATTER_AGENT_DISABLE) return;
+  // 環境変数は子プロセスの Claude Code とそのフックまで伝播する。
+  // 判定は plugin/scripts/_lib.sh の chatter_disabled と同じ（→ core/config.ts）
+  if (isSpeakDisabled()) return;
 
   const config = createConfigStore();
 

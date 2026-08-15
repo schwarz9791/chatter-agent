@@ -17,6 +17,8 @@ import type { WebSocket } from "ws";
 export interface WsServer {
   /** 接続中の全クライアントへ送る */
   broadcast: (message: string) => void;
+  /** そのソケットにだけ送る。接続直後の追いつき用 */
+  sendTo: (socket: WebSocket, message: string) => boolean;
   clientCount: () => number;
   address: () => { host: string; port: number };
   close: () => Promise<void>;
@@ -29,16 +31,19 @@ export interface WsServerOptions {
   heartbeatIntervalMs?: number;
   maxBufferedBytes?: number;
   /**
-   * `?since=<seq>` で接続してきたクライアントへ、接続直後に送り直す行を返す。
+   * 接続してきたクライアントに、まず何を送るか。
    *
-   * `since` は「ここまでは受け取った」の意味なので、**`seq > since` の行**を返すこと。
-   * 遡れる範囲は現世代のファイルまで（設計書 §4-4）。それより古い分は返せないが、
-   * 各行が `seq` を持つので、クライアントは欠落を自分で検出できる。
-   *
-   * ★ 送り直しは connection ハンドラで**同期に**流れる。クライアントは接続の**前**に
-   *   message ハンドラを張ること。open を待ってから張ると取りこぼす。
+   * ★ ここで**まだ broadcast していない分を送らないこと。** `ws` は connection を
+   *   発火する**前に**クライアントを `wss.clients` へ入れるので、直後の broadcast と
+   *   合わせて新規クライアントだけが二重に受け取る。
    */
-  backfill?: (since: number) => string[];
+  onConnect?: (send: (message: string) => boolean) => void;
+  /**
+   * クライアントが「seq N まで喋った」と言ってきたときに呼ぶ。
+   *
+   * 累積 ack なので、1つ落ちても次で自己修復する。`seq` は**非負の安全整数**しか渡らない。
+   */
+  onAck?: (seq: number) => void;
 }
 
 const DEFAULT_HEARTBEAT_MS = 30_000;
@@ -46,22 +51,52 @@ const DEFAULT_MAX_BUFFERED_BYTES = 1024 * 1024;
 const CLOSE_GRACE_MS = 2_000;
 
 /**
- * `?since=12` を読む。無い・10進数字以外・負なら null（取りこぼし埋めをしない）。
+ * クライアントから受け取る唯一のメッセージ。
  *
- * ★ `Number()` に丸投げしないこと。`Number("")` は `0` なので、クライアントが
- *   「まだ何も受け取っていない」つもりで送る `?since=` が**全履歴のリプレイ**になる。
- *   `0x10` → 16、`1e3` → 1000 も通ってしまう。
+ * ★ 上限を絞ること。ここが開いた時点で、繋げる相手はサーバーにデータを送れるようになる。
  */
-export function parseSince(url: string | undefined): number | null {
-  if (!url) return null;
-  const query = url.indexOf("?");
-  if (query === -1) return null;
+const MAX_PAYLOAD_BYTES = 4 * 1024;
 
-  const raw = new URLSearchParams(url.slice(query + 1)).get("since");
-  if (raw === null || !/^\d+$/.test(raw)) return null;
+/**
+ * `{"type":"spoken","seq":N}` から `seq` を読む。読めなければ null。
+ *
+ * ★ ここはクライアント由来の入力。**通す値を絞ること。** 受け取った `seq` は
+ *   ファイル名から読んだ値との比較にしか使わず、パスの組み立てには使わない。
+ */
+export function parseAck(raw: string): number | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
 
-  const since = Number(raw);
-  return Number.isSafeInteger(since) ? since : null;
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const { type, seq } = parsed as { type?: unknown; seq?: unknown };
+
+  if (type !== "spoken") return null;
+  if (typeof seq !== "number" || !Number.isSafeInteger(seq) || seq < 0) return null;
+
+  return seq;
+}
+
+/**
+ * ブラウザからの接続を弾く。
+ *
+ * WebSocket は CORS の対象外なので、これが無いと**ユーザーが開いた任意の Web ページ**が
+ * `new WebSocket("ws://127.0.0.1:8570")` で会話を読め、ack を投げてマスコットを黙らせられる。
+ * `host` を 127.0.0.1 にしても塞がらない。
+ *
+ * Unity / ネイティブクライアントは `Origin` を送らないので影響しない。
+ * LAN 上の他端末に対する認証は別途必要（Issue #3）。
+ */
+function verifyClient(info: { origin?: string; req: { headers: Record<string, unknown> } }): boolean {
+  const origin = info.origin ?? info.req.headers.origin;
+  if (typeof origin === "string" && origin.length > 0) {
+    console.warn(`[WS] Rejected browser origin: ${origin}`);
+    return false;
+  }
+  return true;
 }
 
 export function createWsServer(options: WsServerOptions): Promise<WsServer> {
@@ -69,7 +104,12 @@ export function createWsServer(options: WsServerOptions): Promise<WsServer> {
   const maxBuffered = options.maxBufferedBytes ?? DEFAULT_MAX_BUFFERED_BYTES;
 
   return new Promise<WsServer>((resolve, reject) => {
-    const wss = new WebSocketServer({ host: options.host, port: options.port });
+    const wss = new WebSocketServer({
+      host: options.host,
+      port: options.port,
+      maxPayload: MAX_PAYLOAD_BYTES,
+      verifyClient,
+    });
     const alive = new WeakSet<WebSocket>();
     let boundAddress = { host: options.host, port: options.port };
 
@@ -96,35 +136,22 @@ export function createWsServer(options: WsServerOptions): Promise<WsServer> {
       socket.on("error", (err) => console.error(`[WS] Client error (${peer}):`, err));
       socket.on("close", (code) => console.log(`[WS] Disconnected: ${peer} code=${code}`));
 
-      const since = parseSince(req.url);
-      if (since === null || !options.backfill) return;
+      if (options.onAck) {
+        socket.on("message", (data) => {
+          const seq = parseAck(String(data));
+          if (seq === null) return; // 知らない形は黙って捨てる
+          options.onAck?.(seq);
+        });
+      }
+
+      if (!options.onConnect) return;
 
       // 以後のブロードキャストより先に流す。ここは同期なので順序が入れ替わらない
-      let sent = 0;
-      let truncated = false;
       try {
-        const lines = options.backfill(since);
-        for (const line of lines) {
-          // ★ 捨てられたら打ち切る。数えるのは**実際に送れた分**だけにすること。
-          //   同期ループの中ではソケットを drain できないので、大きな backfill は
-          //   途中で bufferedAmount 上限に当たる。無条件に数えると、届いていないのに
-          //   「送り終えた」とログに出て、欠落の手がかりが消える
-          if (!sendTo(socket, line)) {
-            truncated = true;
-            break;
-          }
-          sent++;
-        }
-        if (truncated) {
-          console.warn(
-            `[WS] Backfill truncated for ${peer}: ${sent}/${lines.length} lines sent since seq=${since}. ` +
-              "クライアントは受け取れた最後の seq から接続し直すこと",
-          );
-        }
+        options.onConnect((message) => sendTo(socket, message));
       } catch (err) {
-        console.error("[WS] Backfill failed:", err);
+        console.error("[WS] onConnect failed:", err);
       }
-      if (!truncated) console.log(`[WS] Backfilled ${sent} lines since seq=${since} for ${peer}`);
     });
 
     // ping に応答しない接続を落とす。Android が圏外に出るとTCPが半開のまま残るため
@@ -149,6 +176,8 @@ export function createWsServer(options: WsServerOptions): Promise<WsServer> {
       broadcast(message) {
         for (const socket of wss.clients) sendTo(socket, message);
       },
+
+      sendTo,
 
       clientCount: () => wss.clients.size,
 

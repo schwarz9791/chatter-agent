@@ -1,36 +1,30 @@
 #!/usr/bin/env node
 /**
- * `chatter-agent-server` — `speech.jsonl` の新規行を WebSocket で配信する常駐プロセス。
+ * `chatter-agent-server` — 配信キューを WebSocket で流す常駐プロセス。
  *
- * **判断ロジックを持たない**（docs/core.md）。差分を読んでそのまま流すだけ。
- * 何を喋るかは CLI が `speech.jsonl` に書いた時点で決まっている。
+ * **判断ロジックを持たない**（docs/core.md）。キューを読んでそのまま流すだけ。
+ * 何を喋るかは CLI が `speech/<seq>.json` を書いた時点で決まっている。
  *
  * 合成ルートなので、ここには配線と終了処理しか置かない。
  */
 
-import * as chokidar from "chokidar";
 import * as fs from "fs";
 import * as path from "path";
 import { createConfigStore } from "../core/config";
-import { getSpeechLogPath } from "../core/paths";
-import { createSpeechTail } from "./speechTail";
+import { getSpeechQueueDir } from "../core/paths";
+import { createSpeechQueue } from "../core/speechQueue";
 import { createWsServer } from "./wsServer";
 
 const SHUTDOWN_STEP_TIMEOUT_MS = 1_500;
 const SHUTDOWN_TIMEOUT_MS = 6_000;
 
 /**
- * watcher を信用しきらないための保険。
+ * キューを見に行く間隔。
  *
- * ★ 単一ファイルパスの監視は、ローテートで対象が差し替わると取りこぼす。実測でも
- *   `verify:phase-b` のローテート試験で、何秒待っても届かない行が出た（chokidar が
- *   新しい inode を掴み直せていない）。stat 1回なので毎秒数回でも無視できるコストで、
- *   これがあれば「届かない」は起きなくなる。
- *
- * watcher 自体は残す。通常時の遅延はこちらの方がずっと小さく、Phase A の受け入れ基準
- * （ターミナル表示と体感で同時）に効く。
+ * ★ ファイル監視は使わない。単一ファイルの監視でローテートの取りこぼしを実測で踏んでおり、
+ *   `readdir` の方が経路として単純で確実。キューは高々数百件なので、10回/秒でも誤差。
  */
-const POLL_INTERVAL_MS = 250;
+const POLL_INTERVAL_MS = 100;
 
 /**
  * 終了処理の1ステップを制限時間つきで実行する。
@@ -77,26 +71,37 @@ function installShutdown(cleanup: () => Promise<void>): void {
 
 async function main(): Promise<void> {
   const config = createConfigStore();
-  const logPath = getSpeechLogPath();
+  const queueDir = getSpeechQueueDir();
   console.log(`[Server] config: ${config.filePath}`);
-  console.log(`[Server] speech log: ${logPath}`);
+  console.log(`[Server] speech queue: ${queueDir}`);
 
-  // ★ 監視対象の親ディレクトリを先に作る。
-  //   chokidar は存在しないファイルを watch すると親ディレクトリを watch しに行き、
-  //   親も無ければさらに上へ遡ってしまう
-  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  fs.mkdirSync(path.dirname(queueDir), { recursive: true });
+  const queue = createSpeechQueue(queueDir);
 
-  const tail = createSpeechTail(logPath);
-  // 起動前に溜まっていた分は流さない。取りこぼしを埋めたいクライアントは ?since= で要求する
-  tail.seekToEnd();
+  /** 配信済みの最大 seq。接続直後の追いつきをここまでに限る */
+  let sentUpTo = 0;
 
-  // ★ 監視より先にポートを押さえる。埋まっているなら監視を始める前に落ちるべき
+  // ★ 監視より先にポートを押さえる。埋まっているなら何も触る前に落ちるべき
   const wsServer = await createWsServer({
     host: config.get("host"),
     port: config.get("port"),
-    // backfill は「既に配信した範囲」だけを返す。まだ配信していない行は、接続直後の
-    // このクライアントにも broadcast で届くので、ここで返すと二重になる（speechTail 参照）
-    backfill: (since) => tail.backfill(since),
+
+    onConnect: (send) => {
+      // ★ sentUpTo までしか送らないこと。その先は直後の poll が broadcast するので、
+      //   ここでも送ると新規クライアントだけが二重に受け取る
+      let sent = 0;
+      for (const entry of queue.readAll()) {
+        if (entry.seq > sentUpTo) break;
+        if (!send(entry.line)) break;
+        sent++;
+      }
+      if (sent > 0) console.log(`[Server] 未読 ${sent} 件を送りました`);
+    },
+
+    onAck: (seq) => {
+      const removed = queue.ackUpTo(seq);
+      if (removed > 0) console.log(`[Server] seq<=${seq} を ${removed} 件消しました`);
+    },
   });
 
   const bound = wsServer.address();
@@ -105,25 +110,25 @@ async function main(): Promise<void> {
     console.warn("[Server] 0.0.0.0 は無認証で LAN 全体に露出します。信頼できない網では host を 127.0.0.1 に");
   }
 
-  const flush = () => {
-    for (const line of tail.readNew()) wsServer.broadcast(line);
-  };
+  // ★ wipe は bind の後。先に消すと、ポートが埋まって起動に失敗したときに
+  //   走っている方のサーバーのキューを消してしまう。
+  //   落ちている間に書かれたものは定義上すべて古いので、捨てて正しい
+  const wiped = queue.clear();
+  if (wiped > 0) console.log(`[Server] 起動前に溜まっていた ${wiped} 件を捨てました`);
 
-  // unlink は張らない。ファイルが消えた直後は readNew が何も返せず（stat できない）
-  // 構造上の no-op になる。ローテート直後の取りこぼしは speechTail の carry-over が扱う
-  const watcher = chokidar.watch(logPath, { ignoreInitial: true });
-  watcher.on("add", flush);
-  watcher.on("change", flush);
-  watcher.on("error", (err) => console.error("[Server] Watch error:", err));
-
-  const poll = setInterval(flush, POLL_INTERVAL_MS);
+  const poll = setInterval(() => {
+    for (const entry of queue.readAll()) {
+      if (entry.seq <= sentUpTo) continue;
+      wsServer.broadcast(entry.line);
+      sentUpTo = entry.seq;
+    }
+  }, POLL_INTERVAL_MS);
   poll.unref();
 
   console.log("[Server] Ready");
 
   installShutdown(async () => {
     clearInterval(poll);
-    await step("file watcher", () => watcher.close());
     await step("websocket server", () => wsServer.close());
   });
 }

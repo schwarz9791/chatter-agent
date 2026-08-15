@@ -49,15 +49,22 @@ plugin/scripts/*.sh          bash。payload を spool/<message_id>.jsonl に追�
   ▼
 chatter-agent-speak (CLI)    ロックを取れた1プロセスだけが spool を順に処理
   │                          delta 結合 → Markdown除去 → 文分割 → 感情判定 → seq 採番
+  ├──▶ speech.jsonl          記録。1文1行で残す。誰も読まない
   ▼
-speech.jsonl                 1文1行。これが全体の契約
+speech/<seq>.json            配信キュー。1文1ファイル
   ▼
-chatter-agent-server         差分読み取り → WebSocket 配信。判断ロジックを持たない
+chatter-agent-server         キューを読んで WebSocket 配信。判断ロジックを持たない
+  ▲                          ack を受けたぶんを消す
+  │ ack
   ▼
 chatter-mascot(-xr)          TTS → 再生 → VRM描画 / 表情 / モーション / リップシンク
 ```
 
-設計の芯は **「捕捉」と「加工」の分離**。hook は追記するだけで重い処理を一切しない。`MessageDisplay` の10秒タイムアウトと、UI をブロックしうるリスクの両方を、構造で回避している。
+設計の芯は2つ。
+
+**「捕捉」と「加工」の分離。** hook は追記するだけで重い処理を一切しない。`MessageDisplay` の10秒タイムアウトと、UI をブロックしうるリスクの両方を、構造で回避している。
+
+**「記録」と「配信」の分離。** 1つのファイルに兼ねさせると、ローテートを跨ぐ差分読み取りが要り、読み手だけが際限なく複雑になる。分ければ順序はファイル名で決まり、消費は削除で表せる。契約は [`docs/protocol.md`](./docs/protocol.md)。
 
 ## 絶対に守ること
 
@@ -92,11 +99,11 @@ jsonl の `timestamp` は**メッセージの生成時刻であって書き込�
 | 文書 | 読むとき |
 |---|---|
 | `_workspace/chatter-agent-design.md` | **設計判断をするとき。全体の一次情報**（git 管理外） |
+| [`docs/protocol.md`](./docs/protocol.md) | **発話の契約。** `SpeechRecord`、配信キュー、WebSocket と ack。クライアントを書くときはここだけで足りる |
 | [`docs/core.md`](./docs/core.md) | `core/` を触るとき。tsconfig の制約、バンドル方針、前身からの流用対応表 |
 | [`docs/plugin.md`](./docs/plugin.md) | `plugin/` を触るとき。bash hook の制約、spool 命名、検証時の落とし穴 |
 | [`docs/origin.md`](./docs/origin.md) | cc-mascot 由来のコードを触るとき。移植の対応表、フォーク点、ライセンス義務 |
 | `docs/architecture.md` | **未作成。** 設計書が一次情報。実装で契約が動いたら分離を検討する |
-| `docs/protocol.md` | **未作成。** 同上（`speech.jsonl` と WebSocket の契約は設計書 §5） |
 | `docs/mascot.md` | **未作成。** Electron 版の着手時に作る |
 | `docs/mascot-xr.md` | **未作成。** Unity 版の着手時に `cc-mascot-xr/xr-app/SETUP.md` を移送して作る |
 

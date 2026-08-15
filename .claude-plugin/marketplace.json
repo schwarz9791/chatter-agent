@@ -1,0 +1,22 @@
+{
+  "name": "chatter-agent",
+  "owner": {
+    "name": "Masaki Matsumura"
+  },
+  "metadata": {
+    "description": "Claude Code の発言を VRM キャラクターに読み上げさせるためのプラグイン"
+  },
+  "plugins": [
+    {
+      "name": "chatter-agent",
+      "source": "./plugin",
+      "description": "MessageDisplay / PreToolUse / Notification の hook で発言を捕捉し、同梱の chatter-agent-speak に渡します。",
+      "version": "0.1.0",
+      "author": {
+        "name": "Masaki Matsumura"
+      },
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/schwarz9791/chatter-agent"
+    }
+  ]
+}

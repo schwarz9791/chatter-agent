@@ -1,7 +1,11 @@
 /**
  * `speech.jsonl` への追記・ローテート・`seq` 採番。
  *
- * これが全体の契約（設計書 §5）を書き出す唯一の場所。WebSocket はこの行をそのまま配信する。
+ * **記録**であって配信経路ではない。配信は `speechQueue.ts` が持つ。
+ *
+ * ★ 誰もこのファイルを tail しないので、**ローテートの正しさが要求されない**。
+ *   退避は1世代だけ（`speech.1.jsonl` を上書き）で、取りこぼしても困る人がいない。
+ *   読み手がいた頃は、世代交代の検出と未読部分の回収を正しく保つ必要があった。
  *
  * 呼び出し側は**ロックを保持していること**。`seq` の採番と state の更新はロック下でしか行わない
  * （並列に走らせると発話順が入れ替わる。CLAUDE.md「絶対に守ること」4）。
@@ -9,7 +13,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { getSpeechLogGenerationPath } from "./paths";
+import { getSpeechLogBackupPath } from "./paths";
 import type { SpeechRecord } from "./types";
 
 /** `seq` と `ts` はこのモジュールが決めるので、呼び出し側は残りを渡す */
@@ -18,10 +22,8 @@ export type SpeechEntry = Omit<SpeechRecord, "seq" | "ts">;
 export interface SpeechLogDeps {
   logPath: string;
   statePath: string;
-  /** これを超えたらローテートする */
+  /** これを超えたら `speech.1.jsonl` に退避する */
   maxBytes: number;
-  /** 保持する退避世代の数 */
-  generations: number;
   /** テストから時刻を固定するため */
   now?: () => Date;
 }
@@ -94,8 +96,9 @@ function writeStateNextSeq(statePath: string, nextSeq: number): void {
 }
 
 export function createSpeechLog(deps: SpeechLogDeps): SpeechLog {
-  const { logPath, statePath, maxBytes, generations } = deps;
+  const { logPath, statePath, maxBytes } = deps;
   const now = deps.now ?? (() => new Date());
+  const backupPath = getSpeechLogBackupPath(logPath);
 
   fs.mkdirSync(path.dirname(logPath), { recursive: true });
 
@@ -108,23 +111,15 @@ export function createSpeechLog(deps: SpeechLogDeps): SpeechLog {
    */
   function reconcile(): number {
     let lastSeq = readLastSeq(logPath);
-    if (lastSeq === 0) lastSeq = readLastSeq(getSpeechLogGenerationPath(logPath, 1));
+    if (lastSeq === 0) lastSeq = readLastSeq(backupPath);
     return Math.max(readStateNextSeq(statePath), lastSeq + 1);
   }
 
   let nextSeq = reconcile();
 
-  /** 世代を1つずつ繰り下げ、最古を捨てる */
+  /** 退避は1世代だけ。前の退避は上書きされる */
   function rotate(): void {
-    const oldest = getSpeechLogGenerationPath(logPath, generations);
-    fs.rmSync(oldest, { force: true });
-
-    for (let g = generations - 1; g >= 1; g--) {
-      const from = getSpeechLogGenerationPath(logPath, g);
-      if (fs.existsSync(from)) fs.renameSync(from, getSpeechLogGenerationPath(logPath, g + 1));
-    }
-
-    if (fs.existsSync(logPath)) fs.renameSync(logPath, getSpeechLogGenerationPath(logPath, 1));
+    if (fs.existsSync(logPath)) fs.renameSync(logPath, backupPath);
   }
 
   function currentSize(): number {

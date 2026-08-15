@@ -25,7 +25,6 @@ function log(overrides: Partial<SpeechLogDeps> = {}) {
     logPath,
     statePath,
     maxBytes: 1024 * 1024,
-    generations: 3,
     now: () => new Date("2026-08-15T00:00:00.000Z"),
     ...overrides,
   });
@@ -156,10 +155,9 @@ describe("ローテート", () => {
 
     expect(readLines()[0]?.seq).toBe(3);
     expect(readLines(path.join(dir, "speech.1.jsonl"))[0]?.seq).toBe(2);
-    expect(readLines(path.join(dir, "speech.2.jsonl"))[0]?.seq).toBe(1);
   });
 
-  it("ローテート直後に state を失っても、1世代前から seq を復旧する", () => {
+  it("ローテート直後に state を失っても、退避先から seq を復旧する", () => {
     const l = log({ maxBytes: 400 });
     l.append([entry("あ".repeat(100))]);
     l.append([entry("い".repeat(100))]);
@@ -171,13 +169,14 @@ describe("ローテート", () => {
     expect(readLines().at(-1)?.seq).toBe(2);
   });
 
-  it("世代数を超えた分は捨てる", () => {
-    const l = log({ maxBytes: 400, generations: 2 });
+  it("★ 退避は1世代だけ（誰も tail しないので古い世代を持つ意味がない）", () => {
+    const l = log({ maxBytes: 400 });
     for (const c of ["あ", "い", "う", "え"]) l.append([entry(c.repeat(100))]);
 
     expect(fs.existsSync(path.join(dir, "speech.1.jsonl"))).toBe(true);
-    expect(fs.existsSync(path.join(dir, "speech.2.jsonl"))).toBe(true);
-    expect(fs.existsSync(path.join(dir, "speech.3.jsonl"))).toBe(false);
+    expect(fs.existsSync(path.join(dir, "speech.2.jsonl"))).toBe(false);
+    // 前の退避は上書きされている
+    expect(readLines(path.join(dir, "speech.1.jsonl")).map((r) => r.text[0])).toEqual(["う"]);
   });
 
   it("空のファイルはローテートしない（空の世代を増やさない）", () => {

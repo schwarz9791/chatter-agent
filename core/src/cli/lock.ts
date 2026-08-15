@@ -106,6 +106,18 @@ export function acquireLock(lockDir: string, options: AcquireLockOptions = {}): 
     } catch {
       // owner が書けなくてもロック自体は有効
     }
+
+    // ★ 書いた印を読み直して、自分のものか確かめること。
+    //   `isStale()` が true を返してから下の renameSync までの間に別プロセスが奪取を
+    //   完了していると、rename が**その生きたロック**に当たって成功してしまう。
+    //   そのとき負けた側はここで自分以外の印を見るので、諦められる。
+    //
+    //   キュー化で失敗モードが悪化したため塞いでいる。以前は seq の重複が
+    //   speech.jsonl の重複行（＝マスコットが言い直すので気づける）で済んだが、
+    //   今は seq がファイル名なので**同じ名前への上書き＝片方が無言で消える**。
+    const owner = readOwner(lockDir);
+    if (owner !== null && owner.token !== token) return null;
+
     return makeLock(lockDir, token);
   };
 

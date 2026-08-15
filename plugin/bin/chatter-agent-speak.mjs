@@ -54,20 +54,30 @@ function getConfigFilePath(e = currentPathEnv()) {
 function getSpoolDir(e = currentPathEnv()) {
 	return path.join(getRuntimeDir(e), "spool");
 }
-/** 発話ログの現世代。全体の契約（設計書 §5） */
+/**
+* 発話の**記録**。1文1行で、消さずに残す。
+*
+* ★ 配信はここを読まない（→ `getSpeechQueueDir`）。誰も tail しないので、
+*   ローテートの正しさが要求されない。
+*/
 function getSpeechLogPath(e = currentPathEnv()) {
 	return path.join(getRuntimeDir(e), "speech.jsonl");
 }
-/**
-* ローテート後の世代パス。`speech.jsonl` → `speech.1.jsonl`。
-* 世代番号は 1 始まり（0 は現世代 = `basePath` そのもの）。
-*/
-function getSpeechLogGenerationPath(basePath, generation) {
-	if (generation <= 0) return basePath;
+/** 記録の退避先。`speech.jsonl` → `speech.1.jsonl`。1世代だけ持つ */
+function getSpeechLogBackupPath(basePath) {
 	const dir = path.dirname(basePath);
 	const ext = path.extname(basePath);
 	const stem = path.basename(basePath, ext);
-	return path.join(dir, `${stem}.${generation}${ext}`);
+	return path.join(dir, `${stem}.1${ext}`);
+}
+/**
+* 発話の**配信キュー**。1文1ファイルで、ファイル名が `seq`。
+*
+* CLI が書き、server が読んで配信し、クライアントの ack で消える。
+* 記録と分けてあるのは、配信側は消えてよく、記録側は残したいため。
+*/
+function getSpeechQueueDir(e = currentPathEnv()) {
+	return path.join(getRuntimeDir(e), "speech");
 }
 /**
 * 次に採番する seq を持つ。
@@ -109,7 +119,7 @@ function createDefaultConfig() {
 		host: "0.0.0.0",
 		speakPrompts: true,
 		speechLogMaxBytes: 5242880,
-		speechLogGenerations: 3,
+		speechQueueMaxEntries: 500,
 		spoolMaxAgeHours: 6
 	};
 }
@@ -167,8 +177,8 @@ const SPECS = {
 		env: "CHATTER_AGENT_SPEECH_LOG_MAX_BYTES",
 		parse: parsePositiveInt
 	},
-	speechLogGenerations: {
-		env: "CHATTER_AGENT_SPEECH_LOG_GENERATIONS",
+	speechQueueMaxEntries: {
+		env: "CHATTER_AGENT_SPEECH_QUEUE_MAX_ENTRIES",
 		parse: parsePositiveInt
 	},
 	spoolMaxAgeHours: {
@@ -276,7 +286,11 @@ function createConfigStore(deps = {}) {
 /**
 * `speech.jsonl` への追記・ローテート・`seq` 採番。
 *
-* これが全体の契約（設計書 §5）を書き出す唯一の場所。WebSocket はこの行をそのまま配信する。
+* **記録**であって配信経路ではない。配信は `speechQueue.ts` が持つ。
+*
+* ★ 誰もこのファイルを tail しないので、**ローテートの正しさが要求されない**。
+*   退避は1世代だけ（`speech.1.jsonl` を上書き）で、取りこぼしても困る人がいない。
+*   読み手がいた頃は、世代交代の検出と未読部分の回収を正しく保つ必要があった。
 *
 * 呼び出し側は**ロックを保持していること**。`seq` の採番と state の更新はロック下でしか行わない
 * （並列に走らせると発話順が入れ替わる。CLAUDE.md「絶対に守ること」4）。
@@ -330,8 +344,9 @@ function writeStateNextSeq(statePath, nextSeq) {
 	fs.renameSync(tmp, statePath);
 }
 function createSpeechLog(deps) {
-	const { logPath, statePath, maxBytes, generations } = deps;
+	const { logPath, statePath, maxBytes } = deps;
 	const now = deps.now ?? (() => /* @__PURE__ */ new Date());
+	const backupPath = getSpeechLogBackupPath(logPath);
 	fs.mkdirSync(path.dirname(logPath), { recursive: true });
 	/**
 	* state と実ファイルの整合を取る。
@@ -342,19 +357,13 @@ function createSpeechLog(deps) {
 	*/
 	function reconcile() {
 		let lastSeq = readLastSeq(logPath);
-		if (lastSeq === 0) lastSeq = readLastSeq(getSpeechLogGenerationPath(logPath, 1));
+		if (lastSeq === 0) lastSeq = readLastSeq(backupPath);
 		return Math.max(readStateNextSeq(statePath), lastSeq + 1);
 	}
 	let nextSeq = reconcile();
-	/** 世代を1つずつ繰り下げ、最古を捨てる */
+	/** 退避は1世代だけ。前の退避は上書きされる */
 	function rotate() {
-		const oldest = getSpeechLogGenerationPath(logPath, generations);
-		fs.rmSync(oldest, { force: true });
-		for (let g = generations - 1; g >= 1; g--) {
-			const from = getSpeechLogGenerationPath(logPath, g);
-			if (fs.existsSync(from)) fs.renameSync(from, getSpeechLogGenerationPath(logPath, g + 1));
-		}
-		if (fs.existsSync(logPath)) fs.renameSync(logPath, getSpeechLogGenerationPath(logPath, 1));
+		if (fs.existsSync(logPath)) fs.renameSync(logPath, backupPath);
 	}
 	function currentSize() {
 		try {
@@ -412,6 +421,130 @@ function createSpeechLog(deps) {
 			fs.appendFileSync(logPath, payload);
 			writeStateNextSeq(statePath, nextSeq);
 			return records;
+		}
+	};
+}
+
+//#endregion
+//#region src/core/speechQueue.ts
+/**
+* 発話の配信キュー。1文1ファイルで、**ファイル名が `seq`**。
+*
+* ```
+* {root}/speech/000000000123.json    ← 中身は speech.jsonl の1行と同一
+* {root}/speech/000000000124.json
+* ```
+*
+* CLI がロック下で書き、server が読んで配信し、クライアントの ack で消える。
+*
+* ★ なぜ `speech.jsonl` の tail をやめたか。
+*   1つのファイルに記録と配信を兼ねさせると、**読み手だけが突出して複雑になる**。
+*   ローテートを跨ぐ差分読み取りは、世代交代の検出（inode か、サイズの逆行か）、
+*   退避された世代の未読部分の回収、消費バイト数の算術を同時に正しく保つ必要があり、
+*   実際に取りこぼしと二重配信を両方踏んだ。
+*
+*   キューにすると、順序はファイル名で決まり、消費は削除で表せる。
+*   **誰も tail しなくなるので、記録側のローテートの正しさも要求されなくなる。**
+*
+* `spool/` と同じ形。あちらは hook が書いて CLI が消し、こちらは CLI が書いて server が消す。
+*/
+/** ファイル名の桁数。`ls` で並べたときに順序が見えるよう固定幅にする */
+const SEQ_DIGITS = 12;
+const SUFFIX = ".json";
+const TMP_SUFFIX = ".tmp";
+function fileNameFor(seq) {
+	return `${String(seq).padStart(SEQ_DIGITS, "0")}${SUFFIX}`;
+}
+/**
+* ファイル名から `seq` を読む。
+*
+* ★ 中身の JSON はパースしない。順序を決めるだけなら名前で足りるし、
+*   1文ごとにパースするコストを server のポーリングに乗せたくない。
+*/
+function seqFromFileName(fileName) {
+	if (!fileName.endsWith(SUFFIX)) return null;
+	const stem = fileName.slice(0, -5);
+	if (!/^\d+$/.test(stem)) return null;
+	const seq = Number(stem);
+	return Number.isSafeInteger(seq) ? seq : null;
+}
+function createSpeechQueue(queueDir) {
+	fs.mkdirSync(queueDir, { recursive: true });
+	/** ディレクトリを走査して `seq` 昇順に並べる。中身は読まない */
+	function listSeqs() {
+		let fileNames;
+		try {
+			fileNames = fs.readdirSync(queueDir);
+		} catch {
+			return [];
+		}
+		const found = [];
+		for (const fileName of fileNames) {
+			const seq = seqFromFileName(fileName);
+			if (seq !== null) found.push({
+				seq,
+				fileName
+			});
+		}
+		return found.sort((a, b) => a.seq - b.seq);
+	}
+	function remove(fileName) {
+		try {
+			fs.rmSync(path.join(queueDir, fileName), { force: true });
+			return true;
+		} catch {
+			return false;
+		}
+	}
+	return {
+		enqueue(records) {
+			for (const record of records) {
+				const target = path.join(queueDir, fileNameFor(record.seq));
+				const tmp = `${target}${TMP_SUFFIX}`;
+				fs.writeFileSync(tmp, `${JSON.stringify(record)}\n`);
+				fs.renameSync(tmp, target);
+			}
+		},
+		readAll() {
+			const entries = [];
+			for (const { seq, fileName } of listSeqs()) {
+				const filePath = path.join(queueDir, fileName);
+				let line;
+				try {
+					line = fs.readFileSync(filePath, "utf-8").trim();
+				} catch {
+					continue;
+				}
+				if (line) entries.push({
+					seq,
+					line,
+					filePath
+				});
+			}
+			return entries;
+		},
+		ackUpTo(upTo) {
+			if (!Number.isSafeInteger(upTo) || upTo < 0) return 0;
+			let removed = 0;
+			for (const { seq, fileName } of listSeqs()) {
+				if (seq > upTo) break;
+				if (remove(fileName)) removed++;
+			}
+			return removed;
+		},
+		clear() {
+			let removed = 0;
+			for (const { fileName } of listSeqs()) if (remove(fileName)) removed++;
+			return removed;
+		},
+		trim(maxEntries) {
+			if (maxEntries < 0) return 0;
+			const all = listSeqs();
+			const excess = all.length - maxEntries;
+			if (excess <= 0) return 0;
+			let removed = 0;
+			for (const { fileName } of all.slice(0, excess)) if (remove(fileName)) removed++;
+			return removed;
 		}
 	};
 }
@@ -863,6 +996,8 @@ function acquireLock(lockDir, options = {}) {
 				token
 			})}\n`);
 		} catch {}
+		const owner = readOwner(lockDir);
+		if (owner !== null && owner.token !== token) return null;
 		return makeLock(lockDir, token);
 	};
 	const first = tryCreate();
@@ -1480,7 +1615,7 @@ function processMessage(item, hasNewer, deps) {
 	let written = 0;
 	if (result.sentences.length > 0) {
 		const messageId = content.messageId ?? entry.messageId;
-		deps.speechLog.append(result.sentences.map((text) => ({
+		deps.publish(result.sentences.map((text) => ({
 			source: "claude-code",
 			sessionId: content.sessionId,
 			turnId: content.turnId,
@@ -1552,7 +1687,7 @@ function processPrompt(item, deps, state, now) {
 			});
 		}
 	}
-	if (records.length > 0) deps.speechLog.append(records);
+	if (records.length > 0) deps.publish(records);
 	removeEntry(entry);
 	if (hookName === "PreToolUse" && promptId !== null) {
 		state.pairedPromptId = promptId;
@@ -1624,13 +1759,18 @@ function main() {
 		const speechLog = createSpeechLog({
 			logPath: getSpeechLogPath(),
 			statePath: getSpeechStatePath(),
-			maxBytes: config.get("speechLogMaxBytes"),
-			generations: config.get("speechLogGenerations")
+			maxBytes: config.get("speechLogMaxBytes")
 		});
+		const speechQueue = createSpeechQueue(getSpeechQueueDir());
 		const classifier = new RuleBasedEmotionClassifier();
 		drainSpool({
 			spoolDir: getSpoolDir(),
-			speechLog,
+			publish: (entries) => {
+				const records = speechLog.append(entries);
+				speechQueue.enqueue(records);
+				speechQueue.trim(config.get("speechQueueMaxEntries"));
+				return records;
+			},
 			workerStatePath: getWorkerStatePath(),
 			speakPrompts: config.get("speakPrompts"),
 			spoolMaxAgeMs: config.get("spoolMaxAgeHours") * 60 * 60 * 1e3,

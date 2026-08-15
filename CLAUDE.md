@@ -4,7 +4,7 @@
 
 **Claude Code の発言を、VRM キャラクターがリアルタイムで読み上げるシステム。**
 
-読み上げるのは**表示側アプリ**。Electron のデスクトップ版 `chatter-mascot` と、Android XR グラス（XREAL Aura）向けの `chatter-mascot-xr` が、どちらも同じサーバーに繋ぐ。**どちらから着手するかは決めていない。**
+読み上げるのは**表示側アプリ**。デスクトップ版 `chatter-mascot` と、Android XR グラス（XREAL Aura）向けの `chatter-mascot-xr` が、どちらも同じサーバーに繋ぐ。**どちらから着手するかも、デスクトップ版のフレームワーク（Electron / Tauri / Wails）も決めていない**（→ [#11](https://github.com/schwarz9791/chatter-agent/issues/11)）。
 
 [CC Mascot](https://github.com/kazakago/cc-mascot)（Mac / Electron）と目的は同じだが、**発言の取得方式が根本的に違う**。CC Mascot は Claude Code が書く jsonl ログを監視するが、本プロジェクトは **Claude Code の `MessageDisplay` hook から直接テキストを受け取る**。
 
@@ -29,7 +29,7 @@ hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公�
 |---|---|---|
 | `plugin/` | Claude Code プラグイン（bash hook） | **未作成。** `bin/chatter-agent-speak.mjs`（バンドル済み CLI）だけ置いてある |
 | `core/` | `chatter-agent-core`（CLI + WebSocket サーバー） | **実装済み。** `summarizer/`（AI要約、既定OFF）だけ未着手 |
-| `apps/chatter-mascot/` | 表示側アプリ（Electron デスクトップ） | 未作成 |
+| `apps/chatter-mascot/` | 表示側アプリ（デスクトップ常駐） | 未作成。**フレームワーク未定** |
 | `apps/chatter-mascot-xr/` | 表示側アプリ（Unity / Android XR） | 未作成 |
 | `docs/` | 作業規約 | protocol / core / plugin / origin の4本 |
 | `.github/workflows/` | CI（typecheck / lint / format / bundle / test / verify） | 稼働中 |
@@ -114,7 +114,7 @@ jsonl の `timestamp` は**メッセージの生成時刻であって書き込�
 | [`docs/plugin.md`](./docs/plugin.md) | `plugin/` を触るとき。bash hook の制約、spool 命名、検証時の落とし穴 |
 | [`docs/origin.md`](./docs/origin.md) | cc-mascot 由来のコードを触るとき。移植の対応表、フォーク点、ライセンス義務 |
 | `docs/architecture.md` | **未作成。** 設計書が一次情報。実装で契約が動いたら分離を検討する |
-| `docs/mascot.md` | **未作成。** 表示側アプリ（Electron）の着手時に作る |
+| `docs/mascot.md` | **未作成。** 表示側アプリ（デスクトップ）の着手時に作る |
 | `docs/mascot-xr.md` | **未作成。** 表示側アプリ（Unity / Android XR）の着手時に `cc-mascot-xr/xr-app/SETUP.md` を移送して作る |
 
 ## 開発コマンド

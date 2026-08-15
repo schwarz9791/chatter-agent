@@ -114,9 +114,16 @@ TTS + 再生は生成よりずっと遅い。Claude Code は 2 秒で 20 文吐�
 
 **`Origin` ヘッダを持つ接続は、`allowedOrigins` に載っていなければ拒否する。** WebSocket は CORS の対象外なので、これが無いとユーザーが開いた任意の Web ページが `new WebSocket("ws://127.0.0.1:8570")` で会話を読み、ack を投げてマスコットを黙らせられる。`host` を `127.0.0.1` に絞っても塞がらない。
 
-`allowedOrigins` の既定は `[]`（＝ `Origin` 付きの接続は全拒否）。**完全一致のみで、前方一致やワイルドカードは無い。** Electron の `chatter-mascot`（renderer）や Unity の WebGL ビルドは `Origin` を送るクライアントなので、繋ぐときは実際のオリジンを設定に足す。
+`allowedOrigins` の既定は `[]`（＝ `Origin` 付きの接続は全拒否）。**完全一致のみで、前方一致やワイルドカードは無い。**
 
-Unity（WebGL 以外）/ ネイティブクライアントは `Origin` を送らないので、`allowedOrigins` の中身に関わらず影響しない。
+**`Origin` が付くかどうかは、クライアントの実装言語ではなく「WebView / ブラウザから張るか」で決まる。**
+
+| 繋ぎ方 | `Origin` | 対応 |
+|---|---|---|
+| ネイティブ側から張る（Unity、Electron の main プロセス、Tauri の Rust、Wails の Go など） | 付かない | 設定不要 |
+| WebView / ブラウザから張る（Tauri の `tauri://localhost`、Electron の renderer、Unity の WebGL ビルドなど） | 付く | 実際のオリジンを `allowedOrigins` に足す |
+
+`tauri://localhost` のような**ブラウザからは名乗れないスキーム**を足すぶんには、上の脅威（任意の Web ページが繋ぐ）は塞がったまま。`http://localhost:*` を足すときは、そのポートを開発サーバー以外に使わないこと。
 
 **LAN 上の他端末に対する認証は無い。** 既定の `0.0.0.0` バインドは、同一 LAN の誰でもエージェントの発言を読める状態を意味する。信頼できないネットワークでは `host` を `127.0.0.1` にすること。認証の追加は [#3](https://github.com/schwarz9791/chatter-agent/issues/3)。
 

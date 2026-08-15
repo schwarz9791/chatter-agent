@@ -2,7 +2,7 @@
 
 **Claude Code の発言を、VRM キャラクターがリアルタイムで読み上げるシステム。**
 
-Claude Code の `MessageDisplay` hook からテキストを直接受け取り、文単位に整形して WebSocket で配信します。受け取った表示側アプリ（Electron デスクトップ / Android XR グラス）が TTS で読み上げ、VRM キャラクターの表情・モーション・リップシンクに反映します。
+Claude Code の `MessageDisplay` hook からテキストを直接受け取り、文単位に整形して WebSocket で配信します。受け取った表示側アプリ（デスクトップ / Android XR グラス）が TTS で読み上げ、VRM キャラクターの表情・モーション・リップシンクに反映します。
 
 [CC Mascot](https://github.com/kazakago/cc-mascot)（Mac / Electron）の派生プロジェクトです。
 
@@ -40,7 +40,7 @@ chatter-mascot(-xr)    表示側アプリ。TTS → 再生 → VRM描画
 |---|---|
 | `plugin/` | Claude Code プラグイン（bash hook） |
 | `core/` | `chatter-agent-core` — CLI と WebSocket サーバー |
-| `apps/chatter-mascot/` | 表示側アプリ（Electron デスクトップ） |
+| `apps/chatter-mascot/` | 表示側アプリ（デスクトップ常駐。フレームワーク未定） |
 | `apps/chatter-mascot-xr/` | 表示側アプリ（Unity / Android XR、XREAL Aura） |
 
 ## 対象

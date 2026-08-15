@@ -17,22 +17,24 @@ core/src/
 │   ├── messageAssembler.ts  ★中核。delta 結合 → 確定した文の切り出し（純粋関数）
 │   ├── worker.ts            ドレインループ。応答待ち通知の整形もここ
 │   └── workerState.ts       プロセスを跨いで持ち回る重複抑制の状態
-├── server/       chatter-agent-server（speech.jsonl → WebSocket 配信）
-│   ├── index.ts             合成ルート。監視より先にポートを押さえる
-│   ├── wsServer.ts          ← cc-mascot-xr 流用 + `?since=` 対応
-│   └── speechTail.ts        差分読み取り / ローテート追従 / 取りこぼし埋め
+├── server/       chatter-agent-server（配信キュー → WebSocket 配信）
+│   ├── index.ts             合成ルート。bind → キューを空にする → ポーリング
+│   └── wsServer.ts          配信と ack。Origin 検査もここ
 ├── core/         契約と基盤
 │   ├── types.ts             SpeechRecord / Emotion / SpeechKind / SpeakMessage
 │   ├── paths.ts             ← cc-mascot-xr 流用
 │   ├── config.ts            ← cc-mascot-xr configStore 流用
-│   └── speechLog.ts         追記 / ローテート / seq 採番 / state 整合
+│   ├── speechLog.ts         記録への追記 / seq 採番 / state 整合
+│   └── speechQueue.ts       配信キュー。CLI が書き、server が読んで消す
 ├── text/         テキスト整形・文分割        ← textFilter.ts のみ cc-mascot 由来
 ├── emotion/      ルールベース感情判定        ← cc-mascot 由来
 ├── prompt/       応答待ち通知の整形
 └── summarizer/   AI要約（既定OFF）           **未着手**
 ```
 
-判断ロジックは `cli/` と `core/` に置く。**`server/` は判断ロジックを持たない** — `speech.jsonl` の新規行を差分読み取りして全クライアントへ流すだけ。エントリポイントは配線に留める。
+判断ロジックは `cli/` と `core/` に置く。**`server/` は判断ロジックを持たない** — キューを読んで全クライアントへ流すだけ。エントリポイントは配線に留める。
+
+発話の契約（`SpeechRecord`、キューの形、WebSocket）は [`protocol.md`](./protocol.md) にある。
 
 cc-mascot 由来のファイルも**このリポジトリのコードとして自由に改変してよい**。隔離区画ではない。詳細は [`origin.md`](./origin.md)。
 
@@ -76,7 +78,7 @@ tsdown 等でバンドルし、成果物を `plugin/bin/chatter-agent-speak.mjs`
 
 | 流用元（`cc-mascot-xr/bridge/`） | 移送先 | 状態 |
 |---|---|---|
-| `src/server/wsServer.ts` + `.test.ts` | `core/src/server/` | **ほぼそのまま（流用済み）。** ping-pong によるデッドコネクション検出、`bufferedAmount` によるバックプレッシャ、graceful close 込み。`?since=` 対応を足した |
+| `src/server/wsServer.ts` + `.test.ts` | `core/src/server/` | **ほぼそのまま（流用済み）。** ping-pong によるデッドコネクション検出、`bufferedAmount` によるバックプレッシャ、graceful close 込み。ack の受信と Origin 検査を足した |
 | `src/config/paths.ts` + `.test.ts` | `core/src/core/paths.ts` | **流用済み。** 環境オブジェクトを引数に取る純関数群。ディレクトリ名と解決先を変えた |
 | `src/config/configStore.ts` + `.test.ts` | `core/src/core/config.ts` | **流用済み。** 環境変数 > JSON > 既定値。mtime + size が変わったときだけ再読込。壊れた JSON では直前値を維持 |
 | `.github/workflows/validate.yml` | リポジトリルート | **適用済み。** `working-directory` 指定済み。chatter-agent では format / bundle の2ジョブを追加した |
@@ -143,7 +145,7 @@ CI には入れていない（ビルドとプロセス起動が要るため）�
 | エントリ | 出力 | 依存 |
 |---|---|---|
 | `src/cli/index.ts` | `plugin/bin/chatter-agent-speak.mjs`（**git にコミット**） | 全部バンドル。npm 依存ゼロ |
-| `src/server/index.ts` | `core/dist/chatter-agent-server.mjs`（gitignore） | `ws` / `chokidar` は external |
+| `src/server/index.ts` | `core/dist/chatter-agent-server.mjs`（gitignore） | `ws` は external |
 
 - **拡張子は `.mjs` でなければならない。** `plugin/bin/` に `package.json` を置かないので、`.js` だと Node が CJS として読んで壊れる
 - **CLI に npm 依存を持たせない。** `src/cli/` から到達する範囲は Node 標準だけで閉じる。ビルド後に
@@ -181,7 +183,8 @@ cc-mascot から移植したコードを oxfmt で整形すると、上流との
 |---|---|---|
 | 設定 | `{root}/config.json` | 人間 |
 | spool | `{root}/spool/` | hook が書き、CLI が消す |
-| 発話ログ | `{root}/speech.jsonl`（退避は `speech.1.jsonl` …） | CLI |
+| 発話の記録 | `{root}/speech.jsonl`（退避は `speech.1.jsonl` の1世代だけ） | CLI |
+| 配信キュー | `{root}/speech/<seq>.json` | CLI が書き、server が消す |
 | seq の state | `{root}/speech.state.json` | CLI |
 | 抑制の state | `{root}/speak.state.json` | CLI |
 | ロック | `{root}/speak.lock/`（ディレクトリ） | CLI |
@@ -197,7 +200,7 @@ cc-mascot から移植したコードを oxfmt で整形すると、上流との
 | `host` | `"0.0.0.0"` | `CHATTER_AGENT_HOST` |
 | `speakPrompts` | `true` | `CHATTER_AGENT_SPEAK_PROMPTS` |
 | `speechLogMaxBytes` | `5242880` | `CHATTER_AGENT_SPEECH_LOG_MAX_BYTES` |
-| `speechLogGenerations` | `3` | `CHATTER_AGENT_SPEECH_LOG_GENERATIONS` |
+| `speechQueueMaxEntries` | `500` | `CHATTER_AGENT_SPEECH_QUEUE_MAX_ENTRIES` |
 | `spoolMaxAgeHours` | `6` | `CHATTER_AGENT_SPOOL_MAX_AGE_HOURS` |
 
 config に載せない環境変数:
@@ -208,44 +211,36 @@ config に載せない環境変数:
 
 ## 実装で設計書から動いたこと
 
-設計書（`_workspace/chatter-agent-design.md`）は一次情報だが、実装中に2点だけ上書きした。
+設計書（`_workspace/chatter-agent-design.md`）は一次情報だが、実装中に上書きした点がある。
 
-1. **spool の処理順は mtime ではなく birthtime。** `<message_id>.jsonl` は delta ごとに追記されて
+1. **配信は `speech.jsonl` の tail ではなくディレクトリキュー。** 設計書 §4-4 / §6 は差分読み取りと
+   ローテート追従を前提にしていたが、1つのファイルに記録と配信を兼ねさせると読み手だけが際限なく
+   複雑になる（取りこぼしと二重配信を両方踏んだ）。分けた経緯は [#8](https://github.com/schwarz9791/chatter-agent/issues/8)、
+   結果の契約は [`protocol.md`](./protocol.md)
+2. **spool の処理順は mtime ではなく birthtime。** `<message_id>.jsonl` は delta ごとに追記されて
    mtime が動き続けるので、`final:true` が 34〜80 秒遅れて届くと先行メッセージの mtime が後発より
    新しくなり、順序が入れ替わる
-2. **世代交代の検出は inode を主に使う。** 設計書 §6 は「サイズが読み取り位置より小さくなったら」
-   としているが、新世代がたまたま同じサイズに達した瞬間に読むと取りこぼす。inode が当てにならない
-   環境（Windows）ではサイズの逆行で拾う
-3. **世代交代を検出したら、退避された直前世代の未読部分を先に読む。** 読み取りとローテートの間に
-   書かれた行は、単に位置をリセットするだけだと消える。退避先の inode が読んでいたファイルと
-   一致することを確かめてから読む
-
-4. **未確定なのはフェンスだけではない。** 設計書 §4-2 は「未閉じの ``` 以降は保留」としているが、
+3. **未確定なのはフェンスだけではない。** 設計書 §4-2 は「未閉じの ``` 以降は保留」としているが、
    `cleanTextForSpeech` が領域ごと削除する構文は他にもある。**`<` が閉じると、既に発話した文まで
    まとめて消える。** 保留の対象を広げてある（→ `src/text/unstableTail.ts`）
 
-加えて、設計書に無い挙動を2つ足した。
+加えて、設計書に無い挙動を足した。
 
 - **保留している最後の文を、後続イベントの到着で先に流す。** `final:true` を待つと 34〜80 秒遅れるが、
   後続イベントが来た時点でそのメッセージはもう伸びない。順序を保ったまま遅延だけを消せる。
   ただし**同一セッションの**後続に限る。spool はグローバルに1ディレクトリで、`MessageDisplay` は
   matcher 非対応で全セッションで発火するため、限定しないと Claude Code を2枚開いただけで
   書きかけの断片が読み上げられる
-- **server は watcher に加えてポーリングもする。** 単一ファイルパスの監視はローテートで対象が
-  差し替わると取りこぼす（実測で、何秒待っても届かない行が出た）。watcher は通常時の遅延のために
-  残し、`readNew` の定期実行を保険にしている
+- **ack をフロー制御として入れた。** TTS は生成よりずっと遅いので、キューは実質バッファ。
+  「起動時に空にする」「上限で古い方から捨てる」も同じ原則（古い発話は無価値）で説明がつく
 
-## 既知の限界
+## 発話の順序について
 
-### 1回の読み取りの間に2世代以上が流れると、中間世代は配信されない
+**メッセージ A が文の途中で止まっているとき、A の末尾は `final` を待つので B の後に発話される。**
 
-server は世代交代を検出したとき、退避された**直前1世代**の未読部分までは拾う。それより古い世代は、
-読み取り位置を当てにできないので追わない（誤った位置から読んで壊れた行を配信するより、諦める方が良い）。
-
-実運用でここに至るには、**2回の読み取りの間に上限サイズの2倍**（既定なら 10MB）が書かれる必要がある。
-`npm run verify:phase-b` の ⑤ が上限を 500 バイトに絞ってこの状態を再現しており、
-そこでも「順序が入れ替わらない」「重複しない」ことは保たれる。欠落は `seq` の飛びとして
-クライアントに見えるので、`?since=` で埋め直せる（ただし埋め直せるのも現世代の範囲まで）。
+断片を読み上げないための意図的な代償で、断片を喋る方が事故に聞こえる。`seq` は書いた順に振られる
+ので `seq` の順序は保たれるが、**「同じ `messageId` の発話が連続するとは限らない」**。
+クライアント側で messageId ごとにまとめる作りにしないこと。
 
 ## 既知の欠落
 
@@ -255,11 +250,16 @@ server は世代交代を検出したとき、退避された**直前1世代**�
 | 症状 | 例 |
 |---|---|
 | **URL 直後の `。` 以降が段落ごと消える** | `参考は https://x。まず読みます。次に実装します。` → `["参考は"]` |
+| **`<` と `>` に挟まれた文が丸ごと消える** | `1 < 2 なので先に進みます。確認しました。3 > 2 です。` → `1  2 です。` |
 | commit hash の正規表現が数値・英単語を食う | `5242880` / `1048576` / `defaced` が消える |
 | 強調・リンク記法が残る | `**` / `*` / `__` / `~~`、`[text](` の残骸 |
 | 約物だけの発話が `seq` を消費する | `すごい！！` → `["すごい！", "！"]` |
 
-URL の件がいちばん重く、**文が無言で消える**。それ以外は「記号が読み上げに混ざる」に留まる。
+上2つが重く、**文が無言で消える**。どちらも「区切りを決め打ちした正規表現が、次の区切りまで走る」
+という同じ形（URL は次の空白まで、タグは次の `>` まで）。残りは「記号が読み上げに混ざる」に留まる。
+
+> `unstableTail` が未閉じの `<` を保留するので、**一度発話してから取り消す**事故は起きない。
+> `>` が到着した時点で間の文が失われること自体は残っている。
 
 **実機で頻度を見てから整形規則をまとめて見直す方針**にしたので、現状は
 `src/cli/messageAssembler.test.ts` の「既知の欠落」ブロックで挙動を固定して可視化してある。
@@ -272,7 +272,7 @@ URL の件がいちばん重く、**文が無言で消える**。それ以外は
 | | |
 |---|---|
 | [#2](https://github.com/schwarz9791/chatter-agent/issues/2) | テキスト整形規則の見直し（上記） |
-| [#3](https://github.com/schwarz9791/chatter-agent/issues/3) | WebSocket に認証も Origin 検査も無い。**任意の Web ページから会話全文が読める** |
+| [#3](https://github.com/schwarz9791/chatter-agent/issues/3) | WebSocket の**認証**。Origin 検査は入ったが、LAN 上の他端末は素通り |
 | [#4](https://github.com/schwarz9791/chatter-agent/issues/4) | `CHATTER_AGENT_DISABLE` の真偽値解釈を bash hook と揃える |
 | [#5](https://github.com/schwarz9791/chatter-agent/issues/5) | Linux で `birthtimeNs` が当てにならない（spool の命名で解く） |
 | [#6](https://github.com/schwarz9791/chatter-agent/issues/6) | `messageAssembler` の O(N²) 再パース |

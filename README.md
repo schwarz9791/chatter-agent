@@ -23,13 +23,18 @@ Claude Code
 plugin/            bash。payload を spool に追記して即 exit 0
   ▼
 chatter-agent-speak    delta 結合 → Markdown除去 → 文分割 → 感情判定
+  ├──▶ speech.jsonl  記録（1文1行）
   ▼
-speech.jsonl       1文1行
+speech/<seq>.json  配信キュー（1文1ファイル）
   ▼
-chatter-agent-server   差分読み取り → WebSocket 配信
+chatter-agent-server   キューを読んで WebSocket 配信
+  ▲                    ack を受けたぶんを消す
+  │ ack
   ▼
 chatter-mascot(-xr)    TTS → 再生 → VRM描画
 ```
+
+発話の契約は [`docs/protocol.md`](./docs/protocol.md) にあります。
 
 | ディレクトリ | 内容 |
 |---|---|

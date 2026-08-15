@@ -1,8 +1,7 @@
 /**
  * Phase B の受け入れ確認。
  *
- * server を実際に起動し、WebSocket クライアントを繋いで
- * 「1文ずつ流れる」「?since= で欠落を埋められる」「ローテートを跨いでも配信が続く」を見る。
+ * server を実際に起動し、WebSocket クライアントを繋いで配信・ack・上限・Origin 検査を見る。
  *
  *   cd core && npm run build && npm run verify:phase-b
  *
@@ -23,8 +22,8 @@ const CLI = path.join(REPO, "plugin", "bin", "chatter-agent-speak.mjs");
 const SERVER = path.join(CORE, "dist", "chatter-agent-server.mjs");
 
 const PORT = 18570;
-/** ローテートを跨ぐ確認のため、上限をわざと小さくする */
-const MAX_BYTES = 500;
+/** 上限で古い方から捨てるのを見たいので、わざと小さくする */
+const QUEUE_MAX = 6;
 
 for (const [label, file] of [
   ["CLI", CLI],
@@ -39,6 +38,7 @@ for (const [label, file] of [
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatter-agent-phase-b-"));
 const runtime = path.join(root, "chatter-agent");
 const spoolDir = path.join(runtime, "spool");
+const queueDir = path.join(runtime, "speech");
 fs.mkdirSync(spoolDir, { recursive: true });
 
 const env = {
@@ -46,8 +46,7 @@ const env = {
   XDG_CONFIG_HOME: root,
   CHATTER_AGENT_HOST: "127.0.0.1",
   CHATTER_AGENT_PORT: String(PORT),
-  CHATTER_AGENT_SPEECH_LOG_MAX_BYTES: String(MAX_BYTES),
-  CHATTER_AGENT_SPEECH_LOG_GENERATIONS: "3",
+  CHATTER_AGENT_SPEECH_QUEUE_MAX_ENTRIES: String(QUEUE_MAX),
 };
 
 const failures = [];
@@ -61,16 +60,17 @@ function show(title) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const queueSize = () => fs.readdirSync(queueDir).filter((f) => f.endsWith(".json")).length;
 
 /** spool に delta を1本置いて CLI を起動する（plugin の bash hook の代わり） */
-function speak(messageId, index, text, final = false) {
+function speak(messageId, text) {
   const payload = {
     session_id: "sess-1",
     hook_event_name: "MessageDisplay",
     turn_id: "turn-1",
     message_id: messageId,
-    index,
-    final,
+    index: 0,
+    final: true,
     delta: text,
   };
   fs.appendFileSync(path.join(spoolDir, `${messageId}.jsonl`), JSON.stringify(payload) + "\n");
@@ -78,9 +78,9 @@ function speak(messageId, index, text, final = false) {
   if (status !== 0) throw new Error(`CLI が異常終了しました (status=${status})`);
 }
 
-/** 接続の前に message ハンドラを張る（?since= の送り直しは接続直後に同期で来る） */
-function connect(query = "") {
-  const socket = new WebSocket(`ws://127.0.0.1:${PORT}${query}`);
+/** 接続の前に message ハンドラを張る（接続直後の追いつきは同期で来る） */
+function connect(options = {}) {
+  const socket = new WebSocket(`ws://127.0.0.1:${PORT}`, { headers: options.headers });
   const received = [];
   socket.on("message", (data) => received.push(JSON.parse(String(data))));
   return new Promise((resolve, reject) => {
@@ -90,6 +90,8 @@ function connect(query = "") {
         received,
         texts: () => received.map((r) => r.text),
         seqs: () => received.map((r) => r.seq),
+        /** 「seq N まで喋った」 */
+        ack: (seq) => socket.send(JSON.stringify({ type: "spoken", seq })),
         async settle(ms = 400) {
           await sleep(ms);
           return received;
@@ -105,107 +107,133 @@ function connect(query = "") {
   });
 }
 
-const server = spawn(process.execPath, [SERVER], { env, stdio: ["ignore", "pipe", "pipe"] });
+let server;
 let serverLog = "";
-server.stdout.on("data", (d) => (serverLog += d));
-server.stderr.on("data", (d) => (serverLog += d));
+
+function startServer() {
+  server = spawn(process.execPath, [SERVER], { env, stdio: ["ignore", "pipe", "pipe"] });
+  server.stdout.on("data", (d) => (serverLog += d));
+  server.stderr.on("data", (d) => (serverLog += d));
+}
+
+async function waitForReady() {
+  const mark = "[Server] Ready";
+  const seen = serverLog.lastIndexOf(mark);
+  for (let i = 0; i < 100; i++) {
+    if (serverLog.lastIndexOf(mark) > seen || (seen === -1 && serverLog.includes(mark))) return;
+    await sleep(50);
+  }
+  throw new Error(`server が起動しませんでした:\n${serverLog}`);
+}
+
+async function stopServer() {
+  if (!server) return;
+  const dead = new Promise((done) => server.once("exit", done));
+  server.kill("SIGTERM");
+  await Promise.race([dead, sleep(3000)]);
+}
 
 function cleanup() {
-  server.kill("SIGTERM");
+  server?.kill("SIGKILL");
   fs.rmSync(root, { recursive: true, force: true });
 }
 
 try {
-  // "Ready" が出るまで待つ
-  for (let i = 0; i < 100 && !serverLog.includes("[Server] Ready"); i++) await sleep(50);
-  if (!serverLog.includes("[Server] Ready")) throw new Error(`server が起動しませんでした:\n${serverLog}`);
+  startServer();
+  await waitForReady();
 
   show("① 接続したクライアントに1文ずつ流れる");
   const client = await connect();
-  speak("m-1", 0, "確認します。ログを見ます。");
-  speak("m-1", 1, "以上です。", true);
+  speak("m-1", "確認します。ログを見ます。以上です。");
   await client.settle();
   console.log(client.received.map((r) => `seq=${r.seq} ${r.kind} ${JSON.stringify(r.text)}`).join("\n"));
   check(
     "1文1行で届く",
     JSON.stringify(client.texts()) === JSON.stringify(["確認します。", "ログを見ます。", "以上です。"]),
+    JSON.stringify(client.texts()),
   );
   check("seq が連続している", JSON.stringify(client.seqs()) === JSON.stringify([1, 2, 3]));
 
-  show("② 切断中の分を ?since= で埋められる");
-  await client.close();
-  speak("m-2", 0, "切断中の一文目。切断中の二文目。", true);
+  show("② ack でキューが減る");
+  console.log(`ack 前のキュー: ${queueSize()} 件`);
+  check("喋る前はキューに残っている", queueSize() === 3, `${queueSize()} 件`);
 
-  // ★ ここで待たないこと。watcher が消化する前に再接続すると、backfill と
-  //   その直後のブロードキャストで二重配信される窓に当たる。待つとこの窓を踏めない
-  const rejoined = await connect(`/?since=${client.seqs().at(-1)}`);
+  client.ack(2);
+  await sleep(300);
+  console.log(`seq<=2 を ack した後: ${queueSize()} 件`);
+  check("累積 ack で seq<=2 が消える", queueSize() === 1, `${queueSize()} 件`);
+
+  client.ack(3);
+  await sleep(300);
+  check("全部 ack すれば空になる", queueSize() === 0, `${queueSize()} 件`);
+
+  show("③ 切断中に書かれた分が、接続時に届く（?since= の代わり）");
+  await client.close();
+  speak("m-2", "切断中の一文目。切断中の二文目。");
+  await sleep(300); // server がキューを読んで sentUpTo を進めるまで待つ
+
+  const rejoined = await connect();
   await rejoined.settle();
   console.log(rejoined.received.map((r) => `seq=${r.seq} ${JSON.stringify(r.text)}`).join("\n"));
   check(
-    "切断中に流れた分だけが送り直される",
+    "未 ack の分が届く",
     JSON.stringify(rejoined.texts()) === JSON.stringify(["切断中の一文目。", "切断中の二文目。"]),
     JSON.stringify(rejoined.texts()),
   );
+
+  show("④ 未配信のまま接続しても二重にならない");
+  // ★ ここで待たないこと。server が読む前に接続すると、接続直後の追いつきと
+  //   直後のブロードキャストが重なる窓に当たる
+  const racer = await connect();
+  speak("m-3", "競合する一文目。競合する二文目。");
+  await racer.settle(600);
+  console.log(`racer: ${racer.seqs().join(",")}`);
+  check("同じ seq を2度受け取らない", new Set(racer.seqs()).size === racer.seqs().length, racer.seqs().join(","));
   check(
-    "★ watcher 未消化のまま再接続しても二重配信されない",
-    new Set(rejoined.seqs()).size === rejoined.seqs().length,
-    rejoined.seqs().join(","),
+    "取りこぼしも無い",
+    racer.texts().includes("競合する一文目。") && racer.texts().includes("競合する二文目。"),
+    racer.texts().join(" / "),
   );
 
-  show("③ 追いついているクライアントには何も送り直さない");
-  const uptodate = await connect(`/?since=${rejoined.seqs().at(-1)}`);
-  await uptodate.settle(300);
-  check("送り直しは0件", uptodate.received.length === 0, `${uptodate.received.length} 件届いた`);
+  await racer.close();
+  await rejoined.close();
 
-  show("④ ローテートを跨いでも配信が続く");
-  // 実運用の条件（世代 5MB / 監視はサブ秒で反応）に合わせ、書き込みの合間に server が
-  // 読める余地を与える。ローテートは跨ぐが、1回の読み取りの間に流れる世代は1つまで。
-  const before = fs.readdirSync(runtime).filter((f) => f.startsWith("speech."));
-  for (let i = 0; i < 6; i++) {
-    speak(`m-r${i}`, 0, `ローテート${i}です。おわり${i}。`, true);
-    await sleep(150);
+  show("⑤ 上限を超えたら古い方から捨てる");
+  const before = queueSize();
+  for (let i = 0; i < 6; i++) speak(`m-cap${i}`, `上限${i}の一文目。上限${i}の二文目。`);
+  const after = queueSize();
+  console.log(`キュー: ${before} 件 → ${after} 件（上限 ${QUEUE_MAX}）`);
+  check("上限を超えない", after <= QUEUE_MAX, `${after} 件`);
+
+  const remaining = fs
+    .readdirSync(queueDir)
+    .filter((f) => f.endsWith(".json"))
+    .map((f) => Number(f.slice(0, -5)))
+    .sort((a, b) => a - b);
+  check("残っているのは新しい方", remaining.every((s, i, a) => i === 0 || s > a[i - 1]) && remaining.length > 0);
+
+  show("⑥ Origin 付きの接続は拒否される（#3）");
+  let rejected = false;
+  try {
+    await connect({ headers: { Origin: "https://evil.example.com" } });
+  } catch {
+    rejected = true;
   }
-  await uptodate.settle(600);
-  const after = fs.readdirSync(runtime).filter((f) => f.startsWith("speech."));
-  console.log(`speech ファイル: ${before.join(", ")}  →  ${after.join(", ")}`);
-  check("実際にローテートが起きた", after.includes("speech.1.jsonl"));
-  check(
-    "ローテートを跨いだ分も全部届いた",
-    [...Array(6).keys()].every((i) => uptodate.texts().includes(`ローテート${i}です。`)),
-    uptodate.texts().join(" / "),
-  );
-  check(
-    "配信された seq が連続している（取りこぼしも重複も無い）",
-    uptodate.seqs().every((s, i, a) => i === 0 || s === a[i - 1] + 1),
-    uptodate.seqs().join(","),
-  );
+  check("ブラウザからは繋がらない", rejected);
 
-  show("⑤ 監視が追いつかないほどの連投（既知の限界。壊れないことだけを見る）");
-  // 1回の読み取りの間に2世代以上が流れると、中間世代は位置を当てにできないので配信されない。
-  // 実運用でここに至るには、読み取りの合間に上限サイズの2倍（既定なら 10MB）が書かれる必要がある。
-  // 欠落しても「順序が入れ替わらない」「重複しない」ことは保たれる、というのがここでの保証。
-  const burstStart = uptodate.seqs().at(-1) ?? 0;
-  for (let i = 0; i < 8; i++) speak(`m-b${i}`, 0, `連投${i}です。おわり${i}。`, true);
-  await uptodate.settle(800);
+  show("⑦ 起動時に、溜まっていたキューを捨てる");
+  await stopServer();
+  speak("m-offline", "サーバーが落ちている間の発話です。");
+  const queuedWhileDown = queueSize();
+  console.log(`落ちている間に溜まった: ${queuedWhileDown} 件`);
 
-  const burst = uptodate.seqs().filter((s) => s > burstStart);
-  const dropped = burst.length === 0 ? 0 : burst.at(-1) - burstStart - burst.length;
-  console.log(`連投 16 行のうち ${burst.length} 行が配信され、${dropped} 行が欠落しました`);
-  check(
-    "配信された分の順序は保たれている",
-    burst.every((s, i, a) => i === 0 || s > a[i - 1]),
-    burst.join(","),
-  );
-  check("重複配信は無い", new Set(burst).size === burst.length, burst.join(","));
+  startServer();
+  await waitForReady();
+  const afterRestart = await connect();
+  await afterRestart.settle(600);
 
-  // 欠落したなら seq が飛んでいるはずで、欠落していないなら連続しているはず。
-  // どちらであってもクライアントは受け取った seq だけで判断できる
-  const contiguous = burst.every((s, i, a) => i === 0 || s === a[i - 1] + 1);
-  check(
-    "欠落の有無が seq の連続性と一致する（クライアントが検出できる）",
-    dropped > 0 ? !contiguous : contiguous,
-    `dropped=${dropped} seqs=${burst.join(",")}`,
-  );
+  check("落ちている間の分は捨てられる", queueSize() === 0, `${queueSize()} 件残っている`);
+  check("古い発話は配信されない", afterRestart.received.length === 0, `${afterRestart.received.length} 件届いた`);
 
   show("結果");
   if (failures.length > 0) {

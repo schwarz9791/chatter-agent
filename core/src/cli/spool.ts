@@ -23,14 +23,14 @@ export interface MessageSpoolEntry {
   messageId: string;
   filePath: string;
   progressPath: string;
-  /** 到着順のキー */
-  order: number;
+  /** 到着順のキー。ナノ秒なので number に収まらない */
+  order: bigint;
 }
 
 export interface PromptSpoolEntry {
   kind: "prompt";
   filePath: string;
-  order: number;
+  order: bigint;
 }
 
 export type SpoolEntry = MessageSpoolEntry | PromptSpoolEntry;
@@ -55,12 +55,16 @@ function progressPathFor(filePath: string): string {
  * ★ mtime を使わないこと。`<message_id>.jsonl` は delta ごとに追記されるので mtime が動き続け、
  *   先に始まったメッセージが後から追記されて順番が入れ替わる。birthtime が本来の「到着順」。
  *   birthtime を持たない環境では mtime に落とす。
+ *
+ * ★ ミリ秒（`birthtimeMs`）では粗すぎる。同じミリ秒に作られたファイルが同値になり、
+ *   下のタイブレーク（パス順）に落ちて到着順が壊れる。`bigint: true` の統計情報が持つ
+ *   ナノ秒を使う。ナノ秒は number の安全整数を超えるので bigint のまま扱う。
  */
-function arrivalOrder(stat: fs.Stats): number {
-  return stat.birthtimeMs > 0 ? stat.birthtimeMs : stat.mtimeMs;
+function arrivalOrder(stat: fs.BigIntStats): bigint {
+  return stat.birthtimeNs > 0n ? stat.birthtimeNs : stat.mtimeNs;
 }
 
-function classify(fileName: string, filePath: string, order: number): SpoolEntry | null {
+function classify(fileName: string, filePath: string, order: bigint): SpoolEntry | null {
   // サイドカーが prompt-*.json のグロブに混ざらないよう、最初に弾く
   if (fileName.endsWith(PROGRESS_SUFFIX)) return null;
 
@@ -93,9 +97,9 @@ export function scanSpool(spoolDir: string): SpoolEntry[] {
   const entries: SpoolEntry[] = [];
   for (const fileName of fileNames) {
     const filePath = path.join(spoolDir, fileName);
-    let stat: fs.Stats;
+    let stat: fs.BigIntStats;
     try {
-      stat = fs.statSync(filePath);
+      stat = fs.statSync(filePath, { bigint: true });
     } catch {
       continue; // 走査中に消えた
     }
@@ -105,8 +109,11 @@ export function scanSpool(spoolDir: string): SpoolEntry[] {
     if (entry) entries.push(entry);
   }
 
-  // 同じミリ秒に生まれたものはパスで決める（順序が実行ごとに揺れないように）
-  return entries.sort((a, b) => a.order - b.order || a.filePath.localeCompare(b.filePath));
+  // ナノ秒まで同値ならパスで決める（順序が実行ごとに揺れないように）
+  return entries.sort((a, b) => {
+    if (a.order !== b.order) return a.order < b.order ? -1 : 1;
+    return a.filePath.localeCompare(b.filePath);
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

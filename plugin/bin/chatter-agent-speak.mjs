@@ -1072,9 +1072,13 @@ function progressPathFor(filePath) {
 * ★ mtime を使わないこと。`<message_id>.jsonl` は delta ごとに追記されるので mtime が動き続け、
 *   先に始まったメッセージが後から追記されて順番が入れ替わる。birthtime が本来の「到着順」。
 *   birthtime を持たない環境では mtime に落とす。
+*
+* ★ ミリ秒（`birthtimeMs`）では粗すぎる。同じミリ秒に作られたファイルが同値になり、
+*   下のタイブレーク（パス順）に落ちて到着順が壊れる。`bigint: true` の統計情報が持つ
+*   ナノ秒を使う。ナノ秒は number の安全整数を超えるので bigint のまま扱う。
 */
 function arrivalOrder(stat) {
-	return stat.birthtimeMs > 0 ? stat.birthtimeMs : stat.mtimeMs;
+	return stat.birthtimeNs > 0n ? stat.birthtimeNs : stat.mtimeNs;
 }
 function classify(fileName, filePath, order) {
 	if (fileName.endsWith(PROGRESS_SUFFIX)) return null;
@@ -1105,7 +1109,7 @@ function scanSpool(spoolDir) {
 		const filePath = path.join(spoolDir, fileName);
 		let stat;
 		try {
-			stat = fs.statSync(filePath);
+			stat = fs.statSync(filePath, { bigint: true });
 		} catch {
 			continue;
 		}
@@ -1113,7 +1117,10 @@ function scanSpool(spoolDir) {
 		const entry = classify(fileName, filePath, arrivalOrder(stat));
 		if (entry) entries.push(entry);
 	}
-	return entries.sort((a, b) => a.order - b.order || a.filePath.localeCompare(b.filePath));
+	return entries.sort((a, b) => {
+		if (a.order !== b.order) return a.order < b.order ? -1 : 1;
+		return a.filePath.localeCompare(b.filePath);
+	});
 }
 function isRecord(value) {
 	return typeof value === "object" && value !== null && !Array.isArray(value);

@@ -6,7 +6,7 @@
  * - `listening` するまで resolve しない（呼び出し側が監視を始める前に失敗を検知できる）
  * - ping-pong で半開接続を落とす（Android が圏外に出ると TCP が半開のまま残る）
  * - タイマーは `unref()`（しないとイベントループが終了できない）
- * - `bufferedAmount` 超過はそのメッセージだけ捨てる（接続は維持）
+ * - `bufferedAmount` 超過はその接続を切る（フレームだけ捨てて繋ぎっぱなしにしない。詳細は sendTo 参照）
  * - `boundAddress` を保持（`wss.address()` は close 後に null を返す）
  * - socket に error ハンドラを必ず付ける（付けないと uncaught でプロセスごと落ちる）
  */
@@ -17,8 +17,6 @@ import type { WebSocket } from "ws";
 export interface WsServer {
   /** 接続中の全クライアントへ送る */
   broadcast: (message: string) => void;
-  /** そのソケットにだけ送る。接続直後の追いつき用 */
-  sendTo: (socket: WebSocket, message: string) => boolean;
   clientCount: () => number;
   address: () => { host: string; port: number };
   close: () => Promise<void>;
@@ -30,6 +28,11 @@ export interface WsServerOptions {
   /** 0 で無効化（テスト用） */
   heartbeatIntervalMs?: number;
   maxBufferedBytes?: number;
+  /**
+   * `Origin` ヘッダの完全一致許可リスト。既定は `[]`（＝ `Origin` 付き接続を全拒否、今までの挙動）。
+   * 前方一致やワイルドカードは入れない。`verifyClient` 参照
+   */
+  allowedOrigins?: string[];
   /**
    * 接続してきたクライアントに、まず何を送るか。
    *
@@ -54,6 +57,13 @@ const CLOSE_GRACE_MS = 2_000;
  * クライアントから受け取る唯一のメッセージ。
  *
  * ★ 上限を絞ること。ここが開いた時点で、繋げる相手はサーバーにデータを送れるようになる。
+ *
+ * ★ 超過したフレームは「黙って捨てられる」のではなく、接続そのものが 1009 で切られる
+ *   （ws@8.21.3: receiver.js が statusCode 1009 を載せた RangeError を投げ、
+ *   websocket.js の receiverOnError が websocket.close() を呼ぶ）。message イベント自体が
+ *   発火しないので、下の `if (seq === null) return` は無関係（あちらはパースに失敗した
+ *   *正常なサイズの* メッセージを捨てているだけ）。送信側（broadcast）の上限には効かない
+ *   — これは受信専用の制限
  */
 const MAX_PAYLOAD_BYTES = 4 * 1024;
 
@@ -87,16 +97,30 @@ export function parseAck(raw: string): number | null {
  * `new WebSocket("ws://127.0.0.1:8570")` で会話を読め、ack を投げてマスコットを黙らせられる。
  * `host` を 127.0.0.1 にしても塞がらない。
  *
- * Unity / ネイティブクライアントは `Origin` を送らないので影響しない。
+ * `allowedOrigins`（完全一致・既定 `[]`）に載っている `Origin` だけを通す。
+ * Electron の `chatter-mascot` や Unity WebGL ビルドのように、`Origin` を送るが正規のクライアント
+ * である相手を通す唯一の経路がこれ。前方一致やワイルドカードは入れない（緩めるほど上の脅威に近づく）。
+ *
+ * Unity（WebGL 以外）/ ネイティブクライアントは `Origin` を送らないので、リストの中身に関わらず通る。
  * LAN 上の他端末に対する認証は別途必要（Issue #3）。
  */
-function verifyClient(info: { origin?: string; req: { headers: Record<string, unknown> } }): boolean {
-  const origin = info.origin ?? info.req.headers.origin;
-  if (typeof origin === "string" && origin.length > 0) {
-    console.warn(`[WS] Rejected browser origin: ${origin}`);
+function createVerifyClient(
+  allowedOrigins: string[],
+): (info: { origin?: string; req: { headers: Record<string, unknown> } }) => boolean {
+  const allowed = new Set(allowedOrigins);
+  return (info) => {
+    const origin = info.origin ?? info.req.headers.origin;
+    if (typeof origin !== "string" || origin.length === 0) return true;
+    if (allowed.has(origin)) return true;
+
+    // 拒否理由を分けて出す。空リストなら「そもそも許可リストが無い」、そうでなければ「リストに無い」
+    console.warn(
+      allowed.size === 0
+        ? `[WS] Rejected origin (allowedOrigins is empty): ${origin}`
+        : `[WS] Rejected origin (not in allowedOrigins): ${origin}`,
+    );
     return false;
-  }
-  return true;
+  };
 }
 
 export function createWsServer(options: WsServerOptions): Promise<WsServer> {
@@ -108,7 +132,7 @@ export function createWsServer(options: WsServerOptions): Promise<WsServer> {
       host: options.host,
       port: options.port,
       maxPayload: MAX_PAYLOAD_BYTES,
-      verifyClient,
+      verifyClient: createVerifyClient(options.allowedOrigins ?? []),
     });
     const alive = new WeakSet<WebSocket>();
     let boundAddress = { host: options.host, port: options.port };
@@ -117,7 +141,13 @@ export function createWsServer(options: WsServerOptions): Promise<WsServer> {
     const sendTo = (socket: WebSocket, message: string): boolean => {
       if (socket.readyState !== socket.OPEN) return false;
       if (socket.bufferedAmount > maxBuffered) {
-        console.warn(`[WS] Backpressure (${socket.bufferedAmount}B buffered), dropping message`);
+        // ★ フレームを捨てて接続を維持すると、キューは「配信済み」として先へ進むのに
+        //   その1文だけが永久に届かない。切ってしまえば、繋ぎ直したときに未 ack 分が
+        //   接続直後の追いつきで再送される（docs/protocol.md）。
+        //   キューの上限 500 件 × 数百バイトは 1MB に遠く届かないので、
+        //   ここに来る時点でクライアントは実質停止している
+        console.warn(`[WS] Backpressure (${socket.bufferedAmount}B buffered), closing`);
+        socket.close(1013, "too slow");
         return false;
       }
       socket.send(message, (err) => {
@@ -139,7 +169,8 @@ export function createWsServer(options: WsServerOptions): Promise<WsServer> {
       if (options.onAck) {
         socket.on("message", (data) => {
           const seq = parseAck(String(data));
-          if (seq === null) return; // 知らない形は黙って捨てる
+          // 知らない形は黙って捨てる。maxPayload 超過はそもそもここに来ない（MAX_PAYLOAD_BYTES 参照）
+          if (seq === null) return;
           options.onAck?.(seq);
         });
       }
@@ -176,8 +207,6 @@ export function createWsServer(options: WsServerOptions): Promise<WsServer> {
       broadcast(message) {
         for (const socket of wss.clients) sendTo(socket, message);
       },
-
-      sendTo,
 
       clientCount: () => wss.clients.size,
 

@@ -15,6 +15,7 @@ const DEFAULTS: ChatterAgentConfig = {
   speechLogMaxBytes: 5 * 1024 * 1024,
   speechQueueMaxEntries: 500,
   spoolMaxAgeHours: 6,
+  allowedOrigins: [],
 };
 
 function store(env: NodeJS.ProcessEnv = {}) {
@@ -146,5 +147,31 @@ describe("createConfigStore", () => {
 
   it("filePath を公開する（起動ログ用）", () => {
     expect(store().filePath).toBe(filePath);
+  });
+});
+
+describe("allowedOrigins（#E-1）", () => {
+  it("既定は空配列（Origin付きの接続は全拒否のまま）", () => {
+    expect(store().get("allowedOrigins")).toEqual([]);
+  });
+
+  it("config.json の配列を受け、要素をtrimして空要素を落とす", () => {
+    write({ allowedOrigins: [" http://localhost:5173 ", "", "app://renderer"] });
+    expect(store().get("allowedOrigins")).toEqual(["http://localhost:5173", "app://renderer"]);
+  });
+
+  it("環境変数はカンマ区切りで受け、要素をtrimして空要素を落とす", () => {
+    const s = store({ CHATTER_AGENT_ALLOWED_ORIGINS: " http://localhost:5173 ,,app://renderer " });
+    expect(s.get("allowedOrigins")).toEqual(["http://localhost:5173", "app://renderer"]);
+  });
+
+  it("文字列以外の要素が混じったら配列ごと既定値にフォールバックする", () => {
+    write({ allowedOrigins: ["http://localhost:5173", 42] });
+    expect(store().get("allowedOrigins")).toEqual([]);
+  });
+
+  it("配列でも文字列でもない値は既定値にフォールバックする", () => {
+    write({ allowedOrigins: 42 });
+    expect(store().get("allowedOrigins")).toEqual([]);
   });
 });

@@ -120,7 +120,8 @@ function createDefaultConfig() {
 		speakPrompts: true,
 		speechLogMaxBytes: 5242880,
 		speechQueueMaxEntries: 500,
-		spoolMaxAgeHours: 6
+		spoolMaxAgeHours: 6,
+		allowedOrigins: []
 	};
 }
 const TRUTHY = [
@@ -155,6 +156,19 @@ const parsePositiveInt = (raw) => {
 	return n !== void 0 && n >= 1 ? n : void 0;
 };
 const parseNonEmptyString = (raw) => typeof raw === "string" && raw.trim() ? raw.trim() : void 0;
+const parseStringList = (raw) => {
+	let items;
+	if (typeof raw === "string") items = raw.split(",");
+	else if (Array.isArray(raw)) items = raw;
+	else return;
+	const out = [];
+	for (const item of items) {
+		if (typeof item !== "string") return void 0;
+		const trimmed = item.trim();
+		if (trimmed) out.push(trimmed);
+	}
+	return out;
+};
 /**
 * キーの定義。satisfies で ChatterAgentConfig の全キーを網羅していることを型で担保する
 * （satisfies は型のみなので erasableSyntaxOnly に抵触しない）。
@@ -184,6 +198,10 @@ const SPECS = {
 	spoolMaxAgeHours: {
 		env: "CHATTER_AGENT_SPOOL_MAX_AGE_HOURS",
 		parse: parsePositiveInt
+	},
+	allowedOrigins: {
+		env: "CHATTER_AGENT_ALLOWED_ORIGINS",
+		parse: parseStringList
 	}
 };
 const CONFIG_KEYS = Object.keys(SPECS);
@@ -917,7 +935,7 @@ var RuleBasedEmotionClassifier = class {
 };
 
 //#endregion
-//#region src/cli/lock.ts
+//#region src/core/lock.ts
 /**
 * 単一ワーカーのロック。
 *
@@ -925,8 +943,9 @@ var RuleBasedEmotionClassifier = class {
 * ロックを取れた1プロセスだけ（CLAUDE.md「絶対に守ること」4）。`seq` の採番も
 * このロック下で行う。取れなかったプロセスは何もせず即終了する（先行ワーカーが拾う）。
 *
-* `src/cli/` は npm 依存を持てない（docs/core.md）ので、ロックライブラリは使わず
-* **`mkdir` の原子性**で実装する。同名ディレクトリの作成は、成功するのが必ず1プロセスだけ。
+* `src/cli/` と `src/core/` はどちらも npm 依存を持てない（docs/core.md）ので、
+* ロックライブラリは使わず**`mkdir` の原子性**で実装する。同名ディレクトリの
+* 作成は、成功するのが必ず1プロセスだけ。
 */
 const DEFAULT_STALE_MS = 6e4;
 function ownerFilePath(lockDir) {
@@ -957,16 +976,22 @@ function isProcessAlive(pid) {
 /**
 * 放置されたロックか判定する。
 *
-* ★ pid の生存確認を経過時間より**先に**行うこと。逆にすると、SIGKILL / SIGHUP / OOM で
-*   死んだプロセスのロックが残ったとき、hook が起動する CLI が丸ごと staleMs のあいだ
-*   無言で return し続ける（その間の発話がすべて遅延する）。
+* 所有者が読めるなら pid の生死**だけ**で決める。古さも条件に加えると、
+* ドレインが staleMs を超えて長引いた・ラップトップがサスペンドから復帰しただけの
+* **生きた保持者**から奪ってしまう（実測: mtime だけで60秒経過扱いにすると
+* 生きたロックが奪われる）。
 *
-* 古さによる判定も残す。所有者が読めない（作成途中 / 壊れている）場合に加えて、
-* pid が再利用されて別のプロセスが生きて見えるケースの backstop になる。
+* ★ この結果、pid が再利用されると恒久的なロックになる穴が残る（死んだプロセスの
+*   pid を別の生きたプロセスが引き継ぐと、owner は永遠に「生きている」に見える）。
+*   意図的な判断: 「生きた保持者を60秒で奪う」方が実害が大きい。踏んだら
+*   `speak.lock` を手で消せば済む。
+*
+* 所有者が読めない場合（mkdir 直後で owner.json を書く前 / 壊れている）だけ、
+* 経過時間で判定する。読めないまま staleMs 続いたなら owner.json を書けずに死んだとみなす。
 */
 function isStale(lockDir, staleMs, now) {
 	const owner = readOwner(lockDir);
-	if (owner !== null && !isProcessAlive(owner.pid)) return true;
+	if (owner !== null) return !isProcessAlive(owner.pid);
 	try {
 		return now - fs.statSync(lockDir).mtimeMs >= staleMs;
 	} catch {
@@ -994,10 +1019,12 @@ function acquireLock(lockDir, options = {}) {
 			fs.writeFileSync(ownerFilePath(lockDir), `${JSON.stringify({
 				pid,
 				token
-			})}\n`);
-		} catch {}
+			})}\n`, { flag: "wx" });
+		} catch {
+			return null;
+		}
 		const owner = readOwner(lockDir);
-		if (owner !== null && owner.token !== token) return null;
+		if (owner === null || owner.token !== token) return null;
 		return makeLock(lockDir, token);
 	};
 	const first = tryCreate();
@@ -1007,6 +1034,17 @@ function acquireLock(lockDir, options = {}) {
 	try {
 		fs.renameSync(lockDir, evicted);
 	} catch {
+		return null;
+	}
+	if (!isStale(evicted, staleMs, now())) {
+		try {
+			fs.renameSync(evicted, lockDir);
+		} catch {
+			fs.rmSync(evicted, {
+				recursive: true,
+				force: true
+			});
+		}
 		return null;
 	}
 	fs.rmSync(evicted, {
@@ -1021,7 +1059,7 @@ function makeLock(lockDir, token) {
 		if (released) return;
 		released = true;
 		const owner = readOwner(lockDir);
-		if (owner !== null && owner.token !== token) return;
+		if (owner === null || owner.token !== token) return;
 		fs.rmSync(lockDir, {
 			recursive: true,
 			force: true

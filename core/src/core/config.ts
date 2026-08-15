@@ -37,6 +37,13 @@ export interface ChatterAgentConfig {
   speechQueueMaxEntries: number;
   /** CLI が起動しないまま終わった spool の孤児を、この時間より古ければ掃除する */
   spoolMaxAgeHours: number;
+  /**
+   * WebSocket 接続を許可する `Origin` の完全一致リスト（前方一致・ワイルドカードは無し）。
+   * 既定は空＝`Origin` 付きの接続はすべて拒否（今までの挙動のまま）。
+   * Electron の renderer（`file://` なら `null`、`http://localhost:*` ならそのオリジン）や
+   * Unity WebGL ビルドを繋ぐときに、必要な分だけ足す。
+   */
+  allowedOrigins: string[];
 }
 
 export function createDefaultConfig(): ChatterAgentConfig {
@@ -47,6 +54,7 @@ export function createDefaultConfig(): ChatterAgentConfig {
     speechLogMaxBytes: 5 * 1024 * 1024,
     speechQueueMaxEntries: 500,
     spoolMaxAgeHours: 6,
+    allowedOrigins: [],
   };
 }
 
@@ -86,6 +94,28 @@ const parsePositiveInt: Parser<number> = (raw) => {
 // のような値がそのまま listen() へ渡る
 const parseNonEmptyString: Parser<string> = (raw) => (typeof raw === "string" && raw.trim() ? raw.trim() : undefined);
 
+// 環境変数（カンマ区切りの文字列）と config.json（配列）の両方を受ける。
+// 要素が1つでも文字列以外なら、部分的に取り込まず配列ごと undefined にする
+// （「一部だけ有効な許可リスト」は事故ると気づきにくいので、丸ごと既定値に倒す）
+const parseStringList: Parser<string[]> = (raw) => {
+  let items: unknown[];
+  if (typeof raw === "string") {
+    items = raw.split(",");
+  } else if (Array.isArray(raw)) {
+    items = raw;
+  } else {
+    return undefined;
+  }
+
+  const out: string[] = [];
+  for (const item of items) {
+    if (typeof item !== "string") return undefined;
+    const trimmed = item.trim();
+    if (trimmed) out.push(trimmed);
+  }
+  return out;
+};
+
 /**
  * キーの定義。satisfies で ChatterAgentConfig の全キーを網羅していることを型で担保する
  * （satisfies は型のみなので erasableSyntaxOnly に抵触しない）。
@@ -98,6 +128,7 @@ const SPECS = {
   speechLogMaxBytes: { env: "CHATTER_AGENT_SPEECH_LOG_MAX_BYTES", parse: parsePositiveInt },
   speechQueueMaxEntries: { env: "CHATTER_AGENT_SPEECH_QUEUE_MAX_ENTRIES", parse: parsePositiveInt },
   spoolMaxAgeHours: { env: "CHATTER_AGENT_SPOOL_MAX_AGE_HOURS", parse: parsePositiveInt },
+  allowedOrigins: { env: "CHATTER_AGENT_ALLOWED_ORIGINS", parse: parseStringList },
 } as const satisfies { [K in ConfigKey]: { env: string; parse: Parser<ChatterAgentConfig[K]> } };
 
 const CONFIG_KEYS = Object.keys(SPECS) as ConfigKey[];

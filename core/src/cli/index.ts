@@ -26,7 +26,7 @@ import {
 import { createSpeechLog } from "../core/speechLog";
 import { createSpeechQueue } from "../core/speechQueue";
 import { RuleBasedEmotionClassifier } from "../emotion/ruleBasedEmotionClassifier";
-import { acquireLock, type Lock } from "./lock";
+import { acquireLock, type Lock } from "../core/lock";
 import { drainSpool } from "./worker";
 
 const LOCK_RETRIES = 3;

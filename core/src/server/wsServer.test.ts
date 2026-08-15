@@ -195,7 +195,7 @@ describe("ack", () => {
 });
 
 describe("Origin 検査（#3）", () => {
-  it("★ Origin ヘッダ付きの接続を拒否する（WebSocket は CORS の対象外）", async () => {
+  it("★ allowedOrigins が空なら Origin ヘッダ付きの接続を拒否する（既定・既存挙動の維持）", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const server = await start();
 
@@ -203,9 +203,63 @@ describe("Origin 検査（#3）", () => {
     expect(server.clientCount()).toBe(0);
   });
 
-  it("Origin を送らないクライアント（Unity / ネイティブ）は通す", async () => {
-    const server = await start();
+  it("Origin を送らない接続は、allowedOrigins の中身に関わらず通す（Unity / ネイティブ）", async () => {
+    const server = await start({ allowedOrigins: ["http://localhost:5173"] });
     await connect(server);
     expect(server.clientCount()).toBe(1);
+  });
+});
+
+describe("allowedOrigins（Electron / Unity WebGL 向け許可リスト）", () => {
+  it("allowedOrigins に載っている Origin は通る", async () => {
+    const server = await start({ allowedOrigins: ["http://localhost:5173"] });
+    await connect(server, { headers: { Origin: "http://localhost:5173" } });
+    expect(server.clientCount()).toBe(1);
+  });
+
+  it("★ allowedOrigins に載っていない Origin は拒否される", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const server = await start({ allowedOrigins: ["http://localhost:5173"] });
+
+    await expect(connect(server, { headers: { Origin: "http://localhost:9999" } })).rejects.toThrow();
+    expect(server.clientCount()).toBe(0);
+  });
+});
+
+describe("maxPayload（4KB超）", () => {
+  it("★ 4KBを超えるフレームを送ると接続が 1009 で切れる", async () => {
+    const server = await start();
+    const client = await connect(server);
+
+    const closeCode = new Promise<number>((resolve) => {
+      client.socket.once("close", (code) => resolve(code));
+    });
+
+    client.socket.send("a".repeat(5 * 1024));
+    expect(await closeCode).toBe(1009);
+  });
+});
+
+describe("バックプレッシャ（sendTo）", () => {
+  it("★ bufferedAmount 超過で接続を切る（フレームを捨てて繋ぎっぱなしにはしない）", async () => {
+    // 実ソケットで bufferedAmount を 1MB 超えさせるのは決定的でないため、maxBufferedBytes に
+    // 負の値を注入して `socket.bufferedAmount > maxBuffered`（0 > -1）を常に真にする。
+    // テスト専用の踏み方
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const server = await start({ maxBufferedBytes: -1 });
+    const client = await connect(server);
+
+    let received = false;
+    client.socket.once("message", () => {
+      received = true;
+    });
+    const closeCode = new Promise<number>((resolve) => {
+      client.socket.once("close", (code) => resolve(code));
+    });
+
+    server.broadcast("hello");
+
+    expect(await closeCode).toBe(1013);
+    expect(received).toBe(false);
   });
 });

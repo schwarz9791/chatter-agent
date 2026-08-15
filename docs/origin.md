@@ -1,20 +1,37 @@
 # cc-mascot からの移植 — 由来とライセンス
 
-テキスト整形・文分割・感情判定・AI要約は、[kazakago/cc-mascot](https://github.com/kazakago/cc-mascot)（Apache-2.0）の `electron/` 配下から**初回に一度だけコピー**して持ち込む。
+テキスト整形・文分割・感情判定は、[kazakago/cc-mascot](https://github.com/kazakago/cc-mascot)（Apache-2.0）の `electron/` 配下から**初回に一度だけコピー**して持ち込む。
 
 **以後はこのリポジトリのコードとして自由に改変する。** 上流に追従する義務を負わない。
+
+## ⚠ 「cc-mascot 由来」と「自分が cc-mascot の上で書いたもの」を混同しない
+
+移植元として見ていたローカル worktree `worktree-ai-summary` は、**kazakago の `main`（`46f7def`）から分岐した自分のブランチ**で、分岐後のコミットはすべて Masaki Matsumura 名義。上流に PR を出しておらず、公開もしていない。
+
+したがって、そこにあるファイルは2種類に分かれる。
+
+| ファイル | 著作者 | 帰属表示 |
+|---|---|---|
+| `filters/textFilter.ts` + `.test.ts` | kazakago | **要る** |
+| `services/ruleBasedEmotionClassifier.ts` + `.test.ts` | kazakago | **要る** |
+| `services/promptEventFormatter.ts` + `.test.ts` | 自分（`e2c566b` で新規作成） | 不要 |
+| `services/summarizer/*` | 自分（`9b23434` で新規作成） | 不要 |
+| `mutedSessionMonitor.ts` | 自分 | 不要 |
+
+前者2つは `main` と**バイト単位で同一**なので、公開リポジトリから引ける。後者は `main` に存在しないので、`@ <hash>` を書いても誰も辿れない。**自分の著作物に kazakago の帰属を付けない。**
+
+判定はこれで確認できる:
+
+```bash
+UPSTREAM=/Users/schwarz/dev/cc-mascot
+git -C "$UPSTREAM" log --format='%an %s' 46f7def..worktree-ai-summary -- electron/<path>
+```
 
 ## なぜ無改変ミラーをやめたか
 
 前身の cc-mascot-xr は `bridge/src/upstream/` を**編集禁止の無改変ミラー**として隔離し、上流の改善をそのまま取り込める状態を維持していた。chatter-agent はこれを引き継がない。
 
-hook 方式への転換で、移植する4種のうち3種が**上流と要件が食い違う**ため。
-
-| ファイル | 食い違い |
-|---|---|
-| `textFilter.ts` | chatter-agent は delta を蓄積した raw 全体へ**繰り返し適用**する。さらに「未閉じの ``` 以降は保留」という上流に存在しない要件がある |
-| `summarizer/isolation.ts` | 無限ループ防止が `CHATTER_AGENT_DISABLE` + session-id レジストリ方式になる。上流の `CLAUDE_CONFIG_DIR` / `GEMINI_CLI_HOME` 隔離とは別物 |
-| `promptEventFormatter.ts` | `kind` の設計が独自（`speech.jsonl` の契約に従う） |
+hook 方式への転換で、`textFilter.ts` が**上流と要件で食い違う**ため。chatter-agent は delta を蓄積した raw 全体へ**繰り返し適用**し、さらに「未閉じの ``` 以降は保留」という上流に存在しない要件がある（→ `core/src/text/pendingFence.ts`）。
 
 守り切れないものを「編集禁止」と書いておくと、**制約の方が先に嘘になる**。実態に合わせて降ろした。
 
@@ -26,10 +43,10 @@ hook 方式への転換で、移植する4種のうち3種が**上流と要件�
 |---|---|
 | 元リポジトリ | https://github.com/kazakago/cc-mascot |
 | ライセンス | Apache License 2.0（Copyright 2026 kazakago） |
-| コピー元のツリー | ローカル worktree `/Users/schwarz/dev/cc-mascot/.claude/worktrees/ai-summary` |
-| フォーク点のコミット | `db56b52`（cc-mascot-xr が最後に同期した地点。**このリポジトリではまだコピーしていない**） |
+| コピー元のコミット | **`46f7def7e3f80e347571760a625da939fad6b852`**（`46f7def` / 2026-08-06 / `main` / "Merge pull request #208 from kazakago/chore/remove-local-git-skills"） |
+| コピー実施日 | 2026-08-15（`text/textFilter.ts` と `emotion/ruleBasedEmotionClassifier.ts` および両者のテスト） |
 
-初回コピーを実施したら、**実際にコピーしたコミットハッシュをここに記録すること。** これが「どこから分岐したか」の唯一の記録になる。
+作業は手元のローカル worktree `/Users/schwarz/dev/cc-mascot/.claude/worktrees/ai-summary`（`bc9b4dd`）から行ったが、**コピーした4ファイルは `main` の `46f7def` と同一**なので、ソースのヘッダには公開リポジトリから引ける `46f7def` を書いてある。
 
 ## ライセンス上の義務（Apache-2.0）
 
@@ -38,58 +55,70 @@ hook 方式への転換で、移植する4種のうち3種が**上流と要件�
 - **§4(b): 改変したファイルには、改変した旨の目立つ告知を付ける。** 移植したファイルの先頭に、由来と改変の有無を書いたヘッダコメントを入れる
 - **§4(a)/(d): ライセンス本文と `NOTICE` の同梱・帰属表示を維持する**
 
-ヘッダの例:
+ヘッダの書式:
 
 ```ts
 /**
  * Originally from kazakago/cc-mascot (Apache-2.0, Copyright 2026 kazakago)
- *   electron/filters/textFilter.ts @ <fork-commit>
+ *   electron/filters/textFilter.ts @ 46f7def
  * Modified for chatter-agent.
  */
 ```
 
 初回コピー直後で未改変のファイルは `Modified` の行を省いてよいが、**手を入れた時点で追記する**。
 
-## 移植するファイル（ソース11 + テスト9 = 20ファイル）
+**ハッシュは公開リポジトリから引けるものだけを書く。** 手元のブランチにしか無いコミットを書くと、読んだ人が辿れない謎の表記になる。
+
+## 移植したファイル
 
 上流の階層をそのまま写す必要はない。**chatter-agent の都合で機能ごとに配置する。**
 
-| 上流 `electron/` | 移送先 `core/src/` | 行数 |
-|---|---|---|
-| `filters/textFilter.ts` | `text/textFilter.ts` | 56（テスト 341） |
-| `services/ruleBasedEmotionClassifier.ts` | `emotion/ruleBasedEmotionClassifier.ts` | 501（テスト 323） |
-| `services/promptEventFormatter.ts` | `prompt/promptEventFormatter.ts` | 97（テスト 138） |
-| `services/summarizer/types.ts` | `summarizer/types.ts` | 58（テスト無し） |
-| `services/summarizer/prompt.ts` | `summarizer/prompt.ts` | 18（テスト無し） |
-| `services/summarizer/semaphore.ts` | `summarizer/semaphore.ts` | 43 |
-| `services/summarizer/isolation.ts` | `summarizer/isolation.ts` | 55 |
-| `services/summarizer/detect.ts` | `summarizer/detect.ts` | 194 |
-| `services/summarizer/backends.ts` | `summarizer/backends.ts` | 156 |
-| `services/summarizer/cliSummarizer.ts` | `summarizer/cliSummarizer.ts` | 156 |
-| `services/summarizer/summaryPipeline.ts` | `summarizer/summaryPipeline.ts` | 123 |
+| 上流 `electron/` | 移送先 `core/src/` | 行数 | 状態 |
+|---|---|---|---|
+| `filters/textFilter.ts` | `text/textFilter.ts` | 56（テスト 341） | ✅ 済 |
+| `services/ruleBasedEmotionClassifier.ts` | `emotion/ruleBasedEmotionClassifier.ts` | 501（テスト 323） | ✅ 済 |
 
 テストはソースと同ディレクトリに並置された `*.test.ts` をそのまま持ってくる。**移植後はこのリポジトリのテストとして育てる**（上流に送る必要はない）。
 
-これらは **Electron ゼロ依存**であることを cc-mascot-xr で確認済み。`from "electron"` は0件、`__dirname` / `require()` / `import.meta` も0件。実行時の依存は Node 標準（`fs` / `path` / `os` / `readline` / `child_process` / `crypto`）のみ。
+どちらも **Electron ゼロ依存**。`from "electron"` は0件、`__dirname` / `require()` / `import.meta` も0件。相対 import も無いので、階層を上流と揃える必要はない。
 
 ### それぞれの役割
 
 - **`textFilter.ts`** — `cleanTextForSpeech`（Markdown / コードブロック / URL / git ハッシュ除去、10段の正規表現）と `splitIntoSentences`。純粋関数なので何度適用しても同じ結果になる
 - **`ruleBasedEmotionClassifier.ts`** — キーワード辞書 + 文末パターン + ヒューリスティック。LLM 不使用でオフライン・即時
-- **`promptEventFormatter.ts`** — hook の payload → 読み上げ文。依存ゼロの純粋関数
-- **`summarizer/`** — CLI エージェントのヘッドレス実行による要約。既定 OFF
 
-### 初回コピー時にやること
+### 実際に加えた改変（2026-08-15 の初回コピー）
 
-1. 上記の対応表どおりに配置する
-2. **相対 import を直す。** 上流は `services/summarizer/summaryPipeline.ts` から `../../filters/textFilter` を参照している。移送後は `../text/textFilter` になる
-3. 各ファイルにライセンスヘッダを入れる
-4. `NOTICE` に帰属表示を書く
-5. このファイルの「フォーク点のコミット」を実際の値に更新する
+型の重複を潰しただけで、ロジックは触っていない。**契約の正は `core/src/core/types.ts`** に置く。
 
-## 移植しないファイル
+| ファイル | 改変 |
+|---|---|
+| `text/textFilter.ts` | ヘッダのみ（**未改変**。`Modified` 行なし） |
+| `text/textFilter.test.ts` | ヘッダのみ（**未改変**） |
+| `emotion/ruleBasedEmotionClassifier.ts` | `export type Emotion = ...` の定義を削除し、`core/types` から `import type` + `export type` で再輸出 |
+| `emotion/ruleBasedEmotionClassifier.test.ts` | ヘッダのみ（**未改変**） |
 
-cc-mascot-xr は jsonl ログ監視方式だったため以下も持っていたが、chatter-agent は hook 方式なので**すべて捨てる**。将来「やっぱり要るのでは」と思ったときのために理由を残す。
+`Emotion` を `core/types` 側に寄せたのは、この union が VRM の標準 expression 名と一対一で、`speech.jsonl` の契約そのものだから。感情判定器はその契約の実装であって、定義元ではない。
+
+**上流と byte 単位で比較したいときは、ヘッダの4〜5行と上の改変行だけを無視すればよい。** 整形は上流の `printWidth: 120` と `.oxfmtrc.json` が一致しているので、`npm run format` をかけても差分は出ない。
+
+## cc-mascot 由来でないもの
+
+同じディレクトリに並んでいるが、**帰属表示もヘッダも要らない**。
+
+| ファイル | 出どころ |
+|---|---|
+| `text/pendingFence.ts` | chatter-agent で新規に書いた（未閉じ ``` の保留） |
+| `prompt/promptEventFormatter.ts` + `.test.ts` | 自分が cc-mascot の作業ブランチ上で書いたものを持ち込んだ |
+| `core/` `cli/` `server/` 配下すべて | chatter-agent 独自 |
+
+`prompt/promptEventFormatter.ts` は移送時に `SpeakMessage` の import 元を `../adapters/harnessAdapter`（kazakago の `adapters/` は移植しない）から `../core/types` に張り替えてある。
+
+`summarizer/`（AI要約、既定 OFF）も同じ扱いで、まだ持ち込んでいない。入れるときは `summaryPipeline.ts` の `../../filters/textFilter` を `../text/textFilter` に張り替えること。
+
+## 持ち込まないファイル
+
+cc-mascot は jsonl ログ監視方式なので以下も持っているが、chatter-agent は hook 方式なので**すべて捨てる**。将来「やっぱり要るのでは」と思ったときのために理由を残す。
 
 | ファイル | 捨てる理由 |
 |---|---|
@@ -97,17 +126,17 @@ cc-mascot-xr は jsonl ログ監視方式だったため以下も持っていた
 | `adapters/` 5本（`harnessAdapter` / `claudeCode` / `codex` / `geminiCli` / `antigravity`） | 対象が Claude Code のみになり、ログ形式の抽象化が不要になったため |
 | `parsers/` 4本 | 同上 |
 | `activeSessionMonitor.ts` | `session_id` が hook payload に直接入るため、`active-session` ファイルによる伝達が不要 |
-| `promptEventMonitor.ts` | `chatter-agent-speak` に統合。spool を読むのは CLI 本体の役割 |
+| `promptEventMonitor.ts` | `chatter-agent-speak` に統合。spool を読むのは CLI 本体の役割（整形担当の `promptEventFormatter.ts` は持ち込んでいるので混同しないこと） |
 | `main.ts` / `preload.ts` / `autoUpdater.ts` | Electron 固有 |
 
 ## 上流の変更を見たくなったとき
 
-追従の義務は無いが、感情辞書の改善などを取り込みたくなることはある。フォーク点が記録してあれば差分は追える。
+追従の義務は無いが、感情辞書の改善などを取り込みたくなることはある。
 
 ```bash
 UPSTREAM=/Users/schwarz/dev/cc-mascot
-git -C "$UPSTREAM" log --oneline <fork-commit>..HEAD -- electron/services/ruleBasedEmotionClassifier.ts
-git -C "$UPSTREAM" diff <fork-commit>..HEAD -- electron/services/ruleBasedEmotionClassifier.ts
+git -C "$UPSTREAM" log --oneline 46f7def..origin/main -- electron/services/ruleBasedEmotionClassifier.ts
+git -C "$UPSTREAM" diff 46f7def..origin/main -- electron/services/ruleBasedEmotionClassifier.ts
 ```
 
-**手で当てる。** rsync で丸ごと上書きすると、こちら側の改変が消える。取り込んだらこのファイルにその旨を追記する。
+**手で当てる。** rsync で丸ごと上書きすると、こちら側の改変が消える。取り込んだらこのファイルにその旨と、新しい基準コミットを追記する。

@@ -1,0 +1,61 @@
+/**
+ * Originally from kazakago/cc-mascot (Apache-2.0, Copyright 2026 kazakago)
+ *   electron/filters/textFilter.ts @ 46f7def
+ */
+
+/**
+ * Text filtering utilities for speech synthesis
+ * Removes markdown syntax and other elements that shouldn't be spoken
+ */
+
+/**
+ * Clean text for speech synthesis by removing markdown syntax and
+ * replacing special characters with readable alternatives
+ */
+export function cleanTextForSpeech(text: string): string {
+  let cleaned = text;
+
+  // 1. Remove code blocks (```...```)
+  cleaned = cleaned.replace(/```[\s\S]*?```/g, "");
+
+  // 2. Remove XML/HTML tags (<example>, </example>, etc.)
+  cleaned = cleaned.replace(/<[^>]+>/g, "");
+
+  // 3. Remove markdown headings (##, ###, etc.)
+  cleaned = cleaned.replace(/^#{1,6}\s+/gm, "");
+
+  // 4. Remove horizontal rules (---, ***)
+  cleaned = cleaned.replace(/^[-*]{3,}$/gm, "");
+
+  // 5. Remove table syntax (|...|)
+  cleaned = cleaned.replace(/^\|.*\|$/gm, "");
+
+  // 6. Remove blockquote markers (>)
+  cleaned = cleaned.replace(/^>\s*/gm, "");
+
+  // 7. Remove list markers (-, *)
+  cleaned = cleaned.replace(/^[-*]\s+/gm, "");
+
+  // 8. Remove URLs (https://...)
+  cleaned = cleaned.replace(/https?:\/\/[^\s]+/g, "");
+
+  // 9. Remove git commit hashes (7-40 character hex strings)
+  cleaned = cleaned.replace(/\b[0-9a-f]{7,40}\b/g, "");
+
+  // 10. Remove inline code backticks but keep the content  (`...`)
+  cleaned = cleaned.replace(/`([^`]+)`/g, "$1");
+
+  return cleaned;
+}
+
+/**
+ * Split text into individual sentences for sequential speech synthesis.
+ * Splits on Japanese period (。), exclamation (！/!), question (？/?), and newlines.
+ * Returns trimmed sentences (including empty strings as spacing information).
+ */
+export function splitIntoSentences(text: string): string[] {
+  // Split on sentence-ending punctuation (keeping the punctuation attached) and newlines
+  const parts = text.split(/(?<=[。！？!?])|[\n\r]+/);
+
+  return parts.map((s) => s.trim());
+}

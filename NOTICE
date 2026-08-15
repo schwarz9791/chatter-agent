@@ -14,7 +14,7 @@ Portions of this product are derived from that work:
       以後は chatter-agent 独自に改変している。対応する *.test.ts も同じ扱い。
       移植元のコミット・対応表・改変の扱いは docs/origin.md に記録している。
 
-      同じディレクトリにある core/src/text/pendingFence.ts は cc-mascot 由来では
+      同じディレクトリにある core/src/text/unstableTail.ts は cc-mascot 由来では
       なく、chatter-agent で新規に書いたもの。
 
 上記以外の cc-mascot 由来の改変点:
@@ -24,8 +24,8 @@ Portions of this product are derived from that work:
     activeSessionMonitor は移植していない。
   - Electron のメインプロセス／レンダラープロセス構成を廃し、Mac 側を
     Node.js 単体の CLI + WebSocket サーバーとして再構成した。
-  - 発話メッセージの配送を Electron IPC から speech.jsonl + WebSocket に
-    置き換えた。
+  - 発話メッセージの配送を Electron IPC から、記録（speech.jsonl）と配信キュー
+    （speech/<seq>.json）+ WebSocket に置き換えた。
   - 設定の永続化を electron-store から JSON ファイルに置き換えた。
   - VRM の描画・音声合成・リップシンクを担うレンダラー側は流用せず、
     Android XR アプリ（および将来の Electron アプリ）として作り直している。

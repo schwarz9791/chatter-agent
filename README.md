@@ -73,7 +73,7 @@ npm run test:run
 npm run build
 
 npm run verify:phase-a   # spool → speech.jsonl
-npm run verify:phase-b   # speech.jsonl → WebSocket
+npm run verify:phase-b   # 配信キュー → WebSocket
 ```
 
 設計方針と作業規約は [`CLAUDE.md`](./CLAUDE.md) と [`docs/`](./docs) にあります。

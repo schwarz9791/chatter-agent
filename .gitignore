@@ -25,3 +25,4 @@ spool/
 # Claude
 .claude/plans
 .claude/worktrees/
+.claude/settings.local.json

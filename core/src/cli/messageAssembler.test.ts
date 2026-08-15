@@ -216,6 +216,50 @@ describe("実測ログに近い流れ", () => {
   });
 });
 
+/**
+ * `MessageDisplay` の delta は「最後の flush を除いて必ず行単位」で届く。
+ * 実機（Claude Code 2.1.233）でも非 final の delta は全て改行で終わっていた。
+ *
+ * 行が閉じていれば最後の文はもう伸びないので、保留する理由が無い。
+ * 入れる前は段落ごとに最後の1文が次の delta まで待っており、実測で 1.4〜5.7 秒遅れていた。
+ */
+describe("行が閉じていれば保留しない", () => {
+  it("delta が改行で終わっていれば、まだ final でなくても最後の文を出す", () => {
+    const r = assemble({ deltas: ["確認します。ログを見ます。\n"] });
+    expect(r.sentences).toEqual(["確認します。", "ログを見ます。"]);
+    expect(r.emitted).toBe(2);
+  });
+
+  it("1文だけの段落でも、行が閉じていれば即座に出す（final を待たない）", () => {
+    const r = assemble({ deltas: ["確認します。\n"] });
+    expect(r.sentences).toEqual(["確認します。"]);
+  });
+
+  it("行が閉じていなければ従来どおり最後の文を保留する", () => {
+    const r = assemble({ deltas: ["確認します。ログを見ます。"] });
+    expect(r.sentences).toEqual(["確認します。"]);
+  });
+
+  it("句点で終わっているだけでは保留を外さない", () => {
+    // 未閉じの `<` が切り落とされて句点止まりになった形。行はまだ閉じていないので、
+    // 次の delta でこの文の続きが来る（`<span>` を挟んで同じ行が伸びる）可能性がある
+    const r = assemble({ deltas: ["確認します。<div"] });
+    expect(r.sentences).toEqual([]);
+  });
+
+  it("行単位の delta が続いても二重に出さない", () => {
+    const { steps, total } = stream(["一段落目です。まだ続きます。\n", "二段落目です。ここまで。\n"], true);
+    expect(steps[0]).toEqual(["一段落目です。", "まだ続きます。"]);
+    expect(steps[1]).toEqual(["二段落目です。", "ここまで。"]);
+    expect(new Set(total).size).toBe(total.length);
+  });
+
+  it("未閉じのコードフェンスは行が閉じていても出さない", () => {
+    const r = assemble({ deltas: ["こう書きます。\n```ts\nconst secret = 1;\n"] });
+    expect(r.sentences).toEqual(["こう書きます。"]);
+  });
+});
+
 describe("防御", () => {
   it("見出し・リストマーカー・URL は除去済みの文になる", () => {
     const r = assemble({

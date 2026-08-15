@@ -7,21 +7,21 @@ licensed under the Apache License, Version 2.0.
 
 Portions of this product are derived from that work:
 
-  - core/src/text/**
-  - core/src/emotion/**
-  - core/src/prompt/**
-  - core/src/summarizer/**
+  - core/src/text/textFilter.ts
+  - core/src/emotion/ruleBasedEmotionClassifier.ts
       cc-mascot の electron/ 配下（filters/textFilter.ts /
-      services/ruleBasedEmotionClassifier.ts / services/promptEventFormatter.ts /
-      services/summarizer/*）を初回に一度だけコピーしたもの。以後は
-      chatter-agent 独自に改変している。移植元のコミット・対応表・改変の
-      扱いは docs/origin.md に記録している。
+      services/ruleBasedEmotionClassifier.ts）を初回に一度だけコピーしたもの。
+      以後は chatter-agent 独自に改変している。対応する *.test.ts も同じ扱い。
+      移植元のコミット・対応表・改変の扱いは docs/origin.md に記録している。
+
+      同じディレクトリにある core/src/text/pendingFence.ts は cc-mascot 由来では
+      なく、chatter-agent で新規に書いたもの。
 
 上記以外の cc-mascot 由来の改変点:
 
   - 発言の取得方式を jsonl ログ監視から Claude Code の MessageDisplay hook に
     置き換えた。これに伴い logMonitor / fileTail / adapters / parsers /
-    activeSessionMonitor / promptEventMonitor は移植していない。
+    activeSessionMonitor は移植していない。
   - Electron のメインプロセス／レンダラープロセス構成を廃し、Mac 側を
     Node.js 単体の CLI + WebSocket サーバーとして再構成した。
   - 発話メッセージの配送を Electron IPC から speech.jsonl + WebSocket に
@@ -29,7 +29,3 @@ Portions of this product are derived from that work:
   - 設定の永続化を electron-store から JSON ファイルに置き換えた。
   - VRM の描画・音声合成・リップシンクを担うレンダラー側は流用せず、
     Android XR アプリ（および将来の Electron アプリ）として作り直している。
-
-This product also includes software developed as part of cc-mascot-xr
-(https://github.com/schwarz9791/cc-mascot-xr), Copyright 2026 Masaki Matsumura,
-licensed under the Apache License, Version 2.0.

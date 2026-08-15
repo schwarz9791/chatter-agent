@@ -12,7 +12,12 @@ export interface SpeechTail {
   /** 前回以降に増えた行。**完結した行だけ**を返す */
   readNew(): string[];
   /**
-   * `seq > since` の行を、現世代のファイルから拾う。
+   * `seq > since` の行を、現世代のファイルの**既に配信した範囲から**拾う。
+   *
+   * ★ ファイル全体を返してはいけない。`ws` は connection を発火する**前に**クライアントを
+   *   `wss.clients` に入れるので、まだ配信していない行を backfill に含めると、直後に
+   *   watcher が発火したときの broadcast と合わせて**新規クライアントだけが二重に受け取る**。
+   *   読み取り位置より先の行は、接続済みのこのクライアントにも broadcast で届く。
    *
    * 遡れるのは現世代まで（設計書 §4-4）。それより古い `seq` を要求されたら手元の最古から返す。
    * 「戻れない」ことは各行の `seq` の飛びとしてクライアントに見えるので、
@@ -39,37 +44,42 @@ function identify(filePath: string): FileIdentity | null {
   }
 }
 
-function fileSize(filePath: string): number {
-  return identify(filePath)?.size ?? 0;
-}
-
-function readRange(filePath: string, from: number, to: number): string {
+function readRange(filePath: string, from: number, to: number): Buffer {
   const length = to - from;
-  if (length <= 0) return "";
+  if (length <= 0) return Buffer.alloc(0);
 
   const fd = fs.openSync(filePath, "r");
   try {
     const buffer = Buffer.allocUnsafe(length);
     const read = fs.readSync(fd, buffer, 0, length, from);
-    return buffer.subarray(0, read).toString("utf-8");
+    return buffer.subarray(0, read);
   } finally {
     fs.closeSync(fd);
   }
 }
 
-/** 完結した行だけを取り出す。返り値の `consumed` は「消費したバイト数」 */
-function completeLines(chunk: string): { lines: string[]; consumed: number } {
-  // 追記の途中に当たった可能性があるので、最後の改行までしか消費しない。
-  // UTF-8 が境界で切れていても、切り捨てる側に入るので壊れない
-  const lastNewline = chunk.lastIndexOf("\n");
+const NEWLINE = 0x0a;
+
+/**
+ * 完結した行だけを取り出す。返り値の `consumed` は**実際に消費したバイト数**。
+ *
+ * ★ 文字列に直してから数えないこと。追記が途中で切れたファイルには不正な UTF-8 が残り
+ *   （`speechLog.ts` の `endsWithNewline` が断片を断片のまま隔離する仕様）、デコードで
+ *   U+FFFD に化けた分だけバイト数がずれて `position` が本来より進む。ずれた位置から
+ *   読み直すと、世代まるごと再配信したり、先頭が欠けた行をそのまま流したりする。
+ */
+function completeLines(chunk: Buffer): { lines: string[]; consumed: number } {
+  // 追記の途中に当たった可能性があるので、最後の改行までしか消費しない
+  const lastNewline = chunk.lastIndexOf(NEWLINE);
   if (lastNewline === -1) return { lines: [], consumed: 0 };
 
   return {
     lines: chunk
-      .slice(0, lastNewline)
+      .subarray(0, lastNewline)
+      .toString("utf-8")
       .split("\n")
       .filter((line) => line.trim().length > 0),
-    consumed: Buffer.byteLength(chunk.slice(0, lastNewline + 1), "utf-8"),
+    consumed: lastNewline + 1,
   };
 }
 
@@ -129,14 +139,17 @@ export function createSpeechTail(logPath: string): SpeechTail {
       //   **新世代がたまたま同じサイズに達した瞬間**に読むと取りこぼす。inode を主に使い、
       //   inode が当てにならない環境（Windows）ではサイズの逆行で拾う。
       const rotated = inode !== 0 && current.inode !== 0 && current.inode !== inode;
+      // inode が当てにならない環境（Windows）ではサイズの逆行でしか気づけない。
+      // その経路でも carry-over を試せるよう、両方を「世代が変わった」として扱う
+      const generationChanged = rotated || current.size < position;
 
       // ★ 退避された直前世代の、まだ読んでいない末尾を先に拾う。
       //   これが無いと、読み取りとローテートの間に書かれた行がそのまま消える。
       //   2世代以上が一度に流れた場合は追えないが、その欠落は seq の飛びとして
       //   クライアントに見える（?since= で埋め直せる）。
-      const carried = rotated ? readCarryOver(logPath, position, inode) : [];
+      const carried = generationChanged ? readCarryOver(logPath, position, inode) : [];
 
-      if (rotated || current.size < position) position = 0;
+      if (generationChanged) position = 0;
       inode = current.inode;
 
       if (current.size === position) return carried;
@@ -148,21 +161,13 @@ export function createSpeechTail(logPath: string): SpeechTail {
     },
 
     backfill(since) {
-      const size = fileSize(logPath);
-      if (size === 0) return [];
+      if (position === 0) return [];
 
-      const chunk = readRange(logPath, 0, size);
-      const lastNewline = chunk.lastIndexOf("\n");
-      if (lastNewline === -1) return [];
-
-      return chunk
-        .slice(0, lastNewline)
-        .split("\n")
-        .filter((line) => {
-          if (!line.trim()) return false;
-          const seq = seqOf(line);
-          return seq !== null && seq > since;
-        });
+      // 読み取り位置までしか読まない。その先は broadcast で届く（上のコメント参照）
+      return completeLines(readRange(logPath, 0, position)).lines.filter((line) => {
+        const seq = seqOf(line);
+        return seq !== null && seq > since;
+      });
     },
   };
 }

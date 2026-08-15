@@ -45,17 +45,23 @@ const DEFAULT_HEARTBEAT_MS = 30_000;
 const DEFAULT_MAX_BUFFERED_BYTES = 1024 * 1024;
 const CLOSE_GRACE_MS = 2_000;
 
-/** `?since=12` を読む。無い・数値でない・負なら null（取りこぼし埋めをしない） */
+/**
+ * `?since=12` を読む。無い・10進数字以外・負なら null（取りこぼし埋めをしない）。
+ *
+ * ★ `Number()` に丸投げしないこと。`Number("")` は `0` なので、クライアントが
+ *   「まだ何も受け取っていない」つもりで送る `?since=` が**全履歴のリプレイ**になる。
+ *   `0x10` → 16、`1e3` → 1000 も通ってしまう。
+ */
 export function parseSince(url: string | undefined): number | null {
   if (!url) return null;
   const query = url.indexOf("?");
   if (query === -1) return null;
 
   const raw = new URLSearchParams(url.slice(query + 1)).get("since");
-  if (raw === null) return null;
+  if (raw === null || !/^\d+$/.test(raw)) return null;
 
   const since = Number(raw);
-  return Number.isInteger(since) && since >= 0 ? since : null;
+  return Number.isSafeInteger(since) ? since : null;
 }
 
 export function createWsServer(options: WsServerOptions): Promise<WsServer> {
@@ -67,15 +73,17 @@ export function createWsServer(options: WsServerOptions): Promise<WsServer> {
     const alive = new WeakSet<WebSocket>();
     let boundAddress = { host: options.host, port: options.port };
 
-    const sendTo = (socket: WebSocket, message: string): void => {
-      if (socket.readyState !== socket.OPEN) return;
+    /** 送れたら true。捨てた（バックプレッシャ / 未接続）なら false */
+    const sendTo = (socket: WebSocket, message: string): boolean => {
+      if (socket.readyState !== socket.OPEN) return false;
       if (socket.bufferedAmount > maxBuffered) {
         console.warn(`[WS] Backpressure (${socket.bufferedAmount}B buffered), dropping message`);
-        return;
+        return false;
       }
       socket.send(message, (err) => {
         if (err) console.error("[WS] Send failed:", err);
       });
+      return true;
     };
 
     wss.on("connection", (socket, req) => {
@@ -93,15 +101,30 @@ export function createWsServer(options: WsServerOptions): Promise<WsServer> {
 
       // 以後のブロードキャストより先に流す。ここは同期なので順序が入れ替わらない
       let sent = 0;
+      let truncated = false;
       try {
-        for (const line of options.backfill(since)) {
-          sendTo(socket, line);
+        const lines = options.backfill(since);
+        for (const line of lines) {
+          // ★ 捨てられたら打ち切る。数えるのは**実際に送れた分**だけにすること。
+          //   同期ループの中ではソケットを drain できないので、大きな backfill は
+          //   途中で bufferedAmount 上限に当たる。無条件に数えると、届いていないのに
+          //   「送り終えた」とログに出て、欠落の手がかりが消える
+          if (!sendTo(socket, line)) {
+            truncated = true;
+            break;
+          }
           sent++;
+        }
+        if (truncated) {
+          console.warn(
+            `[WS] Backfill truncated for ${peer}: ${sent}/${lines.length} lines sent since seq=${since}. ` +
+              "クライアントは受け取れた最後の seq から接続し直すこと",
+          );
         }
       } catch (err) {
         console.error("[WS] Backfill failed:", err);
       }
-      console.log(`[WS] Backfilled ${sent} lines since seq=${since} for ${peer}`);
+      if (!truncated) console.log(`[WS] Backfilled ${sent} lines since seq=${since} for ${peer}`);
     });
 
     // ping に応答しない接続を落とす。Android が圏外に出るとTCPが半開のまま残るため

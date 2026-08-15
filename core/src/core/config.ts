@@ -77,7 +77,9 @@ const parsePositiveInt: Parser<number> = (raw) => {
   return n !== undefined && n >= 1 ? n : undefined;
 };
 
-const parseNonEmptyString: Parser<string> = (raw) => (typeof raw === "string" && raw.trim() ? raw : undefined);
+// trim した値を返すこと。判定にだけ使って生値を返すと、CHATTER_AGENT_HOST=" 127.0.0.1 "
+// のような値がそのまま listen() へ渡る
+const parseNonEmptyString: Parser<string> = (raw) => (typeof raw === "string" && raw.trim() ? raw.trim() : undefined);
 
 /**
  * キーの定義。satisfies で ChatterAgentConfig の全キーを網羅していることを型で担保する
@@ -174,7 +176,9 @@ export function createConfigStore(deps: ConfigStoreDeps = {}): ConfigStore {
     }
 
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      warnOnce("file:shape", `[Config] ${filePath} のトップレベルがオブジェクトではありません。既定値を使います`);
+      // undefined を返すと呼び出し側は fileValues を触らない＝直前の値が残る。
+      // メッセージも実態に合わせる（「既定値を使います」ではない）
+      warnOnce("file:shape", `[Config] ${filePath} のトップレベルがオブジェクトではありません。直前の値を使い続けます`);
       return undefined;
     }
 

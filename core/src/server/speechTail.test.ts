@@ -186,33 +186,40 @@ describe("ローテートへの追従（設計書 §6）", () => {
 });
 
 describe("backfill", () => {
+  /** server の起動と同じ状態にする（既に手元にある分は「配信済み」として扱われる） */
+  function started() {
+    const tail = createSpeechTail(logPath);
+    tail.seekToEnd();
+    return tail;
+  }
+
   it("seq > since の行を返す", () => {
     append(1, 2, 3);
-    expect(createSpeechTail(logPath).backfill(1)).toEqual([line(2), line(3)]);
+    expect(started().backfill(1)).toEqual([line(2), line(3)]);
   });
 
   it("since=0 なら現世代の全部", () => {
     append(1, 2);
-    expect(createSpeechTail(logPath).backfill(0)).toEqual([line(1), line(2)]);
+    expect(started().backfill(0)).toEqual([line(1), line(2)]);
   });
 
   it("追いついていれば空", () => {
     append(1, 2);
-    expect(createSpeechTail(logPath).backfill(2)).toEqual([]);
+    expect(started().backfill(2)).toEqual([]);
   });
 
   it("現世代より古い分は返せない（seq の飛びがクライアントへの合図になる）", () => {
     append(5, 6); // ローテート済みで 1〜4 は前世代にある想定
-    expect(createSpeechTail(logPath).backfill(1)).toEqual([line(5), line(6)]);
+    expect(started().backfill(1)).toEqual([line(5), line(6)]);
   });
 
   it("ファイルが無ければ空", () => {
-    expect(createSpeechTail(logPath).backfill(0)).toEqual([]);
+    expect(started().backfill(0)).toEqual([]);
   });
 
   it("壊れた行は配信対象にしない", () => {
     fs.writeFileSync(logPath, "{ broken\n" + line(2) + "\n");
-    expect(createSpeechTail(logPath).backfill(0)).toEqual([line(2)]);
+    expect(started().backfill(0)).toEqual([line(2)]);
   });
 
   it("読み取り位置を動かさない（配信中の接続に影響しない）", () => {
@@ -223,5 +230,62 @@ describe("backfill", () => {
 
     tail.backfill(0);
     expect(tail.position()).toBe(before);
+  });
+
+  it("★ まだ配信していない行は返さない（二重配信を防ぐ）", () => {
+    // ws は connection を発火する前にクライアントを wss.clients に入れるので、未配信の行を
+    // backfill に含めると、直後の watcher 発火と合わせて新規クライアントだけが二重に受け取る
+    const tail = createSpeechTail(logPath);
+    append(1, 2);
+    tail.readNew();
+    append(3, 4);
+
+    expect(tail.backfill(1)).toEqual([line(2)]);
+
+    // 未配信だった分は readNew（= broadcast）で届く
+    expect(tail.readNew()).toEqual([line(3), line(4)]);
+    expect(tail.backfill(1)).toEqual([line(2), line(3), line(4)]);
+  });
+});
+
+/**
+ * レビュー #9 の回帰テスト。
+ *
+ * `speechLog` は追記が途中で切れた断片を**断片のまま隔離する**仕様なので、ログには
+ * 不正な UTF-8 が残りうる。消費バイト数を文字列から数えていると、U+FFFD に化けた分だけ
+ * `position` が本来より進む。
+ */
+describe("不正な UTF-8 があっても読み取り位置がずれない", () => {
+  /** 追記が途中で切れて、マルチバイトの途中で終わった断片 */
+  const TORN = Buffer.from([0x7b, 0x22, 0x74, 0xe3, 0x81]);
+
+  it("position がファイルサイズを超えない", () => {
+    fs.writeFileSync(logPath, Buffer.concat([TORN, Buffer.from("\n" + line(1) + "\n" + line(2) + "\n")]));
+
+    const tail = createSpeechTail(logPath);
+    const lines = tail.readNew();
+
+    expect(tail.position()).toBe(fs.statSync(logPath).size);
+    expect(lines.at(-1)).toBe(line(2));
+  });
+
+  it("同じ内容をもう一度読んでも再配信しない", () => {
+    fs.writeFileSync(logPath, Buffer.concat([TORN, Buffer.from("\n" + line(1) + "\n")]));
+
+    const tail = createSpeechTail(logPath);
+    tail.readNew();
+
+    // position が進みすぎていると size < position になり、世代交代と誤認して全部を再送する
+    expect(tail.readNew()).toEqual([]);
+  });
+
+  it("続きが追記されたとき、行の先頭が欠けない", () => {
+    fs.writeFileSync(logPath, Buffer.concat([TORN, Buffer.from("\n" + line(1) + "\n")]));
+
+    const tail = createSpeechTail(logPath);
+    tail.readNew();
+
+    append(2);
+    expect(tail.readNew()).toEqual([line(2)]);
   });
 });

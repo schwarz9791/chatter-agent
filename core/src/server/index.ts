@@ -20,6 +20,19 @@ const SHUTDOWN_STEP_TIMEOUT_MS = 1_500;
 const SHUTDOWN_TIMEOUT_MS = 6_000;
 
 /**
+ * watcher を信用しきらないための保険。
+ *
+ * ★ 単一ファイルパスの監視は、ローテートで対象が差し替わると取りこぼす。実測でも
+ *   `verify:phase-b` のローテート試験で、何秒待っても届かない行が出た（chokidar が
+ *   新しい inode を掴み直せていない）。stat 1回なので毎秒数回でも無視できるコストで、
+ *   これがあれば「届かない」は起きなくなる。
+ *
+ * watcher 自体は残す。通常時の遅延はこちらの方がずっと小さく、Phase A の受け入れ基準
+ * （ターミナル表示と体感で同時）に効く。
+ */
+const POLL_INTERVAL_MS = 250;
+
+/**
  * 終了処理の1ステップを制限時間つきで実行する。
  * まとめて1つの watchdog に任せると「諦めた」ことしか分からず、
  * どのリソースが閉じられなかったのか追えなくなるため、名指しで報告して先へ進む。
@@ -81,6 +94,8 @@ async function main(): Promise<void> {
   const wsServer = await createWsServer({
     host: config.get("host"),
     port: config.get("port"),
+    // backfill は「既に配信した範囲」だけを返す。まだ配信していない行は、接続直後の
+    // このクライアントにも broadcast で届くので、ここで返すと二重になる（speechTail 参照）
     backfill: (since) => tail.backfill(since),
   });
 
@@ -94,15 +109,20 @@ async function main(): Promise<void> {
     for (const line of tail.readNew()) wsServer.broadcast(line);
   };
 
+  // unlink は張らない。ファイルが消えた直後は readNew が何も返せず（stat できない）
+  // 構造上の no-op になる。ローテート直後の取りこぼしは speechTail の carry-over が扱う
   const watcher = chokidar.watch(logPath, { ignoreInitial: true });
   watcher.on("add", flush);
   watcher.on("change", flush);
-  watcher.on("unlink", flush); // ローテートで消えた直後の取りこぼしを拾う
   watcher.on("error", (err) => console.error("[Server] Watch error:", err));
+
+  const poll = setInterval(flush, POLL_INTERVAL_MS);
+  poll.unref();
 
   console.log("[Server] Ready");
 
   installShutdown(async () => {
+    clearInterval(poll);
     await step("file watcher", () => watcher.close());
     await step("websocket server", () => wsServer.close());
   });

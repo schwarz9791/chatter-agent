@@ -210,6 +210,25 @@ describe("進捗サイドカー", () => {
     fs.writeFileSync(p, "{ emitted");
     expect(readProgress(p)).toBe(0);
   });
+
+  it("★ 書き込みが途中で落ちても 0 バイトのサイドカーを残さない", () => {
+    // writeFileSync は O_TRUNC してから書くので、素で使うとその隙に落ちたときに
+    // 進捗が 0 に化け、メッセージが丸ごと読み直される
+    const p = path.join(spoolDir, "m1.progress.json");
+    writeProgress(p, 2);
+    writeProgress(p, 5);
+
+    expect(readProgress(p)).toBe(5);
+    // 一時ファイルを残さない
+    expect(fs.readdirSync(spoolDir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
+  });
+
+  it("一時ファイルは走査対象にならない", () => {
+    writeMessage("m1", [delta(0, "あ。")]);
+    fs.writeFileSync(path.join(spoolDir, "m1.progress.json.tmp"), "{}");
+
+    expect(scanSpool(spoolDir)).toHaveLength(1);
+  });
 });
 
 describe("removeEntry", () => {

@@ -57,7 +57,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
         const line = deps.queue.read(seq);
         if (line === null) {
           // 読めない entry は配信できない（protocol.md の「SpeechRecord の JSON 以外は
-          // 送らない」を破れない）。配信済み扱いにしておかないと、毎 poll（10回/秒）
+          // 送らない」を破れない）。配信済み扱いにしておかないと、毎 poll（20回/秒）
           // 同じ entry を見て警告し続ける
           console.warn(`[Server] seq=${seq} を読めなかったのでスキップします`);
           delivered.add(seq);

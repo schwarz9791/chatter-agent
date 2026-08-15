@@ -49,17 +49,28 @@ chatter-mascot(-xr)    表示側アプリ。TTS → 再生 → VRM描画
 
 ## 現在の状態
 
-**開発中。`core/` が動く状態になりました。**
+**開発中。発言を捕捉して配信するところまでが動きます。**
 
 | | 状態 |
 |---|---|
-| `plugin/` | 未作成（バンドル済み CLI `plugin/bin/` だけ先に置いてあります） |
+| `plugin/` | 実装済み。実機で確認済み |
 | `core/` | CLI + WebSocket サーバーとも実装済み。AI要約（既定OFF）のみ未着手 |
 | `apps/` | 未作成 |
 
 実装フェーズは **A**（plugin + CLI で記録と配信キューが育つ）→ **B**（WebSocket 配信）→ **C**（表示側アプリ）。**C をデスクトップ版と XR 版のどちらから始めるかは未定です。**
 
-Phase A / B は core 側だけ完了しています。**発言を実際に読み上げるには、まだ `plugin/`（bash hook）が要ります。**
+Phase A は実機で確定しました。delta が hook に届いてから発話が確定するまで**約 50ms** で、ターミナル表示と体感で同時です。**あとは受け取って喋る側（`apps/`）だけが残っています。**
+
+### 試す
+
+```bash
+claude plugin marketplace add ./
+claude plugin install chatter-agent@chatter-agent
+# セッションを再起動してから
+tail -f "${XDG_CONFIG_HOME:-$HOME/.config}/chatter-agent/speech.jsonl"
+```
+
+`CHATTER_AGENT_DISABLE=1` を付けて起動すると完全に黙ります。
 
 ## 開発
 

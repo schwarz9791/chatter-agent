@@ -23,11 +23,11 @@ hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公�
 
 ## 現在の状態
 
-**`core/` は Phase A + B が実装済み。次は `plugin/`（bash hook）。**
+**Phase A は実機で確定した。次は Phase C（表示側アプリ）。**
 
 | ディレクトリ | 内容 | 状態 |
 |---|---|---|
-| `plugin/` | Claude Code プラグイン（bash hook） | **未作成。** `bin/chatter-agent-speak.mjs`（バンドル済み CLI）だけ置いてある |
+| `plugin/` | Claude Code プラグイン（bash hook） | **実装済み。** 実機で受け入れ基準を満たしている |
 | `core/` | `chatter-agent-core`（CLI + WebSocket サーバー） | **実装済み。** `summarizer/`（AI要約、既定OFF）だけ未着手 |
 | `apps/chatter-mascot/` | 表示側アプリ（デスクトップ常駐） | 未作成。**フレームワーク未定** |
 | `apps/chatter-mascot-xr/` | 表示側アプリ（Unity / Android XR） | 未作成 |
@@ -37,9 +37,18 @@ hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公�
 実装フェーズは **A**（plugin + CLI で記録と配信キューが正しく育つ）→ **B**（WebSocket 配信）→ **C**（表示側アプリ）。
 **Phase C をデスクトップ版と XR 版のどちらから始めるかは決めていない。**
 
-**Phase A / B は core 側だけ完了している。** `npm run verify:phase-a` / `verify:phase-b`（CI の `verify` ジョブでも回る）で spool を手で置いた確認までは通っているが、
-**受け入れ基準の「ターミナル表示と体感で同時」は実機で未確認。** ここは `plugin/` を作らないと測れない。
-`plugin/` 着手時にまず `${CLAUDE_PLUGIN_ROOT}` の実体を実測すること（→ [`docs/plugin.md`](./docs/plugin.md)）。
+**Phase A は実機で確定済み**（Claude Code 2.1.233 / macOS）。受け入れ基準の「ターミナル表示と体感で同時」は、
+delta が hook に届いてから `speech.jsonl` に載るまで**約 50ms** で満たしている。
+`MessageDisplay` は表示と同時に発火するので、体感の差は出ない。
+
+実測で潰れた前提は [`docs/plugin.md`](./docs/plugin.md) に集約してある。要点だけ:
+
+- `/plugin install` はプラグインを**完全コピー**する。`bin/` も実行権限ごと入るので、バンドル同梱の前提は成立
+- **thinking では発火しない**（読み上げ事故は起きない）
+- **`final:true` の 34〜80 秒遅延は 2.1.233 では再現しない**
+
+**Phase B は core 側だけ完了している。** `npm run verify:phase-b` で実サーバーを起動した確認までは通っているが、
+実際の表示側アプリを繋いだ確認は Phase C 待ち。
 
 ## データフロー
 
@@ -73,10 +82,12 @@ chatter-mascot(-xr)          表示側アプリ。TTS → 再生 → VRM描画 /
 
 ### 1. `final:true` を待たない
 
-1つの `message_id` は `index` 0..N で分割送信され `final:true` が終端になるが、**最終チャンクだけが実測で 34〜80秒遅れて届く**（メッセージが閉じる＝次のツール呼び出しが始まるときに flush されるため）。
+1つの `message_id` は `index` 0..N で分割送信され `final:true` が終端になる。**delta が届くたびに、確定した文だけを流す。**
 
-**delta が届くたびに、確定した文だけを流す。** 最後の文と、未閉じの ``` 以降は保留する。
-→ 根拠と実測データは設計書 §2-4
+「確定した文」の判定は2段ある。**非 final の delta は必ず行単位で届く**（Claude Code のスキーマ記述。実測でも全て改行終わり）ので、蓄積テキストが行として閉じていれば最後の文はもう伸びない。閉じていなければ最後の文を保留する。未閉じの ``` 以降も保留する。
+→ [`docs/core.md`](./docs/core.md) / `core/src/cli/messageAssembler.ts`
+
+> 設計書 §2-4 は 2.1.231 で「最終チャンクだけが 34〜80秒遅れて届く」と実測しているが、**2.1.233 では再現しない**（最終 flush は直前の delta から 5.7 秒以内）。とはいえ**待たない設計をやめる理由にはならない。** バージョンで戻りうるうえ、待たない方が速い。
 
 ### 2. jsonl ログ監視に戻らない
 

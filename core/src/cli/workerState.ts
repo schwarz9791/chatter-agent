@@ -9,6 +9,7 @@
  */
 
 import * as fs from "fs";
+import { writeFileAtomic } from "../core/atomicWrite";
 
 export interface WorkerState {
   /** 直前に読み上げた PreToolUse の prompt_id。付随する Notification を1回だけ捨てるために使う */
@@ -42,7 +43,5 @@ export function readWorkerState(statePath: string): WorkerState {
 }
 
 export function writeWorkerState(statePath: string, state: WorkerState): void {
-  const tmp = `${statePath}.tmp`;
-  fs.writeFileSync(tmp, `${JSON.stringify(state)}\n`);
-  fs.renameSync(tmp, statePath);
+  writeFileAtomic(statePath, `${JSON.stringify(state)}\n`);
 }

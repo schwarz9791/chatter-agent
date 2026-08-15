@@ -18,10 +18,17 @@
  *   **誰も tail しなくなるので、記録側のローテートの正しさも要求されなくなる。**
  *
  * `spool/` と同じ形。あちらは hook が書いて CLI が消し、こちらは CLI が書いて server が消す。
+ *
+ * ★ `list()` と `read()` に分けてあるのは、配信済みの entry を毎回全件 readFileSync
+ *   させないため。server は 100ms ごとにポーリングするが、`seq <= sentUpTo` の絞り込みは
+ *   呼び出し側で後から走るので、ファイル名の列挙だけで済む問い合わせと、実際に配信する
+ *   1件だけの読み取りを分けないと、マスコットが繋がっていない間（ack が来ず trim が
+ *   上限に張り付く）も毎秒何十回と全件を読み直すことになる。
  */
 
 import * as fs from "fs";
 import * as path from "path";
+import { writeFileAtomic } from "./atomicWrite";
 import type { SpeechRecord } from "./types";
 
 /** ファイル名の桁数。`ls` で並べたときに順序が見えるよう固定幅にする */
@@ -29,24 +36,21 @@ const SEQ_DIGITS = 12;
 const SUFFIX = ".json";
 const TMP_SUFFIX = ".tmp";
 
-export interface QueueEntry {
-  seq: number;
-  /** そのまま WebSocket に流す1行 */
-  line: string;
-  filePath: string;
-}
-
 export interface SpeechQueue {
-  /** 採番済みのレコードをキューに積む */
-  enqueue(records: SpeechRecord[]): void;
-  /** `seq` 昇順。読めないものは飛ばす */
-  readAll(): QueueEntry[];
+  /** 採番済みのレコードをキューに積む。書けた件数を返す（1件の fs エラーで残りを巻き添えにしない） */
+  enqueue(records: SpeechRecord[]): number;
+  /** `seq` 昇順。中身は読まない */
+  list(): number[];
+  /** その seq の1行。読めない・空・JSON でない・payload の seq がファイル名と食い違うなら null */
+  read(seq: number): string | null;
   /** `seq <= upTo` を消す。消した件数を返す */
   ackUpTo(upTo: number): number;
-  /** 全部消す（server の起動時） */
-  clear(): number;
+  /** mtime が `maxAgeMs` より古い entry を消す。落ちている間に書かれた分だけを捨てるためのもの */
+  dropOlderThan(maxAgeMs: number, now?: number): number;
   /** 件数が上限を超えていたら、古い方から捨てる。捨てた件数を返す */
   trim(maxEntries: number): number;
+  /** 落ちた enqueue が残した `.tmp` を消す。消した件数を返す */
+  sweepTmp(): number;
 }
 
 function fileNameFor(seq: number): string {
@@ -100,32 +104,51 @@ export function createSpeechQueue(queueDir: string): SpeechQueue {
 
   return {
     enqueue(records) {
+      let written = 0;
       for (const record of records) {
         const target = path.join(queueDir, fileNameFor(record.seq));
-        const tmp = `${target}${TMP_SUFFIX}`;
-
-        // ★ tmp + rename で書くこと。server は 100ms ごとに readdir するので、
-        //   素の writeFileSync だと書きかけを読まれる
-        fs.writeFileSync(tmp, `${JSON.stringify(record)}\n`);
-        fs.renameSync(tmp, target);
+        try {
+          // ★ tmp + rename で書くこと（atomicWrite.ts）。server は 100ms ごとに
+          //   readdir するので、素の書き込みだと書きかけを読まれる
+          writeFileAtomic(target, `${JSON.stringify(record)}\n`);
+          written++;
+        } catch (err) {
+          // 1件の fs エラーで残り全部を落とさない。呼び出し側が握り潰さないよう件数で伝える
+          console.error(`[SpeechQueue] seq=${record.seq} の書き込みに失敗しました:`, err);
+        }
       }
+      return written;
     },
 
-    readAll() {
-      const entries: QueueEntry[] = [];
+    list() {
+      return listSeqs().map(({ seq }) => seq);
+    },
 
-      for (const { seq, fileName } of listSeqs()) {
-        const filePath = path.join(queueDir, fileName);
-        let line: string;
-        try {
-          line = fs.readFileSync(filePath, "utf-8").trim();
-        } catch {
-          continue; // 走査中に消えた
-        }
-        if (line) entries.push({ seq, line, filePath });
+    read(seq) {
+      const filePath = path.join(queueDir, fileNameFor(seq));
+      let line: string;
+      try {
+        line = fs.readFileSync(filePath, "utf-8").trim();
+      } catch {
+        return null; // 走査後に消えた・そもそも無い
       }
+      if (!line) return null;
 
-      return entries;
+      // ★ payload の seq とファイル名の seq を照合する。サーバーはファイル名の seq で
+      //   順序・sentUpTo・ack 削除を決め、クライアントは payload の seq で重複排除する
+      //   （protocol.md）。両者がずれると、どちらの側にもエラーが出ないまま実在する
+      //   文を落とすか、同じ文を二度喋る。壊れたファイルをここで削除はしない
+      //   （ユーザーが置いたものかもしれない。飛ばすだけにして判断は呼び出し側に残す）
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        return null;
+      }
+      if (typeof parsed !== "object" || parsed === null) return null;
+      if ((parsed as { seq?: unknown }).seq !== seq) return null;
+
+      return line;
     },
 
     ackUpTo(upTo) {
@@ -139,9 +162,16 @@ export function createSpeechQueue(queueDir: string): SpeechQueue {
       return removed;
     },
 
-    clear() {
+    dropOlderThan(maxAgeMs, now = Date.now()) {
       let removed = 0;
       for (const { fileName } of listSeqs()) {
+        let mtimeMs: number;
+        try {
+          mtimeMs = fs.statSync(path.join(queueDir, fileName)).mtimeMs;
+        } catch {
+          continue; // 走査中に消えた
+        }
+        if (now - mtimeMs <= maxAgeMs) continue; // まだ新しい（今まさに書かれた分かもしれない）。残す
         if (remove(fileName)) removed++;
       }
       return removed;
@@ -158,6 +188,22 @@ export function createSpeechQueue(queueDir: string): SpeechQueue {
       // クライアントが繋がっていなければ ack は来ないので、これが唯一の歯止めになる
       let removed = 0;
       for (const { fileName } of all.slice(0, excess)) {
+        if (remove(fileName)) removed++;
+      }
+      return removed;
+    },
+
+    sweepTmp() {
+      let fileNames: string[];
+      try {
+        fileNames = fs.readdirSync(queueDir);
+      } catch {
+        return 0;
+      }
+
+      let removed = 0;
+      for (const fileName of fileNames) {
+        if (!fileName.endsWith(`${SUFFIX}${TMP_SUFFIX}`)) continue;
         if (remove(fileName)) removed++;
       }
       return removed;

@@ -11,6 +11,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { writeFileAtomic } from "../core/atomicWrite";
 
 const MESSAGE_SUFFIX = ".jsonl";
 const PROMPT_PREFIX = "prompt-";
@@ -206,15 +207,13 @@ export function readProgress(progressPath: string): number {
 /**
  * 出力済みの文数を記録する。
  *
- * ★ tmp + rename にすること。`writeFileSync` は O_TRUNC してから書くので、その隙に
- *   落ちると 0 バイトのサイドカーが残る。`readProgress` はそれを 0 と読むので、
- *   **メッセージが丸ごと最初から読み直される**。WebSocket の契約は `seq` でしか
+ * ★ atomicWrite を使うこと（素の `writeFileSync` は書きかけを読まれる窓ができる）。
+ *   ここで書きかけが漏れると 0 バイトのサイドカーが残り、`readProgress` はそれを 0 と
+ *   読むので、**メッセージが丸ごと最初から読み直される**。WebSocket の契約は `seq` でしか
  *   重複排除しないため、クライアントは言い直しと新規発話を区別できない。
  */
 export function writeProgress(progressPath: string, emitted: number): void {
-  const tmp = `${progressPath}.tmp`;
-  fs.writeFileSync(tmp, `${JSON.stringify({ emitted })}\n`);
-  fs.renameSync(tmp, progressPath);
+  writeFileAtomic(progressPath, `${JSON.stringify({ emitted })}\n`);
 }
 
 /** 処理し終えた spool を消す。メッセージはサイドカーごと消す */

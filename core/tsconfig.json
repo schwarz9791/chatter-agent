@@ -1,0 +1,35 @@
+{
+  "compilerOptions": {
+    "target": "ES2025",
+    "useDefineForClassFields": true,
+    "module": "ESNext",
+    "lib": ["ES2025"],
+    "skipLibCheck": true,
+
+    /* Bundler mode
+       moduleResolution は "bundler" から変えないこと。
+       cc-mascot から移植したコード（src/text, src/emotion, src/prompt, src/summarizer）の
+       相対 import は拡張子なしで、"nodenext" にすると軒並み TS2835 になる。
+       拡張子を書き足せば変えられるが、どのみちバンドルするので利点が無い。
+       詳細は docs/core.md を参照。 */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+
+    /* Linting
+       erasableSyntaxOnly も外さないこと。enum / parameter properties / namespace を
+       禁止することが、esbuild 系のバンドラで実行可能であることの静的な保証になっている。
+       外すと tsc は通るのに実行時に壊れる、という気づきにくい状態になる。 */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "vitest.config.ts", "eslint.config.js"]
+}

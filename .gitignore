@@ -1,0 +1,27 @@
+# ローカル専用の作業メモ（設計書はここに置いたまま。CLAUDE.md から参照している）
+_workspace/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# 依存とビルド成果物
+# 例外: plugin/bin/ は /plugin install だけで完結させるため意図的にコミットする（docs/core.md 参照）
+node_modules
+coverage
+dist
+*.local
+
+# ランタイムが作るもの
+spool/
+
+# Editor / OS
+.idea
+.vscode
+.DS_Store
+*.sw?
+
+# Claude
+.claude/plans
+.claude/worktrees/

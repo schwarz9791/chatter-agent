@@ -13,7 +13,7 @@ const DEFAULTS: ChatterAgentConfig = {
   host: "0.0.0.0",
   speakPrompts: true,
   speechLogMaxBytes: 5 * 1024 * 1024,
-  speechLogGenerations: 3,
+  speechQueueMaxEntries: 500,
   spoolMaxAgeHours: 6,
 };
 
@@ -53,7 +53,7 @@ describe("createDefaultConfig", () => {
   it("発話ログとspoolの既定", () => {
     const c = createDefaultConfig();
     expect(c.speechLogMaxBytes).toBe(5 * 1024 * 1024);
-    expect(c.speechLogGenerations).toBe(3);
+    expect(c.speechQueueMaxEntries).toBe(500);
     expect(c.spoolMaxAgeHours).toBe(6);
     expect(c.speakPrompts).toBe(true);
   });
@@ -65,11 +65,11 @@ describe("createConfigStore", () => {
   });
 
   it("設定ファイルの値が既定値を上書きする", () => {
-    write({ port: 9000, speakPrompts: false, speechLogGenerations: 10 });
+    write({ port: 9000, speakPrompts: false, speechQueueMaxEntries: 10 });
     const s = store();
     expect(s.get("port")).toBe(9000);
     expect(s.get("speakPrompts")).toBe(false);
-    expect(s.get("speechLogGenerations")).toBe(10);
+    expect(s.get("speechQueueMaxEntries")).toBe(10);
     expect(s.get("host")).toBe("0.0.0.0"); // 未指定は既定のまま
   });
 

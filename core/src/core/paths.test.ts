@@ -4,8 +4,9 @@ import {
   getConfigFilePath,
   getLockDir,
   getRuntimeDir,
-  getSpeechLogGenerationPath,
+  getSpeechLogBackupPath,
   getSpeechLogPath,
+  getSpeechQueueDir,
   getSpeechStatePath,
   getSpoolDir,
   getWorkerStatePath,
@@ -46,9 +47,14 @@ describe("ランタイムルート配下のパス", () => {
     expect(getConfigFilePath(e)).toBe(`${root}/config.json`);
     expect(getSpoolDir(e)).toBe(`${root}/spool`);
     expect(getSpeechLogPath(e)).toBe(`${root}/speech.jsonl`);
+    expect(getSpeechQueueDir(e)).toBe(`${root}/speech`);
     expect(getSpeechStatePath(e)).toBe(`${root}/speech.state.json`);
     expect(getWorkerStatePath(e)).toBe(`${root}/speak.state.json`);
     expect(getLockDir(e)).toBe(`${root}/speak.lock`);
+  });
+
+  it("記録（speech.jsonl）と配信キュー（speech/）は別物", () => {
+    expect(getSpeechLogPath(e)).not.toBe(getSpeechQueueDir(e));
   });
 
   it("CHATTER_AGENT_CONFIG は設定ファイルだけを上書きする", () => {
@@ -59,19 +65,13 @@ describe("ランタイムルート配下のパス", () => {
   });
 });
 
-describe("getSpeechLogGenerationPath", () => {
-  it("世代番号を拡張子の手前に挿す", () => {
-    expect(getSpeechLogGenerationPath("/x/speech.jsonl", 1)).toBe("/x/speech.1.jsonl");
-    expect(getSpeechLogGenerationPath("/x/speech.jsonl", 3)).toBe("/x/speech.3.jsonl");
-  });
-
-  it("0 以下は現世代そのもの", () => {
-    expect(getSpeechLogGenerationPath("/x/speech.jsonl", 0)).toBe("/x/speech.jsonl");
-    expect(getSpeechLogGenerationPath("/x/speech.jsonl", -1)).toBe("/x/speech.jsonl");
+describe("getSpeechLogBackupPath", () => {
+  it("拡張子の手前に .1 を挿す", () => {
+    expect(getSpeechLogBackupPath("/x/speech.jsonl")).toBe("/x/speech.1.jsonl");
   });
 
   it("拡張子が無くても壊れない", () => {
-    expect(getSpeechLogGenerationPath("/x/speech", 2)).toBe("/x/speech.2");
+    expect(getSpeechLogBackupPath("/x/speech")).toBe("/x/speech.1");
   });
 });
 

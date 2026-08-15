@@ -15,8 +15,16 @@
  */
 
 import { createConfigStore } from "../core/config";
-import { getLockDir, getSpeechLogPath, getSpeechStatePath, getSpoolDir, getWorkerStatePath } from "../core/paths";
+import {
+  getLockDir,
+  getSpeechLogPath,
+  getSpeechQueueDir,
+  getSpeechStatePath,
+  getSpoolDir,
+  getWorkerStatePath,
+} from "../core/paths";
 import { createSpeechLog } from "../core/speechLog";
+import { createSpeechQueue } from "../core/speechQueue";
 import { RuleBasedEmotionClassifier } from "../emotion/ruleBasedEmotionClassifier";
 import { acquireLock, type Lock } from "./lock";
 import { drainSpool } from "./worker";
@@ -61,14 +69,21 @@ function main(): void {
       logPath: getSpeechLogPath(),
       statePath: getSpeechStatePath(),
       maxBytes: config.get("speechLogMaxBytes"),
-      generations: config.get("speechLogGenerations"),
     });
+    const speechQueue = createSpeechQueue(getSpeechQueueDir());
 
     const classifier = new RuleBasedEmotionClassifier();
 
     drainSpool({
       spoolDir: getSpoolDir(),
-      speechLog,
+      // 記録と配信を同じロック下で書く。順序はここで確定する
+      publish: (entries) => {
+        const records = speechLog.append(entries);
+        speechQueue.enqueue(records);
+        // クライアントが繋がっていなければ ack は来ないので、書いた側が歯止めをかける
+        speechQueue.trim(config.get("speechQueueMaxEntries"));
+        return records;
+      },
       workerStatePath: getWorkerStatePath(),
       speakPrompts: config.get("speakPrompts"),
       spoolMaxAgeMs: config.get("spoolMaxAgeHours") * 60 * 60 * 1000,

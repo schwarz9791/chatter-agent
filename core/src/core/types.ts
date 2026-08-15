@@ -1,8 +1,12 @@
 /**
  * chatter-agent 全体の契約。
  *
- * `speech.jsonl` の1行がそのまま WebSocket で配信されるので、ログ形式と配信形式は同一。
- * 設計書 §5 が一次情報。
+ * 記録（`speech.jsonl`）と配信キュー（`speech/<seq>.json`）は分かれているが、どちらも
+ * この型のオブジェクト1件を1行 / 1ファイルとして持つ。配信キューの1ファイルがそのまま
+ * WebSocket の1フレームになるので、記録・キュー・配信の3箇所で変換は要らない。
+ *
+ * 契約の詳細（キューの形、WebSocket、ack）は docs/protocol.md を正とする。
+ * 設計書 §5 は元の一次情報だが、記録と配信を分けた形には追従していない。
  */
 
 /**
@@ -28,8 +32,11 @@ export type SpeechSource = "claude-code";
 /** `speech.jsonl` の1行。1文1行。 */
 export interface SpeechRecord {
   /**
-   * 単一ワーカーがロック下で採番する。再接続時の欠落検出に使う。
+   * 単一ワーカーがロック下で採番する。**配信キューのファイル名であり、ack のキー**。
    * 次の値は `speech.state.json` に持つのでローテートしても連続する。
+   *
+   * ファイル名の seq と payload の seq は必ず一致するものとしてよい。
+   * `speechQueue.read()` がこれを照合し、食い違ったら配信しない（docs/protocol.md）。
    */
   seq: number;
   /** ISO8601 */

@@ -29,7 +29,7 @@ hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公�
 | `core/` | `chatter-agent-core`（CLI + WebSocket サーバー） | **実装済み。** `summarizer/`（AI要約、既定OFF）だけ未着手 |
 | `apps/chatter-mascot/` | Electron デスクトップ版 | 未作成 |
 | `apps/chatter-mascot-xr/` | Unity / Android XR | 未作成 |
-| `docs/` | 作業規約 | core / plugin / origin の3本 |
+| `docs/` | 作業規約 | protocol / core / plugin / origin の4本 |
 | `.github/workflows/` | CI（typecheck / lint / format / bundle / test） | 稼働中 |
 
 実装フェーズは **A**（plugin + CLI で `speech.jsonl` が正しく育つ）→ **B**（WebSocket 配信）→ **C**（Unity + UniVRM）。

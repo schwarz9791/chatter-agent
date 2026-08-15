@@ -31,7 +31,7 @@ git -C "$UPSTREAM" log --format='%an %s' 46f7def..worktree-ai-summary -- electro
 
 前身の cc-mascot-xr は `bridge/src/upstream/` を**編集禁止の無改変ミラー**として隔離し、上流の改善をそのまま取り込める状態を維持していた。chatter-agent はこれを引き継がない。
 
-hook 方式への転換で、`textFilter.ts` が**上流と要件で食い違う**ため。chatter-agent は delta を蓄積した raw 全体へ**繰り返し適用**し、さらに「未閉じの ``` 以降は保留」という上流に存在しない要件がある（→ `core/src/text/pendingFence.ts`）。
+hook 方式への転換で、`textFilter.ts` が**上流と要件で食い違う**ため。chatter-agent は delta を蓄積した raw 全体へ**繰り返し適用**し、さらに「未確定な末尾は保留」という上流に存在しない要件がある（未閉じの ``` だけでなく、未閉じの `<`、閉じていないインラインのバッククォート、書きかけの表の行、末尾の URL、末尾の16進の並びにも広がっている。→ `core/src/text/unstableTail.ts`）。
 
 守り切れないものを「編集禁止」と書いておくと、**制約の方が先に嘘になる**。実態に合わせて降ろした。
 
@@ -108,7 +108,7 @@ hook 方式への転換で、`textFilter.ts` が**上流と要件で食い違う
 
 | ファイル | 出どころ |
 |---|---|
-| `text/pendingFence.ts` | chatter-agent で新規に書いた（未閉じ ``` の保留） |
+| `text/unstableTail.ts` | chatter-agent で新規に書いた（未確定な末尾の保留。未閉じの ``` / `<` / インラインのバッククォート、書きかけの表の行、末尾の URL、末尾の16進の並び） |
 | `prompt/promptEventFormatter.ts` + `.test.ts` | 自分が cc-mascot の作業ブランチ上で書いたものを持ち込んだ |
 | `core/` `cli/` `server/` 配下すべて | chatter-agent 独自 |
 

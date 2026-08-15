@@ -12,27 +12,30 @@
 core/src/
 ├── cli/          chatter-agent-speak（spool を読む単一ワーカー）
 │   ├── index.ts             エントリ。無効化判定 → ロック → ドレイン → 解放
-│   ├── lock.ts              mkdir の原子性を使った単一ワーカーのロック
 │   ├── spool.ts             走査（到着順）/ 分類 / 読み取り / 削除 / 孤児掃除
 │   ├── messageAssembler.ts  ★中核。delta 結合 → 確定した文の切り出し（純粋関数）
+│   ├── publish.ts           記録と配信キューの両方に書く合成。append できた時点で「出した」が確定する
 │   ├── worker.ts            ドレインループ。応答待ち通知の整形もここ
 │   └── workerState.ts       プロセスを跨いで持ち回る重複抑制の状態
 ├── server/       chatter-agent-server（配信キュー → WebSocket 配信）
-│   ├── index.ts             合成ルート。bind → キューを空にする → ポーリング
+│   ├── index.ts             合成ルート。ロック → bind → 古いキューの掃除 → ポーリング
+│   ├── dispatcher.ts        配信済み seq の判断。何を配信済みとし、何を消してよいか（ユニットテストのため純粋な部品に切り出してある）
 │   └── wsServer.ts          配信と ack。Origin 検査もここ
 ├── core/         契約と基盤
 │   ├── types.ts             SpeechRecord / Emotion / SpeechKind / SpeakMessage
 │   ├── paths.ts             ← cc-mascot-xr 流用
 │   ├── config.ts            ← cc-mascot-xr configStore 流用
+│   ├── lock.ts              mkdir の原子性を使った単一ワーカー / 単一サーバーのロック
+│   ├── atomicWrite.ts       tmp + rename の共通化。キュー entry / seq state / worker state / 進捗サイドカーの4箇所が使う
 │   ├── speechLog.ts         記録への追記 / seq 採番 / state 整合
-│   └── speechQueue.ts       配信キュー。CLI が書き、server が読んで消す
+│   └── speechQueue.ts       配信キュー。list/read/enqueue/ackUpTo/dropOlderThan/trim/sweepTmp
 ├── text/         テキスト整形・文分割        ← textFilter.ts のみ cc-mascot 由来
 ├── emotion/      ルールベース感情判定        ← cc-mascot 由来
 ├── prompt/       応答待ち通知の整形
 └── summarizer/   AI要約（既定OFF）           **未着手**
 ```
 
-判断ロジックは `cli/` と `core/` に置く。**`server/` は判断ロジックを持たない** — キューを読んで全クライアントへ流すだけ。エントリポイントは配線に留める。
+判断ロジックは基本的に `cli/` と `core/` に置く。**`server/index.ts` と `wsServer.ts` は判断ロジックを持たない** — キューを読んで全クライアントへ流すだけの配線に留める。唯一の例外が `server/dispatcher.ts`（何を配信済みとし、何を消してよいか）で、`index.ts` に埋めるとユニットテストから触れないため純粋な部品として切り出してある。
 
 発話の契約（`SpeechRecord`、キューの形、WebSocket）は [`protocol.md`](./protocol.md) にある。
 
@@ -44,7 +47,7 @@ cc-mascot 由来のファイルも**このリポジトリのコードとして�
 
 Apache-2.0 §4(b) は、**改変したファイルにその旨の目立つ告知を付ける**ことを要求している。由来のあるファイルを触ったら、ヘッダに `Modified for chatter-agent.` があるか確認すること。
 
-**対象は `text/textFilter.ts` と `emotion/ruleBasedEmotionClassifier.ts`（+ 両者のテスト）の4ファイルだけ。** 同じディレクトリに並んでいる `text/pendingFence.ts` と `prompt/` 配下は cc-mascot 由来ではないので、ヘッダを足さないこと。区別の根拠は [`origin.md`](./origin.md)。
+**対象は `text/textFilter.ts` と `emotion/ruleBasedEmotionClassifier.ts`（+ 両者のテスト）の4ファイルだけ。** 同じディレクトリに並んでいる `text/unstableTail.ts` と `prompt/` 配下は cc-mascot 由来ではないので、ヘッダを足さないこと。区別の根拠は [`origin.md`](./origin.md)。
 
 ### 2. `tsconfig.json` の `moduleResolution: "bundler"` を変えない
 
@@ -131,7 +134,7 @@ CI（`setup-node`）は `node-version: "24"` で、常に最新の 24 系が入�
 ```bash
 npm run build
 npm run verify:phase-a   # spool → speech.jsonl（scripts/verify-phase-a.sh）
-npm run verify:phase-b   # speech.jsonl → WebSocket（scripts/verify-phase-b.mjs）
+npm run verify:phase-b   # 配信キュー → WebSocket（scripts/verify-phase-b.mjs）
 npm run start:server     # 手で動かすとき
 ```
 
@@ -184,7 +187,7 @@ cc-mascot から移植したコードを oxfmt で整形すると、上流との
 | 設定 | `{root}/config.json` | 人間 |
 | spool | `{root}/spool/` | hook が書き、CLI が消す |
 | 発話の記録 | `{root}/speech.jsonl`（退避は `speech.1.jsonl` の1世代だけ） | CLI |
-| 配信キュー | `{root}/speech/<seq>.json` | CLI が書き、server が消す |
+| 配信キュー | `{root}/speech/<seq>.json` | CLI が書く。上限超過は CLI が切り、ack と起動時の掃除は server が行う |
 | seq の state | `{root}/speech.state.json` | CLI |
 | 抑制の state | `{root}/speak.state.json` | CLI |
 | ロック | `{root}/speak.lock/`（ディレクトリ） | CLI |
@@ -202,6 +205,13 @@ cc-mascot から移植したコードを oxfmt で整形すると、上流との
 | `speechLogMaxBytes` | `5242880` | `CHATTER_AGENT_SPEECH_LOG_MAX_BYTES` |
 | `speechQueueMaxEntries` | `500` | `CHATTER_AGENT_SPEECH_QUEUE_MAX_ENTRIES` |
 | `spoolMaxAgeHours` | `6` | `CHATTER_AGENT_SPOOL_MAX_AGE_HOURS` |
+| `allowedOrigins` | `[]` | `CHATTER_AGENT_ALLOWED_ORIGINS`（カンマ区切り） |
+
+**`speechLogGenerations`（記録の退避世代数）はこの PR で廃止した。** 誰も `speech.jsonl` を tail しなくなったので、
+複数世代を繰り下げる必要がなくなり、`speechLogMaxBytes` を超えたら `speech.1.jsonl` に退避する1世代だけになった。
+既存の `~/.config/chatter-agent/config.json` に `speechLogGenerations` が残っていると、`config.ts` の未知キー警告
+（`[Config] ... の未知のキー "speechLogGenerations" は無視されます`）が CLI 起動のたびに出る。手で消すこと。
+それ以前の環境で作られた `speech.2.jsonl` 以降のファイルも、以後は誰も読み書きしない孤児になる。消してよい。
 
 config に載せない環境変数:
 

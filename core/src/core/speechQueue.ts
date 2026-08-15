@@ -20,7 +20,7 @@
  * `spool/` と同じ形。あちらは hook が書いて CLI が消し、こちらは CLI が書いて server が消す。
  *
  * ★ `list()` と `read()` に分けてあるのは、配信済みの entry を毎回全件 readFileSync
- *   させないため。server は 100ms ごとにポーリングするが、`seq <= sentUpTo` の絞り込みは
+ *   させないため。server は 50ms ごとにポーリングするが、配信済みかどうかの絞り込みは
  *   呼び出し側で後から走るので、ファイル名の列挙だけで済む問い合わせと、実際に配信する
  *   1件だけの読み取りを分けないと、マスコットが繋がっていない間（ack が来ず trim が
  *   上限に張り付く）も毎秒何十回と全件を読み直すことになる。
@@ -108,7 +108,7 @@ export function createSpeechQueue(queueDir: string): SpeechQueue {
       for (const record of records) {
         const target = path.join(queueDir, fileNameFor(record.seq));
         try {
-          // ★ tmp + rename で書くこと（atomicWrite.ts）。server は 100ms ごとに
+          // ★ tmp + rename で書くこと（atomicWrite.ts）。server は 50ms ごとに
           //   readdir するので、素の書き込みだと書きかけを読まれる
           writeFileAtomic(target, `${JSON.stringify(record)}\n`);
           written++;
@@ -135,7 +135,7 @@ export function createSpeechQueue(queueDir: string): SpeechQueue {
       if (!line) return null;
 
       // ★ payload の seq とファイル名の seq を照合する。サーバーはファイル名の seq で
-      //   順序・sentUpTo・ack 削除を決め、クライアントは payload の seq で重複排除する
+      //   順序・配信済みかどうかの判定・ack 削除を決め、クライアントは payload の seq で重複排除する
       //   （protocol.md）。両者がずれると、どちらの側にもエラーが出ないまま実在する
       //   文を落とすか、同じ文を二度喋る。壊れたファイルをここで削除はしない
       //   （ユーザーが置いたものかもしれない。飛ばすだけにして判断は呼び出し側に残す）

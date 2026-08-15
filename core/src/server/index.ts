@@ -2,20 +2,32 @@
 /**
  * `chatter-agent-server` — 配信キューを WebSocket で流す常駐プロセス。
  *
- * **判断ロジックを持たない**（docs/core.md）。キューを読んでそのまま流すだけ。
- * 何を喋るかは CLI が `speech/<seq>.json` を書いた時点で決まっている。
+ * **判断ロジックを持たない**（docs/core.md）。何を配信済みとするか・ack をどう
+ * クランプするかの判断は `dispatcher.ts` に出してある。ここには配線と終了処理しか置かない。
  *
- * 合成ルートなので、ここには配線と終了処理しか置かない。
+ * 起動順は **ロック → bind → 古いキューの掃除 → poll**。ロックが最初なのは、
+ * bind より後ろだと「2台目が別ポートで bind に成功し、1台目の未配信キューを
+ * 巻き込む」窓が残るため（F 参照）。
  */
 
 import * as fs from "fs";
 import * as path from "path";
 import { createConfigStore } from "../core/config";
-import { getSpeechQueueDir } from "../core/paths";
+import { acquireLock } from "../core/lock";
+import { getServerLockDir, getSpeechQueueDir } from "../core/paths";
 import { createSpeechQueue } from "../core/speechQueue";
+import { createDispatcher, type Dispatcher } from "./dispatcher";
 import { createWsServer } from "./wsServer";
 
-const SHUTDOWN_STEP_TIMEOUT_MS = 1_500;
+/**
+ * 終了処理の1ステップの制限時間。
+ *
+ * ★ `CLOSE_GRACE_MS`（wsServer.close() が持つ terminate() 救済の猶予）より大きくすること。
+ *   ここが `CLOSE_GRACE_MS` 以下だと、`step()` の watchdog が先に諦めて次へ進んでしまい、
+ *   wsServer 側の救済（応答しないクライアントを terminate する経路）に到達できない。
+ *   `SHUTDOWN_TIMEOUT_MS`（全体の上限）は超えないこと。
+ */
+const SHUTDOWN_STEP_TIMEOUT_MS = 2_500;
 const SHUTDOWN_TIMEOUT_MS = 6_000;
 
 /**
@@ -75,11 +87,23 @@ function installShutdown(cleanup: () => Promise<void>): void {
 
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
-  // 常駐プロセスなので1件の rejection で落とさない
+  // 常駐プロセスなので1件の rejection / 例外で落とさない
   process.on("unhandledRejection", (err) => console.error("[Server] Unhandled rejection:", err));
+  process.on("uncaughtException", (err) => console.error("[Server] Uncaught exception:", err));
 }
 
 async function main(): Promise<void> {
+  // ★ ロックは bind より前に取ること。配信キューのパス（{root}/speech）にはポートも
+  //   インスタンス識別子も入っていないので、2台目が別ポートで bind に成功すると、
+  //   起動時の掃除（下の dropOlderThan）が1台目の未配信キューを消し、定常状態でも
+  //   両者が独立に配信して二重再生になる。「wipe は bind の後だから安全」という順序の
+  //   工夫では、同じポートでの衝突にしか効かない。キューを所有できるサーバーを1台に絞る
+  const serverLock = acquireLock(getServerLockDir());
+  if (!serverLock) {
+    console.error("[Server] 既に別の chatter-agent-server が動いています");
+    process.exit(1);
+  }
+
   const config = createConfigStore();
   const queueDir = getSpeechQueueDir();
   console.log(`[Server] config: ${config.filePath}`);
@@ -88,34 +112,21 @@ async function main(): Promise<void> {
   fs.mkdirSync(path.dirname(queueDir), { recursive: true });
   const queue = createSpeechQueue(queueDir);
 
-  /** 配信済みの最大 seq。接続直後の追いつきをここまでに限る */
-  let sentUpTo = 0;
+  // wsServer の onConnect / onAck から参照するが、生成は wsServer の後（下記）。
+  // どちらのコールバックも実際の接続・メッセージが来るまで呼ばれないので、
+  // bind が終わってから dispatcher を作っても間に合う
+  let dispatcher: Dispatcher;
 
   // ★ 監視より先にポートを押さえる。埋まっているなら何も触る前に落ちるべき
   const wsServer = await createWsServer({
     host: config.get("host"),
     port: config.get("port"),
     allowedOrigins: config.get("allowedOrigins"),
-
-    onConnect: (send) => {
-      // ★ sentUpTo までしか送らないこと。その先は直後の poll が broadcast するので、
-      //   ここでも送ると新規クライアントだけが二重に受け取る
-      let sent = 0;
-      for (const seq of queue.list()) {
-        if (seq > sentUpTo) break;
-        const line = queue.read(seq);
-        if (line === null) continue; // 扱いの整理は別タスク。ここでは飛ばすだけ
-        if (!send(line)) break;
-        sent++;
-      }
-      if (sent > 0) console.log(`[Server] 未読 ${sent} 件を送りました`);
-    },
-
-    onAck: (seq) => {
-      const removed = queue.ackUpTo(seq);
-      if (removed > 0) console.log(`[Server] seq<=${seq} を ${removed} 件消しました`);
-    },
+    onConnect: (send) => dispatcher.catchUp(send),
+    onAck: (seq) => dispatcher.ack(seq),
   });
+
+  dispatcher = createDispatcher({ queue, broadcast: (line) => wsServer.broadcast(line) });
 
   const bound = wsServer.address();
   console.log(`[Server] listening on ws://${bound.host}:${bound.port}`);
@@ -123,21 +134,14 @@ async function main(): Promise<void> {
     console.warn("[Server] 0.0.0.0 は無認証で LAN 全体に露出します。信頼できない網では host を 127.0.0.1 に");
   }
 
-  // ★ wipe は bind の後。先に消すと、ポートが埋まって起動に失敗したときに
-  //   走っている方のサーバーのキューを消してしまう。
-  //   落ちている間に書かれたものは定義上すべて古いので、捨てて正しい
+  // ★ サーバーは1台しかいない前提（上のロック）なので、「2台目が1台目のキューを消す」
+  //   事故はここでは考えなくてよい。掃除は STARTUP_KEEP_MS の時間条件だけで判断する
+  //   （全消し clear() ではない。落ちている間に書かれた古い entry だけを捨てる。
+  //   理由は STARTUP_KEEP_MS のコメント参照）
   const wiped = queue.dropOlderThan(STARTUP_KEEP_MS);
   if (wiped > 0) console.log(`[Server] 起動前に溜まっていた ${wiped} 件を捨てました`);
 
-  const poll = setInterval(() => {
-    for (const seq of queue.list()) {
-      if (seq <= sentUpTo) continue;
-      const line = queue.read(seq);
-      if (line === null) continue; // 扱いの整理は別タスク。ここでは飛ばすだけ
-      wsServer.broadcast(line);
-      sentUpTo = seq;
-    }
-  }, POLL_INTERVAL_MS);
+  const poll = setInterval(() => dispatcher.poll(), POLL_INTERVAL_MS);
   poll.unref();
 
   console.log("[Server] Ready");
@@ -145,6 +149,12 @@ async function main(): Promise<void> {
   installShutdown(async () => {
     clearInterval(poll);
     await step("websocket server", () => wsServer.close());
+    // ★ isStale() は所有印が読めるなら pid の生死だけで判定する（core/lock.ts）。
+    //   このサーバーは常駐で staleMs（既定60秒）をとうに超えて動き続けるが、
+    //   pid が生きている限り自分のロックを他プロセスに奪われることはない。
+    //   ここで release() し損ねてクラッシュしても、pid は死んでいるので
+    //   次回起動時の isStale() が即座に回収する
+    serverLock.release();
   });
 }
 

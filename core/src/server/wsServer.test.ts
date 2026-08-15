@@ -192,6 +192,21 @@ describe("ack", () => {
 
     await vi.waitFor(() => expect(acks).toEqual([3]));
   });
+
+  it("★ onAck が投げても接続は生き続ける（message イベント経由の uncaught でサーバーごと落ちない）", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const server = await start({
+      onAck: () => {
+        throw new Error("キューを読めなかった");
+      },
+    });
+    const client = await connect(server);
+
+    client.socket.send('{"type":"spoken","seq":1}');
+    // 例外を投げた後でも broadcast が届く＝ソケットもプロセスも生きている
+    server.broadcast("live");
+    expect(await client.waitFor(1)).toEqual(["live"]);
+  });
 });
 
 describe("Origin 検査（#3）", () => {

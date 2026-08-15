@@ -98,3 +98,14 @@ export function getWorkerStatePath(e: PathEnv = currentPathEnv()): string {
 export function getLockDir(e: PathEnv = currentPathEnv()): string {
   return path.join(getRuntimeDir(e), "speak.lock");
 }
+
+/**
+ * サーバーの単一インスタンスロック。`getLockDir` と同じ書き方（mkdir が原子的なディレクトリ）。
+ *
+ * 配信キュー（`getSpeechQueueDir`）のパスにはポートもインスタンス識別子も入っていないので、
+ * 2台目のサーバーが別ポートで bind に成功すると、起動時の掃除が1台目の未配信キューを消し、
+ * 定常状態でも両者が独立に配信して二重再生になる。キューを所有できるサーバーは1台に絞る。
+ */
+export function getServerLockDir(e: PathEnv = currentPathEnv()): string {
+  return path.join(getRuntimeDir(e), "server.lock");
+}

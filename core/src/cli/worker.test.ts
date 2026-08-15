@@ -45,11 +45,11 @@ function drain(overrides: Partial<DrainDeps> = {}) {
   });
 }
 
-function appendDelta(messageId: string, index: number, text: string, final = false): void {
+function appendDelta(messageId: string, index: number, text: string, final = false, sessionId = "sess-1"): void {
   fs.appendFileSync(
     path.join(spoolDir, `${messageId}.jsonl`),
     JSON.stringify({
-      session_id: "sess-1",
+      session_id: sessionId,
       hook_event_name: "MessageDisplay",
       turn_id: "turn-1",
       message_id: messageId,
@@ -58,6 +58,14 @@ function appendDelta(messageId: string, index: number, text: string, final = fal
       delta: text,
     }) + "\n",
   );
+}
+
+/**
+ * 到着順を確実にずらす。`scanSpool` は birthtime をナノ秒で見るので通常はずれるが、
+ * タイムスタンプの粒度が粗いファイルシステムでも落ちないよう明示的に間隔を空ける。
+ */
+function tick(ms = 2): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 function writePrompt(name: string, payload: unknown): void {
@@ -128,10 +136,44 @@ describe("後続イベントによる保留解除（設計書からの上積み�
     drain();
     expect(texts()).toEqual(["確認します。"]);
 
+    tick();
     appendDelta("m2", 0, "次に進みます。");
     drain();
     // m1 の保留分が先。m2 は最後の文なのでまだ保留
     expect(texts()).toEqual(["確認します。", "ログを見ます。"]);
+  });
+
+  it("★ 別セッションのメッセージでは保留を解かない", () => {
+    // spool はグローバルに1ディレクトリで、MessageDisplay は matcher 非対応なので
+    // 全セッションで発火する。Claude Code を2枚開くだけでこの条件が揃う
+    appendDelta("m1", 0, "確認します。ログを見ます。");
+    drain();
+    expect(texts()).toEqual(["確認します。"]);
+
+    tick();
+    appendDelta("other", 0, "別セッションです。", false, "sess-2");
+    drain();
+
+    expect(texts()).toEqual(["確認します。"]);
+  });
+
+  it("★ 文の途中で切れていれば、後続イベントが来ても流さない", () => {
+    appendDelta("m1", 0, "Aの一文目。Aの途中");
+    drain();
+    expect(texts()).toEqual(["Aの一文目。"]);
+
+    tick();
+    appendDelta("m2", 0, "Bの一文目。Bの二文目。");
+    drain();
+
+    // 「Aの途中」を読み上げてしまうと、断片が音声になり順序も壊れる
+    expect(texts()).not.toContain("Aの途中");
+
+    tick();
+    appendDelta("m1", 1, "です。Aの最後の文です。", true);
+    drain();
+
+    expect(texts()).toEqual(["Aの一文目。", "Bの一文目。", "Aの途中です。", "Aの最後の文です。"]);
   });
 
   it("応答待ち通知の到着でも保留を解除する（ツールが始まる＝メッセージは閉じた）", () => {
@@ -152,6 +194,7 @@ describe("後続イベントによる保留解除（設計書からの上積み�
   it("先に流した文を、遅れて届いた final で再送しない", () => {
     appendDelta("m1", 0, "確認します。ログを見ます。");
     drain();
+    tick();
     appendDelta("m2", 0, "次に進みます。");
     drain();
 
@@ -224,17 +267,45 @@ describe("応答待ち通知", () => {
     expect(fs.readdirSync(spoolDir)).toEqual([]);
   });
 
-  it("壊れた payload でも spool を消して先へ進む", () => {
-    fs.writeFileSync(path.join(spoolDir, "prompt-broken.json"), "{ broken");
+  it("★ 読めない payload は消さずに残す（書き込み途中を掴んだだけかもしれない）", () => {
+    const broken = path.join(spoolDir, "prompt-broken.json");
+    fs.writeFileSync(broken, '{"hook_event_name":"PreToolUse","tool_na');
     drain();
-    expect(fs.readdirSync(spoolDir)).toEqual([]);
+
+    expect(fs.existsSync(broken)).toBe(true);
+    expect(texts()).toEqual([]);
+
+    // 書き終われば次のドレインで拾える
+    fs.writeFileSync(broken, JSON.stringify(question));
+    drain();
+    expect(texts()).toEqual(["次は何をしますか？", "選択肢は、進める、やめる。"]);
+    expect(fs.existsSync(broken)).toBe(false);
   });
 
-  it("抑制状態はプロセスを跨いで効く（CLI は毎 delta 起動して終了する）", () => {
+  it("★ 書き込みに失敗したら spool を消さない（イベントを復旧不能に失わない）", () => {
+    writePrompt("q", question);
+
+    const failing = {
+      peekNextSeq: () => 1,
+      append: () => {
+        throw new Error("ENOSPC");
+      },
+    };
+    expect(() => drain({ speechLog: failing })).toThrow("ENOSPC");
+    expect(fs.existsSync(path.join(spoolDir, "prompt-q.json"))).toBe(true);
+  });
+
+  it("★ 抑制状態はプロセスを跨いで効く（CLI は毎 delta 起動して終了する）", () => {
+    // drain() のたびに state をディスクから読み直しているので、別プロセスと同じ条件
     writePrompt("q", question);
     drain();
-    // drain() のたびに state を読み直しているので、別プロセスと同じ条件
-    expect(fs.existsSync(path.join(dir, "speak.state.json"))).toBe(true);
+    expect(texts()).toEqual(["次は何をしますか？", "選択肢は、進める、やめる。"]);
+
+    writePrompt("n", { session_id: "sess-1", prompt_id: "p9", hook_event_name: "Notification", message: "許可を。" });
+    drain();
+
+    // 直前のドレインが書いた speak.state.json を読めていなければ、ここで抑制が効かない
+    expect(texts()).not.toContain("許可を。");
   });
 });
 

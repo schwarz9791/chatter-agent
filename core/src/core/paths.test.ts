@@ -4,6 +4,7 @@ import {
   getConfigFilePath,
   getLockDir,
   getRuntimeDir,
+  getServerLockDir,
   getSpeechLogBackupPath,
   getSpeechLogPath,
   getSpeechQueueDir,
@@ -51,10 +52,16 @@ describe("ランタイムルート配下のパス", () => {
     expect(getSpeechStatePath(e)).toBe(`${root}/speech.state.json`);
     expect(getWorkerStatePath(e)).toBe(`${root}/speak.state.json`);
     expect(getLockDir(e)).toBe(`${root}/speak.lock`);
+    expect(getServerLockDir(e)).toBe(`${root}/server.lock`);
   });
 
   it("記録（speech.jsonl）と配信キュー（speech/）は別物", () => {
     expect(getSpeechLogPath(e)).not.toBe(getSpeechQueueDir(e));
+  });
+
+  it("CLI のロック（speak.lock）とサーバーのロック（server.lock）は別物", () => {
+    // 同居すると、サーバーの単一インスタンス化が CLI のロックを巻き添えにしてしまう
+    expect(getLockDir(e)).not.toBe(getServerLockDir(e));
   });
 
   it("CHATTER_AGENT_CONFIG は設定ファイルだけを上書きする", () => {

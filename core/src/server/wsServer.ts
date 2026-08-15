@@ -171,7 +171,13 @@ export function createWsServer(options: WsServerOptions): Promise<WsServer> {
           const seq = parseAck(String(data));
           // 知らない形は黙って捨てる。maxPayload 超過はそもそもここに来ない（MAX_PAYLOAD_BYTES 参照）
           if (seq === null) return;
-          options.onAck?.(seq);
+          // 隣の onConnect と同じ理由。ここで投げると message イベント経由の uncaught になり
+          // サーバーごと落ちる
+          try {
+            options.onAck?.(seq);
+          } catch (err) {
+            console.error("[WS] onAck failed:", err);
+          }
         });
       }
 

@@ -132,6 +132,19 @@ describe("parseSince", () => {
     expect(parseSince("/?since=-1")).toBeNull();
     expect(parseSince("/?since=1.5")).toBeNull();
   });
+
+  it("★ 空文字は null（全履歴リプレイにしない）", () => {
+    // Number("") は 0 なので、素直に Number() へ渡すと「まだ何も受け取っていない」つもりの
+    // クライアントにログ全体を送りつけてしまう
+    expect(parseSince("/?since=")).toBeNull();
+    expect(parseSince("/?since=%20%20")).toBeNull();
+  });
+
+  it("★ 10進数字以外の表記は受けない", () => {
+    expect(parseSince("/?since=0x10")).toBeNull();
+    expect(parseSince("/?since=1e3")).toBeNull();
+    expect(parseSince("/?since=+5")).toBeNull();
+  });
 });
 
 describe("?since= による取りこぼし埋め", () => {

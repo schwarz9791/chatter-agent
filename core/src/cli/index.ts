@@ -27,6 +27,7 @@ import { createSpeechLog } from "../core/speechLog";
 import { createSpeechQueue } from "../core/speechQueue";
 import { RuleBasedEmotionClassifier } from "../emotion/ruleBasedEmotionClassifier";
 import { acquireLock, type Lock } from "../core/lock";
+import { createPublisher } from "./publish";
 import { drainSpool } from "./worker";
 
 const LOCK_RETRIES = 3;
@@ -79,14 +80,14 @@ function main(): void {
 
     drainSpool({
       spoolDir: getSpoolDir(),
-      // 記録と配信を同じロック下で書く。順序はここで確定する
-      publish: (entries) => {
-        const records = speechLog.append(entries);
-        speechQueue.enqueue(records);
-        // クライアントが繋がっていなければ ack は来ないので、書いた側が歯止めをかける
-        speechQueue.trim(config.get("speechQueueMaxEntries"));
-        return records;
-      },
+      // 記録と配信を同じロック下で書く。順序はここで確定する。
+      // publish は append 後の enqueue/trim では throw しない（cli/publish.ts）
+      publish: createPublisher({
+        speechLog,
+        speechQueue,
+        // config は mtime スタンプで再読込する作りなので、ここも参照のたびに読み直す
+        maxEntries: () => config.get("speechQueueMaxEntries"),
+      }),
       workerStatePath: getWorkerStatePath(),
       speakPrompts: config.get("speakPrompts"),
       spoolMaxAgeMs: config.get("spoolMaxAgeHours") * 60 * 60 * 1000,

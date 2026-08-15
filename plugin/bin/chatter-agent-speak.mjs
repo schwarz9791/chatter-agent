@@ -1126,6 +1126,29 @@ function makeLock(lockDir, token) {
 }
 
 //#endregion
+//#region src/cli/publish.ts
+/** 記録と配信の両方に書く。記録できた時点で「出した」が確定する */
+function createPublisher(deps) {
+	const { speechLog, speechQueue, maxEntries } = deps;
+	return (entries) => {
+		const records = speechLog.append(entries);
+		try {
+			const written = speechQueue.enqueue(records);
+			if (written !== records.length) console.error(`[chatter-agent-speak] 配信キューへの書き込みが ${records.length} 件中 ${written} 件しか成功しませんでした`);
+		} catch (err) {
+			console.error("[chatter-agent-speak] 配信キューへの書き込みに失敗しました:", err);
+		}
+		try {
+			const dropped = speechQueue.trim(maxEntries());
+			if (dropped > 0) console.error(`[chatter-agent-speak] 配信キューの上限を超えたため ${dropped} 件を破棄しました`);
+		} catch (err) {
+			console.error("[chatter-agent-speak] 配信キューの上限チェックに失敗しました:", err);
+		}
+		return records;
+	};
+}
+
+//#endregion
 //#region src/prompt/promptEventFormatter.ts
 /** ExitPlanMode の読み上げ文の定型部分（計画の見出しが取れない場合はこれだけを話す） */
 const PLAN_APPROVAL_TEXT = "計画がまとまりました。確認をお願いします。";
@@ -1858,12 +1881,11 @@ function main() {
 		const classifier = new RuleBasedEmotionClassifier();
 		drainSpool({
 			spoolDir: getSpoolDir(),
-			publish: (entries) => {
-				const records = speechLog.append(entries);
-				speechQueue.enqueue(records);
-				speechQueue.trim(config.get("speechQueueMaxEntries"));
-				return records;
-			},
+			publish: createPublisher({
+				speechLog,
+				speechQueue,
+				maxEntries: () => config.get("speechQueueMaxEntries")
+			}),
 			workerStatePath: getWorkerStatePath(),
 			speakPrompts: config.get("speakPrompts"),
 			spoolMaxAgeMs: config.get("spoolMaxAgeHours") * 60 * 60 * 1e3,

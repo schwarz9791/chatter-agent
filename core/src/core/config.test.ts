@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { createConfigStore, createDefaultConfig } from "./config";
+import { createConfigStore, createDefaultConfig, isSpeakDisabled } from "./config";
 import type { ChatterAgentConfig } from "./config";
 
 let dir: string;
@@ -173,5 +173,27 @@ describe("allowedOrigins（#E-1）", () => {
   it("配列でも文字列でもない値は既定値にフォールバックする", () => {
     write({ allowedOrigins: 42 });
     expect(store().get("allowedOrigins")).toEqual([]);
+  });
+});
+
+describe("isSpeakDisabled（#4）", () => {
+  it("1/true/yes/on で無効化する（大小文字と前後の空白は無視）", () => {
+    for (const raw of ["1", "true", "TRUE", "yes", "on", " 1 ", "  True  "]) {
+      expect(isSpeakDisabled({ CHATTER_AGENT_DISABLE: raw })).toBe(true);
+    }
+  });
+
+  // ★ ここが #4 の本体。presence 判定のままだと「無効化の解除」のつもりで書いた 0 / false が
+  //   逆に全発話を止める。診断も出ないので原因に辿り着けない
+  it("0/false/no/off では無効化しない", () => {
+    for (const raw of ["0", "false", "FALSE", "no", "off"]) {
+      expect(isSpeakDisabled({ CHATTER_AGENT_DISABLE: raw })).toBe(false);
+    }
+  });
+
+  it("未設定・空文字・未知の値では無効化しない", () => {
+    expect(isSpeakDisabled({})).toBe(false);
+    expect(isSpeakDisabled({ CHATTER_AGENT_DISABLE: "" })).toBe(false);
+    expect(isSpeakDisabled({ CHATTER_AGENT_DISABLE: "maybe" })).toBe(false);
   });
 });

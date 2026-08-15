@@ -75,6 +75,22 @@ const parseBoolean: Parser<boolean> = (raw) => {
   return undefined;
 };
 
+/**
+ * `CHATTER_AGENT_DISABLE` — hook と CLI をまとめて黙らせる。無限ループ防止の第1層で、
+ * 要約プロセスはこれを付けて spawn される（設計書 §4-3）。config のキーではないので
+ * `SPECS` には載せず、環境変数だけを見る。
+ *
+ * ★ 「設定されていれば無効」にしないこと。`CHATTER_AGENT_DISABLE=0` を「無効化の解除」の
+ *   つもりで書くと、逆に全発話が止まる。しかも診断が出ないので原因に辿り着けない。→ #4
+ *
+ * ★ 判定は `plugin/scripts/_lib.sh` の `chatter_disabled` と同じトークン集合に揃える。
+ *   hook 側だけが黙る / CLI 側だけが黙るという半端な状態を作らないため。
+ *   未知の値は「無効化しない」に倒す（`parseBoolean` が `undefined` を返すため）。
+ */
+export function isSpeakDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return parseBoolean(env.CHATTER_AGENT_DISABLE) === true;
+}
+
 function toInt(raw: unknown): number | undefined {
   const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw.trim()) : NaN;
   return Number.isInteger(n) ? n : undefined;

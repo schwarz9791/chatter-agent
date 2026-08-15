@@ -6,7 +6,7 @@
 
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { WebSocket } from "ws";
-import { createWsServer, parseSince } from "./wsServer";
+import { createWsServer, parseAck } from "./wsServer";
 import type { WsServer, WsServerOptions } from "./wsServer";
 
 const HOST = "127.0.0.1";
@@ -27,12 +27,12 @@ interface Client {
 
 /**
  * ★ message リスナーを**接続の前**に張る。
- *   `?since=` の送り直しは connection ハンドラで同期に流れるので、
+ *   `onConnect` の送り直しは connection ハンドラで同期に流れるので、
  *   open を待ってから張ると取りこぼす。実クライアントも同じ順序で書く必要がある。
  */
-function connect(server: WsServer, query = ""): Promise<Client> {
+function connect(server: WsServer, options: { headers?: Record<string, string> } = {}): Promise<Client> {
   const { port } = server.address();
-  const socket = new WebSocket(`ws://${HOST}:${port}${query}`);
+  const socket = new WebSocket(`ws://${HOST}:${port}`, { headers: options.headers });
   sockets.push(socket);
 
   const received: string[] = [];
@@ -118,72 +118,94 @@ describe("createWsServer", () => {
   });
 });
 
-describe("parseSince", () => {
-  it("?since= を読む", () => {
-    expect(parseSince("/?since=12")).toBe(12);
-    expect(parseSince("/path?since=0")).toBe(0);
+describe("parseAck", () => {
+  it("累積 ack を読む", () => {
+    expect(parseAck('{"type":"spoken","seq":12}')).toBe(12);
+    expect(parseAck('{"type":"spoken","seq":0}')).toBe(0);
   });
 
-  it("無い・不正なものは null", () => {
-    expect(parseSince(undefined)).toBeNull();
-    expect(parseSince("/")).toBeNull();
-    expect(parseSince("/?other=1")).toBeNull();
-    expect(parseSince("/?since=abc")).toBeNull();
-    expect(parseSince("/?since=-1")).toBeNull();
-    expect(parseSince("/?since=1.5")).toBeNull();
-  });
-
-  it("★ 空文字は null（全履歴リプレイにしない）", () => {
-    // Number("") は 0 なので、素直に Number() へ渡すと「まだ何も受け取っていない」つもりの
-    // クライアントにログ全体を送りつけてしまう
-    expect(parseSince("/?since=")).toBeNull();
-    expect(parseSince("/?since=%20%20")).toBeNull();
-  });
-
-  it("★ 10進数字以外の表記は受けない", () => {
-    expect(parseSince("/?since=0x10")).toBeNull();
-    expect(parseSince("/?since=1e3")).toBeNull();
-    expect(parseSince("/?since=+5")).toBeNull();
+  it("★ 知らない形は捨てる（ここはクライアント由来の入力）", () => {
+    for (const raw of [
+      "",
+      "not json",
+      "[]",
+      "null",
+      '"spoken"',
+      "{}",
+      '{"seq":1}',
+      '{"type":"other","seq":1}',
+      '{"type":"spoken"}',
+      '{"type":"spoken","seq":"1"}',
+      '{"type":"spoken","seq":-1}',
+      '{"type":"spoken","seq":1.5}',
+      '{"type":"spoken","seq":null}',
+      '{"type":"spoken","seq":1e400}',
+      `{"type":"spoken","seq":${Number.MAX_SAFE_INTEGER + 10}}`,
+    ]) {
+      expect(parseAck(raw)).toBeNull();
+    }
   });
 });
 
-describe("?since= による取りこぼし埋め", () => {
-  const lines = [1, 2, 3].map((seq) => JSON.stringify({ seq, text: `文${seq}。` }));
+describe("接続直後の追いつき", () => {
+  it("onConnect で渡した分が、以後のブロードキャストより先に届く", async () => {
+    const server = await start({ onConnect: (send) => void send("catchup") });
+    const client = await connect(server);
 
-  it("接続時に seq > since の行を送り直す", async () => {
-    const server = await start({ backfill: (since) => lines.slice(since) });
-    const client = await connect(server, "/?since=1");
-    expect(await client.waitFor(2)).toEqual([lines[1], lines[2]]);
+    server.broadcast("live");
+    expect(await client.waitFor(2)).toEqual(["catchup", "live"]);
   });
 
-  it("?since= が無ければ何も送り直さない", async () => {
-    const backfill = vi.fn(() => lines);
-    const server = await start({ backfill });
+  it("onConnect が投げても接続は生き続ける", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const server = await start({
+      onConnect: () => {
+        throw new Error("読めなかった");
+      },
+    });
     const client = await connect(server);
 
     server.broadcast("live");
     expect(await client.waitFor(1)).toEqual(["live"]);
-    expect(backfill).not.toHaveBeenCalled();
+  });
+});
+
+describe("ack", () => {
+  it("クライアントの ack が届く", async () => {
+    const acks: number[] = [];
+    const server = await start({ onAck: (seq) => acks.push(seq) });
+    const client = await connect(server);
+
+    client.socket.send('{"type":"spoken","seq":7}');
+    await vi.waitFor(() => expect(acks).toEqual([7]));
   });
 
-  it("送り直した分は、以後のブロードキャストより先に届く", async () => {
-    const server = await start({ backfill: () => [lines[0]!] });
-    const client = await connect(server, "/?since=0");
+  it("★ 不正な ack はハンドラまで届かない", async () => {
+    const acks: number[] = [];
+    const server = await start({ onAck: (seq) => acks.push(seq) });
+    const client = await connect(server);
 
-    server.broadcast("live");
-    expect(await client.waitFor(2)).toEqual([lines[0], "live"]);
+    client.socket.send('{"type":"spoken","seq":-1}');
+    client.socket.send("not json");
+    client.socket.send('{"type":"mute"}');
+    client.socket.send('{"type":"spoken","seq":3}');
+
+    await vi.waitFor(() => expect(acks).toEqual([3]));
+  });
+});
+
+describe("Origin 検査（#3）", () => {
+  it("★ Origin ヘッダ付きの接続を拒否する（WebSocket は CORS の対象外）", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const server = await start();
+
+    await expect(connect(server, { headers: { Origin: "https://evil.example.com" } })).rejects.toThrow();
+    expect(server.clientCount()).toBe(0);
   });
 
-  it("backfill が投げても接続は生き続ける", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    const server = await start({
-      backfill: () => {
-        throw new Error("読めなかった");
-      },
-    });
-    const client = await connect(server, "/?since=1");
-
-    server.broadcast("live");
-    expect(await client.waitFor(1)).toEqual(["live"]);
+  it("Origin を送らないクライアント（Unity / ネイティブ）は通す", async () => {
+    const server = await start();
+    await connect(server);
+    expect(server.clientCount()).toBe(1);
   });
 });

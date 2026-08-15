@@ -58,7 +58,7 @@ export default defineConfig([
   },
 
   /**
-   * server は常駐プロセスで、プラグインに同梱しない。`ws` / `chokidar` は
+   * server は常駐プロセスで、プラグインに同梱しない。`ws` は
    * package.json の依存として実行時に解決させる（既定で external）。
    */
   {

@@ -21,7 +21,6 @@
     "start:server": "node dist/chatter-agent-server.mjs"
   },
   "dependencies": {
-    "chokidar": "^5.0.0",
     "ws": "^8.21.3"
   },
   "devDependencies": {

@@ -3,11 +3,16 @@
  *
  * 順序の保証（CLAUDE.md「絶対に守ること」4）:
  * - spool は**到着順**に処理する
- * - ドレインが空振りするまで繰り返す。これが「解放前にもう一度 spool を見る」に当たり、
+ * - ドレインが空振りするまで繰り返す。これが「解放完了後にもう一度 spool を見る」に当たり、
  *   走査直後に到着した分の取りこぼしを防ぐ
  */
 
-import { formatPromptEvent, getEventHookName, getEventPromptId } from "../prompt/promptEventFormatter";
+import {
+  formatPromptEvent,
+  getEventHookName,
+  getEventPromptId,
+  getEventSessionId,
+} from "../prompt/promptEventFormatter";
 import { cleanTextForSpeech, splitIntoSentences } from "../text/textFilter";
 import type { SpeechEntry, SpeechLog } from "../core/speechLog";
 import type { Emotion } from "../core/types";
@@ -20,6 +25,7 @@ import {
   removeEntry,
   scanSpool,
   writeProgress,
+  type MessageContent,
   type SpoolEntry,
 } from "./spool";
 import { readWorkerState, writeWorkerState, type WorkerState } from "./workerState";
@@ -56,6 +62,15 @@ export interface DrainResult {
   orphansRemoved: number;
 }
 
+/** 1パスで読み込んだ spool の中身。session_id は保留解除の判定に要る */
+type Loaded =
+  | { entry: Extract<SpoolEntry, { kind: "message" }>; content: MessageContent }
+  | { entry: Extract<SpoolEntry, { kind: "prompt" }>; payload: unknown };
+
+function sessionIdOf(loaded: Loaded): string | null {
+  return "content" in loaded ? loaded.content.sessionId : getEventSessionId(loaded.payload);
+}
+
 export function drainSpool(deps: DrainDeps): DrainResult {
   const now = deps.now ?? Date.now;
 
@@ -70,12 +85,21 @@ export function drainSpool(deps: DrainDeps): DrainResult {
     const entries = scanSpool(deps.spoolDir);
     if (entries.length === 0) break;
 
+    // このパスで扱う分をまとめて読む。後続の session_id を見る必要があるので先に揃える
+    const loaded: Loaded[] = entries.map((entry) =>
+      entry.kind === "message"
+        ? { entry, content: readMessage(entry.filePath) }
+        : { entry, payload: readPromptPayload(entry.filePath) },
+    );
+
     let changed = false;
-    for (let i = 0; i < entries.length; i++) {
-      // 後ろに別のイベントが控えているなら、このメッセージはもう伸びない。
-      // 保留していた最後の文を先に流してよい（設計書からの上積み。§2-4 の 34〜80 秒を消す）
-      const hasNewer = i < entries.length - 1;
-      const outcome = processEntry(entries[i]!, hasNewer, deps, state, now);
+    for (let i = 0; i < loaded.length; i++) {
+      const item = loaded[i]!;
+      const outcome =
+        "content" in item
+          ? processMessage(item, hasNewerInSameSession(loaded, i), deps)
+          : processPrompt(item, deps, state, now);
+
       written += outcome.written;
       if (outcome.changed) changed = true;
       if (outcome.stateDirty) stateDirty = true;
@@ -90,6 +114,22 @@ export function drainSpool(deps: DrainDeps): DrainResult {
   return { written, passes, orphansRemoved };
 }
 
+/**
+ * このメッセージがもう伸びないと判断してよいか。
+ *
+ * ★ 「後続エントリが1つでもあるか」で見てはいけない。`getSpoolDir()` にセッション成分が無く、
+ *   `MessageDisplay` は matcher 非対応で**全セッションで発火する**ため、Claude Code を2枚開くと
+ *   別セッションのメッセージで保留が解け、書きかけの断片が読み上げられて順序も壊れる。
+ *
+ * session_id が取れないものは判断材料にしない。保留したまま `final` を待つ方が安全。
+ */
+function hasNewerInSameSession(loaded: Loaded[], index: number): boolean {
+  const sessionId = sessionIdOf(loaded[index]!);
+  if (sessionId === null) return false;
+
+  return loaded.slice(index + 1).some((other) => sessionIdOf(other) === sessionId);
+}
+
 interface EntryOutcome {
   written: number;
   /** 発話を書いた or spool を消した。もう一周する価値があるか */
@@ -99,27 +139,18 @@ interface EntryOutcome {
 
 const NOTHING: EntryOutcome = { written: 0, changed: false, stateDirty: false };
 
-function processEntry(
-  entry: SpoolEntry,
-  hasNewer: boolean,
-  deps: DrainDeps,
-  state: WorkerState,
-  now: () => number,
-): EntryOutcome {
-  return entry.kind === "message" ? processMessage(entry, hasNewer, deps) : processPrompt(entry, deps, state, now);
-}
-
 function processMessage(
-  entry: Extract<SpoolEntry, { kind: "message" }>,
+  item: Extract<Loaded, { content: MessageContent }>,
   hasNewer: boolean,
   deps: DrainDeps,
 ): EntryOutcome {
-  const content = readMessage(entry.filePath);
+  const { entry, content } = item;
   const emitted = readProgress(entry.progressPath);
 
   const result = assembleSentences({
     deltas: content.deltas,
     emitted,
+    final: content.final,
     flushPending: content.final || hasNewer,
   });
 
@@ -149,20 +180,27 @@ function processMessage(
 }
 
 function processPrompt(
-  entry: Extract<SpoolEntry, { kind: "prompt" }>,
+  item: Extract<Loaded, { payload: unknown }>,
   deps: DrainDeps,
   state: WorkerState,
   now: () => number,
 ): EntryOutcome {
-  const payload = readPromptPayload(entry.filePath);
+  const { entry, payload } = item;
 
-  // 1イベントで完結するので、読めても読めなくても必ず消す
-  removeEntry(entry);
+  // ★ 読めないものを消さないこと。hook の書き込み途中を掴んだだけかもしれない。
+  //   恒久的に壊れているものは cleanOrphans が引き取る
+  if (payload === null) return NOTHING;
 
-  if (!deps.speakPrompts || payload === null) return { ...NOTHING, changed: true };
+  if (!deps.speakPrompts) {
+    removeEntry(entry);
+    return { ...NOTHING, changed: true };
+  }
 
   const messages = formatPromptEvent(payload);
-  if (messages.length === 0) return { ...NOTHING, changed: true };
+  if (messages.length === 0) {
+    removeEntry(entry);
+    return { ...NOTHING, changed: true };
+  }
 
   let stateDirty = false;
 
@@ -178,25 +216,22 @@ function processPrompt(
     hookName === "Notification" &&
     promptId !== null &&
     promptId === state.pairedPromptId &&
-    at - state.pairedPromptAt < PROMPT_PAIR_WINDOW_MS
+    withinWindow(at, state.pairedPromptAt, PROMPT_PAIR_WINDOW_MS)
   ) {
     state.pairedPromptId = null;
+    removeEntry(entry);
     return { written: 0, changed: true, stateDirty: true };
   }
 
-  let written = 0;
   const records: SpeechEntry[] = [];
-  const sessionId =
-    typeof (payload as { session_id?: unknown }).session_id === "string"
-      ? (payload as { session_id: string }).session_id
-      : null;
+  const sessionId = getEventSessionId(payload);
 
   for (const message of messages) {
     const cleaned = cleanTextForSpeech(message.text);
     if (!cleaned) continue;
 
     // 許可プロンプトは同じ文面で連続発火することがある
-    if (cleaned === state.lastText && at - state.lastTextAt < DUPLICATE_WINDOW_MS) continue;
+    if (cleaned === state.lastText && withinWindow(at, state.lastTextAt, DUPLICATE_WINDOW_MS)) continue;
     state.lastText = cleaned;
     state.lastTextAt = at;
     stateDirty = true;
@@ -215,10 +250,10 @@ function processPrompt(
     }
   }
 
-  if (records.length > 0) {
-    deps.speechLog.append(records);
-    written = records.length;
-  }
+  // ★ 書き込みが成功してから消す（processMessage と同じ順序）。
+  //   先に消すと、append が失敗したときにイベントが復旧不能に失われる
+  if (records.length > 0) deps.speechLog.append(records);
+  removeEntry(entry);
 
   if (hookName === "PreToolUse" && promptId !== null) {
     state.pairedPromptId = promptId;
@@ -226,5 +261,17 @@ function processPrompt(
     stateDirty = true;
   }
 
-  return { written, changed: true, stateDirty };
+  return { written: records.length, changed: true, stateDirty };
+}
+
+/**
+ * 抑制の時間窓に入っているか。
+ *
+ * ★ 経過が負なら窓の外として扱う。両タイムスタンプは `speak.state.json` に永続化されるので、
+ *   サスペンド/レジュームや NTP で時計が巻き戻ると、本来ペアでない Notification を
+ *   「ペア済み」と誤判定して**通知が二度と出なくなる**。
+ */
+function withinWindow(now: number, since: number, windowMs: number): boolean {
+  const elapsed = now - since;
+  return elapsed >= 0 && elapsed < windowMs;
 }

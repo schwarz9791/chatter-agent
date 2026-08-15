@@ -7,7 +7,7 @@
  *
  * やることは短い:
  *   1. 無効化されていたら即終了
- *   2. ロックを取る。取れなければ即終了（先行ワーカーが拾う）
+ *   2. ロックを取る。取れなければ少し待って数回だけ試す
  *   3. spool をドレインする
  *   4. ロックを解放する
  *
@@ -18,8 +18,33 @@ import { createConfigStore } from "../core/config";
 import { getLockDir, getSpeechLogPath, getSpeechStatePath, getSpoolDir, getWorkerStatePath } from "../core/paths";
 import { createSpeechLog } from "../core/speechLog";
 import { RuleBasedEmotionClassifier } from "../emotion/ruleBasedEmotionClassifier";
-import { acquireLock } from "./lock";
+import { acquireLock, type Lock } from "./lock";
 import { drainSpool } from "./worker";
+
+const LOCK_RETRIES = 3;
+const LOCK_RETRY_DELAY_MS = 120;
+
+/** 同期で待つ。デタッチ済みのプロセスなので、待っても hook はブロックしない */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * ロックを取る。取れなければ少し待って試し直す。
+ *
+ * ★ 一度で諦めてはいけない。先行ワーカーが最後の走査を終えてから解放するまでの窓に
+ *   届いた spool は、そのワーカーにも拾われず、こちらが即終了すると誰にも拾われない。
+ *   特に `permission_prompt` の Notification は**そのターン最後の hook イベント**なので、
+ *   次のドレインを促すものが来ず、ユーザーが答えるまで通知が出ないままになる。
+ */
+function acquireLockWithRetry(lockDir: string): Lock | null {
+  for (let attempt = 0; ; attempt++) {
+    const lock = acquireLock(lockDir);
+    if (lock) return lock;
+    if (attempt >= LOCK_RETRIES) return null;
+    sleepSync(LOCK_RETRY_DELAY_MS);
+  }
+}
 
 function main(): void {
   // 無限ループ防止の第1層（設計書 §4-3）。要約プロセスはこれを付けて spawn される。
@@ -28,7 +53,7 @@ function main(): void {
 
   const config = createConfigStore();
 
-  const lock = acquireLock(getLockDir());
+  const lock = acquireLockWithRetry(getLockDir());
   if (!lock) return; // 先行ワーカーが処理する
 
   try {

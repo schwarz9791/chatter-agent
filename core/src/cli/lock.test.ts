@@ -16,19 +16,20 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-/** 確実に死んでいる pid を作る（一度使って終了した子プロセスの pid は再利用まで空く） */
+/** 確実に死んでいる pid（PID_MAX を超えるので割り当てられない） */
 const DEAD_PID = 2 ** 22 - 1;
+
+const ownerPath = () => path.join(lockDir, "owner.json");
+const ownerToken = () => (JSON.parse(fs.readFileSync(ownerPath(), "utf-8")) as { token: string }).token;
 
 describe("acquireLock", () => {
   it("空の状態なら取れる", () => {
-    const lock = acquireLock(lockDir);
-    expect(lock).not.toBeNull();
+    expect(acquireLock(lockDir)).not.toBeNull();
     expect(fs.existsSync(lockDir)).toBe(true);
   });
 
   it("先行ワーカーがいれば取れない（後続は何もせず終了する）", () => {
-    const first = acquireLock(lockDir);
-    expect(first).not.toBeNull();
+    expect(acquireLock(lockDir)).not.toBeNull();
     expect(acquireLock(lockDir)).toBeNull();
   });
 
@@ -45,42 +46,63 @@ describe("acquireLock", () => {
     expect(fs.existsSync(lockDir)).toBe(false);
   });
 
-  it("解放後に別プロセスが取り直したロックを、古い Lock が消さない…わけではない点に注意", () => {
-    // release は「自分が消す」だけの実装。二重解放は防いでいるが、
-    // 解放済みの Lock を持ち回っても他人のロックは消さない（released フラグで打ち切る）
-    const first = acquireLock(lockDir);
-    first?.release();
-    const second = acquireLock(lockDir);
-    first?.release();
-    expect(fs.existsSync(lockDir)).toBe(true);
-    second?.release();
+  it("親ディレクトリが無くても作る", () => {
+    expect(acquireLock(path.join(dir, "a", "b", "speak.lock"))).not.toBeNull();
   });
 
-  it("親ディレクトリが無くても作る", () => {
-    const nested = path.join(dir, "a", "b", "speak.lock");
-    expect(acquireLock(nested)).not.toBeNull();
+  it("取得したプロセスの所有印を残す", () => {
+    acquireLock(lockDir, { pid: 4242, token: "tok-a" });
+    expect(JSON.parse(fs.readFileSync(ownerPath(), "utf-8"))).toEqual({ pid: 4242, token: "tok-a" });
+  });
+});
+
+describe("所有権（★ 奪われた側が他人のロックを消さないこと）", () => {
+  it("奪われた後に release しても、新しい保持者のロックを消さない", () => {
+    const evicted = acquireLock(lockDir, { token: "tok-old" });
+    expect(evicted).not.toBeNull();
+
+    // 別プロセスが放置ロックとして奪い、自分の印を書いた状態を作る
+    fs.writeFileSync(ownerPath(), JSON.stringify({ pid: process.pid, token: "tok-new" }));
+
+    evicted?.release();
+
+    expect(fs.existsSync(lockDir)).toBe(true);
+    expect(ownerToken()).toBe("tok-new");
+  });
+
+  it("自分の印が残っていれば消す", () => {
+    const lock = acquireLock(lockDir, { token: "tok-mine" });
+    lock?.release();
+    expect(fs.existsSync(lockDir)).toBe(false);
+  });
+
+  it("印が読めない（書けなかった）場合は消す", () => {
+    const lock = acquireLock(lockDir);
+    fs.rmSync(ownerPath());
+    lock?.release();
+    expect(fs.existsSync(lockDir)).toBe(false);
   });
 });
 
 describe("放置ロックの回収", () => {
-  it("プロセスが死んでいて十分に古ければ奪う", () => {
+  it("★ プロセスが死んでいれば、古くなるのを待たずに奪う", () => {
+    // 経過時間を先に見ていると、SIGKILL / SIGHUP のあと staleMs まるごと無言になる
     acquireLock(lockDir, { pid: DEAD_PID });
-    const later = Date.now() + 120_000;
-    expect(acquireLock(lockDir, { staleMs: 60_000, now: () => later })).not.toBeNull();
+    expect(acquireLock(lockDir, { staleMs: 60_000 })).not.toBeNull();
   });
 
-  it("十分に古くてもプロセスが生きていれば奪わない（要約中の長いワーカーを殺さない）", () => {
+  it("プロセスが生きていれば staleMs までは奪わない", () => {
+    acquireLock(lockDir, { pid: process.pid });
+    expect(acquireLock(lockDir, { staleMs: 60_000 })).toBeNull();
+  });
+
+  it("生きて見えても staleMs を超えたら奪う（pid 再利用への backstop）", () => {
     acquireLock(lockDir, { pid: process.pid });
     const later = Date.now() + 120_000;
-    expect(acquireLock(lockDir, { staleMs: 60_000, now: () => later })).toBeNull();
+    expect(acquireLock(lockDir, { staleMs: 60_000, now: () => later })).not.toBeNull();
   });
 
-  it("プロセスが死んでいても新しいロックは奪わない", () => {
-    acquireLock(lockDir, { pid: DEAD_PID });
-    expect(acquireLock(lockDir, { staleMs: 60_000 })).toBeNull();
-  });
-
-  it("pid ファイルが無い（作成途中の）ロックは、古い場合だけ奪う", () => {
+  it("印が無い（作成途中の）ロックは、古い場合だけ奪う", () => {
     fs.mkdirSync(lockDir, { recursive: true });
     expect(acquireLock(lockDir, { staleMs: 60_000 })).toBeNull();
 
@@ -88,10 +110,18 @@ describe("放置ロックの回収", () => {
     expect(acquireLock(lockDir, { staleMs: 60_000, now: () => later })).not.toBeNull();
   });
 
-  it("pid ファイルが壊れていても、古ければ奪う", () => {
+  it("印が壊れていても、古ければ奪う", () => {
     fs.mkdirSync(lockDir, { recursive: true });
-    fs.writeFileSync(path.join(lockDir, "pid"), "not-a-pid");
+    fs.writeFileSync(ownerPath(), "not-json");
     const later = Date.now() + 120_000;
     expect(acquireLock(lockDir, { staleMs: 60_000, now: () => later })).not.toBeNull();
+  });
+
+  it("奪った後は自分の印だけが残り、退避したディレクトリも片付いている", () => {
+    acquireLock(lockDir, { pid: DEAD_PID, token: "tok-dead" });
+    acquireLock(lockDir, { staleMs: 60_000, token: "tok-live" });
+
+    expect(ownerToken()).toBe("tok-live");
+    expect(fs.readdirSync(dir).filter((f) => f.includes("evicted"))).toEqual([]);
   });
 });

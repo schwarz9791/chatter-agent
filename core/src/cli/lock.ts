@@ -22,12 +22,32 @@ export interface AcquireLockOptions {
   /** テスト用 */
   now?: () => number;
   pid?: number;
+  /** 所有権の印。既定はプロセスごとに一意な値 */
+  token?: string;
 }
 
 const DEFAULT_STALE_MS = 60_000;
 
-function pidFilePath(lockDir: string): string {
-  return path.join(lockDir, "pid");
+interface Owner {
+  pid: number;
+  token: string;
+}
+
+function ownerFilePath(lockDir: string): string {
+  return path.join(lockDir, "owner.json");
+}
+
+function readOwner(lockDir: string): Owner | null {
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(ownerFilePath(lockDir), "utf-8"));
+    if (typeof parsed === "object" && parsed !== null) {
+      const { pid, token } = parsed as Partial<Owner>;
+      if (typeof pid === "number" && Number.isInteger(pid) && typeof token === "string") return { pid, token };
+    }
+  } catch {
+    // 作成途中 / 壊れている
+  }
+  return null;
 }
 
 /** そのプロセスが生きているか。権限が無くて確認できない場合は「生きている」に倒す */
@@ -43,25 +63,21 @@ function isProcessAlive(pid: number): boolean {
 /**
  * 放置されたロックか判定する。
  *
- * 「古い」だけでは足りない（要約などで長く走っているワーカーを殺してしまう）ので、
- * **プロセスが死んでいること**と**十分に古いこと**の両方を要求する。
- * pid が読めない（作成途中 / 壊れている）ロックは、古い場合にだけ奪う。
+ * ★ pid の生存確認を経過時間より**先に**行うこと。逆にすると、SIGKILL / SIGHUP / OOM で
+ *   死んだプロセスのロックが残ったとき、hook が起動する CLI が丸ごと staleMs のあいだ
+ *   無言で return し続ける（その間の発話がすべて遅延する）。
+ *
+ * 古さによる判定も残す。所有者が読めない（作成途中 / 壊れている）場合に加えて、
+ * pid が再利用されて別のプロセスが生きて見えるケースの backstop になる。
  */
 function isStale(lockDir: string, staleMs: number, now: number): boolean {
-  let age: number;
-  try {
-    age = now - fs.statSync(lockDir).mtimeMs;
-  } catch {
-    return false; // 消えていた。奪うまでもない
-  }
-  if (age < staleMs) return false;
+  const owner = readOwner(lockDir);
+  if (owner !== null && !isProcessAlive(owner.pid)) return true;
 
   try {
-    const pid = Number.parseInt(fs.readFileSync(pidFilePath(lockDir), "utf-8").trim(), 10);
-    if (!Number.isInteger(pid) || pid <= 0) return true;
-    return !isProcessAlive(pid);
+    return now - fs.statSync(lockDir).mtimeMs >= staleMs;
   } catch {
-    return true;
+    return false; // 消えていた。奪うまでもない
   }
 }
 
@@ -73,40 +89,59 @@ export function acquireLock(lockDir: string, options: AcquireLockOptions = {}): 
   const staleMs = options.staleMs ?? DEFAULT_STALE_MS;
   const now = options.now ?? Date.now;
   const pid = options.pid ?? process.pid;
+  const token = options.token ?? `${pid}-${process.hrtime.bigint()}`;
 
   fs.mkdirSync(path.dirname(lockDir), { recursive: true });
 
-  const tryCreate = (): boolean => {
+  const tryCreate = (): Lock | null => {
     try {
       fs.mkdirSync(lockDir);
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "EEXIST") return false;
+      if ((err as NodeJS.ErrnoException).code === "EEXIST") return null;
       throw err;
     }
-    // 取得後に置く。読めない pid は「作成途中」なので isStale が古さで判定する
+    // 取得後に置く。読めない owner は「作成途中」なので isStale が古さで判定する
     try {
-      fs.writeFileSync(pidFilePath(lockDir), `${pid}\n`);
+      fs.writeFileSync(ownerFilePath(lockDir), `${JSON.stringify({ pid, token })}\n`);
     } catch {
-      // pid が書けなくてもロック自体は有効
+      // owner が書けなくてもロック自体は有効
     }
-    return true;
+    return makeLock(lockDir, token);
   };
 
-  if (tryCreate()) return makeLock(lockDir);
+  const first = tryCreate();
+  if (first) return first;
 
   if (!isStale(lockDir, staleMs, now())) return null;
 
-  // 放置ロックを片付けて取り直す。ここで別プロセスに先を越されたら素直に諦める
-  fs.rmSync(lockDir, { recursive: true, force: true });
-  return tryCreate() ? makeLock(lockDir) : null;
+  // ★ 奪取は rename で行うこと。rmSync → mkdir の順にすると mkdir の原子性が無効になり、
+  //   2プロセスが同時に「放置ロックを消して作り直す」ことができてしまう
+  //   （後から来た側の rmSync が、先に取った側の**生きたロック**を消す）。
+  //   rename は成功するのが1プロセスだけなので、そこで勝者が決まる。
+  const evicted = `${lockDir}.evicted-${token}`;
+  try {
+    fs.renameSync(lockDir, evicted);
+  } catch {
+    // 別プロセスに先を越された。素直に諦める
+    return null;
+  }
+  fs.rmSync(evicted, { recursive: true, force: true });
+
+  return tryCreate();
 }
 
-function makeLock(lockDir: string): Lock {
+function makeLock(lockDir: string, token: string): Lock {
   let released = false;
   return {
     release() {
       if (released) return;
       released = true;
+
+      // ★ 所有権を確認してから消すこと。確認せずに消すと、放置ロックとして奪われた側が
+      //   終了時に**新しい保持者のロック**を消してしまう
+      const owner = readOwner(lockDir);
+      if (owner !== null && owner.token !== token) return;
+
       fs.rmSync(lockDir, { recursive: true, force: true });
     },
   };

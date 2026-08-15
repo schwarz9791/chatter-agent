@@ -24,6 +24,7 @@ export XDG_CONFIG_HOME="$ROOT"
 RUNTIME="$ROOT/chatter-agent"
 SPOOL="$RUNTIME/spool"
 LOG="$RUNTIME/speech.jsonl"
+QUEUE="$RUNTIME/speech"
 mkdir -p "$SPOOL"
 
 # MessageDisplay の実測ペイロード（設計書 §2-3）を1行組み立てて spool に追記し、CLI を起動する
@@ -117,5 +118,26 @@ node -e '
   check("spool は片付いている（final 済みのファイルが残っていない）",
     !fs.readdirSync(process.argv[2]).some((f) => f.startsWith("m-aaa") || f.startsWith("m-ccc") || f.startsWith("prompt-")));
 
+  // ★ ⑥ の並列起動チェック。ロックが破れたときの失敗モードは、speech.jsonl の重複行
+  //   （見える）から speech/<seq>.json の上書き（無言で消える）に移った。$LOG と $SPOOL
+  //   だけでは後者を検出できないので、配信キューも見る
+  const queueDir = process.argv[3];
+  const queueFiles = fs.readdirSync(queueDir);
+  const queueJson = queueFiles.filter((f) => f.endsWith(".json"));
+  const queueSeqs = queueJson.map((f) => Number(f.slice(0, -".json".length))).sort((a, b) => a - b);
+
+  check("speech.jsonl と配信キューの seq 集合が一致する（キュー entry が上書きで潰れていない）",
+    JSON.stringify(queueSeqs) === JSON.stringify([...seqs].sort((a, b) => a - b)));
+
+  const seqMismatch = queueJson.some((f) => {
+    const fileSeq = Number(f.slice(0, -".json".length));
+    const payload = JSON.parse(fs.readFileSync(`${queueDir}/${f}`, "utf8"));
+    return payload.seq !== fileSeq;
+  });
+  check("各キューファイルの payload の seq がファイル名と食い違っていない", !seqMismatch);
+
+  check(".json.tmp が残っていない（tmp + rename が途中で終わっていない）",
+    !queueFiles.some((f) => f.endsWith(".json.tmp")));
+
   process.exit(failed === 0 ? 0 : 1);
-' "$LOG" "$SPOOL"
+' "$LOG" "$SPOOL" "$QUEUE"

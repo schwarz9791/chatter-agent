@@ -135,8 +135,9 @@ try {
   show("② 切断中の分を ?since= で埋められる");
   await client.close();
   speak("m-2", 0, "切断中の一文目。切断中の二文目。", true);
-  await sleep(200);
 
+  // ★ ここで待たないこと。watcher が消化する前に再接続すると、backfill と
+  //   その直後のブロードキャストで二重配信される窓に当たる。待つとこの窓を踏めない
   const rejoined = await connect(`/?since=${client.seqs().at(-1)}`);
   await rejoined.settle();
   console.log(rejoined.received.map((r) => `seq=${r.seq} ${JSON.stringify(r.text)}`).join("\n"));
@@ -145,7 +146,11 @@ try {
     JSON.stringify(rejoined.texts()) === JSON.stringify(["切断中の一文目。", "切断中の二文目。"]),
     JSON.stringify(rejoined.texts()),
   );
-  check("重複して送られない", new Set(rejoined.seqs()).size === rejoined.seqs().length);
+  check(
+    "★ watcher 未消化のまま再接続しても二重配信されない",
+    new Set(rejoined.seqs()).size === rejoined.seqs().length,
+    rejoined.seqs().join(","),
+  );
 
   show("③ 追いついているクライアントには何も送り直さない");
   const uptodate = await connect(`/?since=${rejoined.seqs().at(-1)}`);
@@ -192,7 +197,15 @@ try {
     burst.join(","),
   );
   check("重複配信は無い", new Set(burst).size === burst.length, burst.join(","));
-  check("欠落は seq の飛びとして見える（クライアントが検出できる）", dropped >= 0);
+
+  // 欠落したなら seq が飛んでいるはずで、欠落していないなら連続しているはず。
+  // どちらであってもクライアントは受け取った seq だけで判断できる
+  const contiguous = burst.every((s, i, a) => i === 0 || s === a[i - 1] + 1);
+  check(
+    "欠落の有無が seq の連続性と一致する（クライアントが検出できる）",
+    dropped > 0 ? !contiguous : contiguous,
+    `dropped=${dropped} seqs=${burst.join(",")}`,
+  );
 
   show("結果");
   if (failures.length > 0) {

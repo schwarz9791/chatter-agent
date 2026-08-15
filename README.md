@@ -44,15 +44,17 @@ chatter-mascot(-xr)    TTS → 再生 → VRM描画
 
 ## 現在の状態
 
-**開発中。骨格を作り始めた段階で、実装コードはまだありません。**
+**開発中。`core/` が動く状態になりました。**
 
 | | 状態 |
 |---|---|
-| `plugin/` | 未作成 |
-| `core/` | 雛形のみ（ツールチェーン設定） |
+| `plugin/` | 未作成（バンドル済み CLI `plugin/bin/` だけ先に置いてあります） |
+| `core/` | CLI + WebSocket サーバーとも実装済み。AI要約（既定OFF）のみ未着手 |
 | `apps/` | 未作成 |
 
 実装フェーズは **A**（plugin + CLI で `speech.jsonl` が育つ）→ **B**（WebSocket 配信）→ **C**（Unity + UniVRM）。
+
+Phase A / B は core 側だけ完了しています。**発言を実際に読み上げるには、まだ `plugin/`（bash hook）が要ります。**
 
 ## 開発
 
@@ -63,6 +65,10 @@ npm run typecheck
 npm run lint
 npm run format
 npm run test:run
+npm run build
+
+npm run verify:phase-a   # spool → speech.jsonl
+npm run verify:phase-b   # speech.jsonl → WebSocket
 ```
 
 設計方針と作業規約は [`CLAUDE.md`](./CLAUDE.md) と [`docs/`](./docs) にあります。

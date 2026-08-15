@@ -21,18 +21,22 @@ hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公�
 
 ## 現在の状態
 
-**骨格を作り始めた段階。実装コードはまだ1行も無い。**
+**`core/` は Phase A + B が実装済み。次は `plugin/`（bash hook）。**
 
 | ディレクトリ | 内容 | 状態 |
 |---|---|---|
-| `plugin/` | Claude Code プラグイン（bash hook） | 未作成 |
-| `core/` | `chatter-agent-core`（CLI + WebSocket サーバー） | **雛形のみ。** ツールチェーン設定だけで `src/` は空 |
+| `plugin/` | Claude Code プラグイン（bash hook） | **未作成。** `bin/chatter-agent-speak.mjs`（バンドル済み CLI）だけ置いてある |
+| `core/` | `chatter-agent-core`（CLI + WebSocket サーバー） | **実装済み。** `summarizer/`（AI要約、既定OFF）だけ未着手 |
 | `apps/chatter-mascot/` | Electron デスクトップ版 | 未作成 |
 | `apps/chatter-mascot-xr/` | Unity / Android XR | 未作成 |
 | `docs/` | 作業規約 | core / plugin / origin の3本 |
-| `.github/workflows/` | CI（typecheck / lint / test） | 稼働中 |
+| `.github/workflows/` | CI（typecheck / lint / format / bundle / test） | 稼働中 |
 
 実装フェーズは **A**（plugin + CLI で `speech.jsonl` が正しく育つ）→ **B**（WebSocket 配信）→ **C**（Unity + UniVRM）。
+
+**Phase A / B は core 側だけ完了している。** `npm run verify:phase-a` / `verify:phase-b` で spool を手で置いた確認までは通っているが、
+**受け入れ基準の「ターミナル表示と体感で同時」は実機で未確認。** ここは `plugin/` を作らないと測れない。
+`plugin/` 着手時にまず `${CLAUDE_PLUGIN_ROOT}` の実体を実測すること（→ [`docs/plugin.md`](./docs/plugin.md)）。
 
 ## データフロー
 
@@ -98,6 +102,8 @@ jsonl の `timestamp` は**メッセージの生成時刻であって書き込�
 
 ## 開発コマンド
 
+**Node は 24.11 以上**（tsdown の依存が要求する）。ルートの `mise.toml` で `24.19.0` に固定してある。
+
 ```bash
 cd core
 npm install
@@ -105,9 +111,15 @@ npm run typecheck
 npm run lint
 npm run format
 npm run test:run
+npm run build            # CLI → plugin/bin/、server → dist/
+
+npm run verify:phase-a   # spool → speech.jsonl（spool を手で置いて確認）
+npm run verify:phase-b   # speech.jsonl → WebSocket（実サーバーを起動して確認）
+npm run start:server
 ```
 
-**`build` はまだ無い。** バンドル対象（`src/cli/`）が未作成のため、`tsdown.config.ts` ごと Phase A で作る。
+**`plugin/bin/chatter-agent-speak.mjs` は git にコミットする成果物。** ソースを直したら
+`npm run build` してコミットすること（CI の `bundle` ジョブが一致を検証する）。
 → バンドルの制約は [`docs/core.md`](./docs/core.md)
 
 ## タスク完了時のチェックリスト
@@ -120,12 +132,14 @@ npm run test:run
 - [ ] `npm run format` — フォーマットが適用されていること
 - [ ] `npm run test:run` — 全てのテストが通ること
 
-いずれも `core/` で実行する。`src/` が空のうちは4本とも素通りするだけなので、通ったことを実装の裏付けにしないこと。
+いずれも `core/` で実行する。`src/cli/` を触ったら **`npm run build` してバンドルもコミットする**こと。
 
 ## ライセンス
 
 Apache-2.0。cc-mascot（Apache-2.0, Copyright 2026 kazakago）の派生物。
 
-テキスト整形・感情判定・AI要約は cc-mascot から**初回に一度だけ移植**し、以後はこのリポジトリのコードとして改変する。上流に追従する義務は負わないが、**帰属表示と改変の告知は Apache-2.0 の義務**として維持する。フォーク点・対象ファイル・ヘッダの書式は [`docs/origin.md`](./docs/origin.md)。
+テキスト整形（`text/textFilter.ts`）と感情判定（`emotion/ruleBasedEmotionClassifier.ts`）は cc-mascot から**初回に一度だけ移植**し、以後はこのリポジトリのコードとして改変する。上流に追従する義務は負わないが、**帰属表示と改変の告知は Apache-2.0 の義務**として維持する。フォーク点・対象ファイル・ヘッダの書式は [`docs/origin.md`](./docs/origin.md)。
+
+**「cc-mascot のツリーにあった」＝「cc-mascot の著作物」ではない。** 応答待ち通知の整形（`prompt/`）と AI要約（`summarizer/`、未着手）は、cc-mascot の作業ブランチ上で書いた**自分の著作物**で、上流の `main` には存在しない。kazakago の帰属を付けないこと。判定手順は [`docs/origin.md`](./docs/origin.md)。
 
 cc-mascot 由来のコードを増減させたら `NOTICE` の記述が実態と合っているか確認すること。

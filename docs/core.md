@@ -221,6 +221,12 @@ config に載せない環境変数:
 - `CHATTER_AGENT_CONFIG` — `config.json` の場所そのもの
 - `CHATTER_AGENT_DISABLE` — hook と CLI を無効化（無限ループ防止の第1層）
 - `CHATTER_AGENT_CLI` — 開発時にバンドルを差し替える
+- `CHATTER_AGENT_HOOK_DEBUG` — hook が受けた payload を `{root}/hook-debug.log` に落とす（hook 側だけ。→ [`plugin.md`](./plugin.md)）
+
+`CHATTER_AGENT_DISABLE` は `config.ts` の `isSpeakDisabled()` が判定する。**`1/true/yes/on` で無効、
+それ以外（未設定・空・`0/false/no/off`・未知の値）は有効**で、`plugin/scripts/_lib.sh` の
+`chatter_disabled` と同じトークン集合。以前は presence 判定（空文字以外はすべて truthy）だったため、
+`CHATTER_AGENT_DISABLE=0` を「無効化の解除」のつもりで書くと逆に全発話が黙って止まっていた（[#4](https://github.com/schwarz9791/chatter-agent/issues/4)）。
 
 ## 実装で設計書から動いたこと
 
@@ -239,7 +245,18 @@ config に載せない環境変数:
 
 加えて、設計書に無い挙動を足した。
 
-- **保留している最後の文を、後続イベントの到着で先に流す。** `final:true` を待つと 34〜80 秒遅れるが、
+- **行が閉じていれば最後の文を保留しない。** `MessageDisplay` の delta は
+  **最後の flush を除いて必ず行単位**で届き（Claude Code のスキーマ記述。実測でも全て改行終わり）、
+  `splitIntoSentences` は改行でも分割する。つまり蓄積テキストが行として閉じていれば、最後の文はもう伸びない。
+  → `messageAssembler.ts` の `endsAtLineBoundary`
+
+  **これが受け入れ基準を決めた。** 入れる前は段落ごとに最後の1文だけが次の delta を待っており、
+  実測で 1.4〜5.7 秒遅れていた。1文しかない段落は丸ごと遅れる。入れた後は delta 到着から
+  `speech.jsonl` まで**約 50ms**。
+
+  句点（`。！？`）で終わっているだけでは外さない。`truncateAtUnstableTail` が行の途中で切ると
+  句点止まりになりうるが、その先は次の delta で伸びる
+- **保留している最後の文を、後続イベントの到着で先に流す。** 上の判定で外れなかった場合の受け皿。
   後続イベントが来た時点でそのメッセージはもう伸びない。順序を保ったまま遅延だけを消せる。
   ただし**同一セッションの**後続に限る。spool はグローバルに1ディレクトリで、`MessageDisplay` は
   matcher 非対応で全セッションで発火するため、限定しないと Claude Code を2枚開いただけで
@@ -284,9 +301,8 @@ config に載せない環境変数:
 
 | | |
 |---|---|
-| [#2](https://github.com/schwarz9791/chatter-agent/issues/2) | テキスト整形規則の見直し（上記） |
+| [#2](https://github.com/schwarz9791/chatter-agent/issues/2) | テキスト整形規則の見直し（上記）。**実機で強調記号を踏んだ** — `**強調。**` が `**強調。` と `** 続き` に割れて読み上げられる |
 | [#3](https://github.com/schwarz9791/chatter-agent/issues/3) | WebSocket の**認証**。Origin 検査は入ったが、LAN 上の他端末は素通り |
-| [#4](https://github.com/schwarz9791/chatter-agent/issues/4) | `CHATTER_AGENT_DISABLE` の真偽値解釈を bash hook と揃える |
-| [#5](https://github.com/schwarz9791/chatter-agent/issues/5) | Linux で `birthtimeNs` が当てにならない（spool の命名で解く） |
+| [#5](https://github.com/schwarz9791/chatter-agent/issues/5) | Linux で `birthtimeNs` が当てにならない（spool の命名で解く）。**macOS だけを対象にしている間は実害なし** |
 | [#6](https://github.com/schwarz9791/chatter-agent/issues/6) | `messageAssembler` の O(N²) 再パース |
 | [#7](https://github.com/schwarz9791/chatter-agent/issues/7) | `cleanOrphans` の追加走査 |

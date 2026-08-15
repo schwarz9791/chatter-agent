@@ -14,7 +14,17 @@ spool より先（記録・配信キュー・WebSocket）は [`protocol.md`](./p
 
 ### Node を起動しない
 
-`message_id` は `grep` / `sed` で抜く。Node の起動コスト（~50ms〜）を毎 delta 払うと、`MessageDisplay` の10秒タイムアウトと UI ブロックのリスクの両方に近づく。**重い処理は CLI 側でやる。**
+Node の起動コスト（~50ms〜）を毎 delta 払うと、`MessageDisplay` の10秒タイムアウトと UI ブロックのリスクの両方に近づく。**重い処理は CLI 側でやる。**
+
+判定も抽出も**bash のパラメータ展開だけ**で書いてある（`scripts/_lib.sh`）。CLI を起こす直前まで fork が無い。
+
+> ★ **`message_id` の抽出に `sed` を使わないこと。** `sed 's/.*"message_id"…'` は貪欲マッチで
+> **最後の出現**を拾うので、delta 本文に同じキー名が出てくると別の値を掴み、spool のファイルが割れる。
+> **このリポジトリでは実際に起きる**（`message_id` の話を書いた瞬間に踏む）。
+>
+> `${var#*'"message_id":"'}` は最短一致なので常にトップレベルの値を取る。JSON の文字列の中では
+> `"` が必ず `\"` にエスケープされるため、`"key":"` という並びは本文側には現れない。
+> 同じ理屈で `agent_id` の有無も `case` で判定できる。
 
 ### `MessageDisplay` の制約
 
@@ -22,9 +32,31 @@ spool より先（記録・配信キュー・WebSocket）は [`protocol.md`](./p
 |---|---|
 | matcher | **非対応。毎回必ず発火する** |
 | タイムアウト | **10秒**（他の hook は600秒）。UI 表示経路に同期している可能性がある |
-| 出力 | **read-only。** exit 2 でも "Original text is displayed; stderr ignored"、JSON 出力も無視される |
+| 出力 | **完全な read-only ではない。** hookSpecificOutput に `text`（"Text displayed in place of the delta"）があり、**画面の delta を差し替えられる** |
 
 matcher が効かない＝**全セッションに影響する**ので、無効化手段（`CHATTER_AGENT_DISABLE`）を必ず用意すること。
+
+出力が差し替えに使われる以上、**デタッチした CLI の stdout が hook の stdout に混ざってはいけない**。
+`nohup … >/dev/null 2>&1 </dev/null &` で3つとも切る。stdin まで切るのは、hook の fd を握ったままの子が
+残ると Claude Code が EOF を待って止まりうるため。`setsid` は macOS に無いので使わない。
+
+### delta の届き方（2.1.233 のスキーマ記述 + 実測）
+
+| フィールド | 仕様 |
+|---|---|
+| `index` | 0 始まり。flush ごとに1つ増える |
+| `final` | 最後の flush だけが真。**1メッセージにちょうど1回** |
+| `delta` | **最後の flush を除いて必ず行単位**。final の delta は、メッセージが改行で終わると**空になる** |
+
+ここから2つの帰結がある。
+
+1. **`delta` が空でも spool に書くこと。** `final:true` はファイルの削除と最後の1文の flush を駆動する
+   唯一の合図で、空だからと捨てると両方が止まる
+2. **非 final の delta は行として閉じている** → 蓄積テキストが行境界で終わっていれば、最後の文はもう伸びない。
+   `messageAssembler` はこれを使って保留を外している（→ [`core.md`](./core.md)）
+
+実測（Claude Code 2.1.233 / 段落4つのメッセージ）では、非 final の delta は**すべて改行で終わって**いて、
+到着間隔は 1.4〜5.7 秒だった。**thinking では発火しない**（thinking を挟んだ delta が1件も観測されなかった）。
 
 ## 無限ループ防止
 
@@ -60,8 +92,24 @@ cc-mascot はログのパスをエンコードして除外していたが、**`s
 > （`<ns>-<message_id>.jsonl` など）ことになり、**この命名表と CLI の両方を同時に変える**必要がある。
 > → [#5](https://github.com/schwarz9791/chatter-agent/issues/5)
 
-hook 側で `prompt-<…>.json` を書くときは、**tmp + rename** にするのが望ましい。ワーカーは読めない
-payload を消さずに次のドレインへ回すので書きかけを掴んでも失われないが、余計な往復が減る。
+hook は `prompt-<…>.json` を **tmp + rename** で置いている。ワーカーは読めない payload を消さずに
+次のドレインへ回すので書きかけを掴んでも失われないが、余計な往復が減る。
+**tmp の名前は `*.json.tmp` にすること。** `*.tmp.json` だと prompt として拾われる。
+
+`<…>` は `<epoch>-<pid>-<random>`。順序はファイル名ではなく birthtime で決まるので、
+名前に求められるのは一意性だけ（時刻は spool を覗いたときに読めるように入れてある）。
+
+**`message_id` はファイル名になるので、hook 側でサニタイズすること。** core は
+`path.join(spoolDir, fileName)` するだけで検査しない。`[A-Za-z0-9_-]` 以外を含む値は捨てる
+（`.` を弾いているので `..` も `*.progress.json` との衝突も同時に塞がる）。
+
+### spool のパスに条件分岐を足さない
+
+`${XDG_CONFIG_HOME:-$HOME/.config}/chatter-agent/spool` を一行で組む。これは
+`core/src/core/paths.ts` の冒頭が決めている制約で、分岐を足すと bash 側と Node 側が静かにズレる。
+
+その帰結として、**hook は Windows の `%APPDATA%` を見ていない**（core 側は見る）。
+当面の対象が macOS なので、ズレる可能性より一行で書けることを取っている。
 
 ## hooks.json の3種
 
@@ -71,41 +119,83 @@ payload を消さずに次のドレインへ回すので書きかけを掴んで
 | `PreToolUse` | `AskUserQuestion\|ExitPlanMode` | `scripts/on-prompt.sh` |
 | `Notification` | `permission_prompt` | `scripts/on-prompt.sh` |
 
+## `${CLAUDE_PLUGIN_ROOT}` の実体（実測済み）
+
+`/plugin install` は、プラグインディレクトリを
+`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` へ **完全コピー**する（symlink ではない）。
+`diff -r plugin <cache>` で差分なし、`bin/` も **実行権限ごと**入る。
+
+→ **バンドル済み CLI を `plugin/bin/` に同梱する前提（→ [`core.md`](./core.md)）は成立している。**
+`core/dist` は見えないので、CLI の解決経路は `${CHATTER_AGENT_CLI:-$PLUGIN_ROOT/bin/chatter-agent-speak.mjs}`
+の1本だけにする。
+
+hook script は `${CLAUDE_PLUGIN_ROOT}` を**環境変数としては使っていない**（script 内で見えるか未確認のため）。
+`${BASH_SOURCE[0]%/*}/..` で自分の位置から辿る。`hooks.json` 側の `${CLAUDE_PLUGIN_ROOT}` は
+Claude Code が置換するので、そちらは確実に効く。
+
 ## 検証時の落とし穴
 
 ### 設定変更はセッション再起動が必要
 
 プロジェクトローカルの `.claude/settings.local.json` を書いても、**そのセッション中は反映されない**。対照として `PostToolUse` を仕掛けても発火しないことで確認済み。書き換えたら必ずセッションを立て直す。
 
-### 実装の最初のステップ
+### キャッシュはバージョン単位。同じ版のまま直しても反映されない
 
-**`/plugin install` 後に `${CLAUDE_PLUGIN_ROOT}` が実際に何を指すかを実測する。**
+コピーはインストール時のスナップショットで、パスに `version` が入る。ソースを直しても
+`claude plugin update` は「already at the latest version」と言って**何もしない**。
+
+開発中は次のどちらかを使う。
 
 ```bash
-# ダミーのフックで
-echo "$CLAUDE_PLUGIN_ROOT" >> /tmp/x
+# 版を上げずに入れ直す（開発中はこれ）
+claude plugin uninstall chatter-agent@chatter-agent --scope local
+claude plugin install   chatter-agent@chatter-agent --scope local -y
+
+# CLI だけ差し替えたいなら（hook script の変更は反映されない）
+export CHATTER_AGENT_CLI=<repo>/plugin/bin/chatter-agent-speak.mjs
 ```
 
-ここが想定と違うと、バンドル済み CLI を `plugin/bin/` に同梱する前提（→ [`core.md`](./core.md)）が崩れ、**配布方法から見直しになる**。
+**`bin/` の差し替えはセッション再起動が要らない。** hook が毎回 spawn し直すため。
+`scripts/` と `hooks.json` を直したときだけ再起動する。
+
+### 実機で測るときは診断ログを点ける
+
+`CHATTER_AGENT_HOOK_DEBUG` を有効にすると、hook が受けた payload を到着時刻つきで
+`{root}/hook-debug.log` に落とす。hook は stdout / stderr を握り潰されるので、
+「発火したか」「payload に何が入っていたか」を見る窓はここしかない。
+
+**既定 OFF。** 毎 delta で `perl`（ミリ秒の取得）を起動するうえ、**会話の本文がそのまま残る**。
+測り終えたら切ること。
 
 ## 未検証事項
 
-推測で埋めず、実装時に潰すもの。詳細は `_workspace/chatter-agent-design.md` §10。
+推測で埋めず、潰すもの。詳細は `_workspace/chatter-agent-design.md` §10。
 
-- `MessageDisplay` が UI をブロックするか（10秒タイムアウトの意味）
-- **thinking / tool_use の表示でも発火するか** — 実測では text のみ観測。**thinking を読み上げてしまうと事故**
-- サブエージェントの発言で発火するか（`agent_id` が入るか）
-- delta 間隔の下限（実測は 0.5〜3.5秒。もっと速くなると bash 起動が積み上がる）
-- **bash で `message_id` を安定して抜けるか** — spool のファイル分割がこれに依存する。抜けなかった場合は単一 spool + 位置管理に戻す
+- **サブエージェントの発言で発火するか（`agent_id` が入るか）** — 未観測。
+  hook は `agent_id` を持つ payload を捨てるので、発火してもしなくても挙動は正しい
+- delta 間隔の下限（実測は 1.4〜5.7 秒。もっと速くなると bash 起動が積み上がる）
+
+### 潰れたもの
+
+| 項目 | 結果 |
+|---|---|
+| `${CLAUDE_PLUGIN_ROOT}` の実体 | キャッシュへの完全コピー。`bin/` も入る（上記） |
+| thinking / tool_use でも発火するか | **発火しない。** 段落4つのメッセージで thinking を挟んでも text の delta のみ |
+| `MessageDisplay` が UI をブロックするか | 体感なし。hook は数 ms で返り、delta 到着から `speech.jsonl` まで **約 50ms** |
+| bash で `message_id` を安定して抜けるか | 抜ける。ただし `sed` の貪欲マッチは不可（上記） |
+| `final:true` の 34〜80 秒遅延 | **2.1.233 では再現せず。** 短いメッセージは `index:0` / `final:true` の単一 flush で届き、長いメッセージでも最終 flush は直前の delta から 5.7 秒だった |
 
 ## 現在の状態
 
-**hook script（`scripts/` / `hooks.json` / `.claude-plugin/`）は未作成。** 作成したらルート `CLAUDE.md` の状態表を更新すること。
-
-`plugin/` には配布物だけが先に入っている。
+**実装済み。** 実機（Claude Code 2.1.233 / macOS）で Phase A の受け入れ基準を満たしている。
 
 ```
 plugin/
+├── .claude-plugin/plugin.json    マニフェスト
+├── hooks/hooks.json              MessageDisplay / PreToolUse / Notification
+├── scripts/_lib.sh               共通処理（fork ゼロ）
+├── scripts/on-message.sh         MessageDisplay
+├── scripts/on-prompt.sh          PreToolUse / Notification
 ├── bin/chatter-agent-speak.mjs   バンドル済み CLI（core/ から生成してコミットする）
 ├── LICENSE                       Apache-2.0 全文
 └── NOTICE                        帰属表示
@@ -117,3 +207,21 @@ plugin/
 （→ [`core.md`](./core.md)）。CI がこの3点を検証する。
 
 **`bin/` の中身を手で編集しないこと。** `core/` で `npm run build` して生成する。
+
+リポジトリルートの `.claude-plugin/marketplace.json` が `"source": "./plugin"` でここを指している。
+
+## 検証
+
+`npm run verify:phase-a`（CI の `verify` ジョブでも回る）は、**payload を実際の hook の stdin に流す**。
+手で spool を組むと「hook が spool に正しい形で置けるか」だけが検証の外に残り、そこが一番壊れやすい。
+
+hook 側のガードとして見ているもの:
+
+- delta 本文の `"message_id"` に引っ張られない（貪欲マッチの回帰）
+- `agent_id` 付きの payload を捨てる
+- `message_id` が取れない / ファイル名に使えない値を捨てる
+- `CHATTER_AGENT_DISABLE=1` で積まない、`=0` では黙らない
+- `final:true` の `delta` が空でも保留中の最終文が出る
+
+検証中は `CHATTER_AGENT_CLI` を存在しないパスに向けて**デタッチ起動を止めている**。
+`nohup` で走らせたままだと CLI がいつドレインしたか分からず、検証が非決定的になる。

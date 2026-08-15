@@ -27,5 +27,6 @@ Portions of this product are derived from that work:
   - 発話メッセージの配送を Electron IPC から、記録（speech.jsonl）と配信キュー
     （speech/<seq>.json）+ WebSocket に置き換えた。
   - 設定の永続化を electron-store から JSON ファイルに置き換えた。
-  - VRM の描画・音声合成・リップシンクを担うレンダラー側は流用せず、
-    Android XR アプリ（および将来の Electron アプリ）として作り直している。
+  - VRM の描画・音声合成・リップシンクを担うレンダラー側は移植していない。
+    表示側のクライアントアプリ（Electron デスクトップ版 / Android XR 版）
+    として分離する構成に作り直す。

@@ -44,6 +44,17 @@ function writeMessage(messageId: string, payloads: unknown[]): string {
   return filePath;
 }
 
+/**
+ * 到着順のテストで、ファイルの作成時刻を確実にずらす。
+ *
+ * 実装はナノ秒まで見るので通常はずれるが、タイムスタンプの粒度が粗いファイルシステムでも
+ * 落ちないよう、明示的に間隔を空ける。作成順そのものを検証したいので、
+ * birthtime を後から書き換える手は使えない（utimes は mtime しか動かせない）。
+ */
+function tick(ms = 2): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 function setBirthtime(filePath: string, ms: number): void {
   // birthtime は直接いじれないので、mtime を落として fallback 経路も含めて順序を作る。
   // macOS/APFS では作成順がそのまま birthtime になるため、テストは作成順で担保する。
@@ -91,8 +102,12 @@ describe("scanSpool", () => {
   });
 
   it("到着順（作成順）に並ぶ", () => {
+    // 名前順に並べると first → prompt-third → second になるので、
+    // 作成順で並んでいることがこの並びで分かる
     writeMessage("first", [delta(0, "あ。")]);
+    tick();
     writeMessage("second", [delta(0, "い。")]);
+    tick();
     fs.writeFileSync(path.join(spoolDir, "prompt-third.json"), "{}");
 
     expect(scanSpool(spoolDir).map((e) => path.basename(e.filePath))).toEqual([
@@ -106,6 +121,7 @@ describe("scanSpool", () => {
     // ★ mtime で並べるとここが壊れる。final:true は 34〜80 秒遅れて届くため、
     //   先行メッセージの mtime が後発より新しくなるのが普通に起きる
     const first = writeMessage("first", [delta(0, "あ。")]);
+    tick();
     writeMessage("second", [delta(0, "い。")]);
 
     fs.appendFileSync(first, JSON.stringify(delta(1, "う。", true)) + "\n");

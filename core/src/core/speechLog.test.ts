@@ -121,6 +121,17 @@ describe("seq の state 整合", () => {
     expect(readLines().map((r) => r.seq)).toEqual([1, 100]);
   });
 
+  it("★ state の nextSeq が安全な整数の範囲を超えていたら採番に使わない", () => {
+    // Number.isInteger(1e300) は true になるので、isSafeInteger で弾かないと
+    // 壊れた（あるいは手で編集された）state の値がそのまま採番に使われる
+    log().append([entry("あ。")]);
+    fs.writeFileSync(statePath, JSON.stringify({ nextSeq: 1e300 }));
+
+    const records = log().append([entry("い。")]);
+    // 1e300 を採用せず、ログ末尾から復旧した 2 になる
+    expect(records[0]?.seq).toBe(2);
+  });
+
   it("ログ末尾が途中で切れていても、その手前の行から拾う", () => {
     log().append([entry("あ。"), entry("い。")]);
     fs.appendFileSync(logPath, '{"seq":3,"ts":"2026'); // 追記が途中で切れた状態

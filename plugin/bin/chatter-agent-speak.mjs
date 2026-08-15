@@ -300,6 +300,28 @@ function createConfigStore(deps = {}) {
 }
 
 //#endregion
+//#region src/core/atomicWrite.ts
+/**
+* tmp を書いてから rename する原子書き込み。
+*
+* ★ 素の `writeFileSync` は対象を O_TRUNC してから書くので、書き込みの途中でプロセスが
+*   落ちると、読み手には空バイト・あるいは書きかけのバイト列が見える窓ができる。
+*   同じディレクトリに `.tmp` を書いてから rename すれば、POSIX の rename はファイル
+*   システム内で原子的なので、読み手には「書く前」か「書き終わった後」の2状態しか
+*   見えない。
+*
+* 何が壊れるかは呼び出し側ごとに違う（配信キューの entry か、記録の seq state か、
+* 応答待ちの重複抑制 state か、spool の進捗サイドカーか）。ここは機構だけを持ち、
+* 具体的な帰結は各呼び出し側のコメントに残す。
+*/
+const TMP_SUFFIX$1 = ".tmp";
+function writeFileAtomic(filePath, data) {
+	const tmp = `${filePath}${TMP_SUFFIX$1}`;
+	fs.writeFileSync(tmp, data);
+	fs.renameSync(tmp, filePath);
+}
+
+//#endregion
 //#region src/core/speechLog.ts
 /**
 * `speech.jsonl` への追記・ローテート・`seq` 採番。
@@ -337,7 +359,7 @@ function readLastSeq(filePath) {
 				const parsed = JSON.parse(line);
 				if (typeof parsed === "object" && parsed !== null) {
 					const seq = parsed.seq;
-					if (typeof seq === "number" && Number.isInteger(seq)) return seq;
+					if (typeof seq === "number" && Number.isSafeInteger(seq)) return seq;
 				}
 			} catch {}
 		}
@@ -351,15 +373,13 @@ function readStateNextSeq(statePath) {
 		const parsed = JSON.parse(fs.readFileSync(statePath, "utf-8"));
 		if (typeof parsed === "object" && parsed !== null) {
 			const next = parsed.nextSeq;
-			if (typeof next === "number" && Number.isInteger(next) && next >= 1) return next;
+			if (typeof next === "number" && Number.isSafeInteger(next) && next >= 1) return next;
 		}
 	} catch {}
 	return 1;
 }
 function writeStateNextSeq(statePath, nextSeq) {
-	const tmp = `${statePath}.tmp`;
-	fs.writeFileSync(tmp, `${JSON.stringify({ nextSeq })}\n`);
-	fs.renameSync(tmp, statePath);
+	writeFileAtomic(statePath, `${JSON.stringify({ nextSeq })}\n`);
 }
 function createSpeechLog(deps) {
 	const { logPath, statePath, maxBytes } = deps;
@@ -465,6 +485,12 @@ function createSpeechLog(deps) {
 *   **誰も tail しなくなるので、記録側のローテートの正しさも要求されなくなる。**
 *
 * `spool/` と同じ形。あちらは hook が書いて CLI が消し、こちらは CLI が書いて server が消す。
+*
+* ★ `list()` と `read()` に分けてあるのは、配信済みの entry を毎回全件 readFileSync
+*   させないため。server は 100ms ごとにポーリングするが、`seq <= sentUpTo` の絞り込みは
+*   呼び出し側で後から走るので、ファイル名の列挙だけで済む問い合わせと、実際に配信する
+*   1件だけの読み取りを分けないと、マスコットが繋がっていない間（ack が来ず trim が
+*   上限に張り付く）も毎秒何十回と全件を読み直すことになる。
 */
 /** ファイル名の桁数。`ls` で並べたときに順序が見えるよう固定幅にする */
 const SEQ_DIGITS = 12;
@@ -516,30 +542,39 @@ function createSpeechQueue(queueDir) {
 	}
 	return {
 		enqueue(records) {
+			let written = 0;
 			for (const record of records) {
 				const target = path.join(queueDir, fileNameFor(record.seq));
-				const tmp = `${target}${TMP_SUFFIX}`;
-				fs.writeFileSync(tmp, `${JSON.stringify(record)}\n`);
-				fs.renameSync(tmp, target);
-			}
-		},
-		readAll() {
-			const entries = [];
-			for (const { seq, fileName } of listSeqs()) {
-				const filePath = path.join(queueDir, fileName);
-				let line;
 				try {
-					line = fs.readFileSync(filePath, "utf-8").trim();
-				} catch {
-					continue;
+					writeFileAtomic(target, `${JSON.stringify(record)}\n`);
+					written++;
+				} catch (err) {
+					console.error(`[SpeechQueue] seq=${record.seq} の書き込みに失敗しました:`, err);
 				}
-				if (line) entries.push({
-					seq,
-					line,
-					filePath
-				});
 			}
-			return entries;
+			return written;
+		},
+		list() {
+			return listSeqs().map(({ seq }) => seq);
+		},
+		read(seq) {
+			const filePath = path.join(queueDir, fileNameFor(seq));
+			let line;
+			try {
+				line = fs.readFileSync(filePath, "utf-8").trim();
+			} catch {
+				return null;
+			}
+			if (!line) return null;
+			let parsed;
+			try {
+				parsed = JSON.parse(line);
+			} catch {
+				return null;
+			}
+			if (typeof parsed !== "object" || parsed === null) return null;
+			if (parsed.seq !== seq) return null;
+			return line;
 		},
 		ackUpTo(upTo) {
 			if (!Number.isSafeInteger(upTo) || upTo < 0) return 0;
@@ -550,9 +585,18 @@ function createSpeechQueue(queueDir) {
 			}
 			return removed;
 		},
-		clear() {
+		dropOlderThan(maxAgeMs, now = Date.now()) {
 			let removed = 0;
-			for (const { fileName } of listSeqs()) if (remove(fileName)) removed++;
+			for (const { fileName } of listSeqs()) {
+				let mtimeMs;
+				try {
+					mtimeMs = fs.statSync(path.join(queueDir, fileName)).mtimeMs;
+				} catch {
+					continue;
+				}
+				if (now - mtimeMs <= maxAgeMs) continue;
+				if (remove(fileName)) removed++;
+			}
 			return removed;
 		},
 		trim(maxEntries) {
@@ -562,6 +606,20 @@ function createSpeechQueue(queueDir) {
 			if (excess <= 0) return 0;
 			let removed = 0;
 			for (const { fileName } of all.slice(0, excess)) if (remove(fileName)) removed++;
+			return removed;
+		},
+		sweepTmp() {
+			let fileNames;
+			try {
+				fileNames = fs.readdirSync(queueDir);
+			} catch {
+				return 0;
+			}
+			let removed = 0;
+			for (const fileName of fileNames) {
+				if (!fileName.endsWith(`${SUFFIX}${TMP_SUFFIX}`)) continue;
+				if (remove(fileName)) removed++;
+			}
 			return removed;
 		}
 	};
@@ -1487,15 +1545,13 @@ function readProgress(progressPath) {
 /**
 * 出力済みの文数を記録する。
 *
-* ★ tmp + rename にすること。`writeFileSync` は O_TRUNC してから書くので、その隙に
-*   落ちると 0 バイトのサイドカーが残る。`readProgress` はそれを 0 と読むので、
-*   **メッセージが丸ごと最初から読み直される**。WebSocket の契約は `seq` でしか
+* ★ atomicWrite を使うこと（素の `writeFileSync` は書きかけを読まれる窓ができる）。
+*   ここで書きかけが漏れると 0 バイトのサイドカーが残り、`readProgress` はそれを 0 と
+*   読むので、**メッセージが丸ごと最初から読み直される**。WebSocket の契約は `seq` でしか
 *   重複排除しないため、クライアントは言い直しと新規発話を区別できない。
 */
 function writeProgress(progressPath, emitted) {
-	const tmp = `${progressPath}.tmp`;
-	fs.writeFileSync(tmp, `${JSON.stringify({ emitted })}\n`);
-	fs.renameSync(tmp, progressPath);
+	writeFileAtomic(progressPath, `${JSON.stringify({ emitted })}\n`);
 }
 /** 処理し終えた spool を消す。メッセージはサイドカーごと消す */
 function removeEntry(entry) {
@@ -1560,9 +1616,7 @@ function readWorkerState(statePath) {
 	return emptyWorkerState();
 }
 function writeWorkerState(statePath, state) {
-	const tmp = `${statePath}.tmp`;
-	fs.writeFileSync(tmp, `${JSON.stringify(state)}\n`);
-	fs.renameSync(tmp, statePath);
+	writeFileAtomic(statePath, `${JSON.stringify(state)}\n`);
 }
 
 //#endregion
@@ -1800,6 +1854,7 @@ function main() {
 			maxBytes: config.get("speechLogMaxBytes")
 		});
 		const speechQueue = createSpeechQueue(getSpeechQueueDir());
+		speechQueue.sweepTmp();
 		const classifier = new RuleBasedEmotionClassifier();
 		drainSpool({
 			spoolDir: getSpoolDir(),

@@ -18,7 +18,7 @@ export interface Lock {
 }
 
 export interface AcquireLockOptions {
-  /** この時間より古く、かつプロセスが生きていないロックは奪う */
+  /** 所有印（owner.json）が読めないときだけ使う経過時間のしきい値。読めるなら pid の生死だけで判定する（isStale() 参照） */
   staleMs?: number;
   /** テスト用 */
   now?: () => number;

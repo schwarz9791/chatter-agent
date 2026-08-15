@@ -13,6 +13,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { writeFileAtomic } from "./atomicWrite";
 import { getSpeechLogBackupPath } from "./paths";
 import type { SpeechRecord } from "./types";
 
@@ -64,7 +65,10 @@ function readLastSeq(filePath: string): number {
         const parsed: unknown = JSON.parse(line);
         if (typeof parsed === "object" && parsed !== null) {
           const seq = (parsed as { seq?: unknown }).seq;
-          if (typeof seq === "number" && Number.isInteger(seq)) return seq;
+          // ★ isSafeInteger であること。speechQueue のファイル名解釈・wsServer.parseAck と
+          //   同じ基準に揃えないと、壊れた state の値がここだけ通って採番に使われる
+          //   （1e300 は isInteger では true になる）
+          if (typeof seq === "number" && Number.isSafeInteger(seq)) return seq;
         }
       } catch {
         // 途中で切れた行。さらに遡る
@@ -81,7 +85,7 @@ function readStateNextSeq(statePath: string): number {
     const parsed: unknown = JSON.parse(fs.readFileSync(statePath, "utf-8"));
     if (typeof parsed === "object" && parsed !== null) {
       const next = (parsed as { nextSeq?: unknown }).nextSeq;
-      if (typeof next === "number" && Number.isInteger(next) && next >= 1) return next;
+      if (typeof next === "number" && Number.isSafeInteger(next) && next >= 1) return next;
     }
   } catch {
     // 無い・壊れているのは異常ではない。ログ末尾から復旧する
@@ -90,9 +94,7 @@ function readStateNextSeq(statePath: string): number {
 }
 
 function writeStateNextSeq(statePath: string, nextSeq: number): void {
-  const tmp = `${statePath}.tmp`;
-  fs.writeFileSync(tmp, `${JSON.stringify({ nextSeq })}\n`);
-  fs.renameSync(tmp, statePath);
+  writeFileAtomic(statePath, `${JSON.stringify({ nextSeq })}\n`);
 }
 
 export function createSpeechLog(deps: SpeechLogDeps): SpeechLog {

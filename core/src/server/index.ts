@@ -27,6 +27,16 @@ const SHUTDOWN_TIMEOUT_MS = 6_000;
 const POLL_INTERVAL_MS = 100;
 
 /**
+ * 起動時に残す entry の新しさの境界。これより古い entry だけを捨てる。
+ *
+ * ★ CLI は delta ごとに起動されるので、1つのメッセージの文は複数回のドレインに
+ *   分かれて publish される。無条件の全消しだと、たまたま直前のドレインで積まれた
+ *   entry まで巻き添えにして、マスコットが段落の途中から喋り出す。
+ *   「落ちている間に書かれたものは定義上すべて古い」を、時間の条件に絞る
+ */
+const STARTUP_KEEP_MS = 10_000;
+
+/**
  * 終了処理の1ステップを制限時間つきで実行する。
  * まとめて1つの watchdog に任せると「諦めた」ことしか分からず、
  * どのリソースが閉じられなかったのか追えなくなるため、名指しで報告して先へ進む。
@@ -85,14 +95,17 @@ async function main(): Promise<void> {
   const wsServer = await createWsServer({
     host: config.get("host"),
     port: config.get("port"),
+    allowedOrigins: config.get("allowedOrigins"),
 
     onConnect: (send) => {
       // ★ sentUpTo までしか送らないこと。その先は直後の poll が broadcast するので、
       //   ここでも送ると新規クライアントだけが二重に受け取る
       let sent = 0;
-      for (const entry of queue.readAll()) {
-        if (entry.seq > sentUpTo) break;
-        if (!send(entry.line)) break;
+      for (const seq of queue.list()) {
+        if (seq > sentUpTo) break;
+        const line = queue.read(seq);
+        if (line === null) continue; // 扱いの整理は別タスク。ここでは飛ばすだけ
+        if (!send(line)) break;
         sent++;
       }
       if (sent > 0) console.log(`[Server] 未読 ${sent} 件を送りました`);
@@ -113,14 +126,16 @@ async function main(): Promise<void> {
   // ★ wipe は bind の後。先に消すと、ポートが埋まって起動に失敗したときに
   //   走っている方のサーバーのキューを消してしまう。
   //   落ちている間に書かれたものは定義上すべて古いので、捨てて正しい
-  const wiped = queue.clear();
+  const wiped = queue.dropOlderThan(STARTUP_KEEP_MS);
   if (wiped > 0) console.log(`[Server] 起動前に溜まっていた ${wiped} 件を捨てました`);
 
   const poll = setInterval(() => {
-    for (const entry of queue.readAll()) {
-      if (entry.seq <= sentUpTo) continue;
-      wsServer.broadcast(entry.line);
-      sentUpTo = entry.seq;
+    for (const seq of queue.list()) {
+      if (seq <= sentUpTo) continue;
+      const line = queue.read(seq);
+      if (line === null) continue; // 扱いの整理は別タスク。ここでは飛ばすだけ
+      wsServer.broadcast(line);
+      sentUpTo = seq;
     }
   }, POLL_INTERVAL_MS);
   poll.unref();

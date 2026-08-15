@@ -71,6 +71,9 @@ function main(): void {
       maxBytes: config.get("speechLogMaxBytes"),
     });
     const speechQueue = createSpeechQueue(getSpeechQueueDir());
+    // 落ちた enqueue が残した .tmp はロック下の1プロセスだけが掃除する。
+    // server から掃除すると、CLI が今まさに書いている途中の tmp を消しうる
+    speechQueue.sweepTmp();
 
     const classifier = new RuleBasedEmotionClassifier();
 

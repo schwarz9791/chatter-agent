@@ -141,7 +141,9 @@ npm run start:server     # 手で動かすとき
 **実機での確認（ターミナル表示と体感で同時か）は `plugin/` 着手時に行う。** ここまでは
 「spool に置いたものが正しく育つ・正しく配信される」までしか見ていない。
 
-CI には入れていない（ビルドとプロセス起動が要るため）。手元で回すもの。
+**CI の `verify` ジョブでも回している**（`.github/workflows/validate.yml`）。どちらも
+バンドル（`plugin/bin/` と `core/dist/`）を実行するので `npm run build` が先に要る。
+手元でも同じコマンドで回せる。
 
 ### バンドル
 
@@ -190,7 +192,8 @@ cc-mascot から移植したコードを oxfmt で整形すると、上流との
 | 配信キュー | `{root}/speech/<seq>.json` | CLI が書く。上限超過は CLI が切り、ack と起動時の掃除は server が行う |
 | seq の state | `{root}/speech.state.json` | CLI |
 | 抑制の state | `{root}/speak.state.json` | CLI |
-| ロック | `{root}/speak.lock/`（ディレクトリ） | CLI |
+| CLI のロック | `{root}/speak.lock/`（ディレクトリ） | CLI |
+| サーバーのロック | `{root}/server.lock/`（ディレクトリ） | **server**（bind の前に取る。2台目は起動に失敗する） |
 
 ### 設定と環境変数
 
@@ -207,7 +210,7 @@ cc-mascot から移植したコードを oxfmt で整形すると、上流との
 | `spoolMaxAgeHours` | `6` | `CHATTER_AGENT_SPOOL_MAX_AGE_HOURS` |
 | `allowedOrigins` | `[]` | `CHATTER_AGENT_ALLOWED_ORIGINS`（カンマ区切り） |
 
-**`speechLogGenerations`（記録の退避世代数）はこの PR で廃止した。** 誰も `speech.jsonl` を tail しなくなったので、
+**`speechLogGenerations`（記録の退避世代数）は [#8](https://github.com/schwarz9791/chatter-agent/issues/8) で廃止した。** 誰も `speech.jsonl` を tail しなくなったので、
 複数世代を繰り下げる必要がなくなり、`speechLogMaxBytes` を超えたら `speech.1.jsonl` に退避する1世代だけになった。
 既存の `~/.config/chatter-agent/config.json` に `speechLogGenerations` が残っていると、`config.ts` の未知キー警告
 （`[Config] ... の未知のキー "speechLogGenerations" は無視されます`）が CLI 起動のたびに出る。手で消すこと。

@@ -4,7 +4,7 @@
 
 **Claude Code の発言を、VRM キャラクターがリアルタイムで読み上げるシステム。**
 
-表示先は Android XR グラス（XREAL Aura）越しの `chatter-mascot-xr`。将来 Electron のデスクトップ版 `chatter-mascot` も同じサーバーに繋ぐ。
+読み上げるのは**表示側アプリ**。Electron のデスクトップ版 `chatter-mascot` と、Android XR グラス（XREAL Aura）向けの `chatter-mascot-xr` が、どちらも同じサーバーに繋ぐ。**どちらから着手するかは決めていない。**
 
 [CC Mascot](https://github.com/kazakago/cc-mascot)（Mac / Electron）と目的は同じだが、**発言の取得方式が根本的に違う**。CC Mascot は Claude Code が書く jsonl ログを監視するが、本プロジェクトは **Claude Code の `MessageDisplay` hook から直接テキストを受け取る**。
 
@@ -15,7 +15,9 @@
 
 **設計・根拠・実測データはすべて `_workspace/chatter-agent-design.md` にある。設計判断に迷ったらまずこれを読むこと。**
 
-hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公式ドキュメントに記載が無い）、`final:true` の遅延実測、`speech.jsonl` の契約、未検証事項の一覧まで、この1文書で実装を開始できるように書いてある。
+hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公式ドキュメントに記載が無い）、`final:true` の遅延実測、未検証事項の一覧まで、この1文書で実装を開始できるように書いてある。
+
+> ★ **発話の契約だけは例外。** [#8](https://github.com/schwarz9791/chatter-agent/issues/8) で配信の形が変わり、設計書の §3 の図 / §4-4 / §5 / §6 は旧仕様（`speech.jsonl` の tail + ローテート追従 + `?since=`）のまま残っている。**契約は [`docs/protocol.md`](./docs/protocol.md) が正。** 設計書側にも註記を入れてある。
 
 > `_workspace/` は `.gitignore` 済み。**ローカル専用の作業メモ**でリポジトリには含まれない。
 
@@ -27,14 +29,15 @@ hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公�
 |---|---|---|
 | `plugin/` | Claude Code プラグイン（bash hook） | **未作成。** `bin/chatter-agent-speak.mjs`（バンドル済み CLI）だけ置いてある |
 | `core/` | `chatter-agent-core`（CLI + WebSocket サーバー） | **実装済み。** `summarizer/`（AI要約、既定OFF）だけ未着手 |
-| `apps/chatter-mascot/` | Electron デスクトップ版 | 未作成 |
-| `apps/chatter-mascot-xr/` | Unity / Android XR | 未作成 |
+| `apps/chatter-mascot/` | 表示側アプリ（Electron デスクトップ） | 未作成 |
+| `apps/chatter-mascot-xr/` | 表示側アプリ（Unity / Android XR） | 未作成 |
 | `docs/` | 作業規約 | protocol / core / plugin / origin の4本 |
-| `.github/workflows/` | CI（typecheck / lint / format / bundle / test） | 稼働中 |
+| `.github/workflows/` | CI（typecheck / lint / format / bundle / test / verify） | 稼働中 |
 
-実装フェーズは **A**（plugin + CLI で `speech.jsonl` が正しく育つ）→ **B**（WebSocket 配信）→ **C**（Unity + UniVRM）。
+実装フェーズは **A**（plugin + CLI で記録と配信キューが正しく育つ）→ **B**（WebSocket 配信）→ **C**（表示側アプリ）。
+**Phase C をデスクトップ版と XR 版のどちらから始めるかは決めていない。**
 
-**Phase A / B は core 側だけ完了している。** `npm run verify:phase-a` / `verify:phase-b` で spool を手で置いた確認までは通っているが、
+**Phase A / B は core 側だけ完了している。** `npm run verify:phase-a` / `verify:phase-b`（CI の `verify` ジョブでも回る）で spool を手で置いた確認までは通っているが、
 **受け入れ基準の「ターミナル表示と体感で同時」は実機で未確認。** ここは `plugin/` を作らないと測れない。
 `plugin/` 着手時にまず `${CLAUDE_PLUGIN_ROOT}` の実体を実測すること（→ [`docs/plugin.md`](./docs/plugin.md)）。
 
@@ -57,7 +60,7 @@ chatter-agent-server         キューを読んで WebSocket 配信。判断ロ�
   ▲                          ack を受けたぶんを消す
   │ ack
   ▼
-chatter-mascot(-xr)          TTS → 再生 → VRM描画 / 表情 / モーション / リップシンク
+chatter-mascot(-xr)          表示側アプリ。TTS → 再生 → VRM描画 / 表情 / モーション / リップシンク
 ```
 
 設計の芯は2つ。
@@ -94,6 +97,13 @@ jsonl の `timestamp` は**メッセージの生成時刻であって書き込�
 ドレイン完了後、ロックを解放する前にもう一度 spool を見る（走査直後に到着した分の取りこぼし防止）。
 → 設計書 §4-2
 
+### 5. 記録と配信を1つのファイルに兼ねさせない
+
+`speech.jsonl`（記録）と `speech/<seq>.json`（配信キュー）は別物。1つに兼ねさせると、ローテートを跨ぐ差分読み取りが要り、読み手だけが際限なく複雑になる。**取りこぼしと二重配信を実際に両方踏んだ。**
+
+分ければ順序はファイル名で決まり、消費は削除で表せる。`?since=` も要らない（接続直後に未 ack 分が流れる）。
+→ 経緯は [#8](https://github.com/schwarz9791/chatter-agent/issues/8)、契約は [`docs/protocol.md`](./docs/protocol.md)
+
 ## ドキュメント索引
 
 | 文書 | 読むとき |
@@ -104,8 +114,8 @@ jsonl の `timestamp` は**メッセージの生成時刻であって書き込�
 | [`docs/plugin.md`](./docs/plugin.md) | `plugin/` を触るとき。bash hook の制約、spool 命名、検証時の落とし穴 |
 | [`docs/origin.md`](./docs/origin.md) | cc-mascot 由来のコードを触るとき。移植の対応表、フォーク点、ライセンス義務 |
 | `docs/architecture.md` | **未作成。** 設計書が一次情報。実装で契約が動いたら分離を検討する |
-| `docs/mascot.md` | **未作成。** Electron 版の着手時に作る |
-| `docs/mascot-xr.md` | **未作成。** Unity 版の着手時に `cc-mascot-xr/xr-app/SETUP.md` を移送して作る |
+| `docs/mascot.md` | **未作成。** 表示側アプリ（Electron）の着手時に作る |
+| `docs/mascot-xr.md` | **未作成。** 表示側アプリ（Unity / Android XR）の着手時に `cc-mascot-xr/xr-app/SETUP.md` を移送して作る |
 
 ## 開発コマンド
 
@@ -120,8 +130,8 @@ npm run format
 npm run test:run
 npm run build            # CLI → plugin/bin/、server → dist/
 
-npm run verify:phase-a   # spool → speech.jsonl（spool を手で置いて確認）
-npm run verify:phase-b   # speech.jsonl → WebSocket（実サーバーを起動して確認）
+npm run verify:phase-a   # spool → 記録 + 配信キュー（spool を手で置いて確認）
+npm run verify:phase-b   # 配信キュー → WebSocket（実サーバーを起動して確認）
 npm run start:server
 ```
 

@@ -2,7 +2,7 @@
 
 **Claude Code の発言を、VRM キャラクターがリアルタイムで読み上げるシステム。**
 
-Claude Code の `MessageDisplay` hook からテキストを直接受け取り、文単位に整形して WebSocket で配信します。受け取った側（Android XR グラス / Electron デスクトップ）が TTS で読み上げ、VRM キャラクターの表情・モーション・リップシンクに反映します。
+Claude Code の `MessageDisplay` hook からテキストを直接受け取り、文単位に整形して WebSocket で配信します。受け取った表示側アプリ（Electron デスクトップ / Android XR グラス）が TTS で読み上げ、VRM キャラクターの表情・モーション・リップシンクに反映します。
 
 [CC Mascot](https://github.com/kazakago/cc-mascot)（Mac / Electron）の派生プロジェクトです。
 
@@ -31,7 +31,7 @@ chatter-agent-server   キューを読んで WebSocket 配信
   ▲                    ack を受けたぶんを消す
   │ ack
   ▼
-chatter-mascot(-xr)    TTS → 再生 → VRM描画
+chatter-mascot(-xr)    表示側アプリ。TTS → 再生 → VRM描画
 ```
 
 発話の契約は [`docs/protocol.md`](./docs/protocol.md) にあります。
@@ -40,8 +40,8 @@ chatter-mascot(-xr)    TTS → 再生 → VRM描画
 |---|---|
 | `plugin/` | Claude Code プラグイン（bash hook） |
 | `core/` | `chatter-agent-core` — CLI と WebSocket サーバー |
-| `apps/chatter-mascot/` | Electron デスクトップ版 |
-| `apps/chatter-mascot-xr/` | Unity / Android XR 版（XREAL Aura） |
+| `apps/chatter-mascot/` | 表示側アプリ（Electron デスクトップ） |
+| `apps/chatter-mascot-xr/` | 表示側アプリ（Unity / Android XR、XREAL Aura） |
 
 ## 対象
 
@@ -57,7 +57,7 @@ chatter-mascot(-xr)    TTS → 再生 → VRM描画
 | `core/` | CLI + WebSocket サーバーとも実装済み。AI要約（既定OFF）のみ未着手 |
 | `apps/` | 未作成 |
 
-実装フェーズは **A**（plugin + CLI で `speech.jsonl` が育つ）→ **B**（WebSocket 配信）→ **C**（Unity + UniVRM）。
+実装フェーズは **A**（plugin + CLI で記録と配信キューが育つ）→ **B**（WebSocket 配信）→ **C**（表示側アプリ）。**C をデスクトップ版と XR 版のどちらから始めるかは未定です。**
 
 Phase A / B は core 側だけ完了しています。**発言を実際に読み上げるには、まだ `plugin/`（bash hook）が要ります。**
 

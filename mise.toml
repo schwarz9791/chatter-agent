@@ -1,0 +1,4 @@
+# tsdown の依存（rolldown-plugin-dts）が Node ^22.18.0 || >=24.11.0 を要求する。
+# ~/.npmrc に engine-strict=true があると、これを満たさない Node では npm install が通らない。
+[tools]
+node = "24.19.0"

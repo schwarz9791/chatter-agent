@@ -14,8 +14,8 @@ import {
   getEventSessionId,
 } from "../prompt/promptEventFormatter";
 import { cleanTextForSpeech, splitIntoSentences } from "../text/textFilter";
-import type { SpeechEntry, SpeechLog } from "../core/speechLog";
-import type { Emotion } from "../core/types";
+import type { SpeechEntry } from "../core/speechLog";
+import type { Emotion, SpeechRecord } from "../core/types";
 import { assembleSentences } from "./messageAssembler";
 import {
   cleanOrphans,
@@ -45,7 +45,11 @@ const MAX_PASSES = 8;
 
 export interface DrainDeps {
   spoolDir: string;
-  speechLog: SpeechLog;
+  /**
+   * 発話を確定させる。記録（speech.jsonl）と配信キュー（speech/）の両方に書く。
+   * 採番はこの中で行われるので、採番済みのレコードが返る。
+   */
+  publish: (entries: SpeechEntry[]) => SpeechRecord[];
   workerStatePath: string;
   /** 応答待ち通知（kind: "prompt"）を読み上げるか */
   speakPrompts: boolean;
@@ -157,7 +161,7 @@ function processMessage(
   let written = 0;
   if (result.sentences.length > 0) {
     const messageId = content.messageId ?? entry.messageId;
-    deps.speechLog.append(
+    deps.publish(
       result.sentences.map((text): SpeechEntry => ({
         source: "claude-code",
         sessionId: content.sessionId,
@@ -252,7 +256,7 @@ function processPrompt(
 
   // ★ 書き込みが成功してから消す（processMessage と同じ順序）。
   //   先に消すと、append が失敗したときにイベントが復旧不能に失われる
-  if (records.length > 0) deps.speechLog.append(records);
+  if (records.length > 0) deps.publish(records);
   removeEntry(entry);
 
   if (hookName === "PreToolUse" && promptId !== null) {

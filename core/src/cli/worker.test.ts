@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { createSpeechLog } from "../core/speechLog";
+import { createSpeechQueue } from "../core/speechQueue";
 import type { SpeechRecord } from "../core/types";
 import { drainSpool } from "./worker";
 import type { DrainDeps } from "./worker";
@@ -27,15 +28,22 @@ afterEach(() => {
 let clock = Date.parse("2026-08-15T00:00:00.000Z");
 
 function drain(overrides: Partial<DrainDeps> = {}) {
+  const speechLog = createSpeechLog({
+    logPath,
+    statePath: path.join(dir, "speech.state.json"),
+    maxBytes: 1024 * 1024,
+    now: () => new Date(clock),
+  });
+  const speechQueue = createSpeechQueue(path.join(dir, "speech"));
+
   return drainSpool({
     spoolDir,
-    speechLog: createSpeechLog({
-      logPath,
-      statePath: path.join(dir, "speech.state.json"),
-      maxBytes: 1024 * 1024,
-      generations: 3,
-      now: () => new Date(clock),
-    }),
+    // 本番と同じく、記録と配信キューの両方に書く
+    publish: (entries) => {
+      const records = speechLog.append(entries);
+      speechQueue.enqueue(records);
+      return records;
+    },
     workerStatePath: path.join(dir, "speak.state.json"),
     speakPrompts: true,
     spoolMaxAgeMs: 6 * HOUR,
@@ -285,13 +293,10 @@ describe("応答待ち通知", () => {
   it("★ 書き込みに失敗したら spool を消さない（イベントを復旧不能に失わない）", () => {
     writePrompt("q", question);
 
-    const failing = {
-      peekNextSeq: () => 1,
-      append: () => {
-        throw new Error("ENOSPC");
-      },
+    const failing = () => {
+      throw new Error("ENOSPC");
     };
-    expect(() => drain({ speechLog: failing })).toThrow("ENOSPC");
+    expect(() => drain({ publish: failing })).toThrow("ENOSPC");
     expect(fs.existsSync(path.join(spoolDir, "prompt-q.json"))).toBe(true);
   });
 

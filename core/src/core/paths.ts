@@ -50,21 +50,32 @@ export function getSpoolDir(e: PathEnv = currentPathEnv()): string {
   return path.join(getRuntimeDir(e), "spool");
 }
 
-/** 発話ログの現世代。全体の契約（設計書 §5） */
+/**
+ * 発話の**記録**。1文1行で、消さずに残す。
+ *
+ * ★ 配信はここを読まない（→ `getSpeechQueueDir`）。誰も tail しないので、
+ *   ローテートの正しさが要求されない。
+ */
 export function getSpeechLogPath(e: PathEnv = currentPathEnv()): string {
   return path.join(getRuntimeDir(e), "speech.jsonl");
 }
 
-/**
- * ローテート後の世代パス。`speech.jsonl` → `speech.1.jsonl`。
- * 世代番号は 1 始まり（0 は現世代 = `basePath` そのもの）。
- */
-export function getSpeechLogGenerationPath(basePath: string, generation: number): string {
-  if (generation <= 0) return basePath;
+/** 記録の退避先。`speech.jsonl` → `speech.1.jsonl`。1世代だけ持つ */
+export function getSpeechLogBackupPath(basePath: string): string {
   const dir = path.dirname(basePath);
   const ext = path.extname(basePath);
   const stem = path.basename(basePath, ext);
-  return path.join(dir, `${stem}.${generation}${ext}`);
+  return path.join(dir, `${stem}.1${ext}`);
+}
+
+/**
+ * 発話の**配信キュー**。1文1ファイルで、ファイル名が `seq`。
+ *
+ * CLI が書き、server が読んで配信し、クライアントの ack で消える。
+ * 記録と分けてあるのは、配信側は消えてよく、記録側は残したいため。
+ */
+export function getSpeechQueueDir(e: PathEnv = currentPathEnv()): string {
+  return path.join(getRuntimeDir(e), "speech");
 }
 
 /**

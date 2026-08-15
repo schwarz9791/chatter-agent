@@ -26,10 +26,15 @@ export interface ChatterAgentConfig {
   host: string;
   /** 応答待ち通知（kind: "prompt"）を読み上げるか */
   speakPrompts: boolean;
-  /** speech.jsonl がこのサイズを超えたらローテートする */
+  /** 記録（speech.jsonl）がこのサイズを超えたら speech.1.jsonl に退避する */
   speechLogMaxBytes: number;
-  /** 保持する退避世代の数（speech.1.jsonl … speech.N.jsonl） */
-  speechLogGenerations: number;
+  /**
+   * 配信キューに溜めておく上限。超えたら古い方から捨てる。
+   *
+   * クライアントが繋がっていなければ ack は来ないので、これが唯一の歯止めになる。
+   * 古い発話は無価値（起動時にも全部捨てる）なので、数百あれば足りる。
+   */
+  speechQueueMaxEntries: number;
   /** CLI が起動しないまま終わった spool の孤児を、この時間より古ければ掃除する */
   spoolMaxAgeHours: number;
 }
@@ -40,7 +45,7 @@ export function createDefaultConfig(): ChatterAgentConfig {
     host: "0.0.0.0",
     speakPrompts: true,
     speechLogMaxBytes: 5 * 1024 * 1024,
-    speechLogGenerations: 3,
+    speechQueueMaxEntries: 500,
     spoolMaxAgeHours: 6,
   };
 }
@@ -91,7 +96,7 @@ const SPECS = {
   host: { env: "CHATTER_AGENT_HOST", parse: parseNonEmptyString },
   speakPrompts: { env: "CHATTER_AGENT_SPEAK_PROMPTS", parse: parseBoolean },
   speechLogMaxBytes: { env: "CHATTER_AGENT_SPEECH_LOG_MAX_BYTES", parse: parsePositiveInt },
-  speechLogGenerations: { env: "CHATTER_AGENT_SPEECH_LOG_GENERATIONS", parse: parsePositiveInt },
+  speechQueueMaxEntries: { env: "CHATTER_AGENT_SPEECH_QUEUE_MAX_ENTRIES", parse: parsePositiveInt },
   spoolMaxAgeHours: { env: "CHATTER_AGENT_SPOOL_MAX_AGE_HOURS", parse: parsePositiveInt },
 } as const satisfies { [K in ConfigKey]: { env: string; parse: Parser<ChatterAgentConfig[K]> } };
 

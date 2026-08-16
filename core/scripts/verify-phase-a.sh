@@ -121,7 +121,20 @@ for i in 0 1 2 3 4 5; do
   feed_message m-ccc "$i" false "並列${i}です。"
 done
 feed_message m-ccc 6 true "終わり。"
-for _ in 1 2 3 4 5 6 7 8; do node "$CLI" & done; wait
+
+# ★ 引数なしの `wait` は無条件に 0 を返す（実測確認済み:
+#   `bash -c 'for _ in 1 2 3; do (exit 7) & done; wait; echo $?'` → `0`）。pid を渡さないと、
+#   8並列のワーカーが1つでもクラッシュして検証がそのまま緑になってしまう。
+#
+# ★ ただしこれで拾えるのは crash（segfault / OOM / node 起動失敗）だけ。`cli/index.ts` の
+#   main() は try/catch の後に無条件で `process.exit(0)` するため、JS の例外は前景で
+#   実行していても exit code には出ない（＝この修正では検出できない）。過大な期待をしないこと。
+pids=()
+for _ in 1 2 3 4 5 6 7 8; do
+  node "$CLI" &
+  pids+=($!)
+done
+for p in "${pids[@]}"; do wait "$p"; done
 spoken
 
 show "⑦ hook 側のガード（ここが壊れると spool の形から崩れる）"
@@ -172,13 +185,20 @@ CHATTER_AGENT_DISABLE=1 delta m-off 0 true "無効化中の発言です。"
 #   final:true で閉じた独立のメッセージにしてある（#22 — 空 final の検査と絡ませない）
 CHATTER_AGENT_DISABLE=0 delta m-zero 0 true "ゼロは解除です。"
 
-# ★ R3: ここまでの CHATTER_AGENT_DISABLE=0 は hook 側の判定しか通っていない
-#   （直後の CLI 起動は `delta` の中の env なしの別コマンドとして実行される）。
-#   isSpeakDisabled を旧来の presence 判定（`if (process.env.CHATTER_AGENT_DISABLE) return;`）に
-#   戻しても、ここまでの検証は全部グリーンのままになる（"0" は非空文字列なので presence 判定でも
-#   truthy になり、"1" のケースと結果が区別できない）。CLI に**直接** CHATTER_AGENT_DISABLE=0 を
-#   渡して起動し、spool にある delta が実際に発話されることを見て初めて、CLI 側の
-#   parseBoolean("0") === false（＝無効化しない）という判定を通せる。
+# ★ R3: 上の `CHATTER_AGENT_DISABLE=0 delta m-zero ...` は、実は hook 側だけでなく CLI 側の
+#   判定にも env が届いている。bash は `VAR=val funcname` の代入を関数内で実行されるコマンドに
+#   **エクスポートする**（実測確認済み: `bash -c 'f(){ env | grep -c "^PROBE=1"; }; PROBE=1 f'`
+#   → `1`）ので、`delta` 内の `node "$CLI"` にも CHATTER_AGENT_DISABLE=0 は伝播している
+#   （「env なしの別コマンドとして実行される」という以前のコメントは誤りだった）。
+#
+#   それでも isSpeakDisabled を旧来の presence 判定（`if (process.env.CHATTER_AGENT_DISABLE) return;`）
+#   に戻すと、この検証は依然として見抜けない。presence 判定では "0" も非空文字列なので truthy
+#   （＝無効化）と判定され、m-zero のドレインはその呼び出しの場では失敗するが、spool の
+#   ファイルは消えずに残るだけ。CHATTER_AGENT_DISABLE を立てない `node "$CLI"` 呼び出しが
+#   このあと（⑧以降）何度も来るので、いずれかがそれを拾ってしまい、**最終状態（結果の検証
+#   ブロック）だけを見ると結局発話されていて presence 判定への回帰が隠れる**。CLI に
+#   **直接** CHATTER_AGENT_DISABLE=0 を渡して起動し、その場で $LOG を確認して初めて、CLI 側の
+#   parseBoolean("0") === false（＝無効化しない）という判定を独立に検証できる。
 #
 # ★ ここだけは判定結果を**その場で**確認する（結果の検証セクションまで待たない）。CLI は
 #   毎回再起動されるだけの短命プロセスなので、この呼び出しが誤って何もしなくても、後続の
@@ -410,6 +430,59 @@ node -e '
 ' "$RUNTIME/hook-debug.log"
 rm -f "$SPOOL"/m-r7-cli.* "$SPOOL"/m-r7-node.*
 
+show "⑬ 孤児カスケード: 救済されたメッセージの遅延 final が、ストリーミング中の次のメッセージを打ち切らない"
+
+# ★ **専用セッション（sess-orphan）に隔離すること（#22 で踏んだ罠と同じ）。** sess-1 に置くと
+#   このスクリプトの他の probe が `hasNewerInSameSession` を誤って成立させてしまい、
+#   検査したいタイミングより先に m-orphan-b が救済されてしまう（検査が空振りする）。
+ORPHAN_SESSION='{"session_id":"sess-orphan"}'
+
+# m-orphan-a は final 未着のまま置く（まだ発話されない）
+delta m-orphan-a 0 false "孤児カスケード検証Aの一文目です。" "$ORPHAN_SESSION"
+echo "[m-orphan-a はまだ出ない]"; spoken
+
+# 同一セッションで m-orphan-b が始まる → hasNewerInSameSession が成立し、m-orphan-a が
+# 「final 未着のまま」救済されて spool から消える（tombstone にも記録される）。
+# m-orphan-b 自身は後続が無いので救済されず、ストリーミング中のまま spool に残る。
+delta m-orphan-b 0 false "孤児カスケード検証Bの一文目です。" "$ORPHAN_SESSION"
+echo "[m-orphan-a が救済されて全文出る。m-orphan-b はまだ出ない]"; spoken
+
+node -e '
+  const fs = require("fs");
+  const [orphanFile, streamingFile] = process.argv.slice(1);
+  const ok = !fs.existsSync(orphanFile) && fs.existsSync(streamingFile);
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  m-orphan-a は救済されて spool から消え、m-orphan-b はストリーミング中のまま spool に残っている`);
+  process.exit(ok ? 0 : 1);
+' "$SPOOL/m-orphan-a.0.json" "$SPOOL/m-orphan-b.0.json"
+
+# ★ 救済済み（tombstone 済み）の m-orphan-a に、遅延した final が孤児として届く。
+#   index 0 は既に消えているので readMessage は index 0 から結合できず deltas は空になる
+#   （この1ファイルだけでは final の中身を再構築できない）。tombstone は message_id で
+#   即破棄するので、この孤児の中身に関わらず捕まる想定
+delta m-orphan-a 1 true "孤児カスケード検証Aの最終行です。この文が発話されたら tombstone が効いていない。" "$ORPHAN_SESSION"
+
+# ★ ここだけは判定結果をその場で確認する（R3 と同じ理由）。この後の呼び出しはもう
+#   sess-orphan に触れないので最終的にマスクされる心配は薄いが、"m-orphan-b が打ち切られて
+#   いないこと" は「spool に残っている」という事実そのものが検査対象なので、片付ける前に見る。
+node -e '
+  const fs = require("fs");
+  const [orphanFile, streamingFile, logPath] = process.argv.slice(1);
+  const orphanGone = !fs.existsSync(orphanFile);
+  const streamingIntact = fs.existsSync(streamingFile);
+  let logged = "";
+  try { logged = fs.readFileSync(logPath, "utf8"); } catch {}
+  const orphanNotSpoken = !logged.includes("孤児カスケード検証Aの最終行です");
+  const streamingNotTruncated = !logged.includes("孤児カスケード検証Bの一文目です");
+  const ok = orphanGone && streamingIntact && orphanNotSpoken && streamingNotTruncated;
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  孤児カスケード: 遅延 final は tombstone で即破棄され、ストリーミング中の m-orphan-b は打ち切られない${ok ? "" : ` (orphanGone=${orphanGone} streamingIntact=${streamingIntact} orphanNotSpoken=${orphanNotSpoken} streamingNotTruncated=${streamingNotTruncated})`}`);
+  process.exit(ok ? 0 : 1);
+' "$SPOOL/m-orphan-a.1.json" "$SPOOL/m-orphan-b.0.json" "$LOG"
+spoken
+
+# m-orphan-b は意図的にストリーミング中のまま（final を送らない）でこの節を終える。
+# それ自体が検査したかった状態なので、final で閉じずに spool の残骸だけ片付ける
+rm -f "$SPOOL"/m-orphan-*
+
 show "結果の検証"
 node -e '
   const fs = require("fs");
@@ -435,9 +508,21 @@ node -e '
     JSON.stringify([...[0, 1, 2, 3, 4, 5].map((i) => `並列${i}です。`), "終わり。"]));
   check("final が来なかったメッセージが後続イベントで救済されている",
     texts.includes("中断された発言です。") && texts.includes("この後 final は来ません。"));
+
+  // ★ ⑬ 孤児カスケード（CLAUDE.md 承認済み計画 B-3）。tombstone が無いと、救済で spool から
+  //   消えたはずの m-orphan-a の遅延 final が「同一セッションの後続」として成立してしまい、
+  //   まだストリーミング中の m-orphan-b を打ち切って発話してしまう
+  check("孤児カスケード: 救済された m-orphan-a の一文目は発話されている",
+    texts.includes("孤児カスケード検証Aの一文目です。"));
+  check("孤児カスケード: 救済済みメッセージへの遅延 final（孤児）は発話されていない（tombstone）",
+    !texts.some((t) => t.includes("孤児カスケード検証Aの最終行です")));
+  check("孤児カスケード: ストリーミング中だった m-orphan-b は打ち切られずに発話されていない",
+    !texts.some((t) => t.includes("孤児カスケード検証Bの一文目です")));
+
   check("spool は片付いている（処理済みのファイルが残っていない）",
     !fs.readdirSync(process.argv[2]).some((f) =>
-      ["m-aaa", "m-bbb", "m-ccc", "m-ddd", "m-eee", "m-zero", "m-cli-zero", "prompt-"].some((p) => f.startsWith(p))));
+      ["m-aaa", "m-bbb", "m-ccc", "m-ddd", "m-eee", "m-zero", "m-cli-zero", "m-orphan", "prompt-"].some((p) =>
+        f.startsWith(p))));
 
   // ★ #30 で保証が付いた契約（docs/protocol.md「発話の粒度」）。
   //   1メッセージ分は seq 連続・ts 同値・messageId 同一の塊で配信される

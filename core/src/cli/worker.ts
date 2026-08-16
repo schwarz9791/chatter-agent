@@ -28,7 +28,7 @@ import {
   type MessageContent,
   type SpoolEntry,
 } from "./spool";
-import { readWorkerState, writeWorkerState, type WorkerState } from "./workerState";
+import { addTombstone, isTombstoned, readWorkerState, writeWorkerState, type WorkerState } from "./workerState";
 
 /**
  * ロック取得に使ってよい合計の待ち時間予算。
@@ -127,6 +127,24 @@ function sessionIdOf(loaded: Loaded): string | null {
   return "content" in loaded ? loaded.content.sessionId : getEventSessionId(loaded.payload);
 }
 
+/**
+ * spool の削除を try/catch で包む（CLAUDE.md 承認済み計画 A-3(d)）。
+ *
+ * `removeEntry`（`fs.rmSync(..., { force: true })`）は ENOENT は飲むが、EACCES / EPERM /
+ * EROFS では throw する。ここで拾わないと `drainSpool` 全体が止まり、そのパスの後続
+ * メッセージ・応答待ち通知まで処理されなくなる。
+ *
+ * tombstone（`workerState.ts`）が exactly-once の記録を担うので、削除に失敗して
+ * spool ファイルが残っても、次のドレインで再 publish されることはない。
+ */
+function tryRemoveEntry(entry: SpoolEntry): void {
+  try {
+    removeEntry(entry);
+  } catch (err) {
+    console.warn("[Worker] spool の削除に失敗しました。次のドレインでも残ります:", err);
+  }
+}
+
 export function drainSpool(deps: DrainDeps): DrainResult {
   const now = deps.now ?? Date.now;
 
@@ -146,18 +164,34 @@ export function drainSpool(deps: DrainDeps): DrainResult {
     if (entries.length === 0) break;
 
     // このパスで扱う分をまとめて読む。後続の session_id を見る必要があるので先に揃える
-    const loaded: Loaded[] = entries.map((entry) =>
+    const rawLoaded: Loaded[] = entries.map((entry) =>
       entry.kind === "message"
         ? { entry, content: readMessage(entry.filePaths) }
         : { entry, payload: readPromptPayload(entry.filePath) },
     );
 
     let changed = false;
+
+    // ★ tombstone（CLAUDE.md 承認済み計画 A-3(b)、最優先）。publish 済みの message_id への
+    //   遅延 delta は、発話せず即破棄し `hasNewerInSameSession` の候補にもしない。
+    //   ここで弾いておかないと、救済で全削除された孤児が「同一セッションの後続」として
+    //   成立してしまい、まだ伸びている途中の次のメッセージを打ち切ってしまう
+    //   （孤児カスケード。詳細は workerState.ts の WorkerState.publishedMessageIds）。
+    const loaded: Loaded[] = [];
+    for (const item of rawLoaded) {
+      if ("content" in item && isTombstoned(state, item.entry.messageId)) {
+        tryRemoveEntry(item.entry);
+        changed = true;
+        continue;
+      }
+      loaded.push(item);
+    }
+
     for (let i = 0; i < loaded.length; i++) {
       const item = loaded[i]!;
       const outcome =
         "content" in item
-          ? processMessage(item, hasNewerInSameSession(loaded, i), deps)
+          ? processMessage(item, hasNewerInSameSession(loaded, i), deps, state)
           : processPrompt(item, deps, state, now);
 
       written += outcome.written;
@@ -198,7 +232,23 @@ function hasNewerInSameSession(loaded: Loaded[], index: number): boolean {
   const sessionId = sessionIdOf(loaded[index]!);
   if (sessionId === null) return false;
 
-  return loaded.slice(index + 1).some((other) => sessionIdOf(other) === sessionId);
+  return loaded.slice(index + 1).some((other) => countsAsNewer(other) && sessionIdOf(other) === sessionId);
+}
+
+/**
+ * 「新しいイベントが来た」の材料として数えてよいか（CLAUDE.md 承認済み計画 A-3(c)）。
+ *
+ * ★ 中身の無いメッセージエントリ（`deltas` が空）は候補から外す。tombstone の取りこぼし
+ *   （クラッシュ・state の破損・有界リングから溢れた古い孤児）が起きても、それだけで
+ *   カスケードが起きないための二重の防御。
+ *
+ *   spool の書き込みは tmp + rename なので、可視のファイルは常に完全である。にもかかわらず
+ *   `deltas` が空になるのは「閉じたメッセージの遅延分（index 0 が既に消えた孤児）」か
+ *   「一過性の読み取り失敗」のどちらかで、どちらも「次のメッセージを打ち切ってよい理由」には
+ *   ならない。
+ */
+function countsAsNewer(loaded: Loaded): boolean {
+  return "content" in loaded ? loaded.content.deltas.length > 0 : true;
 }
 
 interface EntryOutcome {
@@ -214,6 +264,7 @@ function processMessage(
   item: Extract<Loaded, { content: MessageContent }>,
   hasNewer: boolean,
   deps: DrainDeps,
+  state: WorkerState,
 ): EntryOutcome {
   const { entry, content } = item;
 
@@ -221,7 +272,17 @@ function processMessage(
   //   `hasNewer` は `final` が来なかったメッセージの救済で、通常経路ではない
   if (!content.final && !hasNewer) return NOTHING;
 
-  const sentences = assembleSentences(content.deltas);
+  // ★ 救済経路では「完全に読めた」ときだけ publish する（CLAUDE.md 承認済み計画 A-3(a)）。
+  //   deltas が空 = index 0 が読めなかった（EMFILE 等の一過性かもしれない。ファイルを
+  //   消してはいけない）。欠番あり = 欠番より後ろのファイルがまだ一度も読まれていない。
+  //   publish すると接頭辞だけ発話した上で未読ファイルまで消えるので、方針は「全損維持」。
+  //   次のドレインで欠番が埋まれば final 経由で全文が出る
+  //   （spool.test.ts「★ index に欠番があるうちは何も出ない。埋まったら全文出る」）。
+  if (!content.final && (content.deltas.length === 0 || content.hasGap)) return NOTHING;
+
+  // ★ 救済経路（続きが来るかもしれない）では、文として閉じていない末尾を発話しない
+  //   （CLAUDE.md 承認済み計画 A-3(e)）。`final` 経由（もう続きは来ない）ではそのまま全部出す
+  const sentences = assembleSentences(content.deltas, { dropUnterminatedTail: !content.final });
 
   // ★ メッセージ1つ分をまとめて1回だけ publish すること。分けて呼ぶと `ts` が割れる
   //   （`speechLog.append` は呼び出しごとに1回だけ時刻を取る）。クライアントは
@@ -241,11 +302,18 @@ function processMessage(
     );
   }
 
+  // ★ 書き込み順序が肝（CLAUDE.md 承認済み計画 A-3(b)）。publish → tombstone を永続化 →
+  //   removeEntry の順にする。こうすると removeEntry が失敗しても、次のドレインで
+  //   再 publish されない（tombstone が exactly-once の記録になる）。
+  addTombstone(state, entry.messageId);
+  writeWorkerState(deps.workerStatePath, state);
+
   // ★ 書き込みが成功してから消す（processPrompt と同じ順序）。先に消すと、publish が
   //   失敗したときにメッセージが復旧不能に失われる。
   // ★ 逆に、消さずに抜けてはいけない。進捗サイドカーが無くなったので、残した entry は
-  //   次のドレインで丸ごと組み直されて**メッセージ全体が二度発話される**
-  removeEntry(entry);
+  //   次のドレインで丸ごと組み直されようとする（tombstone があるので実際には再発話は
+  //   されないが、spool にファイルが残り続けてしまう）
+  tryRemoveEntry(entry);
 
   return { written: sentences.length, changed: true, stateDirty: false };
 }
@@ -263,13 +331,13 @@ function processPrompt(
   if (payload === null) return NOTHING;
 
   if (!deps.speakPrompts) {
-    removeEntry(entry);
+    tryRemoveEntry(entry);
     return { ...NOTHING, changed: true };
   }
 
   const messages = formatPromptEvent(payload);
   if (messages.length === 0) {
-    removeEntry(entry);
+    tryRemoveEntry(entry);
     return { ...NOTHING, changed: true };
   }
 
@@ -290,7 +358,7 @@ function processPrompt(
     withinWindow(at, state.pairedPromptAt, PROMPT_PAIR_WINDOW_MS)
   ) {
     state.pairedPromptId = null;
-    removeEntry(entry);
+    tryRemoveEntry(entry);
     return { written: 0, changed: true, stateDirty: true };
   }
 
@@ -324,7 +392,7 @@ function processPrompt(
   // ★ 書き込みが成功してから消す（processMessage と同じ順序）。
   //   先に消すと、append が失敗したときにイベントが復旧不能に失われる
   if (records.length > 0) deps.publish(records);
-  removeEntry(entry);
+  tryRemoveEntry(entry);
 
   if (hookName === "PreToolUse" && promptId !== null) {
     state.pairedPromptId = promptId;

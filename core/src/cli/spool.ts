@@ -9,7 +9,12 @@
  *   を tmp + rename で置く（追記はしない — bash から任意長の追記を原子的にする移植可能な方法が
  *   無いため。→ docs/plugin.md）。1メッセージは複数の delta ファイルに分かれるので、
  *   「1メッセージ = 複数ファイル」を1エントリにまとめるのがこのファイルの仕事。
- *   ワーカーはディスクに状態を持たない（`final` を見たときに全 delta から組み直す）。
+ *   **spool には**状態を持たない（`final` を見たときに全 delta から組み直す）。
+ *
+ * ★ これは「ワーカーが無状態」という意味ではない。`workerState.ts` は `speak.state.json`
+ *   （`pairedPromptId` / `lastText` / tombstone）を `writeFileAtomic` で永続化している。
+ *   この見出しを根拠に `read/writeWorkerState` を消すと、`AskUserQuestion` のたびに対の
+ *   permission Notification を二重読みする退行が戻る。
  */
 
 import * as fs from "fs";
@@ -19,17 +24,6 @@ import * as path from "path";
 const MESSAGE_DELTA_RE = /^(.+)\.(\d+)\.json$/;
 const PROMPT_PREFIX = "prompt-";
 const PROMPT_SUFFIX = ".json";
-
-/**
- * 進捗サイドカーの残骸。
- *
- * ★ [#30] で廃止したが、**定数と `classify` のガードだけは残すこと。** 既存インストールの
- *   spool に残った `prompt-<…>.progress.json` を prompt として読んでしまうのを防ぐ。
- *   残骸そのものは `cleanOrphans` が mtime で回収する（既定6時間）。
- *
- * [#30]: https://github.com/schwarz9791/chatter-agent/issues/30
- */
-const PROGRESS_SUFFIX = ".progress.json";
 
 export interface MessageSpoolEntry {
   kind: "message";
@@ -54,6 +48,16 @@ export interface MessageContent {
   deltas: string[];
   /** 連続部分の中に `final:true` があったか */
   final: boolean;
+  /**
+   * 連続接頭辞（`deltas`）に入らなかった、読めた delta が他にあるか。
+   *
+   * ★ `byIndex.size > deltas.length` で判定する。欠番の手前で打ち切っているだけで、
+   *   欠番より後ろのファイルは実際には読めている（rename 済みで disk 上に存在する）ことを
+   *   呼び出し側が知る術がこれまで無かった。救済経路（`worker.ts`）で publish してよいかの
+   *   判定に使う: true なら「後ろにまだ読まれていない delta が残っている」ので、
+   *   接頭辞だけを発話した上でその未読分まで消してはいけない。
+   */
+  hasGap: boolean;
   sessionId: string | null;
   turnId: string | null;
   messageId: string | null;
@@ -78,11 +82,19 @@ type ClassifiedFile =
   | { kind: "prompt"; filePath: string; order: bigint }
   | { kind: "messageDelta"; messageId: string; index: number; filePath: string; order: bigint };
 
-/** 判定順は「進捗サイドカーの残骸を最初に弾く → prompt- → message」を維持する */
+/**
+ * 判定順は「prompt- → message」。
+ *
+ * ★ 廃止した進捗サイドカー（`prompt-<…>.progress.json` / `<message_id>.progress.json`）を
+ *   弾く専用ガードはここには無い。`<message_id>.progress.json` は元々どちらのパターンにも
+ *   一致しないので無視されるが、`prompt-<…>.progress.json` は `prompt-` 始まり・`.json` 終わりに
+ *   一致するので prompt entry として拾われる。それでよい —
+ *   `formatPromptEvent`（`prompt/promptEventFormatter.ts`）は未知 payload に `[]` を返すので、
+ *   `worker.ts` の `processPrompt` が発話ゼロのまま即削除する。かつてここにあったガードは
+ *   「掃除を孤児掃除の6時間まで遅らせているだけ」だったので外した（回収経路は
+ *   `worker.test.ts` の該当テストを参照）。
+ */
 function classify(fileName: string, filePath: string, order: bigint): ClassifiedFile | null {
-  // ★ 残骸が prompt-*.json のグロブに混ざらないよう、最初に弾く（PROGRESS_SUFFIX の註を参照）
-  if (fileName.endsWith(PROGRESS_SUFFIX)) return null;
-
   if (fileName.startsWith(PROMPT_PREFIX) && fileName.endsWith(PROMPT_SUFFIX)) {
     return { kind: "prompt", filePath, order };
   }
@@ -233,7 +245,9 @@ export function readMessage(filePaths: string[]): MessageContent {
     if (payload.final === true) final = true;
   }
 
-  return { deltas, final, sessionId, turnId, messageId };
+  const hasGap = byIndex.size > deltas.length;
+
+  return { deltas, final, hasGap, sessionId, turnId, messageId };
 }
 
 /** `prompt-<…>.json` は1イベントで完結するので、payload をそのまま返す */

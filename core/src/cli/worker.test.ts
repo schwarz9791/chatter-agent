@@ -6,13 +6,13 @@ import { acquireLock } from "../core/lock";
 import { createSpeechLog } from "../core/speechLog";
 import { createSpeechQueue } from "../core/speechQueue";
 import type { SpeechRecord } from "../core/types";
-import { scanSpool } from "./spool";
+import { removeEntry, scanSpool } from "./spool";
 import { acquireLockWithRetry, drainSpool } from "./worker";
 import type { DrainDeps } from "./worker";
 
-// ★ scanSpool は「進展の無いパスの直後に届いた spool」を再現するために差し替える。
-//   モジュールごと差し替え、scanSpool だけ vi.fn でラップする（./spool.ts の他の
-//   エクスポートは実体のまま素通りさせる）。パターンは core/lock.test.ts と同じ
+// ★ scanSpool / removeEntry は「進展の無いパスの直後に届いた spool」の再現や、削除失敗の
+//   再現に差し替えが要る。モジュールごと差し替え、この2つだけ vi.fn でラップする
+//   （./spool.ts の他のエクスポートは実体のまま素通りさせる）。パターンは core/lock.test.ts と同じ
 const actualSpoolRef = vi.hoisted(() => ({ current: null as typeof import("./spool") | null }));
 
 vi.mock("./spool", async (importOriginal) => {
@@ -21,6 +21,7 @@ vi.mock("./spool", async (importOriginal) => {
   return {
     ...actual,
     scanSpool: vi.fn(actual.scanSpool),
+    removeEntry: vi.fn(actual.removeEntry),
   };
 });
 
@@ -41,7 +42,10 @@ afterEach(() => {
   // テストごとに mockImplementationOnce で差し替えた分を、毎回「本物へ委譲する」既定の
   // 状態へ戻す（core/lock.test.ts と同じ理由）
   const actual = actualSpoolRef.current;
-  if (actual) vi.mocked(scanSpool).mockImplementation(actual.scanSpool);
+  if (actual) {
+    vi.mocked(scanSpool).mockImplementation(actual.scanSpool);
+    vi.mocked(removeEntry).mockImplementation(actual.removeEntry);
+  }
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -261,12 +265,21 @@ describe("final が来なかったメッセージの救済", () => {
     expect(fs.existsSync(path.join(spoolDir, "m1.0.json"))).toBe(true);
   });
 
-  it("文の途中で切れていても、救済されたら全文出す（もう続きは来ない）", () => {
+  it("★ 文の途中で切れていたら、救済経路では最後の断片を発話しない（続きが来るかもしれない）", () => {
     appendDelta("m1", 0, "Aの一文目。Aの途中");
     drain();
 
     tick();
     appendDelta("m2", 0, "Bの一文目。Bの二文目。");
+    drain();
+
+    // 「Aの途中」は文として閉じていないので落ちる。final 経由なら全部出る
+    // （下の「発話の粒度」/messageAssembler.test.ts 参照）
+    expect(texts()).toEqual(["Aの一文目。"]);
+  });
+
+  it("final 経由（もう続きは来ない）では、末尾が文として閉じていなくても全部出す", () => {
+    appendDelta("m1", 0, "Aの一文目。Aの途中", true);
     drain();
 
     expect(texts()).toEqual(["Aの一文目。", "Aの途中"]);
@@ -287,22 +300,125 @@ describe("final が来なかったメッセージの救済", () => {
     expect(texts()).toEqual(["確認します。", "ログを見ます。", "許可してください。"]);
   });
 
-  it("★ 救済した後に final が届いても、二度発話しない", () => {
+  it("★ 救済した後に final が届いても、二度発話しない（孤児は次のメッセージを打ち切らず、掃除される）", () => {
     appendDelta("m1", 0, "確認します。ログを見ます。");
     drain();
     tick();
     appendDelta("m2", 0, "次に進みます。");
     drain();
     expect(texts()).toEqual(["確認します。", "ログを見ます。"]);
+    expect(fs.readdirSync(spoolDir)).toEqual(["m2.0.json"]);
 
-    // 救済で delta ファイルは消えているので、遅れて届いた final は index 0 を持たない孤児になる
+    // 救済で m1 の delta ファイルは消えているので、遅れて届いた final は index 0 を
+    // 持たない孤児になる。★ 中身のある delta で届く想定にしてある（空 final だと、
+    // 孤児が発話されないのは元々当たり前でデータ喪失が構造的に見えないため）
     tick();
-    appendDelta("m1", 1, "", true);
+    appendDelta("m1", 1, "遅れて届いた分。", true);
+    // m2 はまだ伸びている途中（final も後続も無い）
     drain();
 
-    // m1 の文が二度出ていないこと（m2 はこの到着で救済されるので出てよい）
+    // 孤児の中身は発話されない。m1 の文が二度出ていないこと
+    expect(texts()).not.toContain("遅れて届いた分。");
     expect(texts().filter((t) => t === "確認します。")).toHaveLength(1);
     expect(texts().filter((t) => t === "ログを見ます。")).toHaveLength(1);
+
+    // 孤児のせいで m2 が打ち切られていないこと（まだ確定していないのでまだ出ない）
+    expect(texts()).not.toContain("次に進みます。");
+
+    // 孤児（m1.1.json）は tombstone によって即座に掃除される（6時間の cleanOrphans を待たない）
+    expect(fs.readdirSync(spoolDir)).toEqual(["m2.0.json"]);
+  });
+
+  it("★ 欠番があるうちは救済でも publish しない。埋まれば final 経由で全文出る", () => {
+    appendDelta("m1", 0, "Aの一文目。");
+    appendDelta("m1", 2, "Aの三文目。", true); // index 1 がまだ届いていない
+    drain();
+    expect(texts()).toEqual([]);
+
+    // m2 の到着で救済条件（hasNewer）は揃うが、欠番があるので publish も削除もしない
+    // （方針は「全損維持」）
+    tick();
+    appendDelta("m2", 0, "Bの一文目。");
+    drain();
+
+    expect(texts()).toEqual([]);
+    expect(fs.existsSync(path.join(spoolDir, "m1.0.json"))).toBe(true);
+    expect(fs.existsSync(path.join(spoolDir, "m1.2.json"))).toBe(true);
+
+    // 欠番が埋まれば final 経由で全文出る
+    tick();
+    appendDelta("m1", 1, "Aの二文目。");
+    drain();
+    expect(texts()).toEqual(["Aの一文目。", "Aの二文目。", "Aの三文目。"]);
+  });
+
+  it("★ index 0 が読めていない（deltas が空）まま救済条件が揃っても spool を消さない", () => {
+    // index 0 がそもそも無いので、payload の final:true は連続接頭辞の外で無視される
+    appendDelta("m1", 1, "Aの二文目のつもりだった。", true);
+    drain();
+    expect(texts()).toEqual([]);
+    expect(fs.existsSync(path.join(spoolDir, "m1.1.json"))).toBe(true);
+
+    // hasNewer は成立するが、deltas が空なので publish しない
+    // （EMFILE 等の一過性の読み取り失敗かもしれず、ファイルを消してはいけない）
+    tick();
+    appendDelta("m2", 0, "Bです。");
+    drain();
+
+    expect(texts()).toEqual([]);
+    expect(fs.existsSync(path.join(spoolDir, "m1.1.json"))).toBe(true);
+  });
+
+  it("★ tombstone: publish 済みの message_id への遅延 delta は再発話しない", () => {
+    appendDelta("m1", 0, "確認します。", true);
+
+    const calls: number[] = [];
+    const publish: DrainDeps["publish"] = (entries) => {
+      calls.push(entries.length);
+      return entries.map((entry, i) => ({ ...entry, seq: i + 1, ts: "2026-08-16T00:00:00.000Z" }));
+    };
+
+    drain({ publish });
+    expect(calls).toEqual([1]);
+    expect(fs.existsSync(path.join(spoolDir, "m1.0.json"))).toBe(false);
+
+    // 遅れて m1 が改めて完全な形（index 0 から、final:true 付き）で届く想定
+    tick();
+    appendDelta("m1", 0, "確認します。", true);
+    drain({ publish });
+
+    // tombstone が効いていれば、2回目の drain では publish が呼ばれない
+    expect(calls).toEqual([1]);
+  });
+
+  it("★ tombstone: removeEntry が失敗しても、次のドレインで再 publish されない", () => {
+    appendDelta("m1", 0, "確認します。", true);
+
+    const calls: number[] = [];
+    const publish: DrainDeps["publish"] = (entries) => {
+      calls.push(entries.length);
+      return entries.map((entry, i) => ({ ...entry, seq: i + 1, ts: "2026-08-16T00:00:00.000Z" }));
+    };
+
+    // ★ ドレインは1回の呼び出しの中で「進展あり」なら複数パス回るので、1回だけ throw する
+    //   mockImplementationOnce だと同じ drain() 呼び出しの2パス目で（tombstone 済みの
+    //   エントリの再削除として）呼び直され、そこで実体に委譲されて消えてしまう。
+    //   「削除がずっと失敗し続ける」状況を再現するため、drain() 呼び出しの間ずっと throw する
+    vi.mocked(removeEntry).mockImplementation(() => {
+      throw new Error("EACCES");
+    });
+
+    // removeEntry が失敗してもドレイン全体は止まらない
+    expect(() => drain({ publish })).not.toThrow();
+    expect(calls).toEqual([1]);
+    // 削除に失敗し続けたので spool ファイルはまだ残っている
+    expect(fs.existsSync(path.join(spoolDir, "m1.0.json"))).toBe(true);
+
+    // 次のドレインでは削除は成功するが、tombstone が効いて publish は呼ばれない
+    vi.mocked(removeEntry).mockImplementation(actualSpoolRef.current!.removeEntry);
+    drain({ publish });
+    expect(calls).toEqual([1]);
+    expect(fs.existsSync(path.join(spoolDir, "m1.0.json"))).toBe(false);
   });
 });
 
@@ -364,6 +480,18 @@ describe("応答待ち通知", () => {
   it("speakPrompts が false なら書かないが spool は消す", () => {
     writePrompt("q", question);
     drain({ speakPrompts: false });
+    expect(texts()).toEqual([]);
+    expect(fs.readdirSync(spoolDir)).toEqual([]);
+  });
+
+  it("★ 廃止した進捗サイドカーの残骸（prompt-<…>.progress.json）は専用ガード無しでも即座に片付く", () => {
+    // spool.ts の PROGRESS_SUFFIX ガードを外した（実害が「掃除を孤児掃除の6時間まで遅らせて
+    // いるだけ」だったため）。この残骸は prompt-*.json と同じ形なので通常の prompt entry
+    // として拾われるが、formatPromptEvent が未知 payload（hook_event_name が無い）に [] を
+    // 返すため、processPrompt の「発話ゼロなら即削除」分岐に落ちる。ガード除去で壊れないことを
+    // ここで示す
+    writePrompt("x.progress", { emitted: 1 });
+    drain();
     expect(texts()).toEqual([]);
     expect(fs.readdirSync(spoolDir)).toEqual([]);
   });

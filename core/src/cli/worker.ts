@@ -3,8 +3,9 @@
  *
  * 順序の保証（CLAUDE.md「絶対に守ること」4）:
  * - spool は**到着順**に処理する
- * - ドレインが空振りするまで繰り返す。これが「解放完了後にもう一度 spool を見る」に当たり、
- *   走査直後に到着した分の取りこぼしを防ぐ
+ * - 空振り（進展なし）が**2回連続**するまで繰り返す。1回目の空振りの後にもう一周させることが
+ *   「解放完了後にもう一度 spool を見る」に当たり、直前の走査が終わった直後に到着した分の
+ *   取りこぼしを防ぐ
  */
 
 import {
@@ -14,6 +15,7 @@ import {
   getEventSessionId,
 } from "../prompt/promptEventFormatter";
 import { cleanTextForSpeech, splitIntoSentences } from "../text/textFilter";
+import { acquireLock, type Lock } from "../core/lock";
 import type { SpeechEntry } from "../core/speechLog";
 import type { Emotion, SpeechRecord } from "../core/types";
 import { assembleSentences } from "./messageAssembler";
@@ -31,6 +33,58 @@ import {
 import { readWorkerState, writeWorkerState, type WorkerState } from "./workerState";
 
 /**
+ * ロック取得に使ってよい合計の待ち時間予算。
+ *
+ * ★ 長く待ってよい理由: CLI は hook からデタッチ起動されているので、ここで待っても hook 自体は
+ *   ブロックしない。長く待っても実害は「node プロセスが数個並ぶ」だけ。
+ * ★ 長く待つ必要がある理由: `final:true` の delta と `permission_prompt` の Notification は
+ *   **そのターン最後の hook イベント**。ここでロックを取り損ねると、次に誰かが hook を
+ *   発火させるまで発話が沈黙する。`AskUserQuestion` の場合、それは**ユーザーが既に回答した後**になる。
+ *   旧予算（4回試行 × 120ms ≒ 360ms、Node の起動込みで実測 408〜420ms）は、先行 worker が
+ *   ロックを 500ms 以上保持しただけで超えていた。実測されたドレイン所要時間に対して
+ *   十分な余裕を持たせ、3秒を予算にする。
+ */
+export const LOCK_MAX_WAIT_MS = 3_000;
+
+/** 再試行の間隔 */
+const LOCK_RETRY_DELAY_MS = 120;
+
+/** 同期で待つ。CLI は hook からデタッチ起動されているので、待っても hook はブロックしない */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+export interface AcquireLockWithRetryOptions {
+  maxWaitMs?: number;
+  retryDelayMs?: number;
+  /** テスト用。既定は実際に待つ `sleepSync` */
+  sleep?: (ms: number) => void;
+  /** テスト用 */
+  now?: () => number;
+}
+
+/**
+ * ロックを取る。取れなければ `LOCK_MAX_WAIT_MS` を使い切るまで再試行する。
+ *
+ * ★ 一度で諦めてはいけない。先行ワーカーが最後の走査を終えてから解放するまでの窓に
+ *   届いた spool は、そのワーカーにも拾われず、こちらが即終了すると誰にも拾われない。
+ */
+export function acquireLockWithRetry(lockDir: string, options: AcquireLockWithRetryOptions = {}): Lock | null {
+  const maxWaitMs = options.maxWaitMs ?? LOCK_MAX_WAIT_MS;
+  const retryDelayMs = options.retryDelayMs ?? LOCK_RETRY_DELAY_MS;
+  const sleep = options.sleep ?? sleepSync;
+  const now = options.now ?? Date.now;
+
+  const deadline = now() + maxWaitMs;
+  for (;;) {
+    const lock = acquireLock(lockDir);
+    if (lock) return lock;
+    if (now() >= deadline) return null;
+    sleep(retryDelayMs);
+  }
+}
+
+/**
  * PreToolUse と、それに付随する Notification を同一プロンプトとみなす時間窓。
  * AskUserQuestion / ExitPlanMode では PreToolUse の直後に permission_prompt の
  * Notification も発火するため、後者を捨てるのに使う（上流 cc-mascot と同じ値）。
@@ -40,7 +94,7 @@ const PROMPT_PAIR_WINDOW_MS = 10_000;
 /** 同一テキストの連投を抑制する時間窓（許可プロンプトの重複発火対策） */
 const DUPLICATE_WINDOW_MS = 3_000;
 
-/** 空振りするまで回すが、万一 spool が育ち続けても抜けられるようにする */
+/** 2回連続で空振りするまで回すが、万一 spool が育ち続けても抜けられるようにする */
 const MAX_PASSES = 8;
 
 export interface DrainDeps {
@@ -84,6 +138,10 @@ export function drainSpool(deps: DrainDeps): DrainResult {
   let stateDirty = false;
   let written = 0;
   let passes = 0;
+  // 「進展なし」が連続した回数。1回目の空振りで即座に抜けると、そのパスの走査が
+  // 終わった直後に届いた spool を見ないまま抜けてしまう（CLAUDE.md「絶対に守ること」4）。
+  // 2回連続してはじめて「もう届く分は無い」とみなす
+  let unchangedStreak = 0;
 
   for (; passes < MAX_PASSES; passes++) {
     const entries = scanSpool(deps.spoolDir);
@@ -92,7 +150,7 @@ export function drainSpool(deps: DrainDeps): DrainResult {
     // このパスで扱う分をまとめて読む。後続の session_id を見る必要があるので先に揃える
     const loaded: Loaded[] = entries.map((entry) =>
       entry.kind === "message"
-        ? { entry, content: readMessage(entry.filePath) }
+        ? { entry, content: readMessage(entry.filePaths) }
         : { entry, payload: readPromptPayload(entry.filePath) },
     );
 
@@ -109,8 +167,15 @@ export function drainSpool(deps: DrainDeps): DrainResult {
       if (outcome.stateDirty) stateDirty = true;
     }
 
-    // 何も動かなかった＝到着待ちだけが残っている。ここで抜ける
-    if (!changed) break;
+    if (changed) {
+      unchangedStreak = 0;
+      continue;
+    }
+
+    // 何も動かなかった。ここで即抜けると、この走査の直後に届いた分を見ないまま終わる。
+    // もう一周だけ確認し、それでも空振りならようやく「到着待ちだけが残っている」と判断する
+    unchangedStreak++;
+    if (unchangedStreak >= 2) break;
   }
 
   if (stateDirty) writeWorkerState(deps.workerStatePath, state);

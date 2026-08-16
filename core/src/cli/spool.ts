@@ -5,7 +5,10 @@
  *   公式ドキュメントに記載が無く実測に基づくもの（設計書 §2-3・§10）なので、想定が外れたときに
  *   差し替える場所を1箇所に閉じてある。
  *
- * ★ **spool の `.jsonl` は絶対に書き換えない。** hook が並行して追記している。
+ * ★ **spool のファイルは絶対に書き換えない。** hook は delta ごとに `<message_id>.<index>.json`
+ *   を tmp + rename で置く（追記はしない — bash から任意長の追記を原子的にする移植可能な方法が
+ *   無いため。→ docs/plugin.md）。1メッセージは複数の delta ファイルに分かれるので、
+ *   「1メッセージ = 複数ファイル」を1エントリにまとめるのがこのファイルの仕事。
  *   ワーカーが持つ進捗は `<message_id>.progress.json` のサイドカーに置く。
  */
 
@@ -13,16 +16,18 @@ import * as fs from "fs";
 import * as path from "path";
 import { writeFileAtomic } from "../core/atomicWrite";
 
-const MESSAGE_SUFFIX = ".jsonl";
+/** `<message_id>.<index>.json`。message_id はサニタイズ済みで `.` を含まない（plugin 側の責務） */
+const MESSAGE_DELTA_RE = /^(.+)\.(\d+)\.json$/;
 const PROMPT_PREFIX = "prompt-";
 const PROMPT_SUFFIX = ".json";
 const PROGRESS_SUFFIX = ".progress.json";
 
 export interface MessageSpoolEntry {
   kind: "message";
-  /** ファイル名そのもの。plugin が `<message_id>.jsonl` として置く */
+  /** ファイル名の `<message_id>` 部分 */
   messageId: string;
-  filePath: string;
+  /** delta ファイルのパス。**index 昇順**（欠番はありうる） */
+  filePaths: string[];
   progressPath: string;
   /** 到着順のキー。ナノ秒なので number に収まらない */
   order: bigint;
@@ -46,16 +51,17 @@ export interface MessageContent {
   messageId: string | null;
 }
 
-function progressPathFor(filePath: string): string {
-  return filePath.slice(0, -MESSAGE_SUFFIX.length) + PROGRESS_SUFFIX;
+function progressPathFor(messageId: string, spoolDir: string): string {
+  return path.join(spoolDir, `${messageId}${PROGRESS_SUFFIX}`);
 }
 
 /**
  * 到着順のキー。
  *
- * ★ mtime を使わないこと。`<message_id>.jsonl` は delta ごとに追記されるので mtime が動き続け、
- *   先に始まったメッセージが後から追記されて順番が入れ替わる。birthtime が本来の「到着順」。
- *   birthtime を持たない環境では mtime に落とす。
+ * ★ mtime を使わないこと。1 delta 1 ファイルにしても、進捗サイドカーはワーカーが書き換えるし、
+ *   何よりメッセージの「到着順」を代表する値としては個々のファイルの mtime ではなく
+ *   birthtime を使う必要がある（後述 `arrivalOrderOfMessage`）。birthtime を持たない環境では
+ *   mtime に落とす。
  *
  * ★ ミリ秒（`birthtimeMs`）では粗すぎる。同じミリ秒に作られたファイルが同値になり、
  *   下のタイブレーク（パス順）に落ちて到着順が壊れる。`bigint: true` の統計情報が持つ
@@ -65,25 +71,47 @@ function arrivalOrder(stat: fs.BigIntStats): bigint {
   return stat.birthtimeNs > 0n ? stat.birthtimeNs : stat.mtimeNs;
 }
 
-function classify(fileName: string, filePath: string, order: bigint): SpoolEntry | null {
-  // サイドカーが prompt-*.json のグロブに混ざらないよう、最初に弾く
+type ClassifiedFile =
+  | { kind: "prompt"; filePath: string; order: bigint }
+  | { kind: "messageDelta"; messageId: string; index: number; filePath: string; order: bigint };
+
+/** 判定順は「進捗サイドカーを最初に弾く → prompt- → message」を維持する */
+function classify(fileName: string, filePath: string, order: bigint): ClassifiedFile | null {
+  // サイドカーが prompt-*.json のグロブや delta のグロブに混ざらないよう、最初に弾く
   if (fileName.endsWith(PROGRESS_SUFFIX)) return null;
 
   if (fileName.startsWith(PROMPT_PREFIX) && fileName.endsWith(PROMPT_SUFFIX)) {
     return { kind: "prompt", filePath, order };
   }
 
-  if (fileName.endsWith(MESSAGE_SUFFIX)) {
-    return {
-      kind: "message",
-      messageId: fileName.slice(0, -MESSAGE_SUFFIX.length),
-      filePath,
-      progressPath: progressPathFor(filePath),
-      order,
-    };
+  // `<message_id>.<index>.json`。tmp のまま（`*.json.tmp`）は末尾が `.json` にならないので
+  // ここには来ない＝rename が終わるまで自然に無視される
+  const match = MESSAGE_DELTA_RE.exec(fileName);
+  if (match) {
+    return { kind: "messageDelta", messageId: match[1]!, index: Number(match[2]), filePath, order };
   }
 
   return null;
+}
+
+/**
+ * メッセージの到着順。index 0 のファイルの到着順を採る。
+ *
+ * ★ 「最新のファイルの到着順」ではなく「index 0 の到着順」であること。final:true は
+ *   大きく遅れて届くため、遅れて増えた delta ファイルの方が新しくなるのが普通に起きる。
+ *   それに引きずられて到着順が入れ替わらないよう、常に先頭（index 0）を基準にする。
+ *
+ * index 0 のファイルが（何らかの理由で）無ければ、手元にある中で最小の到着順を使う。
+ */
+function arrivalOrderOfMessage(deltas: { index: number; order: bigint }[]): bigint {
+  const zero = deltas.find((d) => d.index === 0);
+  if (zero) return zero.order;
+  return deltas.reduce((min, d) => (d.order < min ? d.order : min), deltas[0]!.order);
+}
+
+/** タイブレーク（同じナノ秒のときに実行のたびに順序が揺れないようにする）用の代表パス */
+function tieBreakPath(entry: SpoolEntry): string {
+  return entry.kind === "prompt" ? entry.filePath : entry.filePaths[0]!;
 }
 
 /** spool を到着順に走査する。ディレクトリが無いのは正常（まだ hook が動いていない） */
@@ -95,7 +123,10 @@ export function scanSpool(spoolDir: string): SpoolEntry[] {
     return [];
   }
 
-  const entries: SpoolEntry[] = [];
+  const prompts: PromptSpoolEntry[] = [];
+  // messageId ごとに delta ファイルを集める。index 昇順への並べ替えとエントリ化は後段でまとめて行う
+  const messages = new Map<string, { index: number; filePath: string; order: bigint }[]>();
+
   for (const fileName of fileNames) {
     const filePath = path.join(spoolDir, fileName);
     let stat: fs.BigIntStats;
@@ -106,14 +137,35 @@ export function scanSpool(spoolDir: string): SpoolEntry[] {
     }
     if (!stat.isFile()) continue;
 
-    const entry = classify(fileName, filePath, arrivalOrder(stat));
-    if (entry) entries.push(entry);
+    const classified = classify(fileName, filePath, arrivalOrder(stat));
+    if (!classified) continue;
+
+    if (classified.kind === "prompt") {
+      prompts.push(classified);
+      continue;
+    }
+
+    const list = messages.get(classified.messageId) ?? [];
+    list.push({ index: classified.index, filePath: classified.filePath, order: classified.order });
+    messages.set(classified.messageId, list);
+  }
+
+  const entries: SpoolEntry[] = [...prompts];
+  for (const [messageId, deltas] of messages) {
+    deltas.sort((a, b) => a.index - b.index);
+    entries.push({
+      kind: "message",
+      messageId,
+      filePaths: deltas.map((d) => d.filePath),
+      progressPath: progressPathFor(messageId, spoolDir),
+      order: arrivalOrderOfMessage(deltas),
+    });
   }
 
   // ナノ秒まで同値ならパスで決める（順序が実行ごとに揺れないように）
   return entries.sort((a, b) => {
     if (a.order !== b.order) return a.order < b.order ? -1 : 1;
-    return a.filePath.localeCompare(b.filePath);
+    return tieBreakPath(a).localeCompare(tieBreakPath(b));
   });
 }
 
@@ -125,44 +177,45 @@ function stringOrNull(value: unknown): string | null {
   return typeof value === "string" && value ? value : null;
 }
 
-/** 壊れた行・途中で切れた行は黙って捨てる（hook が書き込み中の可能性がある） */
-function parseLines(filePath: string): Record<string, unknown>[] {
+/** 1ファイル1 JSON を読む。壊れた・読めないファイルは黙って捨てる（hook が書き込み中の可能性がある） */
+function readDeltaFile(filePath: string): Record<string, unknown> | null {
   let text: string;
   try {
     text = fs.readFileSync(filePath, "utf-8");
   } catch {
-    return [];
+    return null;
   }
-
-  const out: Record<string, unknown>[] = [];
-  for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      const parsed: unknown = JSON.parse(line);
-      if (isRecord(parsed)) out.push(parsed);
-    } catch {
-      // 追記が途中の行。次の起動で読み直す
-    }
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null; // 書き込み途中（rename 直前）を掴んだ可能性
   }
-  return out;
 }
 
 /**
- * `<message_id>.jsonl` を読み、index 順に結合できる delta 列にする。
+ * delta ファイル群を読み、index 順に結合できる delta 列にする。
  *
  * index に欠番があったら**そこで打ち切る**。歯抜けのまま繋ぐと文が壊れて読み上げられるので、
  * 欠けた分が届くまで（あるいは孤児掃除に回収されるまで）黙って待つ方を選ぶ。
+ *
+ * ★ どの index かは**ファイル名ではなく payload の `index` フィールド**で判定する。
+ *   ファイル名はグルーピング（scanSpool）にしか使わない。同じ index の payload が複数
+ *   渡されたら後に読んだ方を勝たせる（呼び出し順は index 昇順で揃っているので、通常は
+ *   ファイル名どおりの index と一致するが、そうでない場合への備え）。
  */
-export function readMessage(filePath: string): MessageContent {
+export function readMessage(filePaths: string[]): MessageContent {
   const byIndex = new Map<number, Record<string, unknown>>();
   let sessionId: string | null = null;
   let turnId: string | null = null;
   let messageId: string | null = null;
 
-  for (const payload of parseLines(filePath)) {
+  for (const filePath of filePaths) {
+    const payload = readDeltaFile(filePath);
+    if (!payload) continue;
+
     const index = payload.index;
     if (typeof index !== "number" || !Number.isInteger(index) || index < 0) continue;
-    // 同じ index が二度来たら後勝ち（hook の再送を想定）
     byIndex.set(index, payload);
 
     sessionId ??= stringOrNull(payload.session_id);
@@ -216,15 +269,38 @@ export function writeProgress(progressPath: string, emitted: number): void {
   writeFileAtomic(progressPath, `${JSON.stringify({ emitted })}\n`);
 }
 
-/** 処理し終えた spool を消す。メッセージはサイドカーごと消す */
+/** 処理し終えた spool を消す。メッセージは全 delta ファイル + サイドカーを消す */
 export function removeEntry(entry: SpoolEntry): void {
-  fs.rmSync(entry.filePath, { force: true });
-  if (entry.kind === "message") fs.rmSync(entry.progressPath, { force: true });
+  if (entry.kind === "prompt") {
+    fs.rmSync(entry.filePath, { force: true });
+    return;
+  }
+  for (const filePath of entry.filePaths) fs.rmSync(filePath, { force: true });
+  fs.rmSync(entry.progressPath, { force: true });
+}
+
+/** メッセージ関連ファイル（delta + 進捗サイドカー）を message_id でグルーピングするための鍵 */
+function messageGroupKey(fileName: string): string | null {
+  // prompt- は1イベント完結でグルーピングの必要が無いので対象外（呼び出し側でファイル単位に扱う）
+  if (fileName.startsWith(PROMPT_PREFIX)) return null;
+
+  if (fileName.endsWith(PROGRESS_SUFFIX)) return fileName.slice(0, -PROGRESS_SUFFIX.length);
+
+  const match = MESSAGE_DELTA_RE.exec(fileName);
+  return match ? match[1]! : null;
 }
 
 /**
  * CLI が起動しないまま終わった孤児を掃除する。
- * 進行中のメッセージは delta のたびに mtime が更新されるので、ここでは mtime で「無活動時間」を見る。
+ *
+ * ★ **メッセージ単位でまとめて判定すること。** 1 delta 1 ファイルにすると、各ファイルの
+ *   mtime は書かれた瞬間で止まる。ファイル単位で「無活動時間」を見ると、進行中メッセージの
+ *   古い index のファイルだけが閾値を超えて消え、`index` に欠番ができて**そのメッセージが
+ *   永久に発話されなくなる**。そのメッセージに属するファイル群の**最新 mtime**を見て、
+ *   全体が無活動なら delta ファイルとサイドカーをまとめて消す。
+ *
+ * `prompt-*.json` と、rename 前の孤立した `.tmp`（このグルーピングに掛からないもの）は
+ * 従来どおりファイル単位で判定する（1イベントで完結するので、まとめる意味が無い）。
  */
 export function cleanOrphans(spoolDir: string, maxAgeMs: number, now: number = Date.now()): number {
   let fileNames: string[];
@@ -234,8 +310,23 @@ export function cleanOrphans(spoolDir: string, maxAgeMs: number, now: number = D
     return 0;
   }
 
-  let removed = 0;
+  const standalone: string[] = [];
+  const messageGroups = new Map<string, string[]>();
+
   for (const fileName of fileNames) {
+    const key = messageGroupKey(fileName);
+    if (key === null) {
+      standalone.push(fileName);
+      continue;
+    }
+    const list = messageGroups.get(key) ?? [];
+    list.push(fileName);
+    messageGroups.set(key, list);
+  }
+
+  let removed = 0;
+
+  for (const fileName of standalone) {
     const filePath = path.join(spoolDir, fileName);
     try {
       if (now - fs.statSync(filePath).mtimeMs <= maxAgeMs) continue;
@@ -245,5 +336,31 @@ export function cleanOrphans(spoolDir: string, maxAgeMs: number, now: number = D
       // 走査中に消えた
     }
   }
+
+  for (const groupFileNames of messageGroups.values()) {
+    const filePaths = groupFileNames.map((fileName) => path.join(spoolDir, fileName));
+
+    let latestMtimeMs = -Infinity;
+    for (const filePath of filePaths) {
+      try {
+        const mtimeMs = fs.statSync(filePath).mtimeMs;
+        if (mtimeMs > latestMtimeMs) latestMtimeMs = mtimeMs;
+      } catch {
+        // 走査中に消えた
+      }
+    }
+    if (latestMtimeMs === -Infinity) continue; // グループ全体が既に消えていた
+    if (now - latestMtimeMs <= maxAgeMs) continue;
+
+    for (const filePath of filePaths) {
+      try {
+        fs.rmSync(filePath, { force: true });
+        removed++;
+      } catch {
+        // 走査中に消えた
+      }
+    }
+  }
+
   return removed;
 }

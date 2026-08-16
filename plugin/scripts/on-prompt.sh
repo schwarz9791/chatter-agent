@@ -13,9 +13,11 @@
 
 PLUGIN_ROOT=${BASH_SOURCE[0]%/*}/..
 
-chatter_disabled && exit 0
-
+# ★ 順序が重要。stdin を読み切る前に exit すると Claude Code 側が EPIPE になる
+#   （`_lib.sh` の chatter_read_payload 参照）。無効化判定は読み切った後に置くこと。
 chatter_read_payload || exit 0
+
+chatter_disabled && exit 0
 
 chatter_debug PromptEvent "$CHATTER_PAYLOAD"
 
@@ -33,12 +35,10 @@ chatter_ensure_spool || exit 0
 # 名前に求められるのは一意性だけ（時刻は spool を覗いたときに読めるように入れてある）。
 NAME=prompt-$(date +%s)-$$-$RANDOM
 
-# tmp + rename で置く。ワーカーは読めない payload を消さずに次のドレインへ回すので
-# 書きかけを掴んでも失われないが、余計な往復が減る。
-# ★ tmp は `*.json.tmp` にすること。`*.tmp.json` だと prompt として拾われる（spool.ts）。
-TMP=$CHATTER_SPOOL_DIR/$NAME.json.tmp
-printf '%s\n' "$CHATTER_PAYLOAD" >"$TMP" 2>/dev/null &&
-  mv "$TMP" "$CHATTER_SPOOL_DIR/$NAME.json" 2>/dev/null
+# tmp + rename で置く（chatter_write_atomic / _lib.sh）。ワーカーは読めない payload を
+# 消さずに次のドレインへ回すので書きかけを掴んでも失われないが、余計な往復が減る。
+# ★ tmp は `*.json.tmp` になる。`*.tmp.json` だと prompt として拾われる（spool.ts）。
+chatter_write_atomic "$CHATTER_SPOOL_DIR/$NAME.json" "$CHATTER_PAYLOAD"
 
 chatter_spawn_cli "$PLUGIN_ROOT"
 

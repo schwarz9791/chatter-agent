@@ -1,12 +1,28 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { acquireLock } from "../core/lock";
 import { createSpeechLog } from "../core/speechLog";
 import { createSpeechQueue } from "../core/speechQueue";
 import type { SpeechRecord } from "../core/types";
-import { drainSpool } from "./worker";
+import { scanSpool } from "./spool";
+import { acquireLockWithRetry, drainSpool } from "./worker";
 import type { DrainDeps } from "./worker";
+
+// ★ scanSpool は「進展の無いパスの直後に届いた spool」を再現するために差し替える。
+//   モジュールごと差し替え、scanSpool だけ vi.fn でラップする（./spool.ts の他の
+//   エクスポートは実体のまま素通りさせる）。パターンは core/lock.test.ts と同じ
+const actualSpoolRef = vi.hoisted(() => ({ current: null as typeof import("./spool") | null }));
+
+vi.mock("./spool", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./spool")>();
+  actualSpoolRef.current = actual;
+  return {
+    ...actual,
+    scanSpool: vi.fn(actual.scanSpool),
+  };
+});
 
 let dir: string;
 let spoolDir: string;
@@ -22,6 +38,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // テストごとに mockImplementationOnce で差し替えた分を、毎回「本物へ委譲する」既定の
+  // 状態へ戻す（core/lock.test.ts と同じ理由）
+  const actual = actualSpoolRef.current;
+  if (actual) vi.mocked(scanSpool).mockImplementation(actual.scanSpool);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -53,9 +73,13 @@ function drain(overrides: Partial<DrainDeps> = {}) {
   });
 }
 
+/**
+ * spool に delta を1本置く（plugin の bash hook が `<message_id>.<index>.json` を
+ * tmp + rename で置くのと同じ結果になればよいので、テストでは直接 writeFileSync でよい）。
+ */
 function appendDelta(messageId: string, index: number, text: string, final = false, sessionId = "sess-1"): void {
-  fs.appendFileSync(
-    path.join(spoolDir, `${messageId}.jsonl`),
+  fs.writeFileSync(
+    path.join(spoolDir, `${messageId}.${index}.json`),
     JSON.stringify({
       session_id: sessionId,
       hook_event_name: "MessageDisplay",
@@ -64,7 +88,7 @@ function appendDelta(messageId: string, index: number, text: string, final = fal
       index,
       final,
       delta: text,
-    }) + "\n",
+    }),
   );
 }
 
@@ -101,7 +125,7 @@ describe("メッセージの処理", () => {
   it("final:true が来るまで spool を消さない", () => {
     appendDelta("m1", 0, "確認します。ログを見ます。");
     drain();
-    expect(fs.existsSync(path.join(spoolDir, "m1.jsonl"))).toBe(true);
+    expect(fs.existsSync(path.join(spoolDir, "m1.0.json"))).toBe(true);
     expect(fs.existsSync(path.join(spoolDir, "m1.progress.json"))).toBe(true);
   });
 
@@ -324,13 +348,35 @@ describe("ドレインの停止条件", () => {
   it("spool が空なら1周で止まる", () => {
     expect(drain().passes).toBe(0);
   });
+
+  it("★ !changed で終わるパスの直後に届いた spool も、同じドレインで拾う", () => {
+    // 句点が無く、まだ確定しない断片を1件だけ置く。処理してもファイルは残り written も
+    // 0 なので、このパスは !changed で終わる（CLAUDE.md「絶対に守ること」4）
+    appendDelta("m1", 0, "確認します");
+
+    // 1回目の scanSpool が返った直後（＝そのパスの走査が終わった直後）に、別の spool が
+    // 届いた状況を作る。mockImplementationOnce なので効くのは最初の1回だけで、以降は本物
+    vi.mocked(scanSpool).mockImplementationOnce((dir) => {
+      const result = actualSpoolRef.current!.scanSpool(dir);
+      writePrompt("late", { session_id: "sess-1", hook_event_name: "Notification", message: "遅れて届いた通知。" });
+      return result;
+    });
+
+    const result = drain();
+
+    // 旧実装（1回目の !changed で即 break）だと、この spool は次にどこかの hook が
+    // 発火するまで誰にも拾われない。2回連続の空振りではじめて抜けるようにすると、
+    // 同じドレインの中でもう一度走査が走り、ここで拾われる
+    expect(texts()).toContain("遅れて届いた通知。");
+    expect(result.passes).toBeGreaterThanOrEqual(2);
+  });
 });
 
 describe("孤児の掃除", () => {
   it("無活動が閾値を超えた spool を消す", () => {
     appendDelta("old", 0, "あ。");
     const stale = new Date(clock - 10 * HOUR);
-    fs.utimesSync(path.join(spoolDir, "old.jsonl"), stale, stale);
+    fs.utimesSync(path.join(spoolDir, "old.0.json"), stale, stale);
 
     expect(drain().orphansRemoved).toBe(1);
     expect(fs.readdirSync(spoolDir)).toEqual([]);
@@ -339,5 +385,31 @@ describe("孤児の掃除", () => {
   it("進行中のものは消さない", () => {
     appendDelta("m1", 0, "あ。");
     expect(drain().orphansRemoved).toBe(0);
+  });
+});
+
+describe("acquireLockWithRetry", () => {
+  it("★ 先行 worker がロックを長く保持していても、予算内なら解放を待って取得できる", () => {
+    const lockDir = path.join(dir, "speak.lock");
+    const held = acquireLock(lockDir);
+    expect(held).not.toBeNull();
+
+    // 実時間を待つと遅いので擬似クロックで駆動する。旧予算（4回試行 × 120ms ≒ 360ms、
+    // Node 起動込みの実測は408〜420ms）を大きく超える600msの保持を再現する
+    let clock = 0;
+    let sleepCalls = 0;
+    const acquired = acquireLockWithRetry(lockDir, {
+      now: () => clock,
+      sleep: () => {
+        sleepCalls++;
+        clock += 120;
+        if (clock >= 600) held!.release(); // 先行 worker がここでようやく解放する
+      },
+    });
+
+    expect(acquired).not.toBeNull();
+    // 旧 LOCK_RETRIES=3 の予算（sleep は最大3回）では届かない待ち時間であることの確認
+    expect(sleepCalls).toBeGreaterThan(3);
+    acquired?.release();
   });
 });

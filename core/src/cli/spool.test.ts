@@ -38,10 +38,16 @@ function delta(index: number, text: string, final = false, messageId = "m1") {
   };
 }
 
-function writeMessage(messageId: string, payloads: unknown[]): string {
-  const filePath = path.join(spoolDir, `${messageId}.jsonl`);
-  fs.writeFileSync(filePath, payloads.map((p) => JSON.stringify(p)).join("\n") + "\n");
-  return filePath;
+/**
+ * hook が置く形（`<message_id>.<index>.json`、1ファイル1 JSON）を再現する。
+ * 返すのは書いたファイルパスの配列（渡した payload の順）。
+ */
+function writeMessage(messageId: string, payloads: { index: number }[]): string[] {
+  return payloads.map((p) => {
+    const filePath = path.join(spoolDir, `${messageId}.${p.index}.json`);
+    fs.writeFileSync(filePath, JSON.stringify(p));
+    return filePath;
+  });
 }
 
 /**
@@ -55,11 +61,16 @@ function tick(ms = 2): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-function setBirthtime(filePath: string, ms: number): void {
-  // birthtime は直接いじれないので、mtime を落として fallback 経路も含めて順序を作る。
-  // macOS/APFS では作成順がそのまま birthtime になるため、テストは作成順で担保する。
+function setMtime(filePath: string, ms: number): void {
   const t = new Date(ms);
   fs.utimesSync(filePath, t, t);
+}
+
+function messageEntry(kind: "message" | "prompt" = "message") {
+  const entries = scanSpool(spoolDir);
+  const entry = entries.find((e) => e.kind === kind);
+  if (!entry) throw new Error(`no ${kind} entry`);
+  return entry;
 }
 
 describe("scanSpool", () => {
@@ -92,16 +103,37 @@ describe("scanSpool", () => {
     expect(scanSpool(spoolDir)).toEqual([]);
   });
 
-  it("メッセージのファイル名から message_id とサイドカーのパスを決める", () => {
+  it("delta の tmp ファイル（rename 前）は走査対象にならない", () => {
+    // `<message_id>.<index>.json.tmp` は末尾が `.json` にならないので、classify のどの
+    // 分岐にも一致せず無視される（rename が終わるまで自然に隠れる）
+    writeMessage("m1", [delta(0, "あ。")]);
+    fs.writeFileSync(path.join(spoolDir, "m1.1.json.tmp"), "{}");
+
+    const entries = scanSpool(spoolDir);
+    expect(entries).toHaveLength(1);
+    const entry = entries[0]!;
+    if (entry.kind !== "message") throw new Error("unreachable");
+    expect(entry.filePaths).toHaveLength(1);
+  });
+
+  it("メッセージのファイル名（<message_id>.<index>.json）から message_id とサイドカーのパスを決める", () => {
     writeMessage("a94cd2c5", [delta(0, "あ。")]);
-    const entry = scanSpool(spoolDir)[0];
-    expect(entry?.kind).toBe("message");
-    if (entry?.kind !== "message") throw new Error("unreachable");
+    const entry = messageEntry();
+    if (entry.kind !== "message") throw new Error("unreachable");
     expect(entry.messageId).toBe("a94cd2c5");
     expect(entry.progressPath).toBe(path.join(spoolDir, "a94cd2c5.progress.json"));
   });
 
-  it("到着順（作成順）に並ぶ", () => {
+  it("同じ message_id の delta ファイルを1エントリにまとめ、index 昇順に並べる", () => {
+    // わざと届く順を index の昇順とずらして置く
+    writeMessage("m1", [delta(1, "います。"), delta(0, "確認して"), delta(2, "。", true)]);
+
+    const entry = messageEntry();
+    if (entry.kind !== "message") throw new Error("unreachable");
+    expect(entry.filePaths.map((f) => path.basename(f))).toEqual(["m1.0.json", "m1.1.json", "m1.2.json"]);
+  });
+
+  it("到着順（index 0 ファイルの作成順）に並ぶ", () => {
     // 名前順に並べると first → prompt-third → second になるので、
     // 作成順で並んでいることがこの並びで分かる
     writeMessage("first", [delta(0, "あ。")]);
@@ -110,73 +142,94 @@ describe("scanSpool", () => {
     tick();
     fs.writeFileSync(path.join(spoolDir, "prompt-third.json"), "{}");
 
-    expect(scanSpool(spoolDir).map((e) => path.basename(e.filePath))).toEqual([
-      "first.jsonl",
-      "second.jsonl",
+    expect(scanSpool(spoolDir).map((e) => (e.kind === "message" ? e.messageId : path.basename(e.filePath)))).toEqual([
+      "first",
+      "second",
       "prompt-third.json",
     ]);
   });
 
-  it("先に始まったメッセージが後から追記されても順序が入れ替わらない", () => {
-    // ★ mtime で並べるとここが壊れる。final:true は大きく遅れて届くため、
-    //   先行メッセージの mtime が後発より新しくなるのが普通に起きる
-    const first = writeMessage("first", [delta(0, "あ。")]);
+  it("後から届いた delta（index>0）のファイルの方が新しくても、メッセージの到着順は index 0 の作成時刻で決まる", () => {
+    // ★ 「グループの最新ファイル」で並べるとここが壊れる。final:true は大きく遅れて届くため、
+    //   先行メッセージの index>0 のファイルが後発メッセージより新しく作られるのが普通に起きる
+    writeMessage("first", [delta(0, "あ。")]);
     tick();
     writeMessage("second", [delta(0, "い。")]);
+    tick();
+    // 大きく遅れて final が届いた想定。このファイルは全体の中で一番新しく作られる
+    writeMessage("first", [delta(1, "う。", true)]);
 
-    fs.appendFileSync(first, JSON.stringify(delta(1, "う。", true)) + "\n");
-    setBirthtime(first, Date.now() + 60_000);
+    expect(scanSpool(spoolDir).map((e) => (e.kind === "message" ? e.messageId : "?"))).toEqual(["first", "second"]);
+  });
 
-    expect(scanSpool(spoolDir).map((e) => path.basename(e.filePath))).toEqual(["first.jsonl", "second.jsonl"]);
+  it("index 0 のファイルが無ければ、手元にある中で最小の到着順（最初に作られたもの）を使う", () => {
+    // index 0 が欠けている状況（通常は起きないが、フォールバックの確認）
+    fs.writeFileSync(path.join(spoolDir, "m1.2.json"), JSON.stringify(delta(2, "う。")));
+    tick();
+    fs.writeFileSync(path.join(spoolDir, "m1.5.json"), JSON.stringify(delta(5, "お。", true)));
+    tick();
+    writeMessage("m2", [delta(0, "い。")]); // 後から届いた別メッセージ
+
+    expect(scanSpool(spoolDir).map((e) => (e.kind === "message" ? e.messageId : "?"))).toEqual(["m1", "m2"]);
   });
 });
 
 describe("readMessage", () => {
   it("index 順に delta を並べる", () => {
-    const filePath = writeMessage("m1", [delta(1, "います。"), delta(0, "確認して")]);
-    const content = readMessage(filePath);
+    const filePaths = writeMessage("m1", [delta(1, "います。"), delta(0, "確認して")]);
+    const content = readMessage(filePaths);
     expect(content.deltas).toEqual(["確認して", "います。"]);
     expect(content.final).toBe(false);
   });
 
   it("final:true を拾う", () => {
-    const filePath = writeMessage("m1", [delta(0, "あ。"), delta(1, "い。", true)]);
-    expect(readMessage(filePath).final).toBe(true);
+    const filePaths = writeMessage("m1", [delta(0, "あ。"), delta(1, "い。", true)]);
+    expect(readMessage(filePaths).final).toBe(true);
   });
 
   it("payload から sessionId / turnId / messageId を取る", () => {
-    const filePath = writeMessage("m1", [delta(0, "あ。")]);
-    const content = readMessage(filePath);
+    const filePaths = writeMessage("m1", [delta(0, "あ。")]);
+    const content = readMessage(filePaths);
     expect(content.sessionId).toBe("sess-1");
     expect(content.turnId).toBe("turn-1");
     expect(content.messageId).toBe("m1");
   });
 
   it("index に欠番があればそこで打ち切る（歯抜けを繋いで文を壊さない）", () => {
-    const filePath = writeMessage("m1", [delta(0, "あ。"), delta(2, "う。", true)]);
-    const content = readMessage(filePath);
+    const filePaths = writeMessage("m1", [delta(0, "あ。"), delta(2, "う。", true)]);
+    const content = readMessage(filePaths);
     expect(content.deltas).toEqual(["あ。"]);
     expect(content.final).toBe(false);
   });
 
   it("index 0 が無ければ何も読まない", () => {
-    const filePath = writeMessage("m1", [delta(1, "い。")]);
-    expect(readMessage(filePath).deltas).toEqual([]);
+    const filePaths = writeMessage("m1", [delta(1, "い。")]);
+    expect(readMessage(filePaths).deltas).toEqual([]);
   });
 
-  it("途中で切れた行は捨てて、読めた行だけ使う", () => {
-    const filePath = path.join(spoolDir, "m1.jsonl");
-    fs.writeFileSync(filePath, JSON.stringify(delta(0, "あ。")) + "\n" + '{"index":1,"delta":"い');
-    expect(readMessage(filePath).deltas).toEqual(["あ。"]);
+  it("パース不能なファイルは捨てて、読めたファイルだけ使う（rename 直前の書き込み途中を掴んだ可能性）", () => {
+    const f0 = path.join(spoolDir, "m1.0.json");
+    fs.writeFileSync(f0, JSON.stringify(delta(0, "あ。")));
+    const f1 = path.join(spoolDir, "m1.1.json");
+    fs.writeFileSync(f1, '{"index":1,"delta":"い'); // 壊れた JSON
+    expect(readMessage([f0, f1]).deltas).toEqual(["あ。"]);
   });
 
-  it("同じ index が二度来たら後勝ち", () => {
-    const filePath = writeMessage("m1", [delta(0, "旧"), delta(0, "新")]);
-    expect(readMessage(filePath).deltas).toEqual(["新"]);
+  it("readMessage は payload の index を信用する（ファイル名はグルーピングにしか使わない）。同じ index が複数あれば後勝ち", () => {
+    const f0 = path.join(spoolDir, "m1.0.json");
+    fs.writeFileSync(f0, JSON.stringify(delta(0, "旧")));
+    // ファイル名は index 1 だが、中身の index は 0（想定外の状況への備え）
+    const f1 = path.join(spoolDir, "m1.1.json");
+    fs.writeFileSync(f1, JSON.stringify(delta(0, "新")));
+    expect(readMessage([f0, f1]).deltas).toEqual(["新"]);
   });
 
   it("ファイルが無ければ空", () => {
-    expect(readMessage(path.join(spoolDir, "nope.jsonl")).deltas).toEqual([]);
+    expect(readMessage([path.join(spoolDir, "nope.0.json")]).deltas).toEqual([]);
+  });
+
+  it("空配列なら空", () => {
+    expect(readMessage([]).deltas).toEqual([]);
   });
 });
 
@@ -232,9 +285,9 @@ describe("進捗サイドカー", () => {
 });
 
 describe("removeEntry", () => {
-  it("メッセージはサイドカーごと消す", () => {
-    writeMessage("m1", [delta(0, "あ。")]);
-    const entry = scanSpool(spoolDir)[0]!;
+  it("メッセージは全 delta ファイル + サイドカーを消す", () => {
+    writeMessage("m1", [delta(0, "あ。"), delta(1, "い。", true)]);
+    const entry = messageEntry();
     if (entry.kind !== "message") throw new Error("unreachable");
     writeProgress(entry.progressPath, 1);
 
@@ -250,17 +303,41 @@ describe("removeEntry", () => {
 });
 
 describe("cleanOrphans", () => {
-  it("無活動が閾値を超えたファイルを消す", () => {
-    const stale = writeMessage("stale", [delta(0, "あ。")]);
+  it("無活動が閾値を超えたメッセージを、delta ファイルごと消す", () => {
+    const [staleFile] = writeMessage("stale", [delta(0, "あ。")]);
     writeMessage("fresh", [delta(0, "い。")]);
-    setBirthtime(stale, Date.now() - 10 * 60 * 60 * 1000);
+    setMtime(staleFile!, Date.now() - 10 * 60 * 60 * 1000);
 
     expect(cleanOrphans(spoolDir, 6 * 60 * 60 * 1000)).toBe(1);
-    expect(fs.readdirSync(spoolDir)).toEqual(["fresh.jsonl"]);
+    expect(fs.readdirSync(spoolDir)).toEqual(["fresh.0.json"]);
   });
 
-  it("進行中のメッセージは消さない（delta のたびに mtime が更新される）", () => {
+  it("進行中のメッセージは消さない", () => {
     writeMessage("m1", [delta(0, "あ。")]);
+    expect(cleanOrphans(spoolDir, 6 * 60 * 60 * 1000)).toBe(0);
+  });
+
+  it("★ メッセージ単位で判定する（古い index 0 と新しい index 1 が並んでいても、どちらも消えない）", () => {
+    // 1 delta 1 ファイルにすると、各ファイルの mtime は書かれた瞬間で止まる。ファイル単位で
+    // 無活動判定すると、進行中メッセージの古い delta だけが消えて index に欠番ができ、
+    // そのメッセージが永久に発話されなくなる（CLAUDE.md「絶対に守ること」5 の落とし穴）。
+    const [zeroFile] = writeMessage("m1", [delta(0, "あ。")]);
+    setMtime(zeroFile!, Date.now() - 10 * 60 * 60 * 1000); // 単体で見れば閾値を超える古さ
+
+    // index 1 はついさっき届いた最新の delta。メッセージ自体は進行中
+    writeMessage("m1", [delta(1, "い。")]);
+
+    expect(cleanOrphans(spoolDir, 6 * 60 * 60 * 1000)).toBe(0);
+    expect(fs.readdirSync(spoolDir).sort()).toEqual(["m1.0.json", "m1.1.json"]);
+  });
+
+  it("進捗サイドカーもメッセージのグループに含めて判定する", () => {
+    const [zeroFile] = writeMessage("m1", [delta(0, "あ。")]);
+    writeProgress(path.join(spoolDir, "m1.progress.json"), 1);
+    setMtime(zeroFile!, Date.now() - 10 * 60 * 60 * 1000);
+    // サイドカーは直近に更新されている（＝メッセージは進行中）
+    setMtime(path.join(spoolDir, "m1.progress.json"), Date.now());
+
     expect(cleanOrphans(spoolDir, 6 * 60 * 60 * 1000)).toBe(0);
   });
 

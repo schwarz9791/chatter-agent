@@ -50,8 +50,11 @@ INDEX=$CHATTER_VALUE
 chatter_ensure_spool || exit 0
 
 # ★ delta が空でも書くこと。`final:true` の delta は「メッセージが改行で終わったとき空になる」
-#   （Claude Code のスキーマ記述）。空だからと捨てると、ファイルの削除も
-#   最後の1文の flush も駆動されなくなる。
+#   （Claude Code のスキーマ記述）。空だからと捨てると、final:true の payload そのものが
+#   spool に残らない。[#30] 以降は final を待ってメッセージ全文をまとめて発話する設計なので、
+#   被害は「最後の1文が出ない」ではなく**そのメッセージが一文も発話されない**こと
+#   （同一セッションで後続イベントが起きれば救済経路が手前の deltas だけは publish するが、
+#   保証ではない。起きなければ孤児掃除＝既定6時間まで発話されないまま残って消える）。
 chatter_write_atomic "$CHATTER_SPOOL_DIR/$MESSAGE_ID.$INDEX.json" "$CHATTER_PAYLOAD"
 
 chatter_spawn_cli "$PLUGIN_ROOT"

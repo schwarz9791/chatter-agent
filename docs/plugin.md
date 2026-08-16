@@ -103,6 +103,24 @@ hook は `prompt-<…>.json` を **tmp + rename** で置いている。ワーカ
 `path.join(spoolDir, fileName)` するだけで検査しない。`[A-Za-z0-9_-]` 以外を含む値は捨てる
 （`.` を弾いているので `..` も `*.progress.json` との衝突も同時に塞がる）。
 
+### 追記は1回の `write(2)` に収める — `LC_ALL=C` を外さない
+
+**マルチバイトのロケールだと bash の `printf` は 1024 バイトごとに `write` を分ける。**
+hook は並行して走りうるので（実測: `PreToolUse` と `MessageDisplay` が同時に走って診断ログが割れた）、
+同じファイルへの追記が 1024 バイト境界で相手の書き込みに割り込まれ、**UTF-8 文字の途中で千切れる**。
+
+spool の `.jsonl` でこれが起きると、その行が JSON として読めなくなる。core は読めない行を飛ばすので
+`index` の連番がそこで途切れ、**そのメッセージの以降の delta が丸ごと発話されない**。
+しかも `final` を処理できないまま孤児掃除（既定6時間）まで spool に残る。
+
+payload は日本語を含むと 1024 バイトを普通に超えるので、**実際に踏む**。
+
+`_lib.sh` の先頭で `LC_ALL=C` を立てて回避している。C ロケールならバイト列として一括で write される
+（実測: 240 並行追記で破損 0 件。外すと 20 並行で 2 件割れる）。**`export` しないこと** —
+bash 自身のロケールだけを変え、デタッチする node には伝播させない。
+
+`verify:phase-a` の ⑧ がこれを見ている。
+
 ### spool のパスに条件分岐を足さない
 
 `${XDG_CONFIG_HOME:-$HOME/.config}/chatter-agent/spool` を一行で組む。これは
@@ -171,19 +189,38 @@ export CHATTER_AGENT_CLI=<repo>/plugin/bin/chatter-agent-speak.mjs
 
 推測で埋めず、潰すもの。詳細は `_workspace/chatter-agent-design.md` §10。
 
-- **サブエージェントの発言で発火するか（`agent_id` が入るか）** — 未観測。
-  hook は `agent_id` を持つ payload を捨てるので、発火してもしなくても挙動は正しい
 - delta 間隔の下限（実測は 1.4〜5.7 秒。もっと速くなると bash 起動が積み上がる）
+- **`AskUserQuestion` / `ExitPlanMode` の直前のメッセージで `final:true` がどれだけ遅れるか** — 下記
 
-### 潰れたもの
+### 潰れたもの（Claude Code 2.1.233 / macOS で実測）
 
 | 項目 | 結果 |
 |---|---|
 | `${CLAUDE_PLUGIN_ROOT}` の実体 | キャッシュへの完全コピー。`bin/` も入る（上記） |
-| thinking / tool_use でも発火するか | **発火しない。** 段落4つのメッセージで thinking を挟んでも text の delta のみ |
+| thinking / tool_use でも発火するか | **発火しない。** thinking を挟んでも text の delta のみ |
+| **サブエージェントの発言で発火するか** | **発火しない。** 3段落の回答を返す Explore を1本走らせて、`agent_id` / `agent_type` を持つ payload が 0 件。サブの発言は `speech.jsonl` にも混ざらない。hook 側の `agent_id` 除外は**保険として残す**（発火する版が来ても事故らない） |
 | `MessageDisplay` が UI をブロックするか | 体感なし。hook は数 ms で返り、delta 到着から `speech.jsonl` まで **約 50ms** |
 | bash で `message_id` を安定して抜けるか | 抜ける。ただし `sed` の貪欲マッチは不可（上記） |
-| `final:true` の 34〜80 秒遅延 | **2.1.233 では再現せず。** 短いメッセージは `index:0` / `final:true` の単一 flush で届き、長いメッセージでも最終 flush は直前の delta から 5.7 秒だった |
+
+### `final:true` の 34〜80 秒遅延について
+
+設計書 §2-4 は 2.1.231 で「最終チャンクだけが 34〜80 秒遅れる」と実測している。
+**2.1.233 での計測では再現しなかった**が、**条件を踏んでいないだけの可能性がある。**
+
+観測できたのは次の範囲。`final` はいずれも直前の delta から数秒で、その差は thinking の長さで説明がつく。
+
+| 直後にあったもの | 直前 delta → `final` |
+|---|---|
+| Bash などのツール呼び出し | +3.3〜7.0 秒 |
+| **ターン終了**（ツールを呼ばずに終わる） | **+0.62 秒** |
+
+**`AskUserQuestion` / `ExitPlanMode` の直前は測れていない。** 設計書の実測サンプル3件のうち2件は、
+内容を見る限りまさに**ユーザーへの質問の直前の一文**（「確認させてください。」「最後にここだけ確定させてください。」）
+なので、ここが条件である可能性が残る。
+
+**どちらにせよ `final:true` を待たない設計は変えない。** 待たない方が速いうえ、
+質問の直前で遅れるなら `PreToolUse` の prompt が spool に載って `hasNewerInSameSession` が
+保留を解くので、その経路でも救われる。
 
 ## 現在の状態
 

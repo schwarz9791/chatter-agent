@@ -27,7 +27,7 @@ hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公�
 
 | ディレクトリ | 内容 | 状態 |
 |---|---|---|
-| `plugin/` | Claude Code プラグイン（bash hook） | **実装済み。** 実機で受け入れ基準を満たしている |
+| `plugin/` | Claude Code プラグイン（bash hook） | **実装済み。** 実機で動作確認している |
 | `core/` | `chatter-agent-core`（CLI + WebSocket サーバー） | **実装済み。** `summarizer/`（AI要約、既定OFF）だけ未着手 |
 | `apps/chatter-mascot/` | 表示側アプリ（**Unity + UniVRM**。macOS 常駐 + Android XR を1プロジェクトで） | 未作成 |
 | `docs/` | 作業規約 | protocol / core / plugin / origin の4本 |
@@ -41,9 +41,10 @@ hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公�
 [#16](https://github.com/schwarz9791/chatter-agent/issues/16)（デスクトップ固有）/ [#25](https://github.com/schwarz9791/chatter-agent/issues/25)（XR 固有）。
 **#11 は Unity のビルドを待たずに音が出せる。**
 
-**Phase A は実機で確定済み**（Claude Code 2.1.233 / macOS）。受け入れ基準の「ターミナル表示と体感で同時」は、
-delta が hook に届いてから `speech.jsonl` に載るまで**約 50ms** で満たしている。
-`MessageDisplay` は表示と同時に発火するので、体感の差は出ない。
+**Phase A は実機で動作確認した**（Claude Code 2.1.233 / macOS）。delta が hook に届いてから
+`speech.jsonl` に載るまでの配管は**約 50ms** で十分速い。`MessageDisplay` は表示と同時に発火するので、
+**確定した文**はターミナル表示とほぼ体感差なく発話される。ただし段落の最後の一文（さらにメッセージの
+最終行）は確定が遅れる分だけ後から追いつく（→ 下の「実測で潰れた前提」/「絶対に守ること」1）。
 
 実測で潰れた前提は [`docs/plugin.md`](./docs/plugin.md) に集約してある。要点だけ:
 
@@ -60,7 +61,7 @@ delta が hook に届いてから `speech.jsonl` に載るまで**約 50ms** で
 Claude Code
   │ hooks: MessageDisplay / PreToolUse(AskUserQuestion|ExitPlanMode) / Notification(permission_prompt)
   ▼
-plugin/scripts/*.sh          bash。payload を spool/<message_id>.jsonl に追記するだけ。即 exit 0
+plugin/scripts/*.sh          bash。payload を spool/<message_id>.<index>.json に置くだけ。即 exit 0
   │ 毎 delta で CLI をデタッチ起動
   ▼
 chatter-agent-speak (CLI)    ロックを取れた1プロセスだけが spool を順に処理
@@ -86,9 +87,9 @@ chatter-mascot               表示側アプリ（Unity）。TTS → 再生 → 
 
 ### 1. `final:true` を待たない
 
-1つの `message_id` は `index` 0..N で分割送信され `final:true` が終端になる。**delta が届くたびに、確定した文だけを流す。**
+1つの `message_id` は `index` 0..N で分割送信され `final:true` が終端になる。
 
-「確定した文」の判定は2段ある。**非 final の delta は必ず行単位で届く**（Claude Code のスキーマ記述。実測でも全て改行終わり）ので、蓄積テキストが行として閉じていれば最後の文はもう伸びない。閉じていなければ最後の文を保留する。未閉じの ``` 以降も保留する。
+**delta が届くたびに、確定した文だけを流す。** 最後の文と、未閉じの ``` 以降は保留する。
 → [`docs/core.md`](./docs/core.md) / `core/src/cli/messageAssembler.ts`
 
 > 設計書 §2-4 の「最終チャンクだけが大きく遅れる」は **2.1.233 でも起きる**。`final` はメッセージが閉じる瞬間＝次のブロックが始まるときに届くので、遅延は**その手前でモデルが何をどれだけ生成したか**で決まる。ターン終了ならほぼ即座、ツール呼び出しなら数秒、**`AskUserQuestion` の直前だと数十秒**。**秒数を仕様として扱わないこと**（→ [`docs/plugin.md`](./docs/plugin.md)）。
@@ -102,7 +103,9 @@ jsonl の `timestamp` は**メッセージの生成時刻であって書き込�
 
 ### 3. hook script で重い処理をしない
 
-`MessageDisplay` のタイムアウトは**10秒**（他の hook は600秒）で、UI 表示経路に同期している可能性がある。hook は spool に追記して CLI をデタッチ起動し、即 `exit 0` する。**Node を起動しない。**
+`MessageDisplay` のタイムアウトは**10秒**（他の hook は600秒）で、UI 表示経路に同期している可能性がある。hook は spool に1ファイル置いて CLI をデタッチ起動し、即 `exit 0` する。**Node を起動しない。**
+
+**追記はしない。** bash から任意長の追記を原子的にする移植可能な方法が無い（`printf` は stdio が 1024 バイト境界で write を分割する）ため、1イベント1ファイルを tmp + rename で置く。
 → [`docs/plugin.md`](./docs/plugin.md)
 
 ### 4. 発話の順序を壊さない
@@ -144,7 +147,7 @@ npm run format
 npm run test:run
 npm run build            # CLI → plugin/bin/、server → dist/
 
-npm run verify:phase-a   # spool → 記録 + 配信キュー（spool を手で置いて確認）
+npm run verify:phase-a   # spool → 記録 + 配信キュー（payload を実際の hook に食わせて確認）
 npm run verify:phase-b   # 配信キュー → WebSocket（実サーバーを起動して確認）
 npm run start:server
 ```

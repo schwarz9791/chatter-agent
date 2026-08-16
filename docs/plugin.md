@@ -4,13 +4,22 @@ Claude Code の hook を受けて spool に書くだけの bash スクリプト�
 
 spool より先（記録・配信キュー・WebSocket）は [`protocol.md`](./protocol.md) と [`core.md`](./core.md) の担当。
 
-## hook script がやることは3つだけ
+## hook script がやることは4つだけ
 
 ```
-1. CHATTER_AGENT_DISABLE が設定されていたら即 exit 0     ← 無限ループ防止
-2. payload を spool に追記
-3. CLI をデタッチ起動（& / nohup）して即 exit 0
+1. stdin（payload）を最後まで読み切る            ← 途中で exit すると呼び出し側が EPIPE になる
+2. CHATTER_AGENT_DISABLE が設定されていたら exit 0 ← 無限ループ防止
+3. payload を spool に tmp + rename で置く（追記はしない）
+4. CLI をデタッチ起動（& / nohup）して即 exit 0
 ```
+
+> ★ **1 と 2 の順序を逆にしないこと。** `CHATTER_AGENT_DISABLE=1` は無効化中も常に成立するので、
+> 判定を stdin 読み切りより先に置くと、無効化されている間**ずっと** stdin を読み切らずに
+> 終了することになる。Claude Code 側は書き込みが最後まで届かないと EPIPE になる
+> （実測: 300KB の payload で確定的に、小さい payload でも書き込みに遅延があると 30回中16回）。
+> `ExitPlanMode` / `AskUserQuestion` の payload は `tool_input` に計画全文を含むので、
+> 64KB のパイプバッファを普通に超える。プラグインをミュートしたユーザーが、沈黙ではなく
+> delta ごとにエラーを受け取る状態になる。
 
 ### Node を起動しない
 
@@ -25,6 +34,17 @@ Node の起動コスト（~50ms〜）を毎 delta 払うと、`MessageDisplay` �
 > `${var#*'"message_id":"'}` は最短一致なので常にトップレベルの値を取る。JSON の文字列の中では
 > `"` が必ず `\"` にエスケープされるため、`"key":"` という並びは本文側には現れない。
 > 同じ理屈で `agent_id` の有無も `case` で判定できる。
+
+> ★ **その最短一致も、マッチしないときは bash 3.2 で二乗になる。** 実測（`LC_ALL=C`・
+> 非マッチ時の1回の strip）: 4KB 16ms → 16KB 141ms → 64KB **2.1秒**。`message_id` が改名・
+> 省略された payload（64KB・delta 込み）だと、整形済み JSON フォールバックの分まで含めて
+> 非マッチ×2 で **4.2秒**（実測）になり、10秒の timeout に近づく。
+>
+> `chatter_json_string` / `chatter_json_number`（`_lib.sh`）は、この対策として探索対象を
+> payload の先頭 `CHATTER_HEAD_WINDOW`（4096バイト）に限っている。トップレベルのキーは
+> `JSON.stringify` がオブジェクトの宣言順にそのまま出す以上 payload の冒頭に固まっているので
+> 実害が無い。窓を切っているのは「マッチの有無を確かめる走査」で、値の切り出しも同じ窓の中で
+> 完結する前提を置いている（`message_id` / `index` の値は数十バイトを超えない）。
 
 ### `MessageDisplay` の制約
 
@@ -64,64 +84,115 @@ matcher が効かない＝**全セッションに影響する**ので、無効�
 
 AI 要約は `claude -p` 等をヘッドレス実行する。**その出力自身が `MessageDisplay` を発火させる**ため、対策しないと「要約 → 要約の出力を読み上げ → また要約」で無限に増殖する。
 
-- **第1層**: 要約プロセスを `CHATTER_AGENT_DISABLE=1` を付けて spawn する。hook script は**先頭でこれを見て即 `exit 0`**。環境変数は子プロセスの Claude Code とそのフックまで伝播する
+- **第1層**: 要約プロセスを `CHATTER_AGENT_DISABLE=1` を付けて spawn する。hook script は**stdin を読み切った直後にこれを見て `exit 0`**（stdin より先に判定すると EPIPE になる。上の「hook script がやることは4つだけ」参照）。環境変数は子プロセスの Claude Code とそのフックまで伝播する
 - **第2層**: 要約用に採番した session-id をレジストリに記録し、payload の `session_id` が一致したら捨てる（CLI 側の責務）
+
+> ★ **trim は bash 側と Node 側（`core/src/core/config.ts` の `parseBoolean`）で揃えること。**
+> `LC_ALL=C` 下の `[[:space:]]` は ASCII の空白しか含まないので、全角スペース（U+3000）・
+> NBSP（U+00A0）・BOM（U+FEFF）を落とせない。`CHATTER_AGENT_DISABLE` にこれらが混じった値
+> （IME コピペで容易に付く）だと、bash 側は「無効化されていない」、Node 側（`.trim()` は
+> Unicode 対応）は「無効化されている」と食い違い、**hook は spool に積み続けるのに CLI は
+> ロックを取る前に return して何もドレインしない**——診断も出ないまま孤児掃除（既定6時間）
+> まで spool が増え続ける。`_lib.sh` の `chatter_disabled` は、この3種のバイト列
+> （`E3 80 80` / `C2 A0` / `EF BB BF`）を ASCII 空白と組み合わせても剥がせるようループする。
 
 cc-mascot はログのパスをエンコードして除外していたが、**`session_id` が payload に直接入っているので本方式の方が正確**に塞げる。
 
 ## spool のファイル命名
 
-単一の spool ファイルに追記し続けると、「ワーカーが処理済み部分を削る」ときに hook の追記と競合する。**メッセージごとに別ファイルにして、処理し終えたら丸ごと削除する**ことで、この競合ごと消す。
+### なぜ追記をやめたか
+
+以前は `<message_id>.jsonl` に delta ごと1行追記していたが、**bash から任意長の追記を
+原子的にする移植可能な方法は無い**と分かってやめた。
+
+- `printf` は stdio が**1024 バイト境界**で `write` を分割する。hook は並行して走りうるので
+  （実測: `PreToolUse` と `MessageDisplay` が同時に走って診断ログが割れた）、同じファイルへの
+  追記がこの境界で相手の書き込みに割り込まれ、UTF-8 文字の途中で千切れる。
+  **実測: ASCII 4000B・30並行・4試行で 240 行中 8 行が破損**
+- `LC_ALL=C` では防げない。マルチバイトだと分割確率が上がるだけで、原因はロケールではなく
+  stdio の書き込み単位そのものにある
+- `cat` 経由は macOS では原子的だが、GNU cat は `st_blksize` 単位で書くので Linux で割れる
+
+壊れると `spool.ts` が行を捨て、`index` の連番が途切れ、**そのメッセージの以降の delta が
+丸ごと発話されなくなる**。ファイルは `final` を処理できないまま孤児掃除（既定6時間）まで残る。
+
+`rename(2)` はファイルシステム内で原子的なので、**追記そのものをやめて delta ごとに
+tmp + rename で1ファイルを置く**ことで、この競合を構造から消した。区切りに `.` を
+使ってよいのは、`_lib.sh` の `chatter_safe_name` が `[A-Za-z0-9_-]` 以外を弾いていて
+`message_id` に `.` が絶対に入らないから。ここのサニタイズを緩めると、下の命名の
+パースが壊れる。
 
 | 種別 | パス | 書く人 | 書き方 |
 |---|---|---|---|
-| アシスタントの発言 | `spool/<message_id>.jsonl` | hook | delta ごとに1行追記 |
+| アシスタントの発言 | `spool/<message_id>.<index>.json` | hook | delta ごとに1ファイルを tmp + rename で置く |
 | 応答待ち通知 | `spool/prompt-<…>.json` | hook | 1イベントで完結するので単発で置く |
 | 出力済みの文数 | `spool/<message_id>.progress.json` | **ワーカー** | hook は触らない |
 
 `.progress.json` はワーカーのサイドカー。CLI は毎 delta 起動して終了するので、「どこまで発話したか」を
-プロセス内に持てず、ここに置いている。`.jsonl` を削除するときに一緒に消える。
+プロセス内に持てず、ここに置いている。メッセージの全 delta ファイルを削除するときに一緒に消える。
 
-ワーカーは**到着順**に処理し、`final:true` を処理し終えたファイルを削除する。
+ワーカーは**到着順**に処理し、同じ `message_id` の delta ファイルを1エントリにまとめて
+`index` 昇順に結合する。`final:true` を処理し終えたら、そのメッセージの delta ファイルを
+サイドカーごと全部削除する。
 
-> ★ 到着順は **`birthtime`（ナノ秒）** で決めている。`mtime` は使えない — `<message_id>.jsonl` は
-> delta ごとに追記されて mtime が動き続けるので、`final:true` が大きく遅れて届くと先行メッセージが
-> 後発より「新しく」なり、順序が入れ替わる。ミリ秒でも粗すぎて、同じミリ秒に作られたファイルが
+> ★ 到着順は **`birthtime`（ナノ秒）** で決めている。ただし「そのメッセージの delta ファイルの
+> どれか」ではなく**必ず `index` が 0 のファイルの birthtime** を使うこと。`final:true` は
+> 大きく遅れて届くため、遅れて増えた delta ファイルの方が新しく作られるのが普通に起きる。
+> それに引きずられて先行メッセージが後発より「新しく」扱われないよう、常に先頭を基準にする
+> （index 0 が無い場合は、手元にある中で最小の到着順にフォールバックする）。
+> `mtime` は使えない — 1 delta 1 ファイルにしても、複数ファイルの中の「最新」を拾うと
+> 上と同じ理由で順序が入れ替わる。ミリ秒でも粗すぎて、同じミリ秒に作られたファイルが
 > 同値になる（CI で実際に踏んだ）。
 >
 > **ただし Linux では `birthtimeNs` が当てにならない。** libuv は statx が無い環境で birthtime を
-> ctime から埋めるため、追記のたびに進む値になりうる。根治するならファイル名に順序を埋める
-> （`<ns>-<message_id>.jsonl` など）ことになり、**この命名表と CLI の両方を同時に変える**必要がある。
+> ctime から埋めるため、書き込みのたびに進む値になりうる。**この変更（1 delta 1 ファイル）でも
+> 解けていない** — bash 3.2 でサブ秒時刻を取るには fork が要る（`perl` 等）ため、hook 側で
+> 埋めるとタイムアウト予算を消費してしまう。issue は開けたままにする。
 > → [#5](https://github.com/schwarz9791/chatter-agent/issues/5)
 
-hook は `prompt-<…>.json` を **tmp + rename** で置いている。ワーカーは読めない payload を消さずに
-次のドレインへ回すので書きかけを掴んでも失われないが、余計な往復が減る。
-**tmp の名前は `*.json.tmp` にすること。** `*.tmp.json` だと prompt として拾われる。
+孤児掃除（`cleanOrphans`）は CLI が起動しないまま終わった spool を消すが、
+**メッセージ単位（＝そのメッセージの delta ファイル全部）でまとめて無活動時間を判定する。**
+1 delta 1 ファイルでは各ファイルの mtime は書かれた瞬間で止まるので、ファイル単位で見ると
+進行中メッセージの古い delta だけが消えて `index` に欠番ができ、**そのメッセージが永久に
+発話されなくなる**。`prompt-*.json` と孤立した `.tmp` は1イベントで完結するので、
+従来どおりファイル単位で判定してよい。
 
-`<…>` は `<epoch>-<pid>-<random>`。順序はファイル名ではなく birthtime で決まるので、
+hook は spool へのすべての書き込み（delta / `prompt-<…>.json`）を **tmp + rename** で置いている
+（`_lib.sh` の `chatter_write_atomic`）。ワーカーは読めない payload を消さずに次のドレインへ回すので
+書きかけを掴んでも失われないが、余計な往復が減る。
+**tmp の名前は対象パスに `.tmp` を足しただけ**（`<message_id>.<index>.json.tmp` /
+`prompt-<…>.json.tmp`）。`.json` で終わらないので、`classify` のどの判定にも一致せず、
+rename が終わるまで自然に無視される。
+
+`prompt-<…>` の `<…>` は `<epoch>-<pid>-<random>`。順序はファイル名ではなく birthtime で決まるので、
 名前に求められるのは一意性だけ（時刻は spool を覗いたときに読めるように入れてある）。
 
 **`message_id` はファイル名になるので、hook 側でサニタイズすること。** core は
 `path.join(spoolDir, fileName)` するだけで検査しない。`[A-Za-z0-9_-]` 以外を含む値は捨てる
 （`.` を弾いているので `..` も `*.progress.json` との衝突も同時に塞がる）。
 
-### 追記は1回の `write(2)` に収める — `LC_ALL=C` を外さない
+**`index` もファイル名の一部になる。** `chatter_json_number`（`_lib.sh`）が数値として
+取り出せない payload（欠落・負数・小数など）は、そのイベントごと捨てる。
 
-**マルチバイトのロケールだと bash の `printf` は 1024 バイトごとに `write` を分ける。**
-hook は並行して走りうるので（実測: `PreToolUse` と `MessageDisplay` が同時に走って診断ログが割れた）、
-同じファイルへの追記が 1024 バイト境界で相手の書き込みに割り込まれ、**UTF-8 文字の途中で千切れる**。
+### `chatter_safe_name` に `LC_ALL=C` が要る理由 — 追記の原子性とは無関係
 
-spool の `.jsonl` でこれが起きると、その行が JSON として読めなくなる。core は読めない行を飛ばすので
-`index` の連番がそこで途切れ、**そのメッセージの以降の delta が丸ごと発話されない**。
-しかも `final` を処理できないまま孤児掃除（既定6時間）まで spool に残る。
+`_lib.sh` は先頭で `LC_ALL=C` を立てている。**これは追記を1回の `write(2)` に収めるためではない**
+（そもそも上のとおり追記自体をやめている）。本当の理由は `chatter_safe_name` のバイト単位マッチ。
 
-payload は日本語を含むと 1024 バイトを普通に超えるので、**実際に踏む**。
+`case "$1" in *[!A-Za-z0-9_-]*)` は ASCII 以外を弾く意図で書いてあるが、**UTF-8 ロケールでは
+全角英数（`Ａ` `ａ` `１` 等）がこのパターンマッチで `[A-Za-z0-9_-]` に一致してしまう**
+（ロケールの文字クラスがマルチバイト文字を「英数字相当」として扱うため）。C ロケールなら
+1バイトずつ比較するので、全角文字は必ずどこかのバイトが `[!A-Za-z0-9_-]` に当たって弾かれる。
+`message_id` はファイル名になるので、ここが最後の砦になる。
 
-`_lib.sh` の先頭で `LC_ALL=C` を立てて回避している。C ロケールならバイト列として一括で write される
-（実測: 240 並行追記で破損 0 件。外すと 20 並行で 2 件割れる）。**`export` しないこと** —
-bash 自身のロケールだけを変え、デタッチする node には伝播させない。
+**`export` しないこと。** ただし「export しなければ子プロセスに伝播しない」わけではない —
+呼び出し元のシェルが既に `LC_ALL` を export 済みなら、export 属性ごと引き継がれてデタッチした
+node にまで伝播する（実測済み）。ここでの `LC_ALL=C` は「bash 自身のこのプロセスの中だけは
+確実に C ロケールにする」ためのもので、伝播を止める効果は期待しないこと。
 
-`verify:phase-a` の ⑧ がこれを見ている。
+`verify:phase-a` の ⑧ は、追記をやめたことで「同一メッセージに30並行で hook を起動しても
+ファイルが壊れず `index` も欠けない」ことを見ている（旧⑧の「並行追記で行が割れない」という
+主張は誤りで、しかも低確率で落ちるテストだったため差し替えた）。
 
 ### spool のパスに条件分岐を足さない
 
@@ -187,6 +258,13 @@ export CHATTER_AGENT_CLI=<repo>/plugin/bin/chatter-agent-speak.mjs
 **既定 OFF。** 毎 delta で `perl`（ミリ秒の取得）を起動するうえ、**会話の本文がそのまま残る**。
 測り終えたら切ること。
 
+`chatter_spawn_cli` が CLI を起動できなかった理由（CLI が無い / `node` が PATH に無い）も、
+ここに `SpawnCli` タグで1行残る。**spool をドレインする経路も孤児掃除（既定6時間）を走らせる
+経路もここ以外に無い**ので、無言だと診断情報ゼロのまま恒久的に沈黙するプラグインになる。
+本リポジトリは mise で Node を固定していて、shim が PATH に載るのは対話 rc 経由のみ——
+**Finder / Dock から起動した Claude Code はその PATH を継承しない**ため、`node` が見つからない
+状況は現実に起きる。
+
 ## 未検証事項
 
 推測で埋めず、潰すもの。詳細は `_workspace/chatter-agent-design.md` §10。
@@ -227,8 +305,10 @@ export CHATTER_AGENT_CLI=<repo>/plugin/bin/chatter-agent-speak.mjs
 > ★ **これはユーザーの回答待ちではない。** `PreToolUse` はツールが動く前＝質問が画面に出る前に
 > 発火し、`final` はそれと**同じミリ秒**に届く。実測では回答が返るより 50 秒ほど早かった。
 >
-> ついでに、**この2つが同時に走ることは構造的**ということでもある。追記の競合（上の `LC_ALL=C` の節）は
-> まぐれではなく、質問のたびに起きる。
+> ついでに、**`MessageDisplay` と `PreToolUse` が同時に走ることは構造的**（質問のたびに起きる）
+> ということでもある。旧実装（`.jsonl` への追記）はこれが直接の火種だった。今は
+> `MessageDisplay` が書く delta ファイルと `PreToolUse`/`Notification` が書く `prompt-<…>.json`
+> が最初から別ファイルなので、同時に走っても衝突しようがない。
 
 ### 最終行は final flush でしか来ない
 
@@ -278,8 +358,14 @@ hook 側のガードとして見ているもの:
 - delta 本文の `"message_id"` に引っ張られない（貪欲マッチの回帰）
 - `agent_id` 付きの payload を捨てる
 - `message_id` が取れない / ファイル名に使えない値を捨てる
-- `CHATTER_AGENT_DISABLE=1` で積まない、`=0` では黙らない
+- `index` が数値として取れない payload を捨てる（`chatter_json_number`）
+- `CHATTER_AGENT_DISABLE=1` で積まない、`=0` では黙らない（hook 側・CLI 側の両方）
 - `final:true` の `delta` が空でも保留中の最終文が出る
+- 同一メッセージに30並行で hook を起動しても、delta ファイルが壊れず `index` も欠けない
+- `CHATTER_AGENT_DISABLE=1` の間でも stdin を読み切り、300KB 相当の payload で EPIPE にならない（`on-message.sh` / `on-prompt.sh` の両方）
+- `message_id` の無い64KB payload の処理が閾値（1秒）以内で終わる（`CHATTER_HEAD_WINDOW` の窓が効いている）
+- 全角スペース付きの `CHATTER_AGENT_DISABLE` で bash 側と Node 側の判定が揃う
+- CLI / `node` が見つからないとき、それぞれの理由が診断ログ（`hook-debug.log`）に残る
 
 検証中は `CHATTER_AGENT_CLI` を存在しないパスに向けて**デタッチ起動を止めている**。
 `nohup` で走らせたままだと CLI がいつドレインしたか分からず、検証が非決定的になる。

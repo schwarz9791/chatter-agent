@@ -79,42 +79,68 @@ spoken() {
     }' "$LOG"
 }
 
-show "① ツール完了を待たずに、確定した文だけが1文1行で出る"
+# ★ **同一セッションの後続イベントは、まだ final の来ていないメッセージを「救済」して
+#   打ち切る**（worker.ts の hasNewerInSameSession）。独立に検査したいケースは、先に final で
+#   閉じてから次を始めること。順序を崩すと、検査したかったメッセージが手前で消費されて
+#   検査が空振りする（新設計で最も踏みやすい罠）。
+
+show "① final が来るまで1文も出ない"
 delta m-aaa 0 false "完全に判明しました。ストリーミングでテキストが流れてきます。"
 echo "[delta 0 の直後 / final はまだ来ていない]"; spoken
 delta m-aaa 1 false "対照の PostToolUse も2件出たので、設定が読み込まれたことは確定です。"
 echo "[delta 1 の直後]"; spoken
 
-show "② 未閉じコードブロックの中身は読み上げない"
+show "② 未閉じコードブロックを積んでも、まだ何も出ない"
 delta m-aaa 2 false $'こう書きます。\n```ts\nconst secret = 1;\n'
 spoken
 
-show "③ 別メッセージが始まると、前メッセージの保留中の最終文が先に流れる"
-echo "[m-aaa の final はまだ先。ここで m-bbb が始まる]"
+show "③ 大きく遅れて届く final:true。ここで初めてメッセージ全文が一括で出る"
+echo "[フェンスが閉じてコードは消え、①②③ の全文が1つの塊として出る]"
+delta m-aaa 3 true $'const secret = 1;\n```\nこれは実装方針に関わる分岐があるので確認させてください。'
+spoken
+
+show "④ final が来なかったメッセージは、後続イベントの到着で救済される"
+delta m-eee 0 false "中断された発言です。この後 final は来ません。"
+echo "[m-eee はまだ出ない]"; spoken
+echo "[ここで別メッセージ m-bbb が始まる → m-eee が全文出る]"
 delta m-bbb 0 false "次の作業に入ります。ログを確認します。"
 spoken
 
-show "④ 応答待ち通知（PreToolUse に付随する同一 prompt_id の Notification は捨てる）"
+show "⑤ 応答待ち通知（PreToolUse に付随する同一 prompt_id の Notification は捨てる）"
+echo "[この prompt の到着で m-bbb も救済される]"
 prompt '{"session_id":"sess-1","prompt_id":"p9","hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"次は何をしますか？","options":[{"label":"進める"},{"label":"やり直す"}]}]}}'
 prompt '{"session_id":"sess-1","prompt_id":"p9","hook_event_name":"Notification","message":"Claude needs your permission"}'
 spoken
 
-show "⑤ 大きく遅れて届く final:true。フェンスが閉じてブロックが消え、最後の文だけが出る"
-delta m-aaa 3 true $'const secret = 1;\n```\nこれは実装方針に関わる分岐があるので確認させてください。'
-spoken
+show "⑥ 同じ final を複数のワーカーが同時に見ても、二重に発話しない"
 
-show "⑥ 並列に叩いても seq が飛ばず、順序も壊れない"
+# ★ **final を先に置いてから並列に叩くこと。** 新設計で最も危険なレースは
+#   「2つのワーカーが同じ final を見て両方 publish する」で、メッセージ全文がまるごと
+#   二度発話される。final を最後に1回だけ叩く順序（旧⑥）ではそこを踏まない。
 for i in 0 1 2 3 4 5; do
   feed_message m-ccc "$i" false "並列${i}です。"
 done
+feed_message m-ccc 6 true "終わり。"
 for _ in 1 2 3 4 5 6 7 8; do node "$CLI" & done; wait
-delta m-ccc 6 true "終わり。"
 spoken
 
 show "⑦ hook 側のガード（ここが壊れると spool の形から崩れる）"
 
+# ★ **m-ddd だけ専用セッション（sess-ddd）に隔離すること（#22）。** `hasNewer` 救済は
+#   同一セッションの後続イベントで発火するので、sess-1 に置くと後続の probe
+#   （m-zero / m-cli-zero）が m-ddd を救済してしまい、`final` を経由せずに発話される。
+#   そうなると「空 final を捨てる」回帰（`[ -n "$delta" ] || exit 0`）を入れても検査は
+#   緑のままになる ── **実際にこの隔離を入れる前は緑だった。** 専用セッションなら、
+#   m-ddd を発話させる経路は自分の `final` しかない。
+DDD_SESSION='{"session_id":"sess-ddd"}'
+
 # delta 本文に "message_id" が出てくる。sed の貪欲マッチだと WRONG-ID を掴んでファイルが割れる
-delta m-ddd 0 false 'JSON の "message_id":"WRONG-ID" について説明します。次に進みます。'
+delta m-ddd 0 false 'JSON の "message_id":"WRONG-ID" について説明します。空のファイナルで確定します。' "$DDD_SESSION"
+
+# ★ final:true の delta は、メッセージが改行で終わると空で届く。空でも spool に書かないと
+#   メッセージ全体が**一文も**発話されない
+delta m-ddd 1 true "" "$DDD_SESSION"
+spoken
 
 # サブエージェントの発言は捨てる（agent_id はサブエージェント内でのみ入る）
 feed_message m-sub 0 true "サブエージェントの発言です。" '{"agent_id":"sub-1","agent_type":"Explore"}'
@@ -142,20 +168,21 @@ node -e '
 # CLI 側にも同じ env が渡り、isSpeakDisabled（core/src/core/config.ts）が実際に呼ばれる状態で
 # 確認する（R3: CLI を呼ばない feed_message だけだと CLI 側の判定は一度も通らない）。
 CHATTER_AGENT_DISABLE=1 delta m-off 0 true "無効化中の発言です。"
-# ★ =0 は「無効化の解除」なので積まれる。presence 判定に戻すとここが落ちる（#4）
-CHATTER_AGENT_DISABLE=0 feed_message m-ddd 1 false "ゼロは解除です。"
+# ★ =0 は「無効化の解除」なので積まれる。presence 判定に戻すとここが落ちる（#4）。
+#   final:true で閉じた独立のメッセージにしてある（#22 — 空 final の検査と絡ませない）
+CHATTER_AGENT_DISABLE=0 delta m-zero 0 true "ゼロは解除です。"
 
 # ★ R3: ここまでの CHATTER_AGENT_DISABLE=0 は hook 側の判定しか通っていない
-#   （直後の CLI 起動は `delta m-ddd 2 true ""` で、env なしの別コマンドとして実行される）。
+#   （直後の CLI 起動は `delta` の中の env なしの別コマンドとして実行される）。
 #   isSpeakDisabled を旧来の presence 判定（`if (process.env.CHATTER_AGENT_DISABLE) return;`）に
 #   戻しても、ここまでの検証は全部グリーンのままになる（"0" は非空文字列なので presence 判定でも
 #   truthy になり、"1" のケースと結果が区別できない）。CLI に**直接** CHATTER_AGENT_DISABLE=0 を
-#   渡して起動し、既に spool にある delta が実際に発話されることを見て初めて、CLI 側の
+#   渡して起動し、spool にある delta が実際に発話されることを見て初めて、CLI 側の
 #   parseBoolean("0") === false（＝無効化しない）という判定を通せる。
 #
 # ★ ここだけは判定結果を**その場で**確認する（結果の検証セクションまで待たない）。CLI は
 #   毎回再起動されるだけの短命プロセスなので、この呼び出しが誤って何もしなくても、後続の
-#   `delta m-ddd 2 true ""` が同じ spool を拾って結局発話してしまい、最終状態だけを見る限り
+#   どこかの CLI 起動が同じ spool を拾って結局発話してしまい、最終状態だけを見る限り
 #   presence 判定への回帰が隠れてしまう（実際に踏んで気づいた）。
 feed_message m-cli-zero 0 true "CLIにも0を渡して発話される確認用の発言です。"
 CHATTER_AGENT_DISABLE=0 node "$CLI"
@@ -168,9 +195,6 @@ node -e '
   console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  CLI に直接 CHATTER_AGENT_DISABLE=0 を渡すと、その場で発話される（presence 判定への回帰検出 / R3）`);
   process.exit(ok ? 0 : 1);
 ' "$LOG"
-
-# final:true の delta は、メッセージが改行で終わると空で届く。空でも保留中の最終文が出ること
-delta m-ddd 2 true ""
 spoken
 
 show "⑧ 同一メッセージに30並行で hook を起動しても、ファイルが壊れず index も欠けない"
@@ -404,13 +428,33 @@ node -e '
   check("未閉じフェンスの記号が漏れていない", !texts.some((t) => t.includes("```")));
   check("付随 Notification は捨てられている", !texts.includes("Claude needs your permission"));
   check("質問と選択肢が読み上げられている", texts.some((t) => t.includes("選択肢は、進める、やり直す")));
-  check("遅れて届いた final の最後の文が出ている", texts.includes("これは実装方針に関わる分岐があるので確認させてください。"));
-  check("既に流した文が final で再送されていない", texts.filter((t) => t === "こう書きます。").length === 1);
+  check("遅れて届いた final でメッセージの最後の文まで出ている",
+    texts.includes("これは実装方針に関わる分岐があるので確認させてください。"));
   check("並列起動でも順序が保たれている",
-    JSON.stringify(texts.filter((t) => t.startsWith("並列"))) ===
-    JSON.stringify([0, 1, 2, 3, 4, 5].map((i) => `並列${i}です。`)));
-  check("spool は片付いている（final 済みのファイルが残っていない）",
-    !fs.readdirSync(process.argv[2]).some((f) => f.startsWith("m-aaa") || f.startsWith("m-ccc") || f.startsWith("prompt-")));
+    JSON.stringify(texts.filter((t) => t.startsWith("並列") || t === "終わり。")) ===
+    JSON.stringify([...[0, 1, 2, 3, 4, 5].map((i) => `並列${i}です。`), "終わり。"]));
+  check("final が来なかったメッセージが後続イベントで救済されている",
+    texts.includes("中断された発言です。") && texts.includes("この後 final は来ません。"));
+  check("spool は片付いている（処理済みのファイルが残っていない）",
+    !fs.readdirSync(process.argv[2]).some((f) =>
+      ["m-aaa", "m-bbb", "m-ccc", "m-ddd", "m-eee", "m-zero", "m-cli-zero", "prompt-"].some((p) => f.startsWith(p))));
+
+  // ★ #30 で保証が付いた契約（docs/protocol.md「発話の粒度」）。
+  //   1メッセージ分は seq 連続・ts 同値・messageId 同一の塊で配信される
+  const grouped = (messageId) => rows.filter((r) => r.messageId === messageId);
+  const isOneBatch = (messageId) => {
+    const group = grouped(messageId);
+    if (group.length === 0) return false;
+    const contiguous = group.every((r, i) => i === 0 || r.seq === group[i - 1].seq + 1);
+    const sameTs = new Set(group.map((r) => r.ts)).size === 1;
+    // 他メッセージの発話が間に挟まっていないこと
+    const firstIndex = rows.indexOf(group[0]);
+    const solid = group.every((r, i) => rows[firstIndex + i] === r);
+    return contiguous && sameTs && solid;
+  };
+  check("m-aaa の全文が1つの塊で配信されている（seq 連続 / ts 同値 / 間に他メッセージが挟まらない）",
+    grouped("m-aaa").length === 5 && isOneBatch("m-aaa"));
+  check("m-ccc（並列に叩いたメッセージ）も1つの塊で配信されている", isOneBatch("m-ccc"));
 
   // ⑦ hook 側のガード。ここが崩れると spool の形から壊れるので、記録の中身で裏を取る
   const spoolFiles = fs.readdirSync(process.argv[2]);
@@ -435,8 +479,12 @@ node -e '
   //   presence 判定への回帰が隠れてしまうため（上のコメント参照）
   check("CLI に直接 CHATTER_AGENT_DISABLE=0 を渡した発言も、最終的な記録に残っている",
     texts.includes("CLIにも0を渡して発話される確認用の発言です。"));
-  check("final:true の delta が空でも、保留していた最終文が出る",
-    texts.includes("次に進みます。"));
+  // ★ #22: この検査の対象は、**final が来るまで一度も発話されていない**メッセージであること。
+  //   m-ddd は ⑦ の先頭で開いて空 final で閉じており、その間に同一セッションの他イベントを
+  //   挟んでいないので、`[ -n "$delta" ] || exit 0` の回帰でここが確定的に赤くなる
+  check("final:true の delta が空でも、メッセージ全文が出る",
+    texts.includes("空のファイナルで確定します。") &&
+    texts.some((t) => t.includes("WRONG-ID")));
 
   // ★ ⑥ の並列起動チェック。ロックが破れたときの失敗モードは、speech.jsonl の重複行
   //   （見える）から speech/<seq>.json の上書き（無言で消える）に移った。$LOG と $SPOOL

@@ -43,15 +43,17 @@ hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公�
 **#11 は完了した**（`core/src/player/`）。Unity のビルドを待たずに音が出る。
 
 **Phase A は実機で動作確認した**（Claude Code 2.1.233 / macOS）。delta が hook に届いてから
-`speech.jsonl` に載るまでの配管は**約 50ms** で十分速い。`MessageDisplay` は表示と同時に発火するので、
-**確定した文**はターミナル表示とほぼ体感差なく発話される。ただし段落の最後の一文（さらにメッセージの
-最終行）は確定が遅れる分だけ後から追いつく（→ 下の「実測で潰れた前提」/「絶対に守ること」1）。
+`speech.jsonl` に載るまでの配管は**約 50ms** で十分速い。**発話は `final:true` を待って
+メッセージ単位で出す**ので（[#30](https://github.com/schwarz9791/chatter-agent/issues/30)）、
+体感を決めるのは配管の速さではなく `final` の到着タイミングになる。実測では 97.8% のメッセージで
+`final` はほぼ即座に届き（中央値・p90 とも 0秒）、数十秒待つのは `AskUserQuestion` の直前だけ
+（→ 下の「実測で潰れた前提」/「絶対に守ること」1）。
 
 実測で潰れた前提は [`docs/plugin.md`](./docs/plugin.md) に集約してある。要点だけ:
 
 - `/plugin install` はプラグインを**完全コピー**する。`bin/` も実行権限ごと入るので、バンドル同梱の前提は成立
 - **thinking でもサブエージェントでも発火しない**（読み上げ事故は起きない）
-- **メッセージの最終行だけは final flush でしか来ない。** 保留を外しても縮まらない遅延の下限で、`AskUserQuestion` の直前では数十秒に達する
+- **メッセージの最終行だけは final flush でしか来ない。** これが `final` を待つ設計の遅延の下限で、`AskUserQuestion` の直前では数十秒に達する
 
 **Phase B は完了している。** `npm run verify:phase-b` で実サーバーを起動した確認に加え、
 `npm run verify:player` が **hook → CLI → server → player** を通して音が鳴るところまで見ている。
@@ -59,12 +61,16 @@ Unity 側（#12）は同じ契約を踏むので、player が「正しい挙動�
 
 **実機（AivisSpeech + afplay）でも音が出るところまで確認した。** 耳で聞いた限りの体感:
 
-- **確定した文は表示とほぼ同時。** ただし**1文目だけは合成待ちで少し間が空く**（先読みが効くのは2文目以降なので構造的にそうなる）
-- **メッセージの最終行は、ターンがそのまま終わるなら遅れない。** `final` が即座に来るため。
+- **1文目だけは合成待ちで少し間が空く**（先読みが効くのは2文目以降なので構造的にそうなる）
+- **ターンがそのまま終わるなら、メッセージは表示とほぼ同時に喋り出す。** `final` が即座に来るため。
   遅れが問題になるのは手前でツールを呼んだときで、`AskUserQuestion` の直前が最悪（→「絶対に守ること」1）
 - **`**` などの記号は音にならない。** 合成エンジンが `audio_query` で読み仮名に変換する時点で落とすため。
   [#2](https://github.com/schwarz9791/chatter-agent/issues/2) の実害は「記号が読まれる」ことではなく、
   **文が変な所で割れて不自然な切れ目が入る**こと
+
+> ★ **上の体感は、粒度を変える前（文単位で流していた頃）に耳で確かめたもの。**
+> メッセージ単位（[#30](https://github.com/schwarz9791/chatter-agent/issues/30)）での実機確認は**未実施**。
+> 特に「`AskUserQuestion` の直前でどれだけ沈黙するか」は測って [`docs/plugin.md`](./docs/plugin.md) に記録すること。
 
 ## データフロー
 
@@ -76,6 +82,7 @@ plugin/scripts/*.sh          bash。payload を spool/<message_id>.<index>.json 
   │ 毎 delta で CLI をデタッチ起動
   ▼
 chatter-agent-speak (CLI)    ロックを取れた1プロセスだけが spool を順に処理
+  │                          **final:true を待つ**（非 final では何もせず終わる）
   │                          delta 結合 → Markdown除去 → 文分割 → 感情判定 → seq 採番
   ├──▶ speech.jsonl          記録。1文1行で残す。誰も読まない
   ▼
@@ -97,12 +104,30 @@ chatter-mascot               表示側アプリ（Unity）。TTS → 再生 → 
 
 ## 絶対に守ること
 
-### 1. `final:true` を待たない
+### 1. `final:true` を待つ — 発話はメッセージ単位
 
 1つの `message_id` は `index` 0..N で分割送信され `final:true` が終端になる。
 
-**delta が届くたびに、確定した文だけを流す。** 最後の文と、未閉じの ``` 以降は保留する。
-→ [`docs/core.md`](./docs/core.md) / `core/src/cli/messageAssembler.ts`
+**`final` が来るまで1文も出さない。** 来たらメッセージ全文をまとめて1回で流す。
+→ [`docs/protocol.md`](./docs/protocol.md)（契約）/ `core/src/cli/worker.ts` の `processMessage`
+
+> ★ **これは [#30](https://github.com/schwarz9791/chatter-agent/issues/30) で反転した方針。**
+> 設計書 §2-4 と、それ以前のこの節は「`final:true` を待ってはいけない」と書いていた。
+> 反転の理由は3つ、いずれも実測に基づく:
+>
+> 1. **AI要約（[#31](https://github.com/schwarz9791/chatter-agent/issues/31)）が原理的に成立しない。** 要約はメッセージ全体が揃って初めて意味を成すが、1文は平均 34.6 文字しかなく閾値に届かない
+> 2. **サーバー合成（[#29](https://github.com/schwarz9791/chatter-agent/issues/29)）の前提が粒度で決まる。** 合成リクエストの 60秒窓ピークが 37 → 5 req/min（7倍差）
+> 3. **代償が想定より小さい。** `final` の待ち時間は中央値 0秒 / p90 0秒。数十秒待つのは 179件中 4件（`AskUserQuestion` の直前）だけ
+
+**引き換えに失うもの**（受け入れ済み）:
+
+- 表示と発話のズレが**メッセージ全体**に乗る（以前は最終行の1文だけだった）
+- `index` に欠番があると「部分発話」ではなく**全損**になる（→ [#21](https://github.com/schwarz9791/chatter-agent/issues/21)）
+- `publish` が throw したときに組み直されるのが1文ではなく**メッセージ全文**になる（→ [#13](https://github.com/schwarz9791/chatter-agent/issues/13)）
+
+**`final` が来ないメッセージは救済する。** ESC 中断・クラッシュ・`index` 欠番でメッセージが閉じないことはある。
+**同一セッションの**後続イベントが到着したら、そこで打ち切って全文を出し spool を消す（`hasNewerInSameSession`）。
+セッションを限定しないと、Claude Code を2枚開いただけで**まだ伸びる途中のメッセージが分断される**。
 
 > 設計書 §2-4 の「最終チャンクだけが大きく遅れる」は **2.1.233 でも起きる**。`final` はメッセージが閉じる瞬間＝次のブロックが始まるときに届くので、遅延は**その手前でモデルが何をどれだけ生成したか**で決まる。ターン終了ならほぼ即座、ツール呼び出しなら数秒、**`AskUserQuestion` の直前だと数十秒**。**秒数を仕様として扱わないこと**（→ [`docs/plugin.md`](./docs/plugin.md)）。
 

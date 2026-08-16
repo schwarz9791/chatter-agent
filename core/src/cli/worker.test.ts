@@ -116,34 +116,52 @@ function records(): SpeechRecord[] {
 const texts = () => records().map((r) => r.text);
 
 describe("メッセージの処理", () => {
-  it("確定した文だけを書き、最後の文は保留する", () => {
+  it("★ final:true が来るまで1文も書かない", () => {
     appendDelta("m1", 0, "確認します。ログを見ます。");
-    expect(drain().written).toBe(1);
-    expect(texts()).toEqual(["確認します。"]);
+    expect(drain().written).toBe(0);
+    expect(texts()).toEqual([]);
   });
 
   it("final:true が来るまで spool を消さない", () => {
     appendDelta("m1", 0, "確認します。ログを見ます。");
     drain();
     expect(fs.existsSync(path.join(spoolDir, "m1.0.json"))).toBe(true);
-    expect(fs.existsSync(path.join(spoolDir, "m1.progress.json"))).toBe(true);
   });
 
-  it("final:true を処理し終えたら spool をサイドカーごと消す", () => {
+  it("★ 進捗サイドカーを作らない", () => {
+    appendDelta("m1", 0, "確認します。ログを見ます。");
+    drain();
+    expect(fs.readdirSync(spoolDir).filter((f) => f.endsWith(".progress.json"))).toEqual([]);
+  });
+
+  it("final:true でメッセージ全文が一括で出て、spool が消える", () => {
     appendDelta("m1", 0, "確認します。ログを見ます。", true);
     drain();
     expect(fs.readdirSync(spoolDir)).toEqual([]);
     expect(texts()).toEqual(["確認します。", "ログを見ます。"]);
   });
 
-  it("delta を跨いでも同じ文を二度書かない", () => {
+  it("delta を跨いだ文も、final でまとめて1回だけ書く", () => {
     appendDelta("m1", 0, "あ。い");
     drain();
     appendDelta("m1", 1, "。う。");
     drain();
+    expect(texts()).toEqual([]);
+
     appendDelta("m1", 2, "え。", true);
     drain();
     expect(texts()).toEqual(["あ。", "い。", "う。", "え。"]);
+  });
+
+  it("★ index に欠番があるうちは何も出ない。埋まったら全文出る", () => {
+    appendDelta("m1", 0, "あ。");
+    appendDelta("m1", 2, "う。", true); // index 1 がまだ届いていない
+    drain();
+    expect(texts()).toEqual([]);
+
+    appendDelta("m1", 1, "い。");
+    drain();
+    expect(texts()).toEqual(["あ。", "い。", "う。"]);
   });
 
   it("契約どおりのフィールドで書く", () => {
@@ -162,53 +180,99 @@ describe("メッセージの処理", () => {
   });
 });
 
-describe("後続イベントによる保留解除（設計書からの上積み）", () => {
-  it("別メッセージが始まったら、前メッセージの最後の文を先に流す", () => {
+/**
+ * [#30] で保証が付いた契約。クライアントは `(seq, ts)` で重複排除し、`messageId` で
+ * まとめてよくなる（docs/protocol.md「発話の粒度」）。
+ *
+ * [#30]: https://github.com/schwarz9791/chatter-agent/issues/30
+ */
+describe("発話の粒度（契約）", () => {
+  it("★ 1メッセージ分の seq が連続し、ts が同値で、messageId が同一", () => {
+    appendDelta("m1", 0, "あ。い。う。", true);
+    drain();
+
+    const rows = records();
+    expect(rows).toHaveLength(3);
+    expect(rows.map((r) => r.seq)).toEqual([1, 2, 3]);
+    expect(new Set(rows.map((r) => r.ts)).size).toBe(1);
+    expect(new Set(rows.map((r) => r.messageId))).toEqual(new Set(["m1"]));
+  });
+
+  it("★ publish はメッセージあたり1回しか呼ばれない", () => {
+    appendDelta("m1", 0, "あ。い");
+    drain();
+    appendDelta("m1", 1, "。う。え。", true);
+
+    const calls: number[] = [];
+    drain({
+      publish: (entries) => {
+        calls.push(entries.length);
+        return entries.map((entry, i) => ({ ...entry, seq: i + 1, ts: "2026-08-16T00:00:00.000Z" }));
+      },
+    });
+
+    expect(calls).toEqual([4]);
+  });
+
+  it("別メッセージは別の ts を持つ（バッチの境界が読める）", () => {
+    appendDelta("m1", 0, "あ。", true);
+    drain();
+    clock += 1_000;
+    tick();
+    appendDelta("m2", 0, "い。", true);
+    drain();
+
+    const rows = records();
+    expect(rows[0]?.ts).not.toBe(rows[1]?.ts);
+  });
+});
+
+/**
+ * `final` が来なかったメッセージ（ESC 中断・クラッシュ・index 欠番）の取りこぼしを、
+ * 後続イベントの到着で拾う経路。通常の発話は `final:true` が駆動する。
+ */
+describe("final が来なかったメッセージの救済", () => {
+  it("別メッセージが始まったら、前メッセージを全文出して spool を消す", () => {
     appendDelta("m1", 0, "確認します。ログを見ます。");
     drain();
-    expect(texts()).toEqual(["確認します。"]);
+    expect(texts()).toEqual([]);
 
     tick();
     appendDelta("m2", 0, "次に進みます。");
     drain();
-    // m1 の保留分が先。m2 は最後の文なのでまだ保留
+
+    // m1 は救済されて全文出る。m2 は final も後続も無いのでまだ出ない
     expect(texts()).toEqual(["確認します。", "ログを見ます。"]);
+    expect(fs.readdirSync(spoolDir)).toEqual(["m2.0.json"]);
   });
 
-  it("★ 別セッションのメッセージでは保留を解かない", () => {
+  it("★ 別セッションのメッセージでは救済しない", () => {
     // spool はグローバルに1ディレクトリで、MessageDisplay は matcher 非対応なので
-    // 全セッションで発火する。Claude Code を2枚開くだけでこの条件が揃う
+    // 全セッションで発火する。Claude Code を2枚開くだけでこの条件が揃う。
+    // 限定しないと、まだ伸びる途中のメッセージが打ち切られて分断される
     appendDelta("m1", 0, "確認します。ログを見ます。");
     drain();
-    expect(texts()).toEqual(["確認します。"]);
 
     tick();
     appendDelta("other", 0, "別セッションです。", false, "sess-2");
     drain();
 
-    expect(texts()).toEqual(["確認します。"]);
+    expect(texts()).toEqual([]);
+    expect(fs.existsSync(path.join(spoolDir, "m1.0.json"))).toBe(true);
   });
 
-  it("★ 文の途中で切れていれば、後続イベントが来ても流さない", () => {
+  it("文の途中で切れていても、救済されたら全文出す（もう続きは来ない）", () => {
     appendDelta("m1", 0, "Aの一文目。Aの途中");
     drain();
-    expect(texts()).toEqual(["Aの一文目。"]);
 
     tick();
     appendDelta("m2", 0, "Bの一文目。Bの二文目。");
     drain();
 
-    // 「Aの途中」を読み上げてしまうと、断片が音声になり順序も壊れる
-    expect(texts()).not.toContain("Aの途中");
-
-    tick();
-    appendDelta("m1", 1, "です。Aの最後の文です。", true);
-    drain();
-
-    expect(texts()).toEqual(["Aの一文目。", "Bの一文目。", "Aの途中です。", "Aの最後の文です。"]);
+    expect(texts()).toEqual(["Aの一文目。", "Aの途中"]);
   });
 
-  it("応答待ち通知の到着でも保留を解除する（ツールが始まる＝メッセージは閉じた）", () => {
+  it("応答待ち通知の到着でも救済する（ツールが始まる＝メッセージは閉じた）", () => {
     appendDelta("m1", 0, "確認します。ログを見ます。");
     drain();
 
@@ -223,16 +287,21 @@ describe("後続イベントによる保留解除（設計書からの上積み�
     expect(texts()).toEqual(["確認します。", "ログを見ます。", "許可してください。"]);
   });
 
-  it("先に流した文を、遅れて届いた final で再送しない", () => {
+  it("★ 救済した後に final が届いても、二度発話しない", () => {
     appendDelta("m1", 0, "確認します。ログを見ます。");
     drain();
     tick();
     appendDelta("m2", 0, "次に進みます。");
     drain();
+    expect(texts()).toEqual(["確認します。", "ログを見ます。"]);
 
-    appendDelta("m1", 1, "", true); // 大きく遅れて届く final（中身は無し）
+    // 救済で delta ファイルは消えているので、遅れて届いた final は index 0 を持たない孤児になる
+    tick();
+    appendDelta("m1", 1, "", true);
     drain();
 
+    // m1 の文が二度出ていないこと（m2 はこの到着で救済されるので出てよい）
+    expect(texts().filter((t) => t === "確認します。")).toHaveLength(1);
     expect(texts().filter((t) => t === "ログを見ます。")).toHaveLength(1);
   });
 });

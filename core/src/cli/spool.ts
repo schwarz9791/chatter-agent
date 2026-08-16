@@ -9,17 +9,26 @@
  *   を tmp + rename で置く（追記はしない — bash から任意長の追記を原子的にする移植可能な方法が
  *   無いため。→ docs/plugin.md）。1メッセージは複数の delta ファイルに分かれるので、
  *   「1メッセージ = 複数ファイル」を1エントリにまとめるのがこのファイルの仕事。
- *   ワーカーが持つ進捗は `<message_id>.progress.json` のサイドカーに置く。
+ *   ワーカーはディスクに状態を持たない（`final` を見たときに全 delta から組み直す）。
  */
 
 import * as fs from "fs";
 import * as path from "path";
-import { writeFileAtomic } from "../core/atomicWrite";
 
 /** `<message_id>.<index>.json`。message_id はサニタイズ済みで `.` を含まない（plugin 側の責務） */
 const MESSAGE_DELTA_RE = /^(.+)\.(\d+)\.json$/;
 const PROMPT_PREFIX = "prompt-";
 const PROMPT_SUFFIX = ".json";
+
+/**
+ * 進捗サイドカーの残骸。
+ *
+ * ★ [#30] で廃止したが、**定数と `classify` のガードだけは残すこと。** 既存インストールの
+ *   spool に残った `prompt-<…>.progress.json` を prompt として読んでしまうのを防ぐ。
+ *   残骸そのものは `cleanOrphans` が mtime で回収する（既定6時間）。
+ *
+ * [#30]: https://github.com/schwarz9791/chatter-agent/issues/30
+ */
 const PROGRESS_SUFFIX = ".progress.json";
 
 export interface MessageSpoolEntry {
@@ -28,7 +37,6 @@ export interface MessageSpoolEntry {
   messageId: string;
   /** delta ファイルのパス。**index 昇順**（欠番はありうる） */
   filePaths: string[];
-  progressPath: string;
   /** 到着順のキー。ナノ秒なので number に収まらない */
   order: bigint;
 }
@@ -51,17 +59,12 @@ export interface MessageContent {
   messageId: string | null;
 }
 
-function progressPathFor(messageId: string, spoolDir: string): string {
-  return path.join(spoolDir, `${messageId}${PROGRESS_SUFFIX}`);
-}
-
 /**
  * 到着順のキー。
  *
- * ★ mtime を使わないこと。1 delta 1 ファイルにしても、進捗サイドカーはワーカーが書き換えるし、
- *   何よりメッセージの「到着順」を代表する値としては個々のファイルの mtime ではなく
- *   birthtime を使う必要がある（後述 `arrivalOrderOfMessage`）。birthtime を持たない環境では
- *   mtime に落とす。
+ * ★ mtime を使わないこと。メッセージの「到着順」を代表する値としては、個々のファイルの
+ *   mtime ではなく birthtime を使う必要がある（後述 `arrivalOrderOfMessage`）。
+ *   birthtime を持たない環境では mtime に落とす。
  *
  * ★ ミリ秒（`birthtimeMs`）では粗すぎる。同じミリ秒に作られたファイルが同値になり、
  *   下のタイブレーク（パス順）に落ちて到着順が壊れる。`bigint: true` の統計情報が持つ
@@ -75,9 +78,9 @@ type ClassifiedFile =
   | { kind: "prompt"; filePath: string; order: bigint }
   | { kind: "messageDelta"; messageId: string; index: number; filePath: string; order: bigint };
 
-/** 判定順は「進捗サイドカーを最初に弾く → prompt- → message」を維持する */
+/** 判定順は「進捗サイドカーの残骸を最初に弾く → prompt- → message」を維持する */
 function classify(fileName: string, filePath: string, order: bigint): ClassifiedFile | null {
-  // サイドカーが prompt-*.json のグロブや delta のグロブに混ざらないよう、最初に弾く
+  // ★ 残骸が prompt-*.json のグロブに混ざらないよう、最初に弾く（PROGRESS_SUFFIX の註を参照）
   if (fileName.endsWith(PROGRESS_SUFFIX)) return null;
 
   if (fileName.startsWith(PROMPT_PREFIX) && fileName.endsWith(PROMPT_SUFFIX)) {
@@ -157,7 +160,6 @@ export function scanSpool(spoolDir: string): SpoolEntry[] {
       kind: "message",
       messageId,
       filePaths: deltas.map((d) => d.filePath),
-      progressPath: progressPathFor(messageId, spoolDir),
       order: arrivalOrderOfMessage(deltas),
     });
   }
@@ -243,48 +245,19 @@ export function readPromptPayload(filePath: string): unknown {
   }
 }
 
-/** 出力済みの文数。サイドカーが無ければ 0 */
-export function readProgress(progressPath: string): number {
-  try {
-    const parsed: unknown = JSON.parse(fs.readFileSync(progressPath, "utf-8"));
-    if (isRecord(parsed)) {
-      const emitted = parsed.emitted;
-      if (typeof emitted === "number" && Number.isInteger(emitted) && emitted >= 0) return emitted;
-    }
-  } catch {
-    // 無い・壊れているなら 0 から。多少喋り直すが、黙るより良い
-  }
-  return 0;
-}
-
-/**
- * 出力済みの文数を記録する。
- *
- * ★ atomicWrite を使うこと（素の `writeFileSync` は書きかけを読まれる窓ができる）。
- *   ここで書きかけが漏れると 0 バイトのサイドカーが残り、`readProgress` はそれを 0 と
- *   読むので、**メッセージが丸ごと最初から読み直される**。WebSocket の契約は `seq` でしか
- *   重複排除しないため、クライアントは言い直しと新規発話を区別できない。
- */
-export function writeProgress(progressPath: string, emitted: number): void {
-  writeFileAtomic(progressPath, `${JSON.stringify({ emitted })}\n`);
-}
-
-/** 処理し終えた spool を消す。メッセージは全 delta ファイル + サイドカーを消す */
+/** 処理し終えた spool を消す。メッセージは全 delta ファイルを消す */
 export function removeEntry(entry: SpoolEntry): void {
   if (entry.kind === "prompt") {
     fs.rmSync(entry.filePath, { force: true });
     return;
   }
   for (const filePath of entry.filePaths) fs.rmSync(filePath, { force: true });
-  fs.rmSync(entry.progressPath, { force: true });
 }
 
-/** メッセージ関連ファイル（delta + 進捗サイドカー）を message_id でグルーピングするための鍵 */
+/** delta ファイルを message_id でグルーピングするための鍵 */
 function messageGroupKey(fileName: string): string | null {
   // prompt- は1イベント完結でグルーピングの必要が無いので対象外（呼び出し側でファイル単位に扱う）
   if (fileName.startsWith(PROMPT_PREFIX)) return null;
-
-  if (fileName.endsWith(PROGRESS_SUFFIX)) return fileName.slice(0, -PROGRESS_SUFFIX.length);
 
   const match = MESSAGE_DELTA_RE.exec(fileName);
   return match ? match[1]! : null;
@@ -297,10 +270,10 @@ function messageGroupKey(fileName: string): string | null {
  *   mtime は書かれた瞬間で止まる。ファイル単位で「無活動時間」を見ると、進行中メッセージの
  *   古い index のファイルだけが閾値を超えて消え、`index` に欠番ができて**そのメッセージが
  *   永久に発話されなくなる**。そのメッセージに属するファイル群の**最新 mtime**を見て、
- *   全体が無活動なら delta ファイルとサイドカーをまとめて消す。
+ *   全体が無活動なら delta ファイルをまとめて消す。
  *
- * `prompt-*.json` と、rename 前の孤立した `.tmp`（このグルーピングに掛からないもの）は
- * 従来どおりファイル単位で判定する（1イベントで完結するので、まとめる意味が無い）。
+ * `prompt-*.json`、rename 前の孤立した `.tmp`、廃止した `*.progress.json` の残骸
+ * （このグルーピングに掛からないもの）は、ファイル単位で判定する。
  */
 export function cleanOrphans(spoolDir: string, maxAgeMs: number, now: number = Date.now()): number {
   let fileNames: string[];

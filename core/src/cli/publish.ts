@@ -3,10 +3,17 @@
  *
  * ★ `append` が seq を採番して speech.jsonl に書いた時点で「出した」が確定する。
  *   ここから先（enqueue / trim）で throw させてはいけない。throw すると worker.ts の
- *   processMessage が writeProgress より前に抜け、spool の entry がまだ処理していない
+ *   processMessage が `removeEntry` より前に抜け、spool の entry がまだ処理していない
  *   ように見える。次の CLI が同じ文を組み直して別の seq を振り直し、speech.jsonl に
  *   同じ文が二重に残る（クライアントの seq 重複排除は seq が違うので効かない）。
  *   enqueue / trim の失敗は記録して黙って進む。
+ *
+ * ★ **被害範囲はメッセージ全体。** 発話の粒度をメッセージ単位にした（[#30]）ので、
+ *   ここで throw したときに組み直されるのは1文ではなく**メッセージ全文**になる。
+ *   数十文がまとめて二度読み上げられる。この関数の「append の後は throw しない」は、
+ *   その分だけ以前より重い保証になっている。
+ *
+ * [#30]: https://github.com/schwarz9791/chatter-agent/issues/30
  */
 
 import type { SpeechEntry, SpeechLog } from "../core/speechLog";

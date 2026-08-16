@@ -70,10 +70,13 @@ matcher が効かない＝**全セッションに影響する**ので、無効�
 
 ここから帰結が1つある。
 
-**`delta` が空でも spool に書くこと。** `final:true` は**発話とファイルの削除を駆動する唯一の合図**で、
-空だからと捨てるとそのメッセージは**一文も**発話されないまま孤児掃除（既定6時間）まで残る。
+**`delta` が空でも spool に書くこと。** `final:true` は**通常経路（メッセージがそのまま閉じた場合）で
+発話とファイルの削除を駆動する合図**。唯一ではない — 救済経路（`hasNewerInSameSession`）も同一セッションの
+後続イベントを合図に publish とファイル削除の両方を駆動する（→ CLAUDE.md「絶対に守ること」1）。ただし
+救済は「後続が来たら」の話で、来る保証は無い。空だからと `final:true` の payload を捨てると、通常経路では
+そのメッセージは**一文も**発話されず、救済も発火しなければ孤児掃除（既定6時間）まで残ったまま消える。
 [#30](https://github.com/schwarz9791/chatter-agent/issues/30) で `final` を待つようになった分、
-ここを落としたときの被害は「最後の1文が出ない」から「メッセージ全損」に変わっている。
+ここを落としたときの被害は「最後の1文が出ない」から「（救済が発火しない限り）メッセージ全損」に変わっている。
 
 実測（Claude Code 2.1.233）では、非 final の delta は**すべて改行で終わって**いて、到着間隔は 0.7〜5.7 秒だった。
 **thinking では発火しない**（thinking を挟んだ delta が1件も観測されなかった）。
@@ -127,14 +130,23 @@ tmp + rename で1ファイルを置く**ことで、この競合を構造から�
 | アシスタントの発言 | `spool/<message_id>.<index>.json` | hook | delta ごとに1ファイルを tmp + rename で置く |
 | 応答待ち通知 | `spool/prompt-<…>.json` | hook | 1イベントで完結するので単発で置く |
 
-**spool に書くのは hook だけ。ワーカーはディスクに状態を持たない。**
+**spool に書くのは hook だけ。spool には状態を持たない。**
 [#30](https://github.com/schwarz9791/chatter-agent/issues/30) 以前は「どこまで発話したか」を
 `spool/<message_id>.progress.json` のサイドカーに置いていたが、`final` を待って1回だけ組み立てる
 ようになったので不要になった。
 
-> ★ **`.progress.json` を無視するガードだけは `spool.ts` に残してある**（`PROGRESS_SUFFIX`）。
-> 既存インストールの spool に残った `prompt-<…>.progress.json` を、応答待ち通知として
-> 読んでしまわないため。残骸そのものは孤児掃除がファイル単位で回収する。
+> ★ これは「ワーカーが無状態」という意味ではない。`workerState.ts` が `speak.state.json`
+> （`pairedPromptId` / `lastText` / tombstone）を `writeFileAtomic` で永続化している。この見出しを
+> 根拠に `read/writeWorkerState` を削ると、`AskUserQuestion` のたびに対の permission Notification を
+> 二重読みする退行が戻る。
+
+> ★ **`.progress.json` を無視する専用ガードは `spool.ts` から外した。** 既存インストールの spool に
+> 残った `prompt-<…>.progress.json` は `prompt-<…>.json` と同じ形に一致するので、通常の prompt
+> entry として拾われる。それで問題ない — `formatPromptEvent` は未知の payload（`hook_event_name`
+> が無い）に `[]` を返すので、`processPrompt` が発話ゼロのまま即削除する。専用ガードがあった頃は
+> この削除が孤児掃除（既定6時間・ファイル単位）任せになっていただけで、外した方がむしろ早く片付く。
+> `<message_id>.progress.json`（メッセージ側の旧サイドカー）はどちらのパターンにも一致しないので、
+> ガードの有無に関わらず元から無視される。
 
 ワーカーは**到着順**に処理し、同じ `message_id` の delta ファイルを1エントリにまとめて
 `index` 昇順に結合する。処理し終えたら、そのメッセージの delta ファイルを全部削除する。

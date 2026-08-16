@@ -39,7 +39,7 @@ chatter-mascot         表示側アプリ（Unity）。TTS → 再生 → VRM描
 | ディレクトリ | 内容 |
 |---|---|
 | `plugin/` | Claude Code プラグイン（bash hook） |
-| `core/` | `chatter-agent-core` — CLI と WebSocket サーバー |
+| `core/` | `chatter-agent-core` — CLI、WebSocket サーバー、発話 CLI（AivisSpeech で読み上げる） |
 | `apps/chatter-mascot/` | 表示側アプリ（Unity + UniVRM）。macOS 常駐と Android XR（XREAL Aura）を同じプロジェクトから |
 
 ## 対象
@@ -48,17 +48,17 @@ chatter-mascot         表示側アプリ（Unity）。TTS → 再生 → VRM描
 
 ## 現在の状態
 
-**開発中。発言を捕捉して配信するところまでが動きます。**
+**開発中。発言を捕捉して、CLI で読み上げるところまでが動きます。**
 
 | | 状態 |
 |---|---|
 | `plugin/` | 実装済み。実機で確認済み |
-| `core/` | CLI + WebSocket サーバーとも実装済み。AI要約（既定OFF）のみ未着手 |
+| `core/` | CLI + WebSocket サーバー + 発話 CLI とも実装済み。AI要約（既定OFF）のみ未着手 |
 | `apps/` | 未作成 |
 
 実装フェーズは **A**（plugin + CLI で記録と配信キューが育つ）→ **B**（WebSocket 配信）→ **C**（表示側アプリ）。**C は Unity + UniVRM で1プロジェクトにまとめ、発話 → VRM 表示 → プラットフォーム固有（デスクトップの透過ウィンドウ / XR の Full Space）の順に積みます。**
 
-Phase A は実機で動作確認しました。delta が hook に届いてから `speech.jsonl` に載るまでの配管は**約 50ms** で十分速く、確定した文はターミナル表示とほぼ体感差なく発話されます（段落の最後の一文だけは確定が遅れた分だけ後から追いつきます）。**あとは受け取って喋る側（`apps/`）だけが残っています。**
+Phase A は実機で動作確認しました。delta が hook に届いてから `speech.jsonl` に載るまでの配管は**約 50ms** で十分速く、確定した文はターミナル表示とほぼ体感差なく発話されます（段落の最後の一文だけは確定が遅れた分だけ後から追いつきます）。**あとは VRM で表示する側（`apps/`）だけが残っています。**
 
 ### 試す
 
@@ -70,6 +70,20 @@ tail -f "${XDG_CONFIG_HOME:-$HOME/.config}/chatter-agent/speech.jsonl"
 ```
 
 `CHATTER_AGENT_DISABLE=1` を付けて起動すると完全に黙ります。
+
+### 声で聞く
+
+`chatter-agent-player` が、配信された発話を [AivisSpeech](https://aivis-project.com/) で読み上げます。Unity の表示側アプリを待たずに音が出せて、プロトコルの参照実装も兼ねています。
+
+**AivisSpeech.app を起動しておいてください**（既定の接続先は `http://127.0.0.1:10101`）。
+
+```bash
+cd core && npm install && npm run build
+npm run start:server     # 別ターミナル
+npm run start:player     # 別ターミナル
+```
+
+話者を変えるには `CHATTER_AGENT_TTS_SPEAKER_ID` を指定します（起動時に候補の一覧が出ます）。macOS 以外では `CHATTER_AGENT_PLAYER_COMMAND` に再生コマンドを指定してください（既定は `afplay`）。
 
 ## 開発
 
@@ -84,7 +98,10 @@ npm run build
 
 npm run verify:phase-a   # spool → speech.jsonl
 npm run verify:phase-b   # 配信キュー → WebSocket
+npm run verify:player    # WebSocket → 合成 → 再生 → ack
 ```
+
+`verify:player` は合成エンジンと再生コマンドをスタブに差し替えるので、AivisSpeech もオーディオデバイスも要りません。
 
 設計方針と作業規約は [`CLAUDE.md`](./CLAUDE.md) と [`docs/`](./docs) にあります。
 

@@ -189,3 +189,8 @@ jobs:
 
       - name: Verify phase B (delivery queue → WebSocket)
         run: npm run verify:phase-b
+
+      # 合成エンジンはスタブ HTTP に、再生コマンドは fake-player.mjs に差し替わるので、
+      # AivisSpeech もオーディオデバイスも要らない
+      - name: Verify player (WebSocket → 合成 → 再生 → ack)
+        run: npm run verify:player

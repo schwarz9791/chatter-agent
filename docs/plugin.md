@@ -230,6 +230,41 @@ Claude Code が置換するので、そちらは確実に効く。
 
 プロジェクトローカルの `.claude/settings.local.json` を書いても、**そのセッション中は反映されない**。対照として `PostToolUse` を仕掛けても発火しないことで確認済み。書き換えたら必ずセッションを立て直す。
 
+### marketplace の参照先が消えると、症状は「無音」になる
+
+`claude plugin marketplace add ./` は**そのときの絶対パスを覚える**。worktree を作り直したり畳んだりすると
+参照先が消え、プラグインが有効化されなくなる。
+
+**エラーは出ない。** hook が発火しないだけで、`installed_plugins.json` にはインストール記録が残り、
+キャッシュにも実体があるので一見すると正常に見える。実際に、消した worktree を指したまま
+`.claude/settings.local.json` に正しいパスを書いても直らなかった
+（**同名の壊れた登録が既にあると `extraKnownMarketplaces` は効かない**）。
+
+診断は参照先を見るのが早い。
+
+```bash
+claude plugin marketplace list          # Source: Directory (...) が実在するか
+claude plugin list                      # enabled になっているか
+```
+
+`enabled` なのに喋らないなら、hook script を手で叩くと切り分けられる（spool にファイルが置かれれば
+プラグイン側は正常で、Claude Code が hook を発火していない）。
+
+```bash
+ROOT=~/.claude/plugins/cache/chatter-agent/chatter-agent/0.1.0
+echo '{"session_id":"x","hook_event_name":"MessageDisplay","turn_id":"t","message_id":"m","index":0,"final":true,"delta":"確認。"}' \
+  | CLAUDE_PLUGIN_ROOT=$ROOT bash "$ROOT/scripts/on-message.sh"
+```
+
+直すときは登録し直す。**★ `remove` は `.claude/settings.local.json` の
+`extraKnownMarketplaces` と `enabledPlugins` も空にする**ので、書いてあった内容は消える前提でいること。
+
+```bash
+claude plugin marketplace remove chatter-agent
+claude plugin marketplace add <今のリポジトリの絶対パス>
+claude plugin install chatter-agent@chatter-agent
+```
+
 ### キャッシュはバージョン単位。同じ版のまま直しても反映されない
 
 コピーはインストール時のスナップショットで、パスに `version` が入る。ソースを直しても

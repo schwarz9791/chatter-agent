@@ -1,6 +1,6 @@
 # `core/` — chatter-agent-core の開発規約
 
-`chatter-agent-core` は `chatter-agent-speak`（CLI）と `chatter-agent-server`（WebSocket 配信）を含む Node パッケージ。
+`chatter-agent-core` は `chatter-agent-speak`（CLI）、`chatter-agent-server`（WebSocket 配信）、`chatter-agent-player`（発話 CLI）を含む Node パッケージ。
 
 ここに書いてあるのは**ツールチェーン固有の地雷**で、設計判断ではない。設計の根拠は `_workspace/chatter-agent-design.md` を見ること。
 
@@ -21,6 +21,13 @@ core/src/
 │   ├── index.ts             合成ルート。ロック → bind → 古いキューの掃除 → ポーリング
 │   ├── dispatcher.ts        配信済み seq の判断。何を配信済みとし、何を消してよいか（ユニットテストのため純粋な部品に切り出してある）
 │   └── wsServer.ts          配信と ack。Origin 検査もここ
+├── player/       chatter-agent-player（WebSocket → 合成 → 再生 → ack）
+│   ├── index.ts             合成ルート。ロック → 一時dir → エンジン疎通 → 接続。コマンドを実行してイベントを戻すドライバ
+│   ├── playbackQueue.ts     ★中核。合成/再生/ack の判断だけを持つ reducer（副作用ゼロ）
+│   ├── speechFrame.ts       受信フレームの検証。`wsServer.parseAck` と対称
+│   ├── voicevoxClient.ts    AivisSpeech / VOICEVOX 互換 API（fetch + AbortSignal.timeout）
+│   ├── audioPlayer.ts       WAV を一時ファイルに置いて外部コマンドで鳴らす
+│   └── client.ts            ws 接続 / 再接続 / ping watchdog / ack の間引き
 ├── core/         契約と基盤
 │   ├── types.ts             SpeechRecord / Emotion / SpeechKind / SpeakMessage
 │   ├── paths.ts             ← cc-mascot-xr 流用
@@ -36,6 +43,8 @@ core/src/
 ```
 
 判断ロジックは基本的に `cli/` と `core/` に置く。**`server/index.ts` と `wsServer.ts` は判断ロジックを持たない** — キューを読んで全クライアントへ流すだけの配線に留める。唯一の例外が `server/dispatcher.ts`（何を配信済みとし、何を消してよいか）で、`index.ts` に埋めるとユニットテストから触れないため純粋な部品として切り出してある。
+
+`player/` も同じ形だが、切り出し方を一段厳しくしてある。**`playbackQueue.ts` はイベントを入れるとコマンドの配列が返る reducer で、合成も再生も ack も自分では行わない。** dispatcher の副作用は同期の `broadcast` 1本なので注入で足りるが、player の副作用は非同期で、しかも完了コールバックが状態機械に**再入する**（cc-mascot の `useSpeech.ts` が promise の中から `processQueue()` を呼ぶ形）。注入した関数を機械の内側から呼ぶと、「ループの途中で状態が変わる」再入バグをテストで捕まえられない。
 
 発話の契約（`SpeechRecord`、キューの形、WebSocket）は [`protocol.md`](./protocol.md) にある。
 
@@ -112,7 +121,7 @@ npm run lint          # oxlint
 npm run format        # oxfmt
 npm run test:run      # vitest run
 npm run test:coverage
-npm run build         # tsdown（CLI と server の2エントリ）
+npm run build         # tsdown（CLI / server / player の3エントリ）
 ```
 
 ### Node のバージョン
@@ -128,20 +137,26 @@ CI（`setup-node`）は `node-version: "24"` で、常に最新の 24 系が入�
 
 ### 受け入れ確認
 
-`plugin/` がまだ無いので、bash hook の代わりに spool を手で置いて確認する。どちらも使い捨ての
-`XDG_CONFIG_HOME` を掘るので、実際の `~/.config/chatter-agent` は汚さない。
+いずれも使い捨ての `XDG_CONFIG_HOME` を掘るので、実際の `~/.config/chatter-agent` は汚さない。
 
 ```bash
 npm run build
-npm run verify:phase-a   # spool → speech.jsonl（scripts/verify-phase-a.sh）
+npm run verify:phase-a   # spool → speech.jsonl（scripts/verify-phase-a.sh。実際の bash hook に食わせる）
 npm run verify:phase-b   # 配信キュー → WebSocket（scripts/verify-phase-b.mjs）
+npm run verify:player    # WebSocket → 合成 → 再生 → ack（scripts/verify-player.mjs）
 npm run start:server     # 手で動かすとき
+npm run start:player     # 耳で聞くとき（AivisSpeech を起動しておく）
 ```
 
-**実機での確認（ターミナル表示と体感で同時か）は `plugin/` 着手時に行う。** ここまでは
-「spool に置いたものが正しく育つ・正しく配信される」までしか見ていない。
+**`verify:player` は AivisSpeech もオーディオデバイスも要らない。** 合成エンジンはスタブ HTTP に、
+再生コマンドは `scripts/fake-player.mjs` に差し替わる。**プレイヤーコマンドを config で
+差し替えられるようにした決定が、そのまま CI 可能性になっている**（`playerCommand` / `playerArgs`）。
+偽プレイヤーが受け取ったファイル名を追記するので、**実際に何がどの順で鳴ったか**まで検証できる。
+最後のシナリオでは本物の server と CLI を通して、hook → CLI → server → player の全経路を1本で見る。
 
-**CI の `verify` ジョブでも回している**（`.github/workflows/validate.yml`）。どちらも
+**実機での確認（ターミナル表示と体感で同時か）は耳で行う。** 自動の検証が見ているのは形と順序だけ。
+
+**CI の `verify` ジョブでも回している**（`.github/workflows/validate.yml`）。いずれも
 バンドル（`plugin/bin/` と `core/dist/`）を実行するので `npm run build` が先に要る。
 手元でも同じコマンドで回せる。
 
@@ -151,6 +166,10 @@ npm run start:server     # 手で動かすとき
 |---|---|---|
 | `src/cli/index.ts` | `plugin/bin/chatter-agent-speak.mjs`（**git にコミット**） | 全部バンドル。npm 依存ゼロ |
 | `src/server/index.ts` | `core/dist/chatter-agent-server.mjs`（gitignore） | `ws` は external |
+| `src/player/index.ts` | `core/dist/chatter-agent-player.mjs`（gitignore） | `ws` は external |
+
+- ★ **`dist` に出すエントリのうち `clean: true` を持てるのは1つだけ。** 両方が true だと、
+  実行順によって先に出た方の成果物が消える。今は server 側が持っている
 
 - **拡張子は `.mjs` でなければならない。** `plugin/bin/` に `package.json` を置かないので、`.js` だと Node が CJS として読んで壊れる
 - **CLI に npm 依存を持たせない。** `src/cli/` から到達する範囲は Node 標準だけで閉じる。ビルド後に
@@ -194,6 +213,8 @@ cc-mascot から移植したコードを oxfmt で整形すると、上流との
 | 抑制の state | `{root}/speak.state.json` | CLI |
 | CLI のロック | `{root}/speak.lock/`（ディレクトリ） | CLI |
 | サーバーのロック | `{root}/server.lock/`（ディレクトリ） | **server**（bind の前に取る。2台目は起動に失敗する） |
+| player のロック | `{root}/player.lock/`（ディレクトリ） | **player**（接続の前に取る。2台目は起動に失敗する） |
+| player の一時 WAV | `{root}/player-tmp/<seq>.wav` | **player**（起動時にディレクトリごと作り直す） |
 
 ### 設定と環境変数
 
@@ -209,6 +230,29 @@ cc-mascot から移植したコードを oxfmt で整形すると、上流との
 | `speechQueueMaxEntries` | `500` | `CHATTER_AGENT_SPEECH_QUEUE_MAX_ENTRIES` |
 | `spoolMaxAgeHours` | `6` | `CHATTER_AGENT_SPOOL_MAX_AGE_HOURS` |
 | `allowedOrigins` | `[]` | `CHATTER_AGENT_ALLOWED_ORIGINS`（カンマ区切り） |
+
+player だけが読むキー。**別ファイルに分けないこと。** `SPECS` は全バイナリで共有していて、
+載っていないキーは未知キーとして警告されるので、分けると `chatter-agent-speak` が
+毎 delta の起動ごとに警告を吐く。
+
+| キー | 既定値 | 環境変数 |
+|---|---|---|
+| `ttsBaseUrl` | `"http://127.0.0.1:10101"` | `CHATTER_AGENT_TTS_URL` |
+| `ttsSpeakerId` | `888753760` | `CHATTER_AGENT_TTS_SPEAKER_ID` |
+| `synthesisLookahead` | `3`（0 で直列） | `CHATTER_AGENT_SYNTHESIS_LOOKAHEAD` |
+| `synthesisTimeoutMs` | `30000` | `CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS` |
+| `playerCommand` | `"afplay"` | `CHATTER_AGENT_PLAYER_COMMAND` |
+| `playerArgs` | `["{file}"]` | `CHATTER_AGENT_PLAYER_ARGS`（カンマ区切り） |
+| `playerServerUrl` | `""`（空なら `host`/`port` から導出） | `CHATTER_AGENT_PLAYER_SERVER_URL` |
+| `speechMaxAgeMs` | `0`（無効） | `CHATTER_AGENT_SPEECH_MAX_AGE_MS` |
+
+- 既定の `ttsBaseUrl` は **AivisSpeech.app を単体起動したときの標準ポート**。cc-mascot は
+  エンジンを自分で `--port 8564` で spawn するので、そちらに繋ぐなら明示的に指定する
+- `ttsSpeakerId` の既定は AivisSpeech 標準同梱の Anneli（ノーマル）。起動時に `/speakers` で
+  存在を検査し、無ければ候補を並べて警告する（**設定ミスの症状が「無音」なので、これが無いと切り分けできない**）
+- ★ **`playerServerUrl` が `host` と別なのは、既定の `0.0.0.0` が bind アドレスであって接続先ではないから。**
+  空のときは `0.0.0.0` / `::` を `127.0.0.1` に読み替えて組み立てる
+- モジュール名は API ファミリ（`voicevoxClient`）、config キーはエンジン中立（`tts*`）で割り切ってある
 
 **`speechLogGenerations`（記録の退避世代数）は [#8](https://github.com/schwarz9791/chatter-agent/issues/8) で廃止した。** 誰も `speech.jsonl` を tail しなくなったので、
 複数世代を繰り下げる必要がなくなり、`speechLogMaxBytes` を超えたら `speech.1.jsonl` に退避する1世代だけになった。

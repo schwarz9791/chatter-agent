@@ -68,4 +68,18 @@ export default defineConfig([
     clean: true,
     outputOptions: { ...shared.outputOptions, entryFileNames: "chatter-agent-server.mjs" },
   },
+
+  /**
+   * player も常駐プロセス。server と同じ扱い（`dist` へ出し、`ws` は external）。
+   *
+   * ★ `clean` は `dist` に出すエントリのうち1つだけが持つこと。両方が true だと、
+   *   実行順によって先に出た方の成果物が消える。ここは server 側に任せる。
+   */
+  {
+    ...shared,
+    entry: "src/player/index.ts",
+    outDir: "dist",
+    clean: false,
+    outputOptions: { ...shared.outputOptions, entryFileNames: "chatter-agent-player.mjs" },
+  },
 ]);

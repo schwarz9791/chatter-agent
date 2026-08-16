@@ -121,7 +121,15 @@ function createDefaultConfig() {
 		speechLogMaxBytes: 5242880,
 		speechQueueMaxEntries: 500,
 		spoolMaxAgeHours: 6,
-		allowedOrigins: []
+		allowedOrigins: [],
+		ttsBaseUrl: "http://127.0.0.1:10101",
+		ttsSpeakerId: 888753760,
+		synthesisLookahead: 3,
+		synthesisTimeoutMs: 3e4,
+		playerCommand: "afplay",
+		playerArgs: ["{file}"],
+		playerServerUrl: "",
+		speechMaxAgeMs: 0
 	};
 }
 const TRUTHY = [
@@ -170,6 +178,10 @@ const parsePositiveInt = (raw) => {
 	const n = toInt(raw);
 	return n !== void 0 && n >= 1 ? n : void 0;
 };
+const parseNonNegativeInt = (raw) => {
+	const n = toInt(raw);
+	return n !== void 0 && n >= 0 ? n : void 0;
+};
 const parseNonEmptyString = (raw) => typeof raw === "string" && raw.trim() ? raw.trim() : void 0;
 const parseStringList = (raw) => {
 	let items;
@@ -184,6 +196,27 @@ const parseStringList = (raw) => {
 	}
 	return out;
 };
+/**
+* スキームを絞った URL のパーサを作る。
+*
+* 素通しにすると、`localhost:10101`（スキーム忘れ）や末尾スラッシュ付きが
+* そのまま `${baseUrl}/audio_query` に連結されて、症状が「無音」の設定ミスになる。
+* ここで弾けば「不正です。既定値を使います」の警告が出る。
+*/
+function makeUrlParser(protocols) {
+	return (raw) => {
+		const text = parseNonEmptyString(raw);
+		if (text === void 0) return void 0;
+		let url;
+		try {
+			url = new URL(text);
+		} catch {
+			return;
+		}
+		if (!protocols.includes(url.protocol)) return void 0;
+		return text.replace(/\/+$/, "");
+	};
+}
 /**
 * キーの定義。satisfies で ChatterAgentConfig の全キーを網羅していることを型で担保する
 * （satisfies は型のみなので erasableSyntaxOnly に抵触しない）。
@@ -217,6 +250,38 @@ const SPECS = {
 	allowedOrigins: {
 		env: "CHATTER_AGENT_ALLOWED_ORIGINS",
 		parse: parseStringList
+	},
+	ttsBaseUrl: {
+		env: "CHATTER_AGENT_TTS_URL",
+		parse: makeUrlParser(["http:", "https:"])
+	},
+	ttsSpeakerId: {
+		env: "CHATTER_AGENT_TTS_SPEAKER_ID",
+		parse: parseNonNegativeInt
+	},
+	synthesisLookahead: {
+		env: "CHATTER_AGENT_SYNTHESIS_LOOKAHEAD",
+		parse: parseNonNegativeInt
+	},
+	synthesisTimeoutMs: {
+		env: "CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS",
+		parse: parsePositiveInt
+	},
+	playerCommand: {
+		env: "CHATTER_AGENT_PLAYER_COMMAND",
+		parse: parseNonEmptyString
+	},
+	playerArgs: {
+		env: "CHATTER_AGENT_PLAYER_ARGS",
+		parse: parseStringList
+	},
+	playerServerUrl: {
+		env: "CHATTER_AGENT_PLAYER_SERVER_URL",
+		parse: makeUrlParser(["ws:", "wss:"])
+	},
+	speechMaxAgeMs: {
+		env: "CHATTER_AGENT_SPEECH_MAX_AGE_MS",
+		parse: parseNonNegativeInt
 	}
 };
 const CONFIG_KEYS = Object.keys(SPECS);

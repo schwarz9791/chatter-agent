@@ -44,6 +44,48 @@ export interface ChatterAgentConfig {
    * Unity WebGL ビルドを繋ぐときに、必要な分だけ足す。
    */
   allowedOrigins: string[];
+
+  // ── 以下は発話クライアント（player）だけが読む ─────────────────────────
+  // ★ ここに置くこと。config.ts は全バイナリが同じ SPECS を共有していて、
+  //   載っていないキーは「未知のキー」として警告される。別ファイルに分けると
+  //   chatter-agent-speak が毎 delta の起動ごとに警告を吐く。
+
+  /**
+   * 音声合成エンジンの baseUrl。AivisSpeech / VOICEVOX の互換 API を叩く。
+   * 既定は AivisSpeech.app を単体起動したときの標準ポート。
+   * （cc-mascot はエンジンを自分で spawn して 8564 を使うので、そちらとは別物）
+   */
+  ttsBaseUrl: string;
+  /** 話者のスタイル ID。既定は AivisSpeech 標準同梱の Anneli（ノーマル）。VOICEVOX は 0 始まりの小さい整数 */
+  ttsSpeakerId: number;
+  /**
+   * 再生中の1件を含めて、いくつ先まで合成を走らせるか。0 なら完全直列。
+   *
+   * 大きくすると合成待ちは減るが、`/synthesis` は CPU 律速なので
+   * 同時に投げすぎると**先頭の合成が遅くなる**＝1文目の発話開始が遅れる。
+   */
+  synthesisLookahead: number;
+  /** `/audio_query` と `/synthesis` の1リクエストあたりの上限。Node の fetch に既定タイムアウトは無い */
+  synthesisTimeoutMs: number;
+  /** WAV を再生するコマンド。macOS の afplay 以外にも差し替えられる（検証では /usr/bin/true 等を使う） */
+  playerCommand: string;
+  /** `playerCommand` に渡す引数。`{file}` が WAV のパスに置換される。シェルは噛ませない */
+  playerArgs: string[];
+  /**
+   * player の接続先。空なら `port` と `host` から導出する。
+   *
+   * ★ `host` をそのまま使えない。既定の `0.0.0.0` は **bind アドレスであって接続先ではない**。
+   *   導出では `0.0.0.0` / `::` を `127.0.0.1` に読み替える。
+   */
+  playerServerUrl: string;
+  /**
+   * これより古い発話は音を出さずに ack だけして飛ばす。0 なら無効。
+   *
+   * TTS + 再生は生成よりずっと遅いので、バックログを抱えると数分前の発言を今喋ることになる。
+   * server 側の起動時の掃除（10秒）と同じ判断をクライアント側にも置けるようにしてあるが、
+   * 既定は無効。実機で遅れを測ってから決める。
+   */
+  speechMaxAgeMs: number;
 }
 
 export function createDefaultConfig(): ChatterAgentConfig {
@@ -55,6 +97,15 @@ export function createDefaultConfig(): ChatterAgentConfig {
     speechQueueMaxEntries: 500,
     spoolMaxAgeHours: 6,
     allowedOrigins: [],
+
+    ttsBaseUrl: "http://127.0.0.1:10101",
+    ttsSpeakerId: 888753760,
+    synthesisLookahead: 3,
+    synthesisTimeoutMs: 30_000,
+    playerCommand: "afplay",
+    playerArgs: ["{file}"],
+    playerServerUrl: "",
+    speechMaxAgeMs: 0,
   };
 }
 
@@ -106,6 +157,13 @@ const parsePositiveInt: Parser<number> = (raw) => {
   return n !== undefined && n >= 1 ? n : undefined;
 };
 
+// 0 を「無効」「直列」として意味づけているキー用（synthesisLookahead / speechMaxAgeMs）。
+// VOICEVOX の話者 ID も 0 から始まるのでこちらを使う
+const parseNonNegativeInt: Parser<number> = (raw) => {
+  const n = toInt(raw);
+  return n !== undefined && n >= 0 ? n : undefined;
+};
+
 // trim した値を返すこと。判定にだけ使って生値を返すと、CHATTER_AGENT_HOST=" 127.0.0.1 "
 // のような値がそのまま listen() へ渡る
 const parseNonEmptyString: Parser<string> = (raw) => (typeof raw === "string" && raw.trim() ? raw.trim() : undefined);
@@ -133,6 +191,30 @@ const parseStringList: Parser<string[]> = (raw) => {
 };
 
 /**
+ * スキームを絞った URL のパーサを作る。
+ *
+ * 素通しにすると、`localhost:10101`（スキーム忘れ）や末尾スラッシュ付きが
+ * そのまま `${baseUrl}/audio_query` に連結されて、症状が「無音」の設定ミスになる。
+ * ここで弾けば「不正です。既定値を使います」の警告が出る。
+ */
+function makeUrlParser(protocols: string[]): Parser<string> {
+  return (raw) => {
+    const text = parseNonEmptyString(raw);
+    if (text === undefined) return undefined;
+    let url: URL;
+    try {
+      url = new URL(text);
+    } catch {
+      return undefined;
+    }
+    if (!protocols.includes(url.protocol)) return undefined;
+    // 末尾スラッシュを落として連結の形を1つに揃える。`new URL("http://h:1")` は
+    // toString() が "http://h:1/" を返すので、生の文字列側で処理する
+    return text.replace(/\/+$/, "");
+  };
+}
+
+/**
  * キーの定義。satisfies で ChatterAgentConfig の全キーを網羅していることを型で担保する
  * （satisfies は型のみなので erasableSyntaxOnly に抵触しない）。
  * キーを増やすときは ChatterAgentConfig と SPECS の両方を直さないとコンパイルが通らない。
@@ -145,6 +227,15 @@ const SPECS = {
   speechQueueMaxEntries: { env: "CHATTER_AGENT_SPEECH_QUEUE_MAX_ENTRIES", parse: parsePositiveInt },
   spoolMaxAgeHours: { env: "CHATTER_AGENT_SPOOL_MAX_AGE_HOURS", parse: parsePositiveInt },
   allowedOrigins: { env: "CHATTER_AGENT_ALLOWED_ORIGINS", parse: parseStringList },
+
+  ttsBaseUrl: { env: "CHATTER_AGENT_TTS_URL", parse: makeUrlParser(["http:", "https:"]) },
+  ttsSpeakerId: { env: "CHATTER_AGENT_TTS_SPEAKER_ID", parse: parseNonNegativeInt },
+  synthesisLookahead: { env: "CHATTER_AGENT_SYNTHESIS_LOOKAHEAD", parse: parseNonNegativeInt },
+  synthesisTimeoutMs: { env: "CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS", parse: parsePositiveInt },
+  playerCommand: { env: "CHATTER_AGENT_PLAYER_COMMAND", parse: parseNonEmptyString },
+  playerArgs: { env: "CHATTER_AGENT_PLAYER_ARGS", parse: parseStringList },
+  playerServerUrl: { env: "CHATTER_AGENT_PLAYER_SERVER_URL", parse: makeUrlParser(["ws:", "wss:"]) },
+  speechMaxAgeMs: { env: "CHATTER_AGENT_SPEECH_MAX_AGE_MS", parse: parseNonNegativeInt },
 } as const satisfies { [K in ConfigKey]: { env: string; parse: Parser<ChatterAgentConfig[K]> } };
 
 const CONFIG_KEYS = Object.keys(SPECS) as ConfigKey[];

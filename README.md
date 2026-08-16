@@ -2,7 +2,7 @@
 
 **Claude Code の発言を、VRM キャラクターがリアルタイムで読み上げるシステム。**
 
-Claude Code の `MessageDisplay` hook からテキストを直接受け取り、文単位に整形して WebSocket で配信します。受け取った表示側アプリ（デスクトップ / Android XR グラス）が TTS で読み上げ、VRM キャラクターの表情・モーション・リップシンクに反映します。
+Claude Code の `MessageDisplay` hook からテキストを直接受け取り、メッセージが閉じたタイミングで文単位に整形して WebSocket で配信します。受け取った表示側アプリ（デスクトップ / Android XR グラス）が TTS で読み上げ、VRM キャラクターの表情・モーション・リップシンクに反映します。
 
 [CC Mascot](https://github.com/kazakago/cc-mascot)（Mac / Electron）の派生プロジェクトです。
 
@@ -20,9 +20,9 @@ hook 方式なら、テキストが表示されるのと同じタイミングで
 Claude Code
   │ hooks: MessageDisplay / PreToolUse / Notification
   ▼
-plugin/            bash。payload を spool に追記して即 exit 0
+plugin/            bash。payload を spool に置いて即 exit 0
   ▼
-chatter-agent-speak    delta 結合 → Markdown除去 → 文分割 → 感情判定
+chatter-agent-speak    final:true を待つ → delta 結合 → Markdown除去 → 文分割 → 感情判定
   ├──▶ speech.jsonl  記録（1文1行）
   ▼
 speech/<seq>.json  配信キュー（1文1ファイル）
@@ -58,7 +58,7 @@ chatter-mascot         表示側アプリ（Unity）。TTS → 再生 → VRM描
 
 実装フェーズは **A**（plugin + CLI で記録と配信キューが育つ）→ **B**（WebSocket 配信）→ **C**（表示側アプリ）。**C は Unity + UniVRM で1プロジェクトにまとめ、発話 → VRM 表示 → プラットフォーム固有（デスクトップの透過ウィンドウ / XR の Full Space）の順に積みます。**
 
-Phase A は実機で動作確認しました。delta が hook に届いてから `speech.jsonl` に載るまでの配管は**約 50ms** で十分速く、確定した文はターミナル表示とほぼ体感差なく発話されます（段落の最後の一文だけは確定が遅れた分だけ後から追いつきます）。**あとは VRM で表示する側（`apps/`）だけが残っています。**
+Phase A は実機で動作確認しました。delta が hook に届いてから `speech.jsonl` に載るまでの配管は**約 50ms** です。発話は**メッセージが閉じた（`final:true`）タイミングで全文をまとめて**流します（実測では 97.8% のメッセージで即座に届きます）。**あとは VRM で表示する側（`apps/`）だけが残っています。**
 
 ### 試す
 

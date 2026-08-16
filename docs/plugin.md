@@ -68,12 +68,12 @@ matcher が効かない＝**全セッションに影響する**ので、無効�
 | `final` | 最後の flush だけが真。**1メッセージにちょうど1回** |
 | `delta` | **最後の flush を除いて必ず行単位**。final の delta は、メッセージが改行で終わると**空になる** |
 
-ここから2つの帰結がある。
+ここから帰結が1つある。
 
-1. **`delta` が空でも spool に書くこと。** `final:true` はファイルの削除と最後の1文の flush を駆動する
-   唯一の合図で、空だからと捨てると両方が止まる
-2. **非 final の delta は行として閉じている** → 蓄積テキストが行境界で終わっていれば、最後の文はもう伸びない。
-   `messageAssembler` はこれを使って保留を外している（→ [`core.md`](./core.md)）
+**`delta` が空でも spool に書くこと。** `final:true` は**発話とファイルの削除を駆動する唯一の合図**で、
+空だからと捨てるとそのメッセージは**一文も**発話されないまま孤児掃除（既定6時間）まで残る。
+[#30](https://github.com/schwarz9791/chatter-agent/issues/30) で `final` を待つようになった分、
+ここを落としたときの被害は「最後の1文が出ない」から「メッセージ全損」に変わっている。
 
 実測（Claude Code 2.1.233）では、非 final の delta は**すべて改行で終わって**いて、到着間隔は 0.7〜5.7 秒だった。
 **thinking では発火しない**（thinking を挟んだ delta が1件も観測されなかった）。
@@ -126,14 +126,18 @@ tmp + rename で1ファイルを置く**ことで、この競合を構造から�
 |---|---|---|---|
 | アシスタントの発言 | `spool/<message_id>.<index>.json` | hook | delta ごとに1ファイルを tmp + rename で置く |
 | 応答待ち通知 | `spool/prompt-<…>.json` | hook | 1イベントで完結するので単発で置く |
-| 出力済みの文数 | `spool/<message_id>.progress.json` | **ワーカー** | hook は触らない |
 
-`.progress.json` はワーカーのサイドカー。CLI は毎 delta 起動して終了するので、「どこまで発話したか」を
-プロセス内に持てず、ここに置いている。メッセージの全 delta ファイルを削除するときに一緒に消える。
+**spool に書くのは hook だけ。ワーカーはディスクに状態を持たない。**
+[#30](https://github.com/schwarz9791/chatter-agent/issues/30) 以前は「どこまで発話したか」を
+`spool/<message_id>.progress.json` のサイドカーに置いていたが、`final` を待って1回だけ組み立てる
+ようになったので不要になった。
+
+> ★ **`.progress.json` を無視するガードだけは `spool.ts` に残してある**（`PROGRESS_SUFFIX`）。
+> 既存インストールの spool に残った `prompt-<…>.progress.json` を、応答待ち通知として
+> 読んでしまわないため。残骸そのものは孤児掃除がファイル単位で回収する。
 
 ワーカーは**到着順**に処理し、同じ `message_id` の delta ファイルを1エントリにまとめて
-`index` 昇順に結合する。`final:true` を処理し終えたら、そのメッセージの delta ファイルを
-サイドカーごと全部削除する。
+`index` 昇順に結合する。処理し終えたら、そのメッセージの delta ファイルを全部削除する。
 
 > ★ 到着順は **`birthtime`（ナノ秒）** で決めている。ただし「そのメッセージの delta ファイルの
 > どれか」ではなく**必ず `index` が 0 のファイルの birthtime** を使うこと。`final:true` は
@@ -154,8 +158,8 @@ tmp + rename で1ファイルを置く**ことで、この競合を構造から�
 **メッセージ単位（＝そのメッセージの delta ファイル全部）でまとめて無活動時間を判定する。**
 1 delta 1 ファイルでは各ファイルの mtime は書かれた瞬間で止まるので、ファイル単位で見ると
 進行中メッセージの古い delta だけが消えて `index` に欠番ができ、**そのメッセージが永久に
-発話されなくなる**。`prompt-*.json` と孤立した `.tmp` は1イベントで完結するので、
-従来どおりファイル単位で判定してよい。
+発話されなくなる**。`prompt-*.json`、孤立した `.tmp`、廃止した `*.progress.json` の残骸は
+グルーピングの対象外なので、ファイル単位で判定してよい。
 
 hook は spool へのすべての書き込み（delta / `prompt-<…>.json`）を **tmp + rename** で置いている
 （`_lib.sh` の `chatter_write_atomic`）。ワーカーは読めない payload を消さずに次のドレインへ回すので
@@ -169,7 +173,7 @@ rename が終わるまで自然に無視される。
 
 **`message_id` はファイル名になるので、hook 側でサニタイズすること。** core は
 `path.join(spoolDir, fileName)` するだけで検査しない。`[A-Za-z0-9_-]` 以外を含む値は捨てる
-（`.` を弾いているので `..` も `*.progress.json` との衝突も同時に塞がる）。
+（`.` を弾いているので `..` も、廃止した `*.progress.json` との衝突も同時に塞がる）。
 
 **`index` もファイル名の一部になる。** `chatter_json_number`（`_lib.sh`）が数値として
 取り出せない payload（欠落・負数・小数など）は、そのイベントごと捨てる。
@@ -333,6 +337,14 @@ export CHATTER_AGENT_CLI=<repo>/plugin/bin/chatter-agent-speak.mjs
 
 `AskUserQuestion` だけ桁が違うのは、質問文と選択肢の生成そのものが大きいため。
 
+> ★ **[#30](https://github.com/schwarz9791/chatter-agent/issues/30) 以降、この遅延は
+> メッセージ**全文**の遅延になる。** 以前は最終行の1文だけが遅れていたが、`final` を待って
+> まとめて発話するので、上の秒数がそのまま「そのメッセージが1文も聞こえない時間」になる。
+>
+> 引き換えに得たものと、それでも受け入れられる根拠（別の実測: 複数文のメッセージ 179件で
+> `final` の待ち時間は中央値 0秒 / p90 0秒、4秒を超えたのは 4件）は `CLAUDE.md`
+> 「絶対に守ること」1 にある。
+
 > ★ **秒数を仕様として扱わないこと。** モデル・thinking の量・ツール入力の大きさで簡単に動く。
 > 設計書 §2-4 に載っている秒数も同じ性質の観測値で、上限ではない。
 > **回答待ちではない**ので、ユーザーの応答時間とも無関係。
@@ -345,18 +357,25 @@ export CHATTER_AGENT_CLI=<repo>/plugin/bin/chatter-agent-speak.mjs
 > `MessageDisplay` が書く delta ファイルと `PreToolUse`/`Notification` が書く `prompt-<…>.json`
 > が最初から別ファイルなので、同時に走っても衝突しようがない。
 
-### 最終行は final flush でしか来ない
-
-**遅れるのは最後の1文だけで、しかもこれは保留のせいではない。**
+### 最終行は final flush でしか来ない — これが遅延の下限
 
 `delta` は「最後の flush を除いて必ず行単位」なので、**メッセージの最終行（改行で終わっていない行）は
-final flush でしか配信されない**。CLI 側にまだ存在しないテキストなので、保留を外しても縮まらない。
+final flush でしか配信されない**。CLI 側にまだ存在しないテキストなので、**どんな設計でも縮まらない**。
 
-実測（`AskUserQuestion` 直前の 17 文のメッセージ）では、**16 文が各 delta の直後に出て、
-final を待ったのは最終行の 1 文だけ**だった。
+実測（`AskUserQuestion` 直前の 17 文のメッセージ）では、16 文は各 delta の直後に届いていて、
+final でしか来なかったのは最終行の 1 文だけだった。
 
-**`final:true` を待たない設計は変えない。** 最終行以外は待たずに出せているし、
-待つ設計にすると全部が最終行の遅れに引きずられる。
+> ★ **[#30](https://github.com/schwarz9791/chatter-agent/issues/30) で `final` を待つ設計に変えた。**
+> この節は以前「待つ設計にすると全部が最終行の遅れに引きずられる」と書いていたが、
+> **まさにそれを受け入れる**という決定をした。上の 17 文の例なら、16 文も含めて全部が
+> `final` の到着まで待つ。
+>
+> 判断の根拠は「引きずられる幅」の実測で、複数文のメッセージ 179件のうち `final` の待ち時間が
+> 4秒を超えたのは 4件（すべて `AskUserQuestion` の直前）、中央値と p90 はどちらも 0秒だった。
+> 得るもの（AI要約の成立、合成レートが 37 → 5 req/min）は `CLAUDE.md`「絶対に守ること」1。
+
+**未実施**: メッセージ単位に変えてからの実機での無音時間。`AskUserQuestion` の直前で実際に
+何秒沈黙するかを測ってここに記録すること（**秒数は仕様として扱わない**。上の★の註と同じ理由）。
 
 ## 現在の状態
 
@@ -395,7 +414,7 @@ hook 側のガードとして見ているもの:
 - `message_id` が取れない / ファイル名に使えない値を捨てる
 - `index` が数値として取れない payload を捨てる（`chatter_json_number`）
 - `CHATTER_AGENT_DISABLE=1` で積まない、`=0` では黙らない（hook 側・CLI 側の両方）
-- `final:true` の `delta` が空でも保留中の最終文が出る
+- `final:true` の `delta` が空でも、メッセージ全文が出る（★ 検査対象のメッセージは**専用セッションに隔離する**こと。同一セッションに他の probe が居ると `hasNewer` 救済で発話されてしまい、`final` を経由しない経路で緑になる → [#22](https://github.com/schwarz9791/chatter-agent/issues/22)）
 - 同一メッセージに30並行で hook を起動しても、delta ファイルが壊れず `index` も欠けない
 - `CHATTER_AGENT_DISABLE=1` の間でも stdin を読み切り、300KB 相当の payload で EPIPE にならない（`on-message.sh` / `on-prompt.sh` の両方）
 - `message_id` の無い64KB payload の処理が閾値（1秒）以内で終わる（`CHATTER_HEAD_WINDOW` の窓が効いている）

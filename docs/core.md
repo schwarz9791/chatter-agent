@@ -13,7 +13,7 @@ core/src/
 ├── cli/          chatter-agent-speak（spool を読む単一ワーカー）
 │   ├── index.ts             エントリ。無効化判定 → ロック → ドレイン → 解放
 │   ├── spool.ts             走査（到着順）/ 分類 / 読み取り / 削除 / 孤児掃除
-│   ├── messageAssembler.ts  ★中核。delta 結合 → 確定した文の切り出し（純粋関数）
+│   ├── messageAssembler.ts  ★中核。メッセージ全文の delta 結合 → 文の切り出し（純粋関数）
 │   ├── publish.ts           記録と配信キューの両方に書く合成。append できた時点で「出した」が確定する
 │   ├── worker.ts            ドレインループ。応答待ち通知の整形もここ
 │   └── workerState.ts       プロセスを跨いで持ち回る重複抑制の状態
@@ -33,7 +33,7 @@ core/src/
 │   ├── paths.ts             ← cc-mascot-xr 流用
 │   ├── config.ts            ← cc-mascot-xr configStore 流用
 │   ├── lock.ts              mkdir の原子性を使った単一ワーカー / 単一サーバーのロック
-│   ├── atomicWrite.ts       tmp + rename の共通化。キュー entry / seq state / worker state / 進捗サイドカーの4箇所が使う
+│   ├── atomicWrite.ts       tmp + rename の共通化。キュー entry / seq state / worker state の3箇所が使う
 │   ├── speechLog.ts         記録への追記 / seq 採番 / state 整合
 │   └── speechQueue.ts       配信キュー。list/read/enqueue/ackUpTo/dropOlderThan/trim/sweepTmp
 ├── text/         テキスト整形・文分割        ← textFilter.ts のみ cc-mascot 由来
@@ -288,49 +288,44 @@ config に載せない環境変数:
    理由は変わらない。1メッセージが複数ファイルに分かれた分、到着順は「グループの中で最新の
    ファイル」ではなく**必ず `index` が 0 のファイルの birthtime**で決める（→ `spool.ts` の
    `arrivalOrderOfMessage`）
-3. **未確定なのはフェンスだけではない。** 設計書 §4-2 は「未閉じの ``` 以降は保留」としているが、
-   `cleanTextForSpeech` が領域ごと削除する構文は他にもある。**`<` が閉じると、既に発話した文まで
-   まとめて消える。** 保留の対象を広げてある（→ `src/text/unstableTail.ts`）
+3. **★ 発話の粒度はメッセージ単位。`final:true` を待つ。** 設計書 §2-4「★最重要★ `final:true` を
+   待ってはいけない」を [#30](https://github.com/schwarz9791/chatter-agent/issues/30) で**反転させた**。
+   理由（AI要約が成立しない / サーバー合成の req/min が7倍違う / `final` の待ち時間は実測で
+   中央値 0秒）は `CLAUDE.md`「絶対に守ること」1、契約は [`protocol.md`](./protocol.md)「発話の粒度」
+4. **未確定なのはフェンスだけではなかった。** 設計書 §4-2 は「未閉じの ``` 以降は保留」としていたが、
+   `cleanTextForSpeech` が領域ごと削除する構文は他にもある。ただし **#30 で保留の必要そのものが
+   消えた**ので、いま残っているのは「読み上げたくない」フェンスと表の行だけ
+   （→ 下の「消えた課題: ストリーミング中の保留」/ `src/text/unstableTail.ts`）
 
 加えて、設計書に無い挙動を足した。
 
-- **保留している最後の文を、後続イベントの到着で先に流す。** `final:true` を待つと大きく遅れるが、
-  後続イベントが来た時点でそのメッセージはもう伸びない。順序を保ったまま遅延だけを消せる。
-  ただし**同一セッションの**後続に限る。spool はグローバルに1ディレクトリで、`MessageDisplay` は
-  matcher 非対応で全セッションで発火するため、限定しないと Claude Code を2枚開いただけで
-  書きかけの断片が読み上げられる
+- **`final` が来なかったメッセージを、後続イベントの到着で救済する。** ESC 中断・クラッシュ・
+  `index` 欠番でメッセージが閉じないことはある。後続イベントが来た時点でそのメッセージはもう伸びないので、
+  そこで打ち切って全文を出し spool を消す。ただし**同一セッションの**後続に限る。spool はグローバルに
+  1ディレクトリで、`MessageDisplay` は matcher 非対応で全セッションで発火するため、限定しないと
+  Claude Code を2枚開いただけで**まだ伸びる途中のメッセージが分断される**
 - **ack をフロー制御として入れた。** TTS は生成よりずっと遅いので、キューは実質バッファ。
   「起動時に空にする」「上限で古い方から捨てる」も同じ原則（古い発話は無価値）で説明がつく
 
-### 見送った案: 行境界での早期 return
+### 消えた課題: ストリーミング中の保留
 
-一時期、「蓄積テキストが行境界（`\n`）で終わっていれば、まだ `final` でなくても最後の文を出す」
-という早期 return を `messageAssembler.ts` の `resolveLimit` に足したことがある（`endsAtLineBoundary`）。
-**回帰したので revert 済み。** 同じ着想をまた思いつかないよう、なぜ足りなかったかを残す。
+[#30](https://github.com/schwarz9791/chatter-agent/issues/30) で `final:true` を待つようになるまで、
+CLI は delta が届くたびに全文を組み直し、**最後の文を保留して**それ以外を流していた。進捗は
+「出力済みの文数」（`emitted`）だけをディスクに持ち、その前提は**既に出した範囲が後から変化しないこと**
+だった。`unstableTail.ts` が未閉じの `<` / インラインコード / URL / 16進列まで切り落としていたのは、
+`cleanTextForSpeech` がそれらを閉じた瞬間に**既に発話した文ごと**削除・変形するからで、
+「一度喋ってから取り消す」事故を防ぐためだった。
 
-`MessageDisplay` の delta 自体は改行で終わるが、`resolveLimit` が見ているのは delta そのものではなく
-`truncateAtUnstableTail` を通した後の `safe`。`truncateAtUnstableTail` は「未閉じ構文の**開始位置**」
-だけを切り落とすので、`safe` の**末尾**が `\n` であることと、`safe` の**内部**に未閉じの表・タグ・
-フェンスが残っていないことは別の話になる。行が変わった瞬間に、直前の未閉じ構文を含んだまま
-`safe` が確定扱いされてしまう。
+**この設計ごと無くなった。** メッセージ全文が揃ってから1回だけ組み立てるので、既出範囲という概念が無い。
+`emitted` / 進捗サイドカー / 「伸びると不安定になる」構文の保留は全部消えた。残っているのは
+「**そもそも読み上げたくない**」もの（未閉じのフェンス、書きかけの表の行）だけで、これは `final` でも切る。
 
-後続の delta がその構文を閉じると、`cleanTextForSpeech` は開始位置から閉じ位置までを丸ごと
-削除・変形する。対象範囲には**すでに発話済みの文**が含まれうるため、「一度出した文は後から
-変わらない」という `emitted`（文数で進捗を持つ）の前提が壊れる。再現ケースは
-`messageAssembler.test.ts` の「行境界だけでは保留を外せない」を参照。
+同じ着想（行境界で早期に確定させる `endsAtLineBoundary` など）をまた持ち込まないこと。
+**前提が消えたのであって、当時の反証が無効になったわけではない** —
+`safe` の末尾が `\n` であることと、`safe` の内部に未閉じ構文が残っていないことは別の話で、
+delta 単位の早期確定を復活させるなら同じ回帰をもう一度踏む。
 
-代償は測ってある。実測ログ 61 メッセージのうち 46 件は単一 flush（`final` 到着時にまとめて
-確定する短いメッセージ）で完結しており、行境界の早期 return があってもなくても発話タイミングは
-変わらない。早期 return を revert したことで実際に発話開始が遅れるのは、残りのうち約 5% に
-留まる。この規模の代償と引き換えるには回帰が重すぎると判断した。
-
-## 発話の順序について
-
-**メッセージ A が文の途中で止まっているとき、A の末尾は `final` を待つので B の後に発話される。**
-
-断片を読み上げないための意図的な代償で、断片を喋る方が事故に聞こえる。`seq` は書いた順に振られる
-ので `seq` の順序は保たれるが、**「同じ `messageId` の発話が連続するとは限らない」**。
-クライアント側で messageId ごとにまとめる作りにしないこと。
+→ [#24](https://github.com/schwarz9791/chatter-agent/issues/24)（保留を外す条件の精緻化）はこれで無効になった。
 
 ## 既知の欠落
 
@@ -348,8 +343,9 @@ config に載せない環境変数:
 上2つが重く、**文が無言で消える**。どちらも「区切りを決め打ちした正規表現が、次の区切りまで走る」
 という同じ形（URL は次の空白まで、タグは次の `>` まで）。残りは「記号が読み上げに混ざる」に留まる。
 
-> `unstableTail` が未閉じの `<` を保留するので、**一度発話してから取り消す**事故は起きない。
-> `>` が到着した時点で間の文が失われること自体は残っている。
+> `final` を待って1回だけ組み立てるので、**一度発話してから取り消す**事故は起きない
+> （組み立て時にはもう `>` が来ているか、永久に来ないかのどちらかに決まっている）。
+> `>` があると間の文が失われること自体は残っている。
 
 **実機で頻度を見てから整形規則をまとめて見直す方針**にしたので、現状は
 `src/cli/messageAssembler.test.ts` の「既知の欠落」ブロックで挙動を固定して可視化してある。
@@ -364,5 +360,10 @@ config に載せない環境変数:
 | [#2](https://github.com/schwarz9791/chatter-agent/issues/2) | テキスト整形規則の見直し（上記）。**実機で強調記号を踏んだ** — `**強調。**` が `**強調。` と `** 続き` に割れて読み上げられる |
 | [#3](https://github.com/schwarz9791/chatter-agent/issues/3) | WebSocket の**認証**。Origin 検査は入ったが、LAN 上の他端末は素通り |
 | [#5](https://github.com/schwarz9791/chatter-agent/issues/5) | Linux で `birthtimeNs` が当てにならない（spool の命名で解く）。**macOS だけを対象にしている間は実害なし** |
-| [#6](https://github.com/schwarz9791/chatter-agent/issues/6) | `messageAssembler` の O(N²) 再パース |
 | [#7](https://github.com/schwarz9791/chatter-agent/issues/7) | `cleanOrphans` の追加走査 |
+
+> [#6](https://github.com/schwarz9791/chatter-agent/issues/6)（`messageAssembler` の O(N²) 再パース）は
+> [#30](https://github.com/schwarz9791/chatter-agent/issues/30) で解消した。整形と文分割はメッセージあたり
+> 1回しか走らない。**ただし `readMessage` は毎 delta で全 delta ファイルを読み直す**ので、
+> ファイル読み取りの二乗性は残っている（480 delta で実測 474ms だった正規表現のコストとは別物で、
+> 現状は問題になっていない）。

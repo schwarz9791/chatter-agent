@@ -1008,139 +1008,6 @@ var RuleBasedEmotionClassifier = class {
 };
 
 //#endregion
-//#region src/core/lock.ts
-/**
-* 単一ワーカーのロック。
-*
-* CLI は hook から**毎 delta 起動される**が、spool を処理してよいのは
-* ロックを取れた1プロセスだけ（CLAUDE.md「絶対に守ること」4）。`seq` の採番も
-* このロック下で行う。取れなかったプロセスは何もせず即終了する（先行ワーカーが拾う）。
-*
-* `src/cli/` と `src/core/` はどちらも npm 依存を持てない（docs/core.md）ので、
-* ロックライブラリは使わず**`mkdir` の原子性**で実装する。同名ディレクトリの
-* 作成は、成功するのが必ず1プロセスだけ。
-*/
-const DEFAULT_STALE_MS = 6e4;
-function ownerFilePath(lockDir) {
-	return path.join(lockDir, "owner.json");
-}
-function readOwner(lockDir) {
-	try {
-		const parsed = JSON.parse(fs.readFileSync(ownerFilePath(lockDir), "utf-8"));
-		if (typeof parsed === "object" && parsed !== null) {
-			const { pid, token } = parsed;
-			if (typeof pid === "number" && Number.isInteger(pid) && typeof token === "string") return {
-				pid,
-				token
-			};
-		}
-	} catch {}
-	return null;
-}
-/** そのプロセスが生きているか。権限が無くて確認できない場合は「生きている」に倒す */
-function isProcessAlive(pid) {
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch (err) {
-		return err.code === "EPERM";
-	}
-}
-/**
-* 放置されたロックか判定する。
-*
-* 所有者が読めるなら pid の生死**だけ**で決める。古さも条件に加えると、
-* ドレインが staleMs を超えて長引いた・ラップトップがサスペンドから復帰しただけの
-* **生きた保持者**から奪ってしまう（実測: mtime だけで60秒経過扱いにすると
-* 生きたロックが奪われる）。
-*
-* ★ この結果、pid が再利用されると恒久的なロックになる穴が残る（死んだプロセスの
-*   pid を別の生きたプロセスが引き継ぐと、owner は永遠に「生きている」に見える）。
-*   意図的な判断: 「生きた保持者を60秒で奪う」方が実害が大きい。踏んだら
-*   `speak.lock` を手で消せば済む。
-*
-* 所有者が読めない場合（mkdir 直後で owner.json を書く前 / 壊れている）だけ、
-* 経過時間で判定する。読めないまま staleMs 続いたなら owner.json を書けずに死んだとみなす。
-*/
-function isStale(lockDir, staleMs, now) {
-	const owner = readOwner(lockDir);
-	if (owner !== null) return !isProcessAlive(owner.pid);
-	try {
-		return now - fs.statSync(lockDir).mtimeMs >= staleMs;
-	} catch {
-		return false;
-	}
-}
-/**
-* ロックを取る。取れなければ `null`（呼び出し側は即終了すること）。
-* 放置ロックを見つけた場合だけ、1回だけ奪って取り直す。
-*/
-function acquireLock(lockDir, options = {}) {
-	const staleMs = options.staleMs ?? DEFAULT_STALE_MS;
-	const now = options.now ?? Date.now;
-	const pid = options.pid ?? process.pid;
-	const token = options.token ?? `${pid}-${process.hrtime.bigint()}`;
-	fs.mkdirSync(path.dirname(lockDir), { recursive: true });
-	const tryCreate = () => {
-		try {
-			fs.mkdirSync(lockDir);
-		} catch (err) {
-			if (err.code === "EEXIST") return null;
-			throw err;
-		}
-		try {
-			fs.writeFileSync(ownerFilePath(lockDir), `${JSON.stringify({
-				pid,
-				token
-			})}\n`, { flag: "wx" });
-		} catch {
-			return null;
-		}
-		const owner = readOwner(lockDir);
-		if (owner === null || owner.token !== token) return null;
-		return makeLock(lockDir, token);
-	};
-	const first = tryCreate();
-	if (first) return first;
-	if (!isStale(lockDir, staleMs, now())) return null;
-	const evicted = `${lockDir}.evicted-${token}`;
-	try {
-		fs.renameSync(lockDir, evicted);
-	} catch {
-		return null;
-	}
-	if (!isStale(evicted, staleMs, now())) {
-		try {
-			fs.renameSync(evicted, lockDir);
-		} catch {
-			fs.rmSync(evicted, {
-				recursive: true,
-				force: true
-			});
-		}
-		return null;
-	}
-	fs.rmSync(evicted, {
-		recursive: true,
-		force: true
-	});
-	return tryCreate();
-}
-function makeLock(lockDir, token) {
-	let released = false;
-	return { release() {
-		if (released) return;
-		released = true;
-		const owner = readOwner(lockDir);
-		if (owner === null || owner.token !== token) return;
-		fs.rmSync(lockDir, {
-			recursive: true,
-			force: true
-		});
-	} };
-}
-
-//#endregion
 //#region src/cli/publish.ts
 /** 記録と配信の両方に書く。記録できた時点で「出した」が確定する */
 function createPublisher(deps) {
@@ -1278,6 +1145,139 @@ function splitIntoSentences(text) {
 }
 
 //#endregion
+//#region src/core/lock.ts
+/**
+* 単一ワーカーのロック。
+*
+* CLI は hook から**毎 delta 起動される**が、spool を処理してよいのは
+* ロックを取れた1プロセスだけ（CLAUDE.md「絶対に守ること」4）。`seq` の採番も
+* このロック下で行う。取れなかったプロセスは何もせず即終了する（先行ワーカーが拾う）。
+*
+* `src/cli/` と `src/core/` はどちらも npm 依存を持てない（docs/core.md）ので、
+* ロックライブラリは使わず**`mkdir` の原子性**で実装する。同名ディレクトリの
+* 作成は、成功するのが必ず1プロセスだけ。
+*/
+const DEFAULT_STALE_MS = 6e4;
+function ownerFilePath(lockDir) {
+	return path.join(lockDir, "owner.json");
+}
+function readOwner(lockDir) {
+	try {
+		const parsed = JSON.parse(fs.readFileSync(ownerFilePath(lockDir), "utf-8"));
+		if (typeof parsed === "object" && parsed !== null) {
+			const { pid, token } = parsed;
+			if (typeof pid === "number" && Number.isInteger(pid) && typeof token === "string") return {
+				pid,
+				token
+			};
+		}
+	} catch {}
+	return null;
+}
+/** そのプロセスが生きているか。権限が無くて確認できない場合は「生きている」に倒す */
+function isProcessAlive(pid) {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (err) {
+		return err.code === "EPERM";
+	}
+}
+/**
+* 放置されたロックか判定する。
+*
+* 所有者が読めるなら pid の生死**だけ**で決める。古さも条件に加えると、
+* ドレインが staleMs を超えて長引いた・ラップトップがサスペンドから復帰しただけの
+* **生きた保持者**から奪ってしまう（実測: mtime だけで60秒経過扱いにすると
+* 生きたロックが奪われる）。
+*
+* ★ この結果、pid が再利用されると恒久的なロックになる穴が残る（死んだプロセスの
+*   pid を別の生きたプロセスが引き継ぐと、owner は永遠に「生きている」に見える）。
+*   意図的な判断: 「生きた保持者を60秒で奪う」方が実害が大きい。踏んだら
+*   `speak.lock` を手で消せば済む。
+*
+* 所有者が読めない場合（mkdir 直後で owner.json を書く前 / 壊れている）だけ、
+* 経過時間で判定する。読めないまま staleMs 続いたなら owner.json を書けずに死んだとみなす。
+*/
+function isStale(lockDir, staleMs, now) {
+	const owner = readOwner(lockDir);
+	if (owner !== null) return !isProcessAlive(owner.pid);
+	try {
+		return now - fs.statSync(lockDir).mtimeMs >= staleMs;
+	} catch {
+		return false;
+	}
+}
+/**
+* ロックを取る。取れなければ `null`（呼び出し側は即終了すること）。
+* 放置ロックを見つけた場合だけ、1回だけ奪って取り直す。
+*/
+function acquireLock(lockDir, options = {}) {
+	const staleMs = options.staleMs ?? DEFAULT_STALE_MS;
+	const now = options.now ?? Date.now;
+	const pid = options.pid ?? process.pid;
+	const token = options.token ?? `${pid}-${process.hrtime.bigint()}`;
+	fs.mkdirSync(path.dirname(lockDir), { recursive: true });
+	const tryCreate = () => {
+		try {
+			fs.mkdirSync(lockDir);
+		} catch (err) {
+			if (err.code === "EEXIST") return null;
+			throw err;
+		}
+		try {
+			fs.writeFileSync(ownerFilePath(lockDir), `${JSON.stringify({
+				pid,
+				token
+			})}\n`, { flag: "wx" });
+		} catch {
+			return null;
+		}
+		const owner = readOwner(lockDir);
+		if (owner === null || owner.token !== token) return null;
+		return makeLock(lockDir, token);
+	};
+	const first = tryCreate();
+	if (first) return first;
+	if (!isStale(lockDir, staleMs, now())) return null;
+	const evicted = `${lockDir}.evicted-${token}`;
+	try {
+		fs.renameSync(lockDir, evicted);
+	} catch {
+		return null;
+	}
+	if (!isStale(evicted, staleMs, now())) {
+		try {
+			fs.renameSync(evicted, lockDir);
+		} catch {
+			fs.rmSync(evicted, {
+				recursive: true,
+				force: true
+			});
+		}
+		return null;
+	}
+	fs.rmSync(evicted, {
+		recursive: true,
+		force: true
+	});
+	return tryCreate();
+}
+function makeLock(lockDir, token) {
+	let released = false;
+	return { release() {
+		if (released) return;
+		released = true;
+		const owner = readOwner(lockDir);
+		if (owner === null || owner.token !== token) return;
+		fs.rmSync(lockDir, {
+			recursive: true,
+			force: true
+		});
+	} };
+}
+
+//#endregion
 //#region src/text/unstableTail.ts
 /**
 * まだ確定していない末尾の切り落とし。
@@ -1404,23 +1404,6 @@ function endsAtBoundary(text) {
 	return text.length === 0 || /[。！？!?\n\r]\s*$/.test(text);
 }
 /**
-* 行として閉じているか。**まだ delta が続くときの保留を外してよいかの判定。**
-*
-* ★ `MessageDisplay` の delta は「最後の flush を除いて必ず行単位」で届く
-*   （Claude Code のスキーマ記述 / 実測でも非 final の delta は全て改行で終わっていた）。
-*   `splitIntoSentences` は改行でも分割するので、蓄積テキストが行として閉じていれば
-*   **最後の文はもう伸びない**。保留する理由が無い。
-*
-* ★ 句点（`。！？`）だけでは足りないので `endsAtBoundary` を流用しないこと。
-*   `truncateAtUnstableTail` が行の途中で切ると句点で終わりうるが、その先は次の delta で伸びる。
-*
-* これを入れる前は、段落ごとに**最後の1文だけが次の delta まで待って**いた。
-* delta の間隔ぶんそのまま遅れるので、1文しかない段落は丸ごと遅れる。
-*/
-function endsAtLineBoundary(text) {
-	return /[\n\r]\s*$/.test(text);
-}
-/**
 * 全文を組み直し、確定した文のうち未出力のものを返す。
 *
 * 未確定の末尾（未閉じの ``` や `<` など）を先に切り落とすのが要で、これにより
@@ -1442,7 +1425,6 @@ function assembleSentences(input) {
 }
 function resolveLimit(total, input, safe) {
 	if (input.final) return total;
-	if (endsAtLineBoundary(safe)) return total;
 	if (input.flushPending && endsAtBoundary(safe)) return total;
 	return Math.max(0, total - 1);
 }
@@ -1456,22 +1438,27 @@ function resolveLimit(total, input, safe) {
 *   公式ドキュメントに記載が無く実測に基づくもの（設計書 §2-3・§10）なので、想定が外れたときに
 *   差し替える場所を1箇所に閉じてある。
 *
-* ★ **spool の `.jsonl` は絶対に書き換えない。** hook が並行して追記している。
+* ★ **spool のファイルは絶対に書き換えない。** hook は delta ごとに `<message_id>.<index>.json`
+*   を tmp + rename で置く（追記はしない — bash から任意長の追記を原子的にする移植可能な方法が
+*   無いため。→ docs/plugin.md）。1メッセージは複数の delta ファイルに分かれるので、
+*   「1メッセージ = 複数ファイル」を1エントリにまとめるのがこのファイルの仕事。
 *   ワーカーが持つ進捗は `<message_id>.progress.json` のサイドカーに置く。
 */
-const MESSAGE_SUFFIX = ".jsonl";
+/** `<message_id>.<index>.json`。message_id はサニタイズ済みで `.` を含まない（plugin 側の責務） */
+const MESSAGE_DELTA_RE = /^(.+)\.(\d+)\.json$/;
 const PROMPT_PREFIX = "prompt-";
 const PROMPT_SUFFIX = ".json";
 const PROGRESS_SUFFIX = ".progress.json";
-function progressPathFor(filePath) {
-	return filePath.slice(0, -6) + PROGRESS_SUFFIX;
+function progressPathFor(messageId, spoolDir) {
+	return path.join(spoolDir, `${messageId}${PROGRESS_SUFFIX}`);
 }
 /**
 * 到着順のキー。
 *
-* ★ mtime を使わないこと。`<message_id>.jsonl` は delta ごとに追記されるので mtime が動き続け、
-*   先に始まったメッセージが後から追記されて順番が入れ替わる。birthtime が本来の「到着順」。
-*   birthtime を持たない環境では mtime に落とす。
+* ★ mtime を使わないこと。1 delta 1 ファイルにしても、進捗サイドカーはワーカーが書き換えるし、
+*   何よりメッセージの「到着順」を代表する値としては個々のファイルの mtime ではなく
+*   birthtime を使う必要がある（後述 `arrivalOrderOfMessage`）。birthtime を持たない環境では
+*   mtime に落とす。
 *
 * ★ ミリ秒（`birthtimeMs`）では粗すぎる。同じミリ秒に作られたファイルが同値になり、
 *   下のタイブレーク（パス順）に落ちて到着順が壊れる。`bigint: true` の統計情報が持つ
@@ -1480,6 +1467,7 @@ function progressPathFor(filePath) {
 function arrivalOrder(stat) {
 	return stat.birthtimeNs > 0n ? stat.birthtimeNs : stat.mtimeNs;
 }
+/** 判定順は「進捗サイドカーを最初に弾く → prompt- → message」を維持する */
 function classify(fileName, filePath, order) {
 	if (fileName.endsWith(PROGRESS_SUFFIX)) return null;
 	if (fileName.startsWith(PROMPT_PREFIX) && fileName.endsWith(PROMPT_SUFFIX)) return {
@@ -1487,14 +1475,33 @@ function classify(fileName, filePath, order) {
 		filePath,
 		order
 	};
-	if (fileName.endsWith(MESSAGE_SUFFIX)) return {
-		kind: "message",
-		messageId: fileName.slice(0, -6),
+	const match = MESSAGE_DELTA_RE.exec(fileName);
+	if (match) return {
+		kind: "messageDelta",
+		messageId: match[1],
+		index: Number(match[2]),
 		filePath,
-		progressPath: progressPathFor(filePath),
 		order
 	};
 	return null;
+}
+/**
+* メッセージの到着順。index 0 のファイルの到着順を採る。
+*
+* ★ 「最新のファイルの到着順」ではなく「index 0 の到着順」であること。final:true は
+*   大きく遅れて届くため、遅れて増えた delta ファイルの方が新しくなるのが普通に起きる。
+*   それに引きずられて到着順が入れ替わらないよう、常に先頭（index 0）を基準にする。
+*
+* index 0 のファイルが（何らかの理由で）無ければ、手元にある中で最小の到着順を使う。
+*/
+function arrivalOrderOfMessage(deltas) {
+	const zero = deltas.find((d) => d.index === 0);
+	if (zero) return zero.order;
+	return deltas.reduce((min, d) => d.order < min ? d.order : min, deltas[0].order);
+}
+/** タイブレーク（同じナノ秒のときに実行のたびに順序が揺れないようにする）用の代表パス */
+function tieBreakPath(entry) {
+	return entry.kind === "prompt" ? entry.filePath : entry.filePaths[0];
 }
 /** spool を到着順に走査する。ディレクトリが無いのは正常（まだ hook が動いていない） */
 function scanSpool(spoolDir) {
@@ -1504,7 +1511,8 @@ function scanSpool(spoolDir) {
 	} catch {
 		return [];
 	}
-	const entries = [];
+	const prompts = [];
+	const messages = /* @__PURE__ */ new Map();
 	for (const fileName of fileNames) {
 		const filePath = path.join(spoolDir, fileName);
 		let stat;
@@ -1514,12 +1522,34 @@ function scanSpool(spoolDir) {
 			continue;
 		}
 		if (!stat.isFile()) continue;
-		const entry = classify(fileName, filePath, arrivalOrder(stat));
-		if (entry) entries.push(entry);
+		const classified = classify(fileName, filePath, arrivalOrder(stat));
+		if (!classified) continue;
+		if (classified.kind === "prompt") {
+			prompts.push(classified);
+			continue;
+		}
+		const list = messages.get(classified.messageId) ?? [];
+		list.push({
+			index: classified.index,
+			filePath: classified.filePath,
+			order: classified.order
+		});
+		messages.set(classified.messageId, list);
+	}
+	const entries = [...prompts];
+	for (const [messageId, deltas] of messages) {
+		deltas.sort((a, b) => a.index - b.index);
+		entries.push({
+			kind: "message",
+			messageId,
+			filePaths: deltas.map((d) => d.filePath),
+			progressPath: progressPathFor(messageId, spoolDir),
+			order: arrivalOrderOfMessage(deltas)
+		});
 	}
 	return entries.sort((a, b) => {
 		if (a.order !== b.order) return a.order < b.order ? -1 : 1;
-		return a.filePath.localeCompare(b.filePath);
+		return tieBreakPath(a).localeCompare(tieBreakPath(b));
 	});
 }
 function isRecord(value) {
@@ -1528,36 +1558,40 @@ function isRecord(value) {
 function stringOrNull(value) {
 	return typeof value === "string" && value ? value : null;
 }
-/** 壊れた行・途中で切れた行は黙って捨てる（hook が書き込み中の可能性がある） */
-function parseLines(filePath) {
+/** 1ファイル1 JSON を読む。壊れた・読めないファイルは黙って捨てる（hook が書き込み中の可能性がある） */
+function readDeltaFile(filePath) {
 	let text;
 	try {
 		text = fs.readFileSync(filePath, "utf-8");
 	} catch {
-		return [];
+		return null;
 	}
-	const out = [];
-	for (const line of text.split("\n")) {
-		if (!line.trim()) continue;
-		try {
-			const parsed = JSON.parse(line);
-			if (isRecord(parsed)) out.push(parsed);
-		} catch {}
+	try {
+		const parsed = JSON.parse(text);
+		return isRecord(parsed) ? parsed : null;
+	} catch {
+		return null;
 	}
-	return out;
 }
 /**
-* `<message_id>.jsonl` を読み、index 順に結合できる delta 列にする。
+* delta ファイル群を読み、index 順に結合できる delta 列にする。
 *
 * index に欠番があったら**そこで打ち切る**。歯抜けのまま繋ぐと文が壊れて読み上げられるので、
 * 欠けた分が届くまで（あるいは孤児掃除に回収されるまで）黙って待つ方を選ぶ。
+*
+* ★ どの index かは**ファイル名ではなく payload の `index` フィールド**で判定する。
+*   ファイル名はグルーピング（scanSpool）にしか使わない。同じ index の payload が複数
+*   渡されたら後に読んだ方を勝たせる（呼び出し順は index 昇順で揃っているので、通常は
+*   ファイル名どおりの index と一致するが、そうでない場合への備え）。
 */
-function readMessage(filePath) {
+function readMessage(filePaths) {
 	const byIndex = /* @__PURE__ */ new Map();
 	let sessionId = null;
 	let turnId = null;
 	let messageId = null;
-	for (const payload of parseLines(filePath)) {
+	for (const filePath of filePaths) {
+		const payload = readDeltaFile(filePath);
+		if (!payload) continue;
 		const index = payload.index;
 		if (typeof index !== "number" || !Number.isInteger(index) || index < 0) continue;
 		byIndex.set(index, payload);
@@ -1610,14 +1644,33 @@ function readProgress(progressPath) {
 function writeProgress(progressPath, emitted) {
 	writeFileAtomic(progressPath, `${JSON.stringify({ emitted })}\n`);
 }
-/** 処理し終えた spool を消す。メッセージはサイドカーごと消す */
+/** 処理し終えた spool を消す。メッセージは全 delta ファイル + サイドカーを消す */
 function removeEntry(entry) {
-	fs.rmSync(entry.filePath, { force: true });
-	if (entry.kind === "message") fs.rmSync(entry.progressPath, { force: true });
+	if (entry.kind === "prompt") {
+		fs.rmSync(entry.filePath, { force: true });
+		return;
+	}
+	for (const filePath of entry.filePaths) fs.rmSync(filePath, { force: true });
+	fs.rmSync(entry.progressPath, { force: true });
+}
+/** メッセージ関連ファイル（delta + 進捗サイドカー）を message_id でグルーピングするための鍵 */
+function messageGroupKey(fileName) {
+	if (fileName.startsWith(PROMPT_PREFIX)) return null;
+	if (fileName.endsWith(PROGRESS_SUFFIX)) return fileName.slice(0, -14);
+	const match = MESSAGE_DELTA_RE.exec(fileName);
+	return match ? match[1] : null;
 }
 /**
 * CLI が起動しないまま終わった孤児を掃除する。
-* 進行中のメッセージは delta のたびに mtime が更新されるので、ここでは mtime で「無活動時間」を見る。
+*
+* ★ **メッセージ単位でまとめて判定すること。** 1 delta 1 ファイルにすると、各ファイルの
+*   mtime は書かれた瞬間で止まる。ファイル単位で「無活動時間」を見ると、進行中メッセージの
+*   古い index のファイルだけが閾値を超えて消え、`index` に欠番ができて**そのメッセージが
+*   永久に発話されなくなる**。そのメッセージに属するファイル群の**最新 mtime**を見て、
+*   全体が無活動なら delta ファイルとサイドカーをまとめて消す。
+*
+* `prompt-*.json` と、rename 前の孤立した `.tmp`（このグルーピングに掛からないもの）は
+* 従来どおりファイル単位で判定する（1イベントで完結するので、まとめる意味が無い）。
 */
 function cleanOrphans(spoolDir, maxAgeMs, now = Date.now()) {
 	let fileNames;
@@ -1626,11 +1679,37 @@ function cleanOrphans(spoolDir, maxAgeMs, now = Date.now()) {
 	} catch {
 		return 0;
 	}
-	let removed = 0;
+	const standalone = [];
+	const messageGroups = /* @__PURE__ */ new Map();
 	for (const fileName of fileNames) {
+		const key = messageGroupKey(fileName);
+		if (key === null) {
+			standalone.push(fileName);
+			continue;
+		}
+		const list = messageGroups.get(key) ?? [];
+		list.push(fileName);
+		messageGroups.set(key, list);
+	}
+	let removed = 0;
+	for (const fileName of standalone) {
 		const filePath = path.join(spoolDir, fileName);
 		try {
 			if (now - fs.statSync(filePath).mtimeMs <= maxAgeMs) continue;
+			fs.rmSync(filePath, { force: true });
+			removed++;
+		} catch {}
+	}
+	for (const groupFileNames of messageGroups.values()) {
+		const filePaths = groupFileNames.map((fileName) => path.join(spoolDir, fileName));
+		let latestMtimeMs = -Infinity;
+		for (const filePath of filePaths) try {
+			const mtimeMs = fs.statSync(filePath).mtimeMs;
+			if (mtimeMs > latestMtimeMs) latestMtimeMs = mtimeMs;
+		} catch {}
+		if (latestMtimeMs === -Infinity) continue;
+		if (now - latestMtimeMs <= maxAgeMs) continue;
+		for (const filePath of filePaths) try {
 			fs.rmSync(filePath, { force: true });
 			removed++;
 		} catch {}
@@ -1683,9 +1762,48 @@ function writeWorkerState(statePath, state) {
 *
 * 順序の保証（CLAUDE.md「絶対に守ること」4）:
 * - spool は**到着順**に処理する
-* - ドレインが空振りするまで繰り返す。これが「解放完了後にもう一度 spool を見る」に当たり、
-*   走査直後に到着した分の取りこぼしを防ぐ
+* - 空振り（進展なし）が**2回連続**するまで繰り返す。1回目の空振りの後にもう一周させることが
+*   「解放完了後にもう一度 spool を見る」に当たり、直前の走査が終わった直後に到着した分の
+*   取りこぼしを防ぐ
 */
+/**
+* ロック取得に使ってよい合計の待ち時間予算。
+*
+* ★ 長く待ってよい理由: CLI は hook からデタッチ起動されているので、ここで待っても hook 自体は
+*   ブロックしない。長く待っても実害は「node プロセスが数個並ぶ」だけ。
+* ★ 長く待つ必要がある理由: `final:true` の delta と `permission_prompt` の Notification は
+*   **そのターン最後の hook イベント**。ここでロックを取り損ねると、次に誰かが hook を
+*   発火させるまで発話が沈黙する。`AskUserQuestion` の場合、それは**ユーザーが既に回答した後**になる。
+*   旧予算（4回試行 × 120ms ≒ 360ms、Node の起動込みで実測 408〜420ms）は、先行 worker が
+*   ロックを 500ms 以上保持しただけで超えていた。実測されたドレイン所要時間に対して
+*   十分な余裕を持たせ、3秒を予算にする。
+*/
+const LOCK_MAX_WAIT_MS = 3e3;
+/** 再試行の間隔 */
+const LOCK_RETRY_DELAY_MS = 120;
+/** 同期で待つ。CLI は hook からデタッチ起動されているので、待っても hook はブロックしない */
+function sleepSync(ms) {
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+/**
+* ロックを取る。取れなければ `LOCK_MAX_WAIT_MS` を使い切るまで再試行する。
+*
+* ★ 一度で諦めてはいけない。先行ワーカーが最後の走査を終えてから解放するまでの窓に
+*   届いた spool は、そのワーカーにも拾われず、こちらが即終了すると誰にも拾われない。
+*/
+function acquireLockWithRetry(lockDir, options = {}) {
+	const maxWaitMs = options.maxWaitMs ?? 3e3;
+	const retryDelayMs = options.retryDelayMs ?? LOCK_RETRY_DELAY_MS;
+	const sleep = options.sleep ?? sleepSync;
+	const now = options.now ?? Date.now;
+	const deadline = now() + maxWaitMs;
+	for (;;) {
+		const lock = acquireLock(lockDir);
+		if (lock) return lock;
+		if (now() >= deadline) return null;
+		sleep(retryDelayMs);
+	}
+}
 /**
 * PreToolUse と、それに付随する Notification を同一プロンプトとみなす時間窓。
 * AskUserQuestion / ExitPlanMode では PreToolUse の直後に permission_prompt の
@@ -1694,7 +1812,7 @@ function writeWorkerState(statePath, state) {
 const PROMPT_PAIR_WINDOW_MS = 1e4;
 /** 同一テキストの連投を抑制する時間窓（許可プロンプトの重複発火対策） */
 const DUPLICATE_WINDOW_MS = 3e3;
-/** 空振りするまで回すが、万一 spool が育ち続けても抜けられるようにする */
+/** 2回連続で空振りするまで回すが、万一 spool が育ち続けても抜けられるようにする */
 const MAX_PASSES = 8;
 function sessionIdOf(loaded) {
 	return "content" in loaded ? loaded.content.sessionId : getEventSessionId(loaded.payload);
@@ -1706,12 +1824,13 @@ function drainSpool(deps) {
 	let stateDirty = false;
 	let written = 0;
 	let passes = 0;
+	let unchangedStreak = 0;
 	for (; passes < MAX_PASSES; passes++) {
 		const entries = scanSpool(deps.spoolDir);
 		if (entries.length === 0) break;
 		const loaded = entries.map((entry) => entry.kind === "message" ? {
 			entry,
-			content: readMessage(entry.filePath)
+			content: readMessage(entry.filePaths)
 		} : {
 			entry,
 			payload: readPromptPayload(entry.filePath)
@@ -1724,7 +1843,12 @@ function drainSpool(deps) {
 			if (outcome.changed) changed = true;
 			if (outcome.stateDirty) stateDirty = true;
 		}
-		if (!changed) break;
+		if (changed) {
+			unchangedStreak = 0;
+			continue;
+		}
+		unchangedStreak++;
+		if (unchangedStreak >= 2) break;
 	}
 	if (stateDirty) writeWorkerState(deps.workerStatePath, state);
 	return {
@@ -1871,34 +1995,12 @@ function withinWindow(now, since, windowMs) {
 *
 * やることは短い:
 *   1. 無効化されていたら即終了
-*   2. ロックを取る。取れなければ少し待って数回だけ試す
+*   2. ロックを取る。取れなければ `LOCK_MAX_WAIT_MS`（worker.ts）を使い切るまで待って試す
 *   3. spool をドレインする
 *   4. ロックを解放する
 *
 * **何があっても exit 0 で終える。** hook の失敗が Claude Code の表示を止めてはいけない。
 */
-const LOCK_RETRIES = 3;
-const LOCK_RETRY_DELAY_MS = 120;
-/** 同期で待つ。デタッチ済みのプロセスなので、待っても hook はブロックしない */
-function sleepSync(ms) {
-	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-/**
-* ロックを取る。取れなければ少し待って試し直す。
-*
-* ★ 一度で諦めてはいけない。先行ワーカーが最後の走査を終えてから解放するまでの窓に
-*   届いた spool は、そのワーカーにも拾われず、こちらが即終了すると誰にも拾われない。
-*   特に `permission_prompt` の Notification は**そのターン最後の hook イベント**なので、
-*   次のドレインを促すものが来ず、ユーザーが答えるまで通知が出ないままになる。
-*/
-function acquireLockWithRetry(lockDir) {
-	for (let attempt = 0;; attempt++) {
-		const lock = acquireLock(lockDir);
-		if (lock) return lock;
-		if (attempt >= LOCK_RETRIES) return null;
-		sleepSync(LOCK_RETRY_DELAY_MS);
-	}
-}
 function main() {
 	if (isSpeakDisabled()) return;
 	const config = createConfigStore();

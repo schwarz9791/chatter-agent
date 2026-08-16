@@ -62,7 +62,12 @@ function show(title) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const queueSize = () => fs.readdirSync(queueDir).filter((f) => f.endsWith(".json")).length;
 
-/** spool に delta を1本置いて CLI を起動する（plugin の bash hook の代わり） */
+/**
+ * spool に delta を1本置いて CLI を起動する（plugin の bash hook の代わり）。
+ *
+ * hook は `<message_id>.<index>.json` を tmp + rename で置く（追記はしない）。ここでは
+ * 1メッセージ1 delta（index 0 が即 final）で十分なので、そのまま writeFileSync でよい。
+ */
 function speak(messageId, text) {
   const payload = {
     session_id: "sess-1",
@@ -73,7 +78,7 @@ function speak(messageId, text) {
     final: true,
     delta: text,
   };
-  fs.appendFileSync(path.join(spoolDir, `${messageId}.jsonl`), JSON.stringify(payload) + "\n");
+  fs.writeFileSync(path.join(spoolDir, `${messageId}.0.json`), JSON.stringify(payload));
   const { status } = spawnSync(process.execPath, [CLI], { env, stdio: "ignore" });
   if (status !== 0) throw new Error(`CLI が異常終了しました (status=${status})`);
 }

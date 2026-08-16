@@ -1401,7 +1401,18 @@ function makeLock(lockDir, token) {
 *   ようになった（[#30]）ので「後から届いて閉じる」ことはもう無く、未閉じのまま終わった
 *   コードや表はそのまま捨てる。読み上げたくないものなので、これでよい。
 *
+* ★★ [#32] のレビューで、上の「開始位置」の探し方が2つとも壊れていた（実測で再現済み）:
+*
+* - 表の行（`incompleteTableRowAt`）は**文字列全体の最後の行しか見ていなかった**ので、
+*   メッセージが改行で終わる（＝最後の行が空文字になる）と検出できず、生パイプがそのまま
+*   読み上げに漏れていた。**全行を見る**ように直した。代償は下記のドキュメントを参照
+* - コードフェンス（`unclosedFenceAt`）は ``` の出現回数を**行頭かどうか無関係に**数えていた
+*   ので、地の文に混ざった ``` （「バッククォート \`\`\` を使います」のような文中の引用）が
+*   奇数個目に化けると、そこから末尾までが丸ごと無音になっていた。**行頭の ``` だけを
+*   開始として数える**ように直した。代償は `unclosedFenceAt` のコメントを参照
+*
 * [#30]: https://github.com/schwarz9791/chatter-agent/issues/30
+* [#32]: https://github.com/schwarz9791/chatter-agent/issues/32
 */
 const FENCE = "```";
 /**
@@ -1417,8 +1428,31 @@ function truncateAtUnstableTail(text) {
 /**
 * 開いたままのコードフェンスの開始位置。
 *
-* 数え方は `cleanTextForSpeech` の正規表現に合わせ、左から順に非重複で ``` を拾い、
-* 奇数個目を開き・偶数個目を閉じとして扱う。行頭かどうかは見ない（正規表現も見ていない）。
+* ★ [#32] 修正前は `cleanTextForSpeech` の正規表現（`/```[\s\S]*?```/g`）に合わせて、
+*   行頭かどうかを見ずに ``` を左から非重複で拾い、奇数個目を開き・偶数個目を閉じとして
+*   扱っていた。これだと地の文の中に ``` が1つ紛れ込む（「バッククォート \`\`\` を
+*   使います」のような文中の言及）だけで開閉が反転し、**そこから末尾までを丸ごと切り
+*   落としてしまう**（実測で確認済み。[#32]）。
+*
+*   守りたい不変条件は2つあり、両立しない:
+*     1. コードが読み上げに漏れない（未閉じフェンス以降を切る理由）
+*     2. 地の文が無言で消えない（切りすぎない理由）
+*
+*   ★ ここでは 2 を優先し、**開き側は行頭（先頭の空白は許す）の ``` だけを開始として
+*   数える**ことにした。実際のコードフェンスはほぼ必ず行頭から始まる一方、地の文の中で
+*   ``` に言及するときは行の途中に出てくるので、行頭限定は開き側の誤検出をほぼ無くせる。
+*
+*   代償は2つ:
+*   - **`cleanTextForSpeech` の数え方とズレる。** あの正規表現は行頭を見ないので、地の文の
+*     迷子の ``` が実際のコードフェンスと誤って対にされることが理論上ありうる。ただし
+*     `cleanTextForSpeech` は非貪欲マッチなので、対になる相手が見つからなければその ```
+*     はただの文字として残るだけ（読み上げエンジンは記号を発音しないので実害は小さい。
+*     CLAUDE.md 実測ノート参照）。「コードが漏れる」よりずっと軽い失敗モード
+*   - **閉じ側は行頭を要求しない**（既存仕様のまま）。すでに開いている状態で見つかった
+*     ``` は無条件で閉じ扱いにする。閉じ側まで行頭限定にすると `説明。\n```````
+*     （開閉が同じ行に連続する）のような既存仕様を壊すため。閉じ探索は「開いている
+*     区間の中」でしか働かないので、地の文の迷子フェンスが誤って閉じ役にされるのは
+*     「本物のコードフェンスが開いた直後」に限られ、影響範囲は開き側よりずっと狭い
 */
 function unclosedFenceAt(text) {
 	let searchFrom = 0;
@@ -1428,7 +1462,7 @@ function unclosedFenceAt(text) {
 		const found = text.indexOf(FENCE, searchFrom);
 		if (found === -1) break;
 		if (isOpen) isOpen = false;
-		else {
+		else if (isAtLineStart(text, found)) {
 			isOpen = true;
 			openedAt = found;
 		}
@@ -1437,16 +1471,44 @@ function unclosedFenceAt(text) {
 	return isOpen ? openedAt : null;
 }
 /**
+* `index` の直前が「行頭（先頭の空白・タブは許す）」かどうか。
+* 改行 / 復帰 / 文字列先頭まで戻って非空白文字に当たらなければ true。
+*/
+function isAtLineStart(text, index) {
+	let i = index - 1;
+	while (i >= 0 && (text[i] === " " || text[i] === "	")) i--;
+	return i < 0 || text[i] === "\n" || text[i] === "\r";
+}
+/**
 * 書きかけの表の行の位置。
 *
 * 除去の正規表現は `/^\|.*\|$/gm` で、行が `|` で閉じて初めて消える。閉じていない行は
 * 生の `| A | B` が1文として読み上げられてしまう。
+*
+* ★ [#32] 修正前は `scan.lastIndexOf("\n") + 1` で**文字列全体の最後の行しか**見て
+*   いなかった。メッセージが改行で終わる（＝最後の行が空文字になる）と、その手前にある
+*   未閉じの表の行を素通りしてしまい、生パイプがそのまま読み上げに漏れていた（実測で
+*   確認済み。[#32]）。**全行を走査**し、`|` で始まるのに `/^\|.*\|$/` に一致しない
+*   最初の行の開始位置を返すように直した。
+*
+*   ★★ 代償: 未閉じの表の行が本文の途中にあると、**そこから末尾までを丸ごと切り落とす**
+*   （最初に見つかった不安定行より後ろは、本物の地の文であっても失われる）。表の行1つを
+*   誤読み上げさせないために、その後ろの文をまるごと諦める形になる。「生パイプを読み上げる」
+*   より「その先の文が発話されない」方が実害が小さいと判断してこちらを選んだ
+*   （読み上げ事故＝ユーザーに見える形で表構文がそのまま音になる、の方が気付きやすく、
+*   目に見える表示（`MessageDisplay` 側）とは独立に発話だけが欠けるのは実害としては軽い）
 */
 function incompleteTableRowAt(scan) {
-	const lineStart = scan.lastIndexOf("\n") + 1;
-	const line = scan.slice(lineStart);
-	if (!line.startsWith("|")) return null;
-	return /^\|.*\|$/.test(line) ? null : lineStart;
+	let lineStart = 0;
+	while (lineStart <= scan.length) {
+		const newlineAt = scan.indexOf("\n", lineStart);
+		const lineEnd = newlineAt === -1 ? scan.length : newlineAt;
+		const line = scan.slice(lineStart, lineEnd);
+		if (line.startsWith("|") && !/^\|.*\|$/.test(line)) return lineStart;
+		if (newlineAt === -1) break;
+		lineStart = newlineAt + 1;
+	}
+	return null;
 }
 
 //#endregion
@@ -1463,6 +1525,8 @@ function incompleteTableRowAt(scan) {
 *
 * [#30]: https://github.com/schwarz9791/chatter-agent/issues/30
 */
+/** 文として閉じているとみなす末尾（句点・感嘆符・疑問符・改行） */
+const SENTENCE_END_RE = /[。！？!?\n\r]\s*$/;
 /**
 * 全文を組み立て、発話する文を順に返す。
 *
@@ -1471,9 +1535,11 @@ function incompleteTableRowAt(scan) {
 *
 * @param deltas index 順に並んだ delta。欠番があってはならない（呼び出し側が連続した前半だけを渡す）
 */
-function assembleSentences(deltas) {
+function assembleSentences(deltas, options = {}) {
 	const safe = truncateAtUnstableTail(deltas.join(""));
-	return splitIntoSentences(cleanTextForSpeech(safe)).filter((sentence) => sentence.length > 0);
+	const sentences = splitIntoSentences(cleanTextForSpeech(safe)).filter((sentence) => sentence.length > 0);
+	if (options.dropUnterminatedTail && sentences.length > 0 && !SENTENCE_END_RE.test(safe)) sentences.pop();
+	return sentences;
 }
 
 //#endregion
@@ -1489,22 +1555,17 @@ function assembleSentences(deltas) {
 *   を tmp + rename で置く（追記はしない — bash から任意長の追記を原子的にする移植可能な方法が
 *   無いため。→ docs/plugin.md）。1メッセージは複数の delta ファイルに分かれるので、
 *   「1メッセージ = 複数ファイル」を1エントリにまとめるのがこのファイルの仕事。
-*   ワーカーはディスクに状態を持たない（`final` を見たときに全 delta から組み直す）。
+*   **spool には**状態を持たない（`final` を見たときに全 delta から組み直す）。
+*
+* ★ これは「ワーカーが無状態」という意味ではない。`workerState.ts` は `speak.state.json`
+*   （`pairedPromptId` / `lastText` / tombstone）を `writeFileAtomic` で永続化している。
+*   この見出しを根拠に `read/writeWorkerState` を消すと、`AskUserQuestion` のたびに対の
+*   permission Notification を二重読みする退行が戻る。
 */
 /** `<message_id>.<index>.json`。message_id はサニタイズ済みで `.` を含まない（plugin 側の責務） */
 const MESSAGE_DELTA_RE = /^(.+)\.(\d+)\.json$/;
 const PROMPT_PREFIX = "prompt-";
 const PROMPT_SUFFIX = ".json";
-/**
-* 進捗サイドカーの残骸。
-*
-* ★ [#30] で廃止したが、**定数と `classify` のガードだけは残すこと。** 既存インストールの
-*   spool に残った `prompt-<…>.progress.json` を prompt として読んでしまうのを防ぐ。
-*   残骸そのものは `cleanOrphans` が mtime で回収する（既定6時間）。
-*
-* [#30]: https://github.com/schwarz9791/chatter-agent/issues/30
-*/
-const PROGRESS_SUFFIX = ".progress.json";
 /**
 * 到着順のキー。
 *
@@ -1519,9 +1580,19 @@ const PROGRESS_SUFFIX = ".progress.json";
 function arrivalOrder(stat) {
 	return stat.birthtimeNs > 0n ? stat.birthtimeNs : stat.mtimeNs;
 }
-/** 判定順は「進捗サイドカーの残骸を最初に弾く → prompt- → message」を維持する */
+/**
+* 判定順は「prompt- → message」。
+*
+* ★ 廃止した進捗サイドカー（`prompt-<…>.progress.json` / `<message_id>.progress.json`）を
+*   弾く専用ガードはここには無い。`<message_id>.progress.json` は元々どちらのパターンにも
+*   一致しないので無視されるが、`prompt-<…>.progress.json` は `prompt-` 始まり・`.json` 終わりに
+*   一致するので prompt entry として拾われる。それでよい —
+*   `formatPromptEvent`（`prompt/promptEventFormatter.ts`）は未知 payload に `[]` を返すので、
+*   `worker.ts` の `processPrompt` が発話ゼロのまま即削除する。かつてここにあったガードは
+*   「掃除を孤児掃除の6時間まで遅らせているだけ」だったので外した（回収経路は
+*   `worker.test.ts` の該当テストを参照）。
+*/
 function classify(fileName, filePath, order) {
-	if (fileName.endsWith(PROGRESS_SUFFIX)) return null;
 	if (fileName.startsWith(PROMPT_PREFIX) && fileName.endsWith(PROMPT_SUFFIX)) return {
 		kind: "prompt",
 		filePath,
@@ -1657,9 +1728,11 @@ function readMessage(filePaths) {
 		deltas.push(typeof payload.delta === "string" ? payload.delta : "");
 		if (payload.final === true) final = true;
 	}
+	const hasGap = byIndex.size > deltas.length;
 	return {
 		deltas,
 		final,
+		hasGap,
 		sessionId,
 		turnId,
 		messageId
@@ -1755,12 +1828,21 @@ function cleanOrphans(spoolDir, maxAgeMs, now = Date.now()) {
 *
 * 書き込むのはロック保持者だけなので競合しない。
 */
+/**
+* tombstone の保持件数（有界リング）。
+*
+* `message_id` は UUID なので1件36バイト前後、64件でも数KBに収まる。古いものから溢れて
+* 捨ててよい（溢れた古い孤児のカスケードは `worker.ts` 側の「中身の無いエントリを
+* `hasNewer` の候補から外す」二重の防御で受ける）。
+*/
+const TOMBSTONE_LIMIT = 64;
 function emptyWorkerState() {
 	return {
 		pairedPromptId: null,
 		pairedPromptAt: 0,
 		lastText: "",
-		lastTextAt: 0
+		lastTextAt: 0,
+		publishedMessageIds: []
 	};
 }
 function readWorkerState(statePath) {
@@ -1772,7 +1854,8 @@ function readWorkerState(statePath) {
 				pairedPromptId: typeof record.pairedPromptId === "string" ? record.pairedPromptId : null,
 				pairedPromptAt: typeof record.pairedPromptAt === "number" ? record.pairedPromptAt : 0,
 				lastText: typeof record.lastText === "string" ? record.lastText : "",
-				lastTextAt: typeof record.lastTextAt === "number" ? record.lastTextAt : 0
+				lastTextAt: typeof record.lastTextAt === "number" ? record.lastTextAt : 0,
+				publishedMessageIds: Array.isArray(record.publishedMessageIds) ? record.publishedMessageIds.filter((id) => typeof id === "string").slice(-64) : []
 			};
 		}
 	} catch {}
@@ -1780,6 +1863,18 @@ function readWorkerState(statePath) {
 }
 function writeWorkerState(statePath, state) {
 	writeFileAtomic(statePath, `${JSON.stringify(state)}\n`);
+}
+/** `messageId` が publish 済みとして記録されているか（tombstone） */
+function isTombstoned(state, messageId) {
+	return state.publishedMessageIds.includes(messageId);
+}
+/**
+* `messageId` を publish 済みとして記録する。有界リングなので、上限を超えた分は
+* 古いものから捨てる（呼び出し元で `writeWorkerState` して永続化すること）。
+*/
+function addTombstone(state, messageId) {
+	state.publishedMessageIds.push(messageId);
+	if (state.publishedMessageIds.length > TOMBSTONE_LIMIT) state.publishedMessageIds.splice(0, state.publishedMessageIds.length - TOMBSTONE_LIMIT);
 }
 
 //#endregion
@@ -1844,6 +1939,23 @@ const MAX_PASSES = 8;
 function sessionIdOf(loaded) {
 	return "content" in loaded ? loaded.content.sessionId : getEventSessionId(loaded.payload);
 }
+/**
+* spool の削除を try/catch で包む（CLAUDE.md 承認済み計画 A-3(d)）。
+*
+* `removeEntry`（`fs.rmSync(..., { force: true })`）は ENOENT は飲むが、EACCES / EPERM /
+* EROFS では throw する。ここで拾わないと `drainSpool` 全体が止まり、そのパスの後続
+* メッセージ・応答待ち通知まで処理されなくなる。
+*
+* tombstone（`workerState.ts`）が exactly-once の記録を担うので、削除に失敗して
+* spool ファイルが残っても、次のドレインで再 publish されることはない。
+*/
+function tryRemoveEntry(entry) {
+	try {
+		removeEntry(entry);
+	} catch (err) {
+		console.warn("[Worker] spool の削除に失敗しました。次のドレインでも残ります:", err);
+	}
+}
 function drainSpool(deps) {
 	const now = deps.now ?? Date.now;
 	const orphansRemoved = cleanOrphans(deps.spoolDir, deps.spoolMaxAgeMs, now());
@@ -1855,7 +1967,7 @@ function drainSpool(deps) {
 	for (; passes < MAX_PASSES; passes++) {
 		const entries = scanSpool(deps.spoolDir);
 		if (entries.length === 0) break;
-		const loaded = entries.map((entry) => entry.kind === "message" ? {
+		const rawLoaded = entries.map((entry) => entry.kind === "message" ? {
 			entry,
 			content: readMessage(entry.filePaths)
 		} : {
@@ -1863,9 +1975,18 @@ function drainSpool(deps) {
 			payload: readPromptPayload(entry.filePath)
 		});
 		let changed = false;
+		const loaded = [];
+		for (const item of rawLoaded) {
+			if ("content" in item && isTombstoned(state, item.entry.messageId)) {
+				tryRemoveEntry(item.entry);
+				changed = true;
+				continue;
+			}
+			loaded.push(item);
+		}
 		for (let i = 0; i < loaded.length; i++) {
 			const item = loaded[i];
-			const outcome = "content" in item ? processMessage(item, hasNewerInSameSession(loaded, i), deps) : processPrompt(item, deps, state, now);
+			const outcome = "content" in item ? processMessage(item, hasNewerInSameSession(loaded, i), deps, state) : processPrompt(item, deps, state, now);
 			written += outcome.written;
 			if (outcome.changed) changed = true;
 			if (outcome.stateDirty) stateDirty = true;
@@ -1900,17 +2021,33 @@ function drainSpool(deps) {
 function hasNewerInSameSession(loaded, index) {
 	const sessionId = sessionIdOf(loaded[index]);
 	if (sessionId === null) return false;
-	return loaded.slice(index + 1).some((other) => sessionIdOf(other) === sessionId);
+	return loaded.slice(index + 1).some((other) => countsAsNewer(other) && sessionIdOf(other) === sessionId);
+}
+/**
+* 「新しいイベントが来た」の材料として数えてよいか（CLAUDE.md 承認済み計画 A-3(c)）。
+*
+* ★ 中身の無いメッセージエントリ（`deltas` が空）は候補から外す。tombstone の取りこぼし
+*   （クラッシュ・state の破損・有界リングから溢れた古い孤児）が起きても、それだけで
+*   カスケードが起きないための二重の防御。
+*
+*   spool の書き込みは tmp + rename なので、可視のファイルは常に完全である。にもかかわらず
+*   `deltas` が空になるのは「閉じたメッセージの遅延分（index 0 が既に消えた孤児）」か
+*   「一過性の読み取り失敗」のどちらかで、どちらも「次のメッセージを打ち切ってよい理由」には
+*   ならない。
+*/
+function countsAsNewer(loaded) {
+	return "content" in loaded ? loaded.content.deltas.length > 0 : true;
 }
 const NOTHING = {
 	written: 0,
 	changed: false,
 	stateDirty: false
 };
-function processMessage(item, hasNewer, deps) {
+function processMessage(item, hasNewer, deps, state) {
 	const { entry, content } = item;
 	if (!content.final && !hasNewer) return NOTHING;
-	const sentences = assembleSentences(content.deltas);
+	if (!content.final && (content.deltas.length === 0 || content.hasGap)) return NOTHING;
+	const sentences = assembleSentences(content.deltas, { dropUnterminatedTail: !content.final });
 	if (sentences.length > 0) {
 		const messageId = content.messageId ?? entry.messageId;
 		deps.publish(sentences.map((text) => ({
@@ -1923,7 +2060,9 @@ function processMessage(item, hasNewer, deps) {
 			emotion: deps.classify(text)
 		})));
 	}
-	removeEntry(entry);
+	addTombstone(state, entry.messageId);
+	writeWorkerState(deps.workerStatePath, state);
+	tryRemoveEntry(entry);
 	return {
 		written: sentences.length,
 		changed: true,
@@ -1934,7 +2073,7 @@ function processPrompt(item, deps, state, now) {
 	const { entry, payload } = item;
 	if (payload === null) return NOTHING;
 	if (!deps.speakPrompts) {
-		removeEntry(entry);
+		tryRemoveEntry(entry);
 		return {
 			...NOTHING,
 			changed: true
@@ -1942,7 +2081,7 @@ function processPrompt(item, deps, state, now) {
 	}
 	const messages = formatPromptEvent(payload);
 	if (messages.length === 0) {
-		removeEntry(entry);
+		tryRemoveEntry(entry);
 		return {
 			...NOTHING,
 			changed: true
@@ -1954,7 +2093,7 @@ function processPrompt(item, deps, state, now) {
 	const at = now();
 	if (hookName === "Notification" && promptId !== null && promptId === state.pairedPromptId && withinWindow(at, state.pairedPromptAt, PROMPT_PAIR_WINDOW_MS)) {
 		state.pairedPromptId = null;
-		removeEntry(entry);
+		tryRemoveEntry(entry);
 		return {
 			written: 0,
 			changed: true,
@@ -1984,7 +2123,7 @@ function processPrompt(item, deps, state, now) {
 		}
 	}
 	if (records.length > 0) deps.publish(records);
-	removeEntry(entry);
+	tryRemoveEntry(entry);
 	if (hookName === "PreToolUse" && promptId !== null) {
 		state.pairedPromptId = promptId;
 		state.pairedPromptAt = at;

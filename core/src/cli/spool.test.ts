@@ -60,7 +60,8 @@ function setMtime(filePath: string, ms: number): void {
 
 /**
  * 廃止した進捗サイドカー（#30）の残骸を置く。既存インストールの spool に残っているもの。
- * ワーカーはもう書かないが、読み側のガードは残っている（`PROGRESS_SUFFIX`）。
+ * ワーカーはもう書かない。専用の読み側ガード（`PROGRESS_SUFFIX`）は外した — 実害が
+ * 「掃除を孤児掃除の6時間まで遅らせているだけ」だったため（下のテスト参照）。
  */
 function writeStaleProgress(fileName: string): string {
   const filePath = path.join(spoolDir, fileName);
@@ -88,16 +89,28 @@ describe("scanSpool", () => {
     expect(entries.map((e) => e.kind).sort()).toEqual(["message", "prompt"]);
   });
 
-  it("★ 進捗サイドカーの残骸は走査対象にしない（prompt-*.json のグロブに混ざらせない）", () => {
-    // #30 でサイドカーは廃止したが、既存インストールの spool には残っている。
-    // ガードを外すと prompt-x.progress.json が応答待ち通知として読まれる
+  it("`<message_id>.progress.json`（メッセージ側の旧サイドカー）は走査対象にしない", () => {
+    // メッセージの delta ファイル名パターン（<message_id>.<index>.json）にも prompt-*.json にも
+    // 一致しないので、専用ガードの有無に関わらず元から無視される
     writeMessage("m1", [delta(0, "あ。")]);
     writeStaleProgress("m1.progress.json");
-    writeStaleProgress("prompt-x.progress.json");
 
     const entries = scanSpool(spoolDir);
     expect(entries).toHaveLength(1);
     expect(entries[0]?.kind).toBe("message");
+  });
+
+  it("`prompt-<…>.progress.json`（応答待ち側の旧サイドカー）は prompt entry として拾われる", () => {
+    // 以前は専用ガード（PROGRESS_SUFFIX）でここだけ弾いていたが、外しても実害が無いと分かった
+    // ので削除した。formatPromptEvent が未知 payload に [] を返すため、worker.ts の
+    // processPrompt が発話ゼロのまま即削除する（worker.test.ts で確認）。回収は通常の
+    // 削除経路か、ドレインが起きない場合の保険として孤児掃除（既定6時間）が引き取る
+    writeMessage("m1", [delta(0, "あ。")]);
+    writeStaleProgress("prompt-x.progress.json");
+
+    const entries = scanSpool(spoolDir);
+    expect(entries).toHaveLength(2);
+    expect(entries.map((e) => e.kind).sort()).toEqual(["message", "prompt"]);
   });
 
   it("関係ないファイルは無視する", () => {
@@ -207,6 +220,25 @@ describe("readMessage", () => {
   it("index 0 が無ければ何も読まない", () => {
     const filePaths = writeMessage("m1", [delta(1, "い。")]);
     expect(readMessage(filePaths).deltas).toEqual([]);
+  });
+
+  it("★ hasGap: 欠番があれば true（欠番より後ろに読めたファイルが残っている）", () => {
+    const filePaths = writeMessage("m1", [delta(0, "あ。"), delta(2, "う。", true)]);
+    expect(readMessage(filePaths).hasGap).toBe(true);
+  });
+
+  it("★ hasGap: 欠番が無く全部連続していれば false", () => {
+    const filePaths = writeMessage("m1", [delta(0, "あ。"), delta(1, "い。", true)]);
+    expect(readMessage(filePaths).hasGap).toBe(false);
+  });
+
+  it("★ hasGap: index 0 が無ければ true（読めた分はあるが連続接頭辞には入らない）", () => {
+    const filePaths = writeMessage("m1", [delta(1, "い。")]);
+    expect(readMessage(filePaths).hasGap).toBe(true);
+  });
+
+  it("★ hasGap: 何も読めなければ false（欠番の判定材料が無い）", () => {
+    expect(readMessage([path.join(spoolDir, "nope.0.json")]).hasGap).toBe(false);
   });
 
   it("パース不能なファイルは捨てて、読めたファイルだけ使う（rename 直前の書き込み途中を掴んだ可能性）", () => {

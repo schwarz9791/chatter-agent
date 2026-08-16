@@ -53,7 +53,8 @@ function show(title) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function until(predicate, timeoutMs = 5000) {
+// 既定は広めに取る。CI（ubuntu）は手元より遅く、Node の初回起動と合成 2 往復が乗る
+async function until(predicate, timeoutMs = 10_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (predicate()) return true;
@@ -239,11 +240,17 @@ function startPlayer(env) {
   return handle;
 }
 
+/**
+ * ★ `[Player] Ready` ではなく**接続が張れたところまで**待つこと。
+ *   Ready は `client.start()` の直後に出るので、その時点ではまだハンドシェイクの途中でありうる。
+ *   接続前に `stub.send()` すると `wss.clients` が空で誰にも届かず、そのシナリオが丸ごと空振りする。
+ *   手元（macOS）では接続が間に合っていたが、CI の初回起動では間に合わずに落ちた。
+ */
 async function startReadyPlayer(env = playerEnv()) {
   fs.writeFileSync(playLog, "");
   const handle = startPlayer(env);
-  const ok = await until(() => handle.log.includes("[Player] Ready") || handle.exited !== null);
-  if (!ok || handle.exited !== null) throw new Error(`player が起動しませんでした:\n${handle.log}`);
+  const ok = await until(() => handle.log.includes("[Player] 接続しました") || handle.exited !== null, 15_000);
+  if (!ok || handle.exited !== null) throw new Error(`player が接続しませんでした:\n${handle.log}`);
   return handle;
 }
 
@@ -365,7 +372,7 @@ try {
     await until(() => played().length === 1);
 
     stub.state.sockets[0].close();
-    const reconnected = await until(() => stub.state.connections === 2, 6000);
+    const reconnected = await until(() => stub.state.connections === 2, 15_000);
     check("切断されたら繋ぎ直す", reconnected, `connections=${stub.state.connections}\n${player.log}`);
 
     await sleep(500);

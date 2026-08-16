@@ -4,7 +4,7 @@
 
 **Claude Code の発言を、VRM キャラクターがリアルタイムで読み上げるシステム。**
 
-読み上げるのは**表示側アプリ**。デスクトップ版 `chatter-mascot` と、Android XR グラス（XREAL Aura）向けの `chatter-mascot-xr` が、どちらも同じサーバーに繋ぐ。**どちらから着手するかも、デスクトップ版のフレームワーク（Electron / Tauri / Wails）も決めていない**（→ [#16](https://github.com/schwarz9791/chatter-agent/issues/16)）。
+読み上げるのは**表示側アプリ `chatter-mascot`**。**Unity + UniVRM で1つ作り**、macOS デスクトップ（透過ウィンドウで常駐）と Android XR グラス（XREAL Aura）の両方を同じプロジェクトからビルドする。**どちらのプラットフォームから着手するかは決めていない**（→ [#12](https://github.com/schwarz9791/chatter-agent/issues/12)）。
 
 [CC Mascot](https://github.com/kazakago/cc-mascot)（Mac / Electron）と目的は同じだが、**発言の取得方式が根本的に違う**。CC Mascot は Claude Code が書く jsonl ログを監視するが、本プロジェクトは **Claude Code の `MessageDisplay` hook から直接テキストを受け取る**。
 
@@ -29,16 +29,17 @@ hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公�
 |---|---|---|
 | `plugin/` | Claude Code プラグイン（bash hook） | **未作成。** `bin/chatter-agent-speak.mjs`（バンドル済み CLI）だけ置いてある |
 | `core/` | `chatter-agent-core`（CLI + WebSocket サーバー） | **実装済み。** `summarizer/`（AI要約、既定OFF）だけ未着手 |
-| `apps/chatter-mascot/` | 表示側アプリ（デスクトップ常駐） | 未作成。**フレームワーク未定** |
-| `apps/chatter-mascot-xr/` | 表示側アプリ（Unity / Android XR） | 未作成 |
+| `apps/chatter-mascot/` | 表示側アプリ（**Unity + UniVRM**。macOS 常駐 + Android XR を1プロジェクトで） | 未作成 |
 | `docs/` | 作業規約 | protocol / core / plugin / origin の4本 |
 | `.github/workflows/` | CI（typecheck / lint / format / bundle / test / verify） | 稼働中 |
 
 実装フェーズは **A**（plugin + CLI で記録と配信キューが正しく育つ）→ **B**（WebSocket 配信）→ **C**（表示側アプリ）。
-**Phase C をデスクトップ版と XR 版のどちらから始めるかは決めていない。** ただし **C は「発話」と「VRM 表示」に分けてある**
-（[#11](https://github.com/schwarz9791/chatter-agent/issues/11) / [#12](https://github.com/schwarz9791/chatter-agent/issues/12) が発話、
-[#16](https://github.com/schwarz9791/chatter-agent/issues/16) / [#17](https://github.com/schwarz9791/chatter-agent/issues/17) が表示）。
-**発話はフレームワーク選定を待たずに着手できる。**
+**Phase C は Unity + UniVRM で1プロジェクト。** プラットフォーム別ではなく**レイヤーで分けてある**:
+[#11](https://github.com/schwarz9791/chatter-agent/issues/11)（Node の発話 CLI）→
+[#12](https://github.com/schwarz9791/chatter-agent/issues/12)（Unity の土台と発話）→
+[#17](https://github.com/schwarz9791/chatter-agent/issues/17)（UniVRM の表示）→
+[#16](https://github.com/schwarz9791/chatter-agent/issues/16)（デスクトップ固有）/ [#25](https://github.com/schwarz9791/chatter-agent/issues/25)（XR 固有）。
+**#11 は Unity のビルドを待たずに音が出せる。**
 
 **Phase A / B は core 側だけ完了している。** `npm run verify:phase-a` / `verify:phase-b`（CI の `verify` ジョブでも回る）で spool を手で置いた確認までは通っているが、
 **受け入れ基準の「ターミナル表示と体感で同時」は実機で未確認。** ここは `plugin/` を作らないと測れない。
@@ -63,7 +64,7 @@ chatter-agent-server         キューを読んで WebSocket 配信。判断ロ�
   ▲                          ack を受けたぶんを消す
   │ ack
   ▼
-chatter-mascot(-xr)          表示側アプリ。TTS → 再生 → VRM描画 / 表情 / モーション / リップシンク
+chatter-mascot               表示側アプリ（Unity）。TTS → 再生 → VRM描画 / 表情 / モーション / リップシンク
 ```
 
 設計の芯は2つ。
@@ -117,8 +118,7 @@ jsonl の `timestamp` は**メッセージの生成時刻であって書き込�
 | [`docs/plugin.md`](./docs/plugin.md) | `plugin/` を触るとき。bash hook の制約、spool 命名、検証時の落とし穴 |
 | [`docs/origin.md`](./docs/origin.md) | cc-mascot 由来のコードを触るとき。移植の対応表、フォーク点、ライセンス義務 |
 | `docs/architecture.md` | **未作成。** 設計書が一次情報。実装で契約が動いたら分離を検討する |
-| `docs/mascot.md` | **未作成。** 表示側アプリ（デスクトップ）の着手時に作る |
-| `docs/mascot-xr.md` | **未作成。** 表示側アプリ（Unity / Android XR）の着手時に `cc-mascot-xr/xr-app/SETUP.md` を移送して作る |
+| `docs/mascot.md` | **未作成。** 表示側アプリ（Unity）の着手時に作る。`cc-mascot-xr/xr-app/SETUP.md` の移送先は `apps/chatter-mascot/SETUP.md` |
 
 ## 開発コマンド
 

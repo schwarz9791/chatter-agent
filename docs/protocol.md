@@ -1,6 +1,6 @@
 # 発話の契約 — 記録・配信キュー・WebSocket
 
-`chatter-agent-speak`（CLI）が発話を確定させ、`chatter-agent-server` がクライアントへ配信する。この文書は**その境界の契約**を定める。クライアント（`chatter-mascot` / `chatter-mascot-xr`）はここだけを見れば実装できる。
+`chatter-agent-speak`（CLI）が発話を確定させ、`chatter-agent-server` がクライアントへ配信する。この文書は**その境界の契約**を定める。クライアント（表示側アプリ `chatter-mascot`）はここだけを見れば実装できる。
 
 > 設計書 `_workspace/chatter-agent-design.md` §5 が元の一次情報だが、[#8](https://github.com/schwarz9791/chatter-agent/issues/8) で配信の形が変わったので、契約はこちらを正とする。
 

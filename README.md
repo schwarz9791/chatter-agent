@@ -31,7 +31,7 @@ chatter-agent-server   キューを読んで WebSocket 配信
   ▲                    ack を受けたぶんを消す
   │ ack
   ▼
-chatter-mascot(-xr)    表示側アプリ。TTS → 再生 → VRM描画
+chatter-mascot         表示側アプリ（Unity）。TTS → 再生 → VRM描画
 ```
 
 発話の契約は [`docs/protocol.md`](./docs/protocol.md) にあります。
@@ -40,8 +40,7 @@ chatter-mascot(-xr)    表示側アプリ。TTS → 再生 → VRM描画
 |---|---|
 | `plugin/` | Claude Code プラグイン（bash hook） |
 | `core/` | `chatter-agent-core` — CLI と WebSocket サーバー |
-| `apps/chatter-mascot/` | 表示側アプリ（デスクトップ常駐。フレームワーク未定） |
-| `apps/chatter-mascot-xr/` | 表示側アプリ（Unity / Android XR、XREAL Aura） |
+| `apps/chatter-mascot/` | 表示側アプリ（Unity + UniVRM）。macOS 常駐と Android XR（XREAL Aura）を同じプロジェクトから |
 
 ## 対象
 
@@ -57,7 +56,7 @@ chatter-mascot(-xr)    表示側アプリ。TTS → 再生 → VRM描画
 | `core/` | CLI + WebSocket サーバーとも実装済み。AI要約（既定OFF）のみ未着手 |
 | `apps/` | 未作成 |
 
-実装フェーズは **A**（plugin + CLI で記録と配信キューが育つ）→ **B**（WebSocket 配信）→ **C**（表示側アプリ）。**C をデスクトップ版と XR 版のどちらから始めるかは未定で、それぞれ「発話」と「VRM 表示」に分けてあります。**
+実装フェーズは **A**（plugin + CLI で記録と配信キューが育つ）→ **B**（WebSocket 配信）→ **C**（表示側アプリ）。**C は Unity + UniVRM で1プロジェクトにまとめ、発話 → VRM 表示 → プラットフォーム固有（デスクトップの透過ウィンドウ / XR の Full Space）の順に積みます。**
 
 Phase A / B は core 側だけ完了しています。**発言を実際に読み上げるには、まだ `plugin/`（bash hook）が要ります。**
 

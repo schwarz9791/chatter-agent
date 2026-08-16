@@ -28,5 +28,5 @@ Portions of this product are derived from that work:
     （speech/<seq>.json）+ WebSocket に置き換えた。
   - 設定の永続化を electron-store から JSON ファイルに置き換えた。
   - VRM の描画・音声合成・リップシンクを担うレンダラー側は移植していない。
-    表示側のクライアントアプリ（デスクトップ版 / Android XR 版）として
-    分離する構成に作り直す。
+    表示側のクライアントアプリを Unity + UniVRM で作り直し、macOS
+    デスクトップと Android XR の両方をそこから作る。

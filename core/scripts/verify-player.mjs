@@ -412,7 +412,11 @@ try {
     //   掴んだままになるので、後続の合成が新しい接続を開くまでの間が読めない。
     //   12 秒だと数回に1回取りこぼした
     const ok = await until(() => played().includes(2), 25_000);
-    check("★ タイムアウトして次へ進む（head が固まると以後すべて無音）", ok, `${JSON.stringify(played())}\n${player.log}`);
+    check(
+      "★ タイムアウトして次へ進む（head が固まると以後すべて無音）",
+      ok,
+      `${JSON.stringify(played())}\n${player.log}`,
+    );
     check("固まった seq は鳴らない", !played().includes(1), JSON.stringify(played()));
     await until(() => stub.lastAck() === 2, 5000);
     check("ack も追いつく", stub.lastAck() === 2, `${JSON.stringify(stub.state.acks)}\n${player.log}`);

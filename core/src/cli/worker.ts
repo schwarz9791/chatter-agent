@@ -22,11 +22,9 @@ import { assembleSentences } from "./messageAssembler";
 import {
   cleanOrphans,
   readMessage,
-  readProgress,
   readPromptPayload,
   removeEntry,
   scanSpool,
-  writeProgress,
   type MessageContent,
   type SpoolEntry,
 } from "./spool";
@@ -184,13 +182,17 @@ export function drainSpool(deps: DrainDeps): DrainResult {
 }
 
 /**
- * このメッセージがもう伸びないと判断してよいか。
+ * `final` が来なかったメッセージを、後続イベントの到着で救済してよいか。
+ *
+ * 通常の発話は `final:true` が駆動する。これはその取りこぼし（ESC 中断・クラッシュ・
+ * index 欠番で `final` に到達できないメッセージ）を、次のイベントが来た時点で拾うための経路。
  *
  * ★ 「後続エントリが1つでもあるか」で見てはいけない。`getSpoolDir()` にセッション成分が無く、
  *   `MessageDisplay` は matcher 非対応で**全セッションで発火する**ため、Claude Code を2枚開くと
- *   別セッションのメッセージで保留が解け、書きかけの断片が読み上げられて順序も壊れる。
+ *   別セッションのメッセージで救済が誤発火し、まだ伸びる途中のメッセージが打ち切られて
+ *   読み上げられる（順序も壊れる）。
  *
- * session_id が取れないものは判断材料にしない。保留したまま `final` を待つ方が安全。
+ * session_id が取れないものは判断材料にしない。そのまま `final` を待つ方が安全。
  */
 function hasNewerInSameSession(loaded: Loaded[], index: number): boolean {
   const sessionId = sessionIdOf(loaded[index]!);
@@ -214,20 +216,20 @@ function processMessage(
   deps: DrainDeps,
 ): EntryOutcome {
   const { entry, content } = item;
-  const emitted = readProgress(entry.progressPath);
 
-  const result = assembleSentences({
-    deltas: content.deltas,
-    emitted,
-    final: content.final,
-    flushPending: content.final || hasNewer,
-  });
+  // ★ `final` を待つ（CLAUDE.md「絶対に守ること」1）。まだ閉じていないメッセージには触らない。
+  //   `hasNewer` は `final` が来なかったメッセージの救済で、通常経路ではない
+  if (!content.final && !hasNewer) return NOTHING;
 
-  let written = 0;
-  if (result.sentences.length > 0) {
+  const sentences = assembleSentences(content.deltas);
+
+  // ★ メッセージ1つ分をまとめて1回だけ publish すること。分けて呼ぶと `ts` が割れる
+  //   （`speechLog.append` は呼び出しごとに1回だけ時刻を取る）。クライアントは
+  //   `(seq, ts)` で重複排除する契約なので、`ts` の同値性は契約の一部（docs/protocol.md）
+  if (sentences.length > 0) {
     const messageId = content.messageId ?? entry.messageId;
     deps.publish(
-      result.sentences.map((text): SpeechEntry => ({
+      sentences.map((text): SpeechEntry => ({
         source: "claude-code",
         sessionId: content.sessionId,
         turnId: content.turnId,
@@ -237,15 +239,15 @@ function processMessage(
         emotion: deps.classify(text),
       })),
     );
-    written = result.sentences.length;
   }
 
-  if (result.emitted !== emitted) writeProgress(entry.progressPath, result.emitted);
+  // ★ 書き込みが成功してから消す（processPrompt と同じ順序）。先に消すと、publish が
+  //   失敗したときにメッセージが復旧不能に失われる。
+  // ★ 逆に、消さずに抜けてはいけない。進捗サイドカーが無くなったので、残した entry は
+  //   次のドレインで丸ごと組み直されて**メッセージ全体が二度発話される**
+  removeEntry(entry);
 
-  // final:true を処理し終えたファイルだけを消す。まだ来ていなければ次の delta で読み直す
-  if (content.final) removeEntry(entry);
-
-  return { written, changed: written > 0 || content.final, stateDirty: false };
+  return { written: sentences.length, changed: true, stateDirty: false };
 }
 
 function processPrompt(

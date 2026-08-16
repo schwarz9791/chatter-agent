@@ -70,8 +70,9 @@ describe("createPublisher", () => {
     const publish = createPublisher({ speechLog, speechQueue, maxEntries: () => 500 });
 
     // ★ 修正前の実装（speechQueue.enqueue(records) を直接呼ぶだけ）はここで例外を
-    //   投げて抜けていた。呼び出し側（worker.ts の processMessage）は writeProgress に
-    //   到達できず、spool の entry を消せないまま次の delta で同じ文を組み直していた
+    //   投げて抜けていた。呼び出し側（worker.ts の processMessage）は removeEntry に
+    //   到達できず、spool の entry を消せないまま次の CLI が同じメッセージを組み直していた
+    //   （#30 以降、組み直される単位は1文ではなくメッセージ全文）
     let result: SpeechRecord[] | undefined;
     expect(() => {
       result = publish([entry()]);

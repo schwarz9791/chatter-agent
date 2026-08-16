@@ -1383,47 +1383,35 @@ function makeLock(lockDir, token) {
 //#endregion
 //#region src/text/unstableTail.ts
 /**
-* まだ確定していない末尾の切り落とし。
+* 読み上げたくない末尾の切り落とし。
 *
 * chatter-agent 固有の要件で、上流 cc-mascot には存在しない。
 *
-* CLI は毎 delta 起動して終了するため、進捗は「出力済みの文数」でしか持てない。
-* これが成り立つ前提は **既に出した範囲が後から変化しないこと** で、`cleanTextForSpeech` を
-* 伸び続ける raw に繰り返し適用するかぎり、その前提は自動では成立しない。
-*
-* 10段の正規表現のうち、**開始位置が既出範囲にあり、閉じ側が後から届く**ものが危険:
+* `cleanTextForSpeech` の10段の正規表現には、**閉じ側が来て初めて除去が効く**ものがある。
+* 開いたままだと除去が空振りし、中身が生のまま読み上げに漏れる:
 *
 * | 構文 | 何が起きるか |
 * |---|---|
-* | ```` ``` ```` | 閉じフェンスが来るまでコードが読み上げられる |
-* | `<…>` | `>` が届いた瞬間、`<` 以降の**既に発話した文ごと**削除される |
-* | `` `…` `` | 閉じバッククォートが届くと既出テキストから記号が消える |
-* | 表の行 | 行が閉じるまで生の `\| A \| B` が読み上げられ、閉じると消える |
-* | URL | 空白が来るまで削除範囲が伸び続ける |
-* | 16進列 | 7文字目が届いた瞬間に消え、41文字目で戻る |
+* | ```` ``` ```` | 閉じフェンスが無いとコードがそのまま読み上げられる |
+* | 表の行 | 行が `\|` で閉じていないと生の `\| A \| B` が読み上げられる |
 *
-* これらの開始位置より後ろを切り落としてから整形すれば、既出範囲は変化しなくなる。
+* これらの開始位置より後ろを切り落としてから整形すれば、どちらも漏れない。
 *
-* ★ 引き換えに**発話が遅れる**。未閉じの `<` がある間、それ以降は保留される。
-*   `final:true` で保留は解ける（もう伸びないので不安定ではなくなる）ため、
-*   遅延の上限は「メッセージが閉じるまで」＝保留中の最終文と同じ。
+* ★ 引き換えに、切り落とした分は**発話されない**。`final:true` を待って1回だけ組み立てる
+*   ようになった（[#30]）ので「後から届いて閉じる」ことはもう無く、未閉じのまま終わった
+*   コードや表はそのまま捨てる。読み上げたくないものなので、これでよい。
+*
+* [#30]: https://github.com/schwarz9791/chatter-agent/issues/30
 */
 const FENCE = "```";
 /**
-* まだ確定していない末尾があれば、その開始位置より後ろを切り落とす。
-* すべて確定していれば元の文字列をそのまま返す。
+* 読み上げたくない末尾があれば、その開始位置より後ろを切り落とす。
+* すべて閉じていれば元の文字列をそのまま返す。
 */
-function truncateAtUnstableTail(text, options = {}) {
+function truncateAtUnstableTail(text) {
 	const scan = text.replace(/```[\s\S]*?```/g, (block) => block.replace(/[^\n]/g, " "));
-	const always = [unclosedFenceAt(text), incompleteTableRowAt(scan)];
-	const whileStreaming = options.final ? [] : [
-		unclosedTagAt(scan),
-		unclosedInlineCodeAt(scan),
-		trailingUrlAt(scan),
-		trailingHexRunAt(scan)
-	];
 	let cut = text.length;
-	for (const at of [...always, ...whileStreaming]) if (at !== null && at < cut) cut = at;
+	for (const at of [unclosedFenceAt(text), incompleteTableRowAt(scan)]) if (at !== null && at < cut) cut = at;
 	return cut === text.length ? text : text.slice(0, cut);
 }
 /**
@@ -1433,43 +1421,26 @@ function truncateAtUnstableTail(text, options = {}) {
 * 奇数個目を開き・偶数個目を閉じとして扱う。行頭かどうかは見ない（正規表現も見ていない）。
 */
 function unclosedFenceAt(text) {
-	return unclosedDelimiterAt(text, FENCE);
-}
-/** 開いたままのインラインバッククォートの開始位置 */
-function unclosedInlineCodeAt(scan) {
-	return unclosedDelimiterAt(scan, "`");
-}
-function unclosedDelimiterAt(text, delimiter) {
 	let searchFrom = 0;
 	let openedAt = -1;
 	let isOpen = false;
 	for (;;) {
-		const found = text.indexOf(delimiter, searchFrom);
+		const found = text.indexOf(FENCE, searchFrom);
 		if (found === -1) break;
 		if (isOpen) isOpen = false;
 		else {
 			isOpen = true;
 			openedAt = found;
 		}
-		searchFrom = found + delimiter.length;
+		searchFrom = found + 3;
 	}
 	return isOpen ? openedAt : null;
 }
 /**
-* 閉じていない `<` の位置。
-*
-* `/<[^>]+>/g` は左から非重複で拾うので、**最後の `>` より後ろにある最初の `<`** が
-* 閉じ待ちになる。それより前の `<` はすでにどれかの `>` と対になっている。
-*/
-function unclosedTagAt(scan) {
-	const found = scan.indexOf("<", scan.lastIndexOf(">") + 1);
-	return found === -1 ? null : found;
-}
-/**
 * 書きかけの表の行の位置。
 *
-* 除去の正規表現は `/^\|.*\|$/gm` で、行が `|` で閉じて初めて消える。閉じるまでの間は
-* 生の `| A | B` が1文として読み上げられ、閉じた瞬間に消えるので、既出範囲が縮む。
+* 除去の正規表現は `/^\|.*\|$/gm` で、行が `|` で閉じて初めて消える。閉じていない行は
+* 生の `| A | B` が1文として読み上げられてしまう。
 */
 function incompleteTableRowAt(scan) {
 	const lineStart = scan.lastIndexOf("\n") + 1;
@@ -1477,59 +1448,32 @@ function incompleteTableRowAt(scan) {
 	if (!line.startsWith("|")) return null;
 	return /^\|.*\|$/.test(line) ? null : lineStart;
 }
-/** 末尾の URL。後続の空白が来るまで削除範囲が伸び続ける */
-function trailingUrlAt(scan) {
-	return scan.match(/https?:\/\/\S*$/)?.index ?? null;
-}
-/** 末尾の16進列。7文字目が届いた瞬間に消え、41文字目で戻る */
-function trailingHexRunAt(scan) {
-	return scan.match(/\b[0-9a-f]+$/)?.index ?? null;
-}
 
 //#endregion
 //#region src/cli/messageAssembler.ts
 /**
-* delta の集合から「確定した文」だけを切り出す。chatter-agent の中核。
+* 1メッセージ分の delta を結合して、発話する文の列にする。chatter-agent の中核。
 *
-* ★ `final:true` を待ってはいけない（CLAUDE.md「絶対に守ること」1 / 設計書 §2-4）。
-*   最終チャンクはメッセージが閉じるとき＝次のブロックが始まるときに flush されるので、
-*   その手前でモデルが生成した分だけ遅れる。`AskUserQuestion` の直前だと数十秒に達する。
-*   **秒数は仕様ではない**（モデル・thinking の量・ツール入力の大きさで動く）。
+* ★ **`final:true` を待ってから呼ぶこと**（CLAUDE.md「絶対に守ること」1 / [#30]）。
+*   メッセージが閉じるまで1文も出さないので、この関数は「メッセージ全文が揃った状態」しか
+*   受け取らない。呼び出し側のゲートは `worker.ts` の `processMessage` にある。
 *
-* そこで delta が届くたびに全体を組み直し、**最後の文を除いた**未出力分だけを流す。
-* 最後の文はまだ伸びうるので保留する。
+* 純粋関数であることが重要で、CLI は毎 delta 起動して終了する。ディスクに進捗を持たず、
+* `final` を見たときにゼロから組み直す。
 *
-* この関数が純粋であることが重要で、CLI は毎 delta 起動して終了するため、
-* 状態は「出力済みの文数」だけをディスクに持ち、テキストは毎回ゼロから組み直す。
+* [#30]: https://github.com/schwarz9791/chatter-agent/issues/30
 */
-/** 文として閉じているか。句点・感嘆符・疑問符か、行が変わっていれば閉じている */
-function endsAtBoundary(text) {
-	return text.length === 0 || /[。！？!?\n\r]\s*$/.test(text);
-}
 /**
-* 全文を組み直し、確定した文のうち未出力のものを返す。
+* 全文を組み立て、発話する文を順に返す。
 *
-* 未確定の末尾（未閉じの ``` や `<` など）を先に切り落とすのが要で、これにより
-* 「開いたままのコードや表が読み上げられない」と「既に出した文が後から変化しない」が
-* 同時に成立する。後者が `emitted`（文数）で進捗を持てる根拠になっている。
+* 読み上げたくない末尾（未閉じの ``` や書きかけの表の行）を先に切り落としてから整形する。
+* → `src/text/unstableTail.ts`
+*
+* @param deltas index 順に並んだ delta。欠番があってはならない（呼び出し側が連続した前半だけを渡す）
 */
-function assembleSentences(input) {
-	const raw = input.deltas.join("");
-	const safe = truncateAtUnstableTail(raw, { final: input.final });
-	const cleaned = cleanTextForSpeech(safe);
-	const all = splitIntoSentences(cleaned).filter((sentence) => sentence.length > 0);
-	const limit = resolveLimit(all.length, input, safe);
-	const clamped = Math.min(input.emitted, all.length);
-	const from = Math.min(clamped, limit);
-	return {
-		sentences: all.slice(from, limit),
-		emitted: Math.max(clamped, limit)
-	};
-}
-function resolveLimit(total, input, safe) {
-	if (input.final) return total;
-	if (input.flushPending && endsAtBoundary(safe)) return total;
-	return Math.max(0, total - 1);
+function assembleSentences(deltas) {
+	const safe = truncateAtUnstableTail(deltas.join(""));
+	return splitIntoSentences(cleanTextForSpeech(safe)).filter((sentence) => sentence.length > 0);
 }
 
 //#endregion
@@ -1545,23 +1489,28 @@ function resolveLimit(total, input, safe) {
 *   を tmp + rename で置く（追記はしない — bash から任意長の追記を原子的にする移植可能な方法が
 *   無いため。→ docs/plugin.md）。1メッセージは複数の delta ファイルに分かれるので、
 *   「1メッセージ = 複数ファイル」を1エントリにまとめるのがこのファイルの仕事。
-*   ワーカーが持つ進捗は `<message_id>.progress.json` のサイドカーに置く。
+*   ワーカーはディスクに状態を持たない（`final` を見たときに全 delta から組み直す）。
 */
 /** `<message_id>.<index>.json`。message_id はサニタイズ済みで `.` を含まない（plugin 側の責務） */
 const MESSAGE_DELTA_RE = /^(.+)\.(\d+)\.json$/;
 const PROMPT_PREFIX = "prompt-";
 const PROMPT_SUFFIX = ".json";
+/**
+* 進捗サイドカーの残骸。
+*
+* ★ [#30] で廃止したが、**定数と `classify` のガードだけは残すこと。** 既存インストールの
+*   spool に残った `prompt-<…>.progress.json` を prompt として読んでしまうのを防ぐ。
+*   残骸そのものは `cleanOrphans` が mtime で回収する（既定6時間）。
+*
+* [#30]: https://github.com/schwarz9791/chatter-agent/issues/30
+*/
 const PROGRESS_SUFFIX = ".progress.json";
-function progressPathFor(messageId, spoolDir) {
-	return path.join(spoolDir, `${messageId}${PROGRESS_SUFFIX}`);
-}
 /**
 * 到着順のキー。
 *
-* ★ mtime を使わないこと。1 delta 1 ファイルにしても、進捗サイドカーはワーカーが書き換えるし、
-*   何よりメッセージの「到着順」を代表する値としては個々のファイルの mtime ではなく
-*   birthtime を使う必要がある（後述 `arrivalOrderOfMessage`）。birthtime を持たない環境では
-*   mtime に落とす。
+* ★ mtime を使わないこと。メッセージの「到着順」を代表する値としては、個々のファイルの
+*   mtime ではなく birthtime を使う必要がある（後述 `arrivalOrderOfMessage`）。
+*   birthtime を持たない環境では mtime に落とす。
 *
 * ★ ミリ秒（`birthtimeMs`）では粗すぎる。同じミリ秒に作られたファイルが同値になり、
 *   下のタイブレーク（パス順）に落ちて到着順が壊れる。`bigint: true` の統計情報が持つ
@@ -1570,7 +1519,7 @@ function progressPathFor(messageId, spoolDir) {
 function arrivalOrder(stat) {
 	return stat.birthtimeNs > 0n ? stat.birthtimeNs : stat.mtimeNs;
 }
-/** 判定順は「進捗サイドカーを最初に弾く → prompt- → message」を維持する */
+/** 判定順は「進捗サイドカーの残骸を最初に弾く → prompt- → message」を維持する */
 function classify(fileName, filePath, order) {
 	if (fileName.endsWith(PROGRESS_SUFFIX)) return null;
 	if (fileName.startsWith(PROMPT_PREFIX) && fileName.endsWith(PROMPT_SUFFIX)) return {
@@ -1646,7 +1595,6 @@ function scanSpool(spoolDir) {
 			kind: "message",
 			messageId,
 			filePaths: deltas.map((d) => d.filePath),
-			progressPath: progressPathFor(messageId, spoolDir),
 			order: arrivalOrderOfMessage(deltas)
 		});
 	}
@@ -1725,41 +1673,17 @@ function readPromptPayload(filePath) {
 		return null;
 	}
 }
-/** 出力済みの文数。サイドカーが無ければ 0 */
-function readProgress(progressPath) {
-	try {
-		const parsed = JSON.parse(fs.readFileSync(progressPath, "utf-8"));
-		if (isRecord(parsed)) {
-			const emitted = parsed.emitted;
-			if (typeof emitted === "number" && Number.isInteger(emitted) && emitted >= 0) return emitted;
-		}
-	} catch {}
-	return 0;
-}
-/**
-* 出力済みの文数を記録する。
-*
-* ★ atomicWrite を使うこと（素の `writeFileSync` は書きかけを読まれる窓ができる）。
-*   ここで書きかけが漏れると 0 バイトのサイドカーが残り、`readProgress` はそれを 0 と
-*   読むので、**メッセージが丸ごと最初から読み直される**。WebSocket の契約は `seq` でしか
-*   重複排除しないため、クライアントは言い直しと新規発話を区別できない。
-*/
-function writeProgress(progressPath, emitted) {
-	writeFileAtomic(progressPath, `${JSON.stringify({ emitted })}\n`);
-}
-/** 処理し終えた spool を消す。メッセージは全 delta ファイル + サイドカーを消す */
+/** 処理し終えた spool を消す。メッセージは全 delta ファイルを消す */
 function removeEntry(entry) {
 	if (entry.kind === "prompt") {
 		fs.rmSync(entry.filePath, { force: true });
 		return;
 	}
 	for (const filePath of entry.filePaths) fs.rmSync(filePath, { force: true });
-	fs.rmSync(entry.progressPath, { force: true });
 }
-/** メッセージ関連ファイル（delta + 進捗サイドカー）を message_id でグルーピングするための鍵 */
+/** delta ファイルを message_id でグルーピングするための鍵 */
 function messageGroupKey(fileName) {
 	if (fileName.startsWith(PROMPT_PREFIX)) return null;
-	if (fileName.endsWith(PROGRESS_SUFFIX)) return fileName.slice(0, -14);
 	const match = MESSAGE_DELTA_RE.exec(fileName);
 	return match ? match[1] : null;
 }
@@ -1770,10 +1694,10 @@ function messageGroupKey(fileName) {
 *   mtime は書かれた瞬間で止まる。ファイル単位で「無活動時間」を見ると、進行中メッセージの
 *   古い index のファイルだけが閾値を超えて消え、`index` に欠番ができて**そのメッセージが
 *   永久に発話されなくなる**。そのメッセージに属するファイル群の**最新 mtime**を見て、
-*   全体が無活動なら delta ファイルとサイドカーをまとめて消す。
+*   全体が無活動なら delta ファイルをまとめて消す。
 *
-* `prompt-*.json` と、rename 前の孤立した `.tmp`（このグルーピングに掛からないもの）は
-* 従来どおりファイル単位で判定する（1イベントで完結するので、まとめる意味が無い）。
+* `prompt-*.json`、rename 前の孤立した `.tmp`、廃止した `*.progress.json` の残骸
+* （このグルーピングに掛からないもの）は、ファイル単位で判定する。
 */
 function cleanOrphans(spoolDir, maxAgeMs, now = Date.now()) {
 	let fileNames;
@@ -1961,13 +1885,17 @@ function drainSpool(deps) {
 	};
 }
 /**
-* このメッセージがもう伸びないと判断してよいか。
+* `final` が来なかったメッセージを、後続イベントの到着で救済してよいか。
+*
+* 通常の発話は `final:true` が駆動する。これはその取りこぼし（ESC 中断・クラッシュ・
+* index 欠番で `final` に到達できないメッセージ）を、次のイベントが来た時点で拾うための経路。
 *
 * ★ 「後続エントリが1つでもあるか」で見てはいけない。`getSpoolDir()` にセッション成分が無く、
 *   `MessageDisplay` は matcher 非対応で**全セッションで発火する**ため、Claude Code を2枚開くと
-*   別セッションのメッセージで保留が解け、書きかけの断片が読み上げられて順序も壊れる。
+*   別セッションのメッセージで救済が誤発火し、まだ伸びる途中のメッセージが打ち切られて
+*   読み上げられる（順序も壊れる）。
 *
-* session_id が取れないものは判断材料にしない。保留したまま `final` を待つ方が安全。
+* session_id が取れないものは判断材料にしない。そのまま `final` を待つ方が安全。
 */
 function hasNewerInSameSession(loaded, index) {
 	const sessionId = sessionIdOf(loaded[index]);
@@ -1981,17 +1909,11 @@ const NOTHING = {
 };
 function processMessage(item, hasNewer, deps) {
 	const { entry, content } = item;
-	const emitted = readProgress(entry.progressPath);
-	const result = assembleSentences({
-		deltas: content.deltas,
-		emitted,
-		final: content.final,
-		flushPending: content.final || hasNewer
-	});
-	let written = 0;
-	if (result.sentences.length > 0) {
+	if (!content.final && !hasNewer) return NOTHING;
+	const sentences = assembleSentences(content.deltas);
+	if (sentences.length > 0) {
 		const messageId = content.messageId ?? entry.messageId;
-		deps.publish(result.sentences.map((text) => ({
+		deps.publish(sentences.map((text) => ({
 			source: "claude-code",
 			sessionId: content.sessionId,
 			turnId: content.turnId,
@@ -2000,13 +1922,11 @@ function processMessage(item, hasNewer, deps) {
 			text,
 			emotion: deps.classify(text)
 		})));
-		written = result.sentences.length;
 	}
-	if (result.emitted !== emitted) writeProgress(entry.progressPath, result.emitted);
-	if (content.final) removeEntry(entry);
+	removeEntry(entry);
 	return {
-		written,
-		changed: written > 0 || content.final,
+		written: sentences.length,
+		changed: true,
 		stateDirty: false
 	};
 }

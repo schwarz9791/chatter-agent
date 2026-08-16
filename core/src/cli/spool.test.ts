@@ -2,15 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import {
-  cleanOrphans,
-  readMessage,
-  readProgress,
-  readPromptPayload,
-  removeEntry,
-  scanSpool,
-  writeProgress,
-} from "./spool";
+import { cleanOrphans, readMessage, readPromptPayload, removeEntry, scanSpool } from "./spool";
 
 let spoolDir: string;
 
@@ -66,6 +58,16 @@ function setMtime(filePath: string, ms: number): void {
   fs.utimesSync(filePath, t, t);
 }
 
+/**
+ * 廃止した進捗サイドカー（#30）の残骸を置く。既存インストールの spool に残っているもの。
+ * ワーカーはもう書かないが、読み側のガードは残っている（`PROGRESS_SUFFIX`）。
+ */
+function writeStaleProgress(fileName: string): string {
+  const filePath = path.join(spoolDir, fileName);
+  fs.writeFileSync(filePath, JSON.stringify({ emitted: 1 }));
+  return filePath;
+}
+
 function messageEntry(kind: "message" | "prompt" = "message") {
   const entries = scanSpool(spoolDir);
   const entry = entries.find((e) => e.kind === kind);
@@ -86,11 +88,12 @@ describe("scanSpool", () => {
     expect(entries.map((e) => e.kind).sort()).toEqual(["message", "prompt"]);
   });
 
-  it("進捗サイドカーは走査対象にしない（prompt-*.json のグロブに混ざらせない）", () => {
+  it("★ 進捗サイドカーの残骸は走査対象にしない（prompt-*.json のグロブに混ざらせない）", () => {
+    // #30 でサイドカーは廃止したが、既存インストールの spool には残っている。
+    // ガードを外すと prompt-x.progress.json が応答待ち通知として読まれる
     writeMessage("m1", [delta(0, "あ。")]);
-    writeProgress(path.join(spoolDir, "m1.progress.json"), 1);
-    // prompt- で始まるメッセージのサイドカーも弾けること
-    writeProgress(path.join(spoolDir, "prompt-x.progress.json"), 1);
+    writeStaleProgress("m1.progress.json");
+    writeStaleProgress("prompt-x.progress.json");
 
     const entries = scanSpool(spoolDir);
     expect(entries).toHaveLength(1);
@@ -116,12 +119,11 @@ describe("scanSpool", () => {
     expect(entry.filePaths).toHaveLength(1);
   });
 
-  it("メッセージのファイル名（<message_id>.<index>.json）から message_id とサイドカーのパスを決める", () => {
+  it("メッセージのファイル名（<message_id>.<index>.json）から message_id を決める", () => {
     writeMessage("a94cd2c5", [delta(0, "あ。")]);
     const entry = messageEntry();
     if (entry.kind !== "message") throw new Error("unreachable");
     expect(entry.messageId).toBe("a94cd2c5");
-    expect(entry.progressPath).toBe(path.join(spoolDir, "a94cd2c5.progress.json"));
   });
 
   it("同じ message_id の delta ファイルを1エントリにまとめ、index 昇順に並べる", () => {
@@ -247,49 +249,11 @@ describe("readPromptPayload", () => {
   });
 });
 
-describe("進捗サイドカー", () => {
-  it("書いて読める", () => {
-    const p = path.join(spoolDir, "m1.progress.json");
-    writeProgress(p, 3);
-    expect(readProgress(p)).toBe(3);
-  });
-
-  it("無ければ 0", () => {
-    expect(readProgress(path.join(spoolDir, "nope.progress.json"))).toBe(0);
-  });
-
-  it("壊れていれば 0（多少喋り直すが、黙るよりは良い）", () => {
-    const p = path.join(spoolDir, "m1.progress.json");
-    fs.writeFileSync(p, "{ emitted");
-    expect(readProgress(p)).toBe(0);
-  });
-
-  it("★ 書き込みが途中で落ちても 0 バイトのサイドカーを残さない", () => {
-    // writeFileSync は O_TRUNC してから書くので、素で使うとその隙に落ちたときに
-    // 進捗が 0 に化け、メッセージが丸ごと読み直される
-    const p = path.join(spoolDir, "m1.progress.json");
-    writeProgress(p, 2);
-    writeProgress(p, 5);
-
-    expect(readProgress(p)).toBe(5);
-    // 一時ファイルを残さない
-    expect(fs.readdirSync(spoolDir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
-  });
-
-  it("一時ファイルは走査対象にならない", () => {
-    writeMessage("m1", [delta(0, "あ。")]);
-    fs.writeFileSync(path.join(spoolDir, "m1.progress.json.tmp"), "{}");
-
-    expect(scanSpool(spoolDir)).toHaveLength(1);
-  });
-});
-
 describe("removeEntry", () => {
-  it("メッセージは全 delta ファイル + サイドカーを消す", () => {
+  it("メッセージは全 delta ファイルを消す", () => {
     writeMessage("m1", [delta(0, "あ。"), delta(1, "い。", true)]);
     const entry = messageEntry();
     if (entry.kind !== "message") throw new Error("unreachable");
-    writeProgress(entry.progressPath, 1);
 
     removeEntry(entry);
     expect(fs.readdirSync(spoolDir)).toEqual([]);
@@ -331,14 +295,16 @@ describe("cleanOrphans", () => {
     expect(fs.readdirSync(spoolDir).sort()).toEqual(["m1.0.json", "m1.1.json"]);
   });
 
-  it("進捗サイドカーもメッセージのグループに含めて判定する", () => {
-    const [zeroFile] = writeMessage("m1", [delta(0, "あ。")]);
-    writeProgress(path.join(spoolDir, "m1.progress.json"), 1);
-    setMtime(zeroFile!, Date.now() - 10 * 60 * 60 * 1000);
-    // サイドカーは直近に更新されている（＝メッセージは進行中）
-    setMtime(path.join(spoolDir, "m1.progress.json"), Date.now());
+  it("★ 進捗サイドカーの残骸は、メッセージとは独立にファイル単位で回収する", () => {
+    // #30 でサイドカーは廃止した。既存インストールに残った分は誰も更新しないので、
+    // グループに含めずファイル単位で古さを見る（含めると、進行中メッセージの delta を
+    // 古いサイドカーが道連れにする／その逆が起きる）
+    const stale = writeStaleProgress("m1.progress.json");
+    setMtime(stale, Date.now() - 10 * 60 * 60 * 1000);
+    writeMessage("m1", [delta(0, "あ。")]); // 同じ message_id の進行中メッセージ
 
-    expect(cleanOrphans(spoolDir, 6 * 60 * 60 * 1000)).toBe(0);
+    expect(cleanOrphans(spoolDir, 6 * 60 * 60 * 1000)).toBe(1);
+    expect(fs.readdirSync(spoolDir)).toEqual(["m1.0.json"]);
   });
 
   it("ディレクトリが無くても落ちない", () => {

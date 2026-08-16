@@ -152,7 +152,17 @@ export function createSpeechClient(options: SpeechClientOptions): SpeechClient {
       console.log(`[Player] 接続しました: ${options.url}`);
       armWatchdog();
       options.onConnected();
-      flushAck();
+
+      // ★ ここで `flushAck()` を呼ばないこと。`flushAck` は送れると分かるまで値を消さないので、
+      //   間引き中に切断されると `pendingAck` が**切断を跨いで生き残る**。その状態で
+      //   ランタイムルートが作り直されると、繋ぎ直した先の新しいサーバーへ旧エポックの
+      //   ack が飛び、配信済み・未発話の entry がまとめて消える。
+      //   `dropPendingAck` は `resetEpoch` からしか出ず、`resetEpoch` は最初のフレームを
+      //   見るまで走らないので、ws が `open` → `message` の順である以上**構造的に間に合わない**。
+      //
+      //   溜まっている ack は放っておいてよい。同じサーバーなら未 ack 分が再送され、
+      //   `playbackQueue` の重複枝が `emitAck` を出して改めて送る。作り直されていれば
+      //   `resetEpoch` の `dropPendingAck` が捨てる。どちらでも取りこぼさない
     });
 
     // サーバーの heartbeat。ws は pong を自動で返すので、ここでは生存の証拠として使う

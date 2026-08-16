@@ -109,3 +109,30 @@ export function getLockDir(e: PathEnv = currentPathEnv()): string {
 export function getServerLockDir(e: PathEnv = currentPathEnv()): string {
   return path.join(getRuntimeDir(e), "server.lock");
 }
+
+/**
+ * 発話クライアント（player）の単一インスタンスロック。書き方は `getLockDir` と同じ。
+ *
+ * ★ 「二重に鳴ってうるさい」ではなく、**2台目が1台目のキューを破壊するから**取る。
+ *   ack は累積で、server の `speechQueue.ackUpTo` は `seq <= upTo` を**ファイル名で範囲削除**する。
+ *   `dispatcher.ack` のクランプは値を配信済みの範囲に押さえるだけで、削除対象を
+ *   「その ack を送ってきたクライアントが受け取った分」には限定しない。
+ *   速い player の ack が、遅い player のまだ喋っていない entry を消す。
+ *
+ * このロックはランタイムルート単位なので、`XDG_CONFIG_HOME` を分けた2台や
+ * リモートの server に繋ぐ2台は防げない（→ docs/protocol.md）。
+ */
+export function getPlayerLockDir(e: PathEnv = currentPathEnv()): string {
+  return path.join(getRuntimeDir(e), "player.lock");
+}
+
+/**
+ * player が合成した WAV を置く場所。再生し終えたら消す。
+ *
+ * 固定ディレクトリにしてあるのは、`getPlayerLockDir` で1台に絞ってあるため
+ * **起動時に丸ごと消して作り直せる**から。`os.tmpdir()` + mkdtemp にすると
+ * SIGKILL でゴミが残り、prefix 走査と pid の生死判定が要る。
+ */
+export function getPlayerTmpDir(e: PathEnv = currentPathEnv()): string {
+  return path.join(getRuntimeDir(e), "player-tmp");
+}

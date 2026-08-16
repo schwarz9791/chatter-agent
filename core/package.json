@@ -18,7 +18,9 @@
     "test:coverage": "vitest run --coverage",
     "verify:phase-a": "bash scripts/verify-phase-a.sh",
     "verify:phase-b": "node scripts/verify-phase-b.mjs",
-    "start:server": "node dist/chatter-agent-server.mjs"
+    "verify:player": "node scripts/verify-player.mjs",
+    "start:server": "node dist/chatter-agent-server.mjs",
+    "start:player": "node dist/chatter-agent-player.mjs"
   },
   "dependencies": {
     "ws": "^8.21.3"

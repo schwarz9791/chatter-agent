@@ -16,6 +16,15 @@ const DEFAULTS: ChatterAgentConfig = {
   speechQueueMaxEntries: 500,
   spoolMaxAgeHours: 6,
   allowedOrigins: [],
+
+  ttsBaseUrl: "http://127.0.0.1:10101",
+  ttsSpeakerId: 888753760,
+  synthesisLookahead: 3,
+  synthesisTimeoutMs: 30_000,
+  playerCommand: "afplay",
+  playerArgs: ["{file}"],
+  playerServerUrl: "",
+  speechMaxAgeMs: 0,
 };
 
 function store(env: NodeJS.ProcessEnv = {}) {
@@ -57,6 +66,18 @@ describe("createDefaultConfig", () => {
     expect(c.speechQueueMaxEntries).toBe(500);
     expect(c.spoolMaxAgeHours).toBe(6);
     expect(c.speakPrompts).toBe(true);
+  });
+
+  it("player の既定は AivisSpeech 単体起動のポートと afplay", () => {
+    const c = createDefaultConfig();
+    expect(c.ttsBaseUrl).toBe("http://127.0.0.1:10101");
+    expect(c.ttsSpeakerId).toBe(888753760);
+    expect(c.synthesisLookahead).toBe(3);
+    expect(c.playerCommand).toBe("afplay");
+    expect(c.playerArgs).toEqual(["{file}"]);
+    // 空なら port / host から導出する。速度と古さの既定は無効
+    expect(c.playerServerUrl).toBe("");
+    expect(c.speechMaxAgeMs).toBe(0);
   });
 });
 
@@ -102,6 +123,53 @@ describe("createConfigStore", () => {
   it("範囲外のポートは既定値にフォールバックする", () => {
     write({ port: 70000 });
     expect(store().get("port")).toBe(8570);
+  });
+
+  it("ttsBaseUrl はスキームを検査し、末尾スラッシュを落とす", () => {
+    expect(store({ CHATTER_AGENT_TTS_URL: "http://127.0.0.1:8564/" }).get("ttsBaseUrl")).toBe("http://127.0.0.1:8564");
+    expect(store({ CHATTER_AGENT_TTS_URL: "https://tts.example/api//" }).get("ttsBaseUrl")).toBe(
+      "https://tts.example/api",
+    );
+  });
+
+  it("スキームの無い ttsBaseUrl は既定値にフォールバックする", () => {
+    // ★ 素通しにすると `localhost:10101/audio_query` を fetch して、症状が「無音」の設定ミスになる
+    write({ ttsBaseUrl: "localhost:10101" });
+    expect(store().get("ttsBaseUrl")).toBe("http://127.0.0.1:10101");
+  });
+
+  it("playerServerUrl は ws / wss だけを受ける", () => {
+    expect(store({ CHATTER_AGENT_PLAYER_SERVER_URL: "ws://127.0.0.1:9999" }).get("playerServerUrl")).toBe(
+      "ws://127.0.0.1:9999",
+    );
+    // http:// を書いてしまったら既定（空＝port/host から導出）へ倒す
+    expect(store({ CHATTER_AGENT_PLAYER_SERVER_URL: "http://127.0.0.1:9999" }).get("playerServerUrl")).toBe("");
+  });
+
+  it("0 を意味のある値として受けるキーがある", () => {
+    // synthesisLookahead: 0 = 完全直列、speechMaxAgeMs: 0 = 古さで飛ばさない、
+    // ttsSpeakerId: 0 = VOICEVOX の先頭スタイル。parsePositiveInt だと全部弾かれる
+    const s = store({
+      CHATTER_AGENT_SYNTHESIS_LOOKAHEAD: "0",
+      CHATTER_AGENT_SPEECH_MAX_AGE_MS: "0",
+      CHATTER_AGENT_TTS_SPEAKER_ID: "0",
+    });
+    expect(s.get("synthesisLookahead")).toBe(0);
+    expect(s.get("speechMaxAgeMs")).toBe(0);
+    expect(s.get("ttsSpeakerId")).toBe(0);
+  });
+
+  it("負の値は既定値にフォールバックする", () => {
+    write({ synthesisLookahead: -1, ttsSpeakerId: -1 });
+    const s = store();
+    expect(s.get("synthesisLookahead")).toBe(3);
+    expect(s.get("ttsSpeakerId")).toBe(888753760);
+  });
+
+  it("playerArgs は環境変数のカンマ区切りと config.json の配列の両方を受ける", () => {
+    expect(store({ CHATTER_AGENT_PLAYER_ARGS: "-q,1,{file}" }).get("playerArgs")).toEqual(["-q", "1", "{file}"]);
+    write({ playerArgs: ["{file}", "--volume", "0.5"] });
+    expect(store().get("playerArgs")).toEqual(["{file}", "--volume", "0.5"]);
   });
 
   it("未知のキーは無視して警告する", () => {

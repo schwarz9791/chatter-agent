@@ -3,6 +3,8 @@ import { describe, it, expect } from "vitest";
 import {
   getConfigFilePath,
   getLockDir,
+  getPlayerLockDir,
+  getPlayerTmpDir,
   getRuntimeDir,
   getServerLockDir,
   getSpeechLogBackupPath,
@@ -53,6 +55,8 @@ describe("ランタイムルート配下のパス", () => {
     expect(getWorkerStatePath(e)).toBe(`${root}/speak.state.json`);
     expect(getLockDir(e)).toBe(`${root}/speak.lock`);
     expect(getServerLockDir(e)).toBe(`${root}/server.lock`);
+    expect(getPlayerLockDir(e)).toBe(`${root}/player.lock`);
+    expect(getPlayerTmpDir(e)).toBe(`${root}/player-tmp`);
   });
 
   it("記録（speech.jsonl）と配信キュー（speech/）は別物", () => {
@@ -62,6 +66,16 @@ describe("ランタイムルート配下のパス", () => {
   it("CLI のロック（speak.lock）とサーバーのロック（server.lock）は別物", () => {
     // 同居すると、サーバーの単一インスタンス化が CLI のロックを巻き添えにしてしまう
     expect(getLockDir(e)).not.toBe(getServerLockDir(e));
+  });
+
+  it("3つのロックはすべて別物", () => {
+    // player は server とも CLI とも独立に動く。共有すると、どれか1つの起動が他を締め出す
+    expect(new Set([getLockDir(e), getServerLockDir(e), getPlayerLockDir(e)]).size).toBe(3);
+  });
+
+  it("player の一時ディレクトリは配信キューと混ざらない", () => {
+    // 起動時にディレクトリごと消すので、混ざっていると未配信のキューを巻き添えにする
+    expect(getPlayerTmpDir(e)).not.toBe(getSpeechQueueDir(e));
   });
 
   it("CHATTER_AGENT_CONFIG は設定ファイルだけを上書きする", () => {

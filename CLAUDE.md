@@ -23,12 +23,13 @@ hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公�
 
 ## 現在の状態
 
-**Phase A は実機で確定した。次は Phase C（表示側アプリ）。**
+**Phase A は実機で確定した。配管は player（発話 CLI）まで通っている。次は Phase C（表示側アプリ）。**
 
 | ディレクトリ | 内容 | 状態 |
 |---|---|---|
 | `plugin/` | Claude Code プラグイン（bash hook） | **実装済み。** 実機で動作確認している |
-| `core/` | `chatter-agent-core`（CLI + WebSocket サーバー） | **実装済み。** `summarizer/`（AI要約、既定OFF）だけ未着手 |
+| `core/` | `chatter-agent-core`（CLI + WebSocket サーバー + 発話 CLI） | **実装済み。** `summarizer/`（AI要約、既定OFF）だけ未着手 |
+| `core/src/player/` | `chatter-agent-player`（WebSocket → AivisSpeech → 再生 → ack） | **実装済み**（[#11](https://github.com/schwarz9791/chatter-agent/issues/11)）。**プロトコルの参照実装。捨てない** |
 | `apps/chatter-mascot/` | 表示側アプリ（**Unity + UniVRM**。macOS 常駐 + Android XR を1プロジェクトで） | 未作成 |
 | `docs/` | 作業規約 | protocol / core / plugin / origin の4本 |
 | `.github/workflows/` | CI（typecheck / lint / format / bundle / test / verify） | 稼働中 |
@@ -39,7 +40,7 @@ hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公�
 [#12](https://github.com/schwarz9791/chatter-agent/issues/12)（Unity の土台と発話）→
 [#17](https://github.com/schwarz9791/chatter-agent/issues/17)（UniVRM の表示）→
 [#16](https://github.com/schwarz9791/chatter-agent/issues/16)（デスクトップ固有）/ [#25](https://github.com/schwarz9791/chatter-agent/issues/25)（XR 固有）。
-**#11 は Unity のビルドを待たずに音が出せる。**
+**#11 は完了した**（`core/src/player/`）。Unity のビルドを待たずに音が出る。
 
 **Phase A は実機で動作確認した**（Claude Code 2.1.233 / macOS）。delta が hook に届いてから
 `speech.jsonl` に載るまでの配管は**約 50ms** で十分速い。`MessageDisplay` は表示と同時に発火するので、
@@ -52,8 +53,18 @@ hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公�
 - **thinking でもサブエージェントでも発火しない**（読み上げ事故は起きない）
 - **メッセージの最終行だけは final flush でしか来ない。** 保留を外しても縮まらない遅延の下限で、`AskUserQuestion` の直前では数十秒に達する
 
-**Phase B は core 側だけ完了している。** `npm run verify:phase-b` で実サーバーを起動した確認までは通っているが、
-実際の表示側アプリを繋いだ確認は Phase C 待ち。
+**Phase B は完了している。** `npm run verify:phase-b` で実サーバーを起動した確認に加え、
+`npm run verify:player` が **hook → CLI → server → player** を通して音が鳴るところまで見ている。
+Unity 側（#12）は同じ契約を踏むので、player が「正しい挙動」の突き合わせ先になる。
+
+**実機（AivisSpeech + afplay）でも音が出るところまで確認した。** 耳で聞いた限りの体感:
+
+- **確定した文は表示とほぼ同時。** ただし**1文目だけは合成待ちで少し間が空く**（先読みが効くのは2文目以降なので構造的にそうなる）
+- **メッセージの最終行は、ターンがそのまま終わるなら遅れない。** `final` が即座に来るため。
+  遅れが問題になるのは手前でツールを呼んだときで、`AskUserQuestion` の直前が最悪（→「絶対に守ること」1）
+- **`**` などの記号は音にならない。** 合成エンジンが `audio_query` で読み仮名に変換する時点で落とすため。
+  [#2](https://github.com/schwarz9791/chatter-agent/issues/2) の実害は「記号が読まれる」ことではなく、
+  **文が変な所で割れて不自然な切れ目が入る**こと
 
 ## データフロー
 
@@ -73,6 +84,7 @@ speech/<seq>.json            配信キュー。1文1ファイル
 chatter-agent-server         キューを読んで WebSocket 配信。判断ロジックを持たない
   ▲                          ack を受けたぶんを消す
   │ ack
+  ├──▶ chatter-agent-player  発話 CLI。AivisSpeech → afplay。**プロトコルの参照実装**
   ▼
 chatter-mascot               表示側アプリ（Unity）。TTS → 再生 → VRM描画 / 表情 / モーション / リップシンク
 ```
@@ -145,12 +157,18 @@ npm run typecheck
 npm run lint
 npm run format
 npm run test:run
-npm run build            # CLI → plugin/bin/、server → dist/
+npm run build            # CLI → plugin/bin/、server と player → dist/
 
 npm run verify:phase-a   # spool → 記録 + 配信キュー（payload を実際の hook に食わせて確認）
 npm run verify:phase-b   # 配信キュー → WebSocket（実サーバーを起動して確認）
+npm run verify:player    # WebSocket → 合成 → 再生 → ack（エンジンも音も要らない。CI で回る）
 npm run start:server
+npm run start:player     # 耳で確認する。AivisSpeech を起動しておくこと
 ```
+
+**発話を耳で聞くには AivisSpeech.app を単体で起動する**（既定の接続先は `http://127.0.0.1:10101`）。
+cc-mascot が `--port 8564` で spawn するエンジンとは別物なので、そちらに繋ぐなら
+`CHATTER_AGENT_TTS_URL=http://127.0.0.1:8564` を渡す。
 
 **`plugin/bin/chatter-agent-speak.mjs` は git にコミットする成果物。** ソースを直したら
 `npm run build` してコミットすること（CI の `bundle` ジョブが一致を検証する）。

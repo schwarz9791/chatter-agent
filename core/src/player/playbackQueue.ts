@@ -20,43 +20,36 @@ import type { SpeechRecord } from "../core/types";
 
 export type ItemStatus = "pending" | "synthesizing" | "ready" | "playing" | "done";
 
-/**
- * `done` に落ちた理由。
- *
- * ★ 失敗も再生完了もすべて `done` を経由させること。失敗を見つけた瞬間に ack を打つと、
- *   先読みのぶんだけ head を追い越す。`ack` は累積で、server の `speechQueue.ackUpTo` は
- *   `seq <= upTo` を**ファイル名で範囲削除**するので、まだ喋っていない手前の entry が
- *   キューから消える。そこから先の任意の切断（1013 / ping 無応答 / Ctrl-C）で、
- *   その entry は再送されないまま恒久的に失われる。
- *
- *   失敗は「長さ 0 の再生」として扱う、と考えると迷わない。
- */
-export type DoneReason = "played" | "synthesis-failed" | "playback-failed" | "empty-text" | "stale";
-
 export interface QueueItem {
   record: SpeechRecord;
   status: ItemStatus;
   /** `ready` 以降で、合成済み WAV のパス */
   file: string | null;
-  doneReason: DoneReason | null;
   /** 合成を試みた回数。`synthesisAttempts` に達したら諦める */
   attempts: number;
 }
 
+/**
+ * ★ 非同期の結果を戻すイベントには必ず `epoch` を載せること。
+ *
+ *   `seq` は**エポックを跨いで一意ではない**。採番がやり直された直後に古い合成が返ってくると、
+ *   `seq` だけで突き合わせる実装は**同じ seq の新しい item に別の文の音声を入れる**。
+ *   「こんにちは」を鳴らしながら「さようなら」を ack する、という壊れ方をする。
+ */
 export type PlaybackEvent =
   | { kind: "received"; record: SpeechRecord }
-  | { kind: "synthesized"; seq: number; file: string }
-  | { kind: "synthesisFailed"; seq: number; reason: string }
-  | { kind: "played"; seq: number }
-  | { kind: "playbackFailed"; seq: number; reason: string }
+  | { kind: "synthesized"; epoch: number; seq: number; file: string }
+  | { kind: "synthesisFailed"; epoch: number; seq: number; reason: string }
+  | { kind: "played"; epoch: number; seq: number }
+  | { kind: "playbackFailed"; epoch: number; seq: number; reason: string }
   | { kind: "connected" }
   | { kind: "disconnected" }
   /** 時間で進む判断（stale / stall watchdog）のためだけに入れる */
   | { kind: "tick" };
 
 export type PlaybackCommand =
-  | { kind: "synthesize"; seq: number; text: string }
-  | { kind: "play"; seq: number; file: string }
+  | { kind: "synthesize"; epoch: number; seq: number; text: string }
+  | { kind: "play"; epoch: number; seq: number; file: string }
   /**
    * 累積 ack（「seq までは片付いた」）。
    *
@@ -65,8 +58,16 @@ export type PlaybackCommand =
    *   足りる。ドライバ側で最大値を覚えて次のティックに1回だけ送ること。
    */
   | { kind: "ack"; seq: number }
+  /**
+   * ドライバが溜めている未送出の ack を捨てる。
+   *
+   * ★ エポックが変わった瞬間に必ず出すこと。ドライバ側の間引きバッファ（20ms）に旧エポックの
+   *   ack が残っていると、**切断を挟まなくても**それが新しいサーバーに飛ぶ。`ackUpTo` は
+   *   ファイル名で範囲削除するので、まだ喋っていない entry が消える。
+   */
+  | { kind: "dropPendingAck" }
   /** 使い終わった（あるいは捨てた）WAV を消す */
-  | { kind: "discardFile"; seq: number; file: string }
+  | { kind: "discardFile"; epoch: number; seq: number; file: string }
   | { kind: "log"; message: string }
   | { kind: "warn"; message: string };
 
@@ -95,6 +96,14 @@ export function createDefaultOptions(): PlaybackOptions {
 
 export interface PlaybackState {
   readonly options: PlaybackOptions;
+  /**
+   * 現在のエポックの通し番号。採番がやり直されるたびに +1 する。
+   *
+   * これはプロセス内のカウンタで、サーバー由来ではない。`seq` がエポックを跨いで一意でない以上、
+   * **非同期の結果・一時ファイル・孤児・保留 ack のすべてを `(epoch, seq)` で識別する**必要がある。
+   * `SpeechRecord` に generation id が載れば、これはそのまま置き換えられる（→ #29）。
+   */
+  epoch: number;
   /** seq → item。順序は seq の昇順で都度求める（挿入順とは限らない） */
   items: Map<number, QueueItem>;
   /**
@@ -108,22 +117,36 @@ export interface PlaybackState {
    *   `server/dispatcher.ts` が `delivered` を水位ではなく集合にしたのと同じ罠の、鏡像。
    */
   seen: Set<string>;
-  /** 受け取った最大の seq。エポック変化の検出に使う */
+  /** 受け取った最大の seq と `ts`（ISO8601 なので辞書順＝時刻順）。**エポック変化の検出に使う** */
   maxSeqSeen: number;
+  maxTsSeen: string;
+  /**
+   * **消費した**（＝ack を打った）最大の seq。`seen` から溢れた再送の検出に使う。
+   *
+   * ★ 受信ベースの `maxSeqSeen` と役割を分けること。エポック変化は「seq が戻ったのに ts は
+   *   進んだ」で見るので受信ベースが要る。一方「seen から溢れた消費済みの再送」は、
+   *   消費した範囲でしか起きないので消費ベースで判定する。1つの水位で兼ねると、
+   *   接続直後の追いつきが seq 昇順で来なかっただけのフレームを**捨てて無音になる**。
+   */
+  maxSeqConsumed: number;
   /**
    * 切断中に確定した ack。累積 ack なので最大値だけ意味がある。
    *
-   * ★ エポック変化を観測したら**捨てること**。旧エポックの `ack(500)` を新エポックの
-   *   サーバーに打つと、`dispatcher.ack` のクランプは `delivered` の範囲に値を押さえるだけで、
-   *   `ackUpTo` はファイル名で範囲削除するため、**まだ喋っていない seq 1, 2 が消える**。
+   * ★ どのエポックのものかを持つこと。旧エポックの `ack(500)` を新エポックのサーバーに打つと、
+   *   `dispatcher.ack` のクランプは `delivered` の範囲に値を押さえるだけで、`ackUpTo` は
+   *   ファイル名で範囲削除するため、**まだ喋っていない seq 1, 2 が消える**。
+   *   ws は必ず `open` → `message` の順に発火するので、`connected` の時点では
+   *   「新エポックの最初のフレーム」はまだ届いていない。エポックの一致を見るしか止める手が無い。
    */
-  pendingAck: number | null;
+  pendingAck: { epoch: number; seq: number } | null;
   connected: boolean;
   /**
-   * エポックリセットで items から外した、再生中の item。
+   * エポックリセットで items から外した、再生中の item。キーは `${epoch}:${seq}`。
    * 音は最後まで流すが、完了しても ack しない（もう別のエポックなので意味を持たない）。
    */
-  orphans: Map<number, string | null>;
+  orphans: Map<string, string | null>;
+  /** head の走査結果。null = 未計算、-1 = 空。`trackInsert` / `trackDelete` が維持する */
+  headCache: number | null;
   /** stall watchdog: 現在の head と、それが head になった時刻 */
   headSeq: number | null;
   headSince: number;
@@ -133,12 +156,16 @@ export interface PlaybackState {
 export function createPlaybackState(options: PlaybackOptions = createDefaultOptions()): PlaybackState {
   return {
     options,
+    epoch: 0,
     items: new Map(),
     seen: new Set(),
     maxSeqSeen: 0,
+    maxTsSeen: "",
+    maxSeqConsumed: 0,
     pendingAck: null,
     connected: false,
     orphans: new Map(),
+    headCache: null,
     headSeq: null,
     headSince: 0,
     stallWarned: false,
@@ -149,17 +176,54 @@ function seenKey(record: SpeechRecord): string {
   return `${record.seq}:${record.ts}`;
 }
 
-/** seq 昇順。Map の挿入順は受信順であって seq 順とは限らない（再接続の追いつきなど） */
-function sortedSeqs(state: PlaybackState): number[] {
-  return [...state.items.keys()].sort((a, b) => a - b);
+/**
+ * 最小の seq を `k` 件だけ、昇順で返す。
+ *
+ * ★ 全体をソートしないこと。必要なのは窓のぶん（既定 4 件）だけで、`items` は最大
+ *   `speechQueueMaxEntries`（既定 500、上限なし）まで育つ。接続直後の追いつきでは
+ *   フレームごとに `step()` が回るので、O(n log n) を毎回払うとイベントループが止まる。
+ */
+function smallestSeqs(state: PlaybackState, k: number): number[] {
+  if (k <= 0) return [];
+  const out: number[] = [];
+  for (const seq of state.items.keys()) {
+    if (out.length < k) {
+      out.push(seq);
+      out.sort((a, b) => a - b);
+      continue;
+    }
+    if (seq >= out[out.length - 1]) continue;
+    out[out.length - 1] = seq;
+    out.sort((a, b) => a - b);
+  }
+  return out;
 }
 
+/**
+ * head（最小 seq の item）。
+ *
+ * ★ 呼ばれる回数が多い（`step()` の1周で3回 + `checkStall`）ので、走査結果を持ち回る。
+ *   挿入では最小値を更新するだけ、削除では head が消えたときにだけ再走査する。
+ */
 function headItem(state: PlaybackState): QueueItem | undefined {
-  let min = Infinity;
-  for (const seq of state.items.keys()) if (seq < min) min = seq;
-  return min === Infinity ? undefined : state.items.get(min);
+  if (state.headCache === null) {
+    let min = Infinity;
+    for (const seq of state.items.keys()) if (seq < min) min = seq;
+    state.headCache = min === Infinity ? -1 : min;
+  }
+  return state.headCache < 0 ? undefined : state.items.get(state.headCache);
 }
 
+function trackInsert(state: PlaybackState, seq: number): void {
+  if (state.headCache === null) return;
+  if (state.headCache < 0 || seq < state.headCache) state.headCache = seq;
+}
+
+function trackDelete(state: PlaybackState, seq: number): void {
+  if (state.headCache === seq) state.headCache = null;
+}
+
+/** 消費した（＝ack を打った）ことを覚える。エポック判定の基準はここだけで進む */
 function remember(state: PlaybackState, record: SpeechRecord): void {
   const key = seenKey(record);
   // 追い出しは**挿入順**（Set のイテレーション順）。数値の最小から追い出すと、
@@ -171,6 +235,8 @@ function remember(state: PlaybackState, record: SpeechRecord): void {
     if (oldest.done) break;
     state.seen.delete(oldest.value);
   }
+
+  if (record.seq > state.maxSeqConsumed) state.maxSeqConsumed = record.seq;
 }
 
 function isStale(state: PlaybackState, item: QueueItem, now: number): boolean {
@@ -181,9 +247,21 @@ function isStale(state: PlaybackState, item: QueueItem, now: number): boolean {
   return now - ts > maxAgeMs;
 }
 
-function finish(item: QueueItem, reason: DoneReason): void {
+/**
+ * 終端へ落とす。
+ *
+ * ★ 失敗も再生完了もすべてここを通すこと。失敗を見つけた瞬間に ack を打つと、
+ *   先読みのぶんだけ head を追い越す。`ack` は累積で、server の `speechQueue.ackUpTo` は
+ *   `seq <= upTo` を**ファイル名で範囲削除**するので、まだ喋っていない手前の entry が
+ *   キューから消え、そこから先の任意の切断（1013 / ping 無応答 / Ctrl-C）で失われる。
+ *   失敗は「長さ 0 の再生」として扱う、と考えると迷わない。
+ */
+function finish(item: QueueItem): void {
   item.status = "done";
-  item.doneReason = reason;
+}
+
+function orphanKey(epoch: number, seq: number): string {
+  return `${epoch}:${seq}`;
 }
 
 /** ack を出すか、切断中なら溜める */
@@ -192,17 +270,25 @@ function emitAck(state: PlaybackState, seq: number, commands: PlaybackCommand[])
     commands.push({ kind: "ack", seq });
     return;
   }
-  state.pendingAck = state.pendingAck === null ? seq : Math.max(state.pendingAck, seq);
+  // 溜めるときはエポックごと覚える。エポックが変われば下の resetEpoch が捨てる
+  const held = state.pendingAck;
+  state.pendingAck =
+    held !== null && held.epoch === state.epoch
+      ? { epoch: state.epoch, seq: Math.max(held.seq, seq) }
+      : { epoch: state.epoch, seq };
 }
 
 /** 古くなった pending / ready を落とす。再生中には触らない（もう鳴っている） */
 function markStale(state: PlaybackState, now: number, commands: PlaybackCommand[]): boolean {
+  // 既定（0 = 無効）では判定するものが無い。step() のループから毎回呼ばれるので入口で抜ける
+  if (state.options.maxAgeMs <= 0) return false;
+
   let changed = false;
   for (const item of state.items.values()) {
     if (item.status !== "pending" && item.status !== "ready") continue;
     if (!isStale(state, item, now)) continue;
     commands.push({ kind: "log", message: `seq=${item.record.seq} は古いので飛ばします` });
-    finish(item, "stale");
+    finish(item);
     changed = true;
   }
   return changed;
@@ -220,8 +306,9 @@ function consumeHead(state: PlaybackState, commands: PlaybackCommand[]): boolean
     if (!head || head.status !== "done") break;
 
     const { seq } = head.record;
-    if (head.file) commands.push({ kind: "discardFile", seq, file: head.file });
+    if (head.file) commands.push({ kind: "discardFile", epoch: state.epoch, seq, file: head.file });
     state.items.delete(seq);
+    trackDelete(state, seq);
     remember(state, head.record);
     acked = seq;
   }
@@ -236,7 +323,7 @@ function startPlayback(state: PlaybackState, commands: PlaybackCommand[]): boole
   const head = headItem(state);
   if (!head || head.status !== "ready" || !head.file) return false;
   head.status = "playing";
-  commands.push({ kind: "play", seq: head.record.seq, file: head.file });
+  commands.push({ kind: "play", epoch: state.epoch, seq: head.record.seq, file: head.file });
   return true;
 }
 
@@ -249,7 +336,7 @@ function startPlayback(state: PlaybackState, commands: PlaybackCommand[]): boole
  *   **音は出るのに先読みだけが恒久的に無効化される**（しかも気づけない）。
  */
 function fillWindow(state: PlaybackState, commands: PlaybackCommand[]): boolean {
-  const window = sortedSeqs(state).slice(0, state.options.lookahead + 1);
+  const window = smallestSeqs(state, state.options.lookahead + 1);
   let changed = false;
 
   for (const seq of window) {
@@ -260,14 +347,14 @@ function fillWindow(state: PlaybackState, commands: PlaybackCommand[]): boolean 
 
     // 約物だけの断片は合成に出さない。/audio_query は空の WAV か 4xx を返す
     if (!hasSpeakableText(item.record.text)) {
-      finish(item, "empty-text");
+      finish(item);
       changed = true;
       continue;
     }
 
     item.status = "synthesizing";
     item.attempts++;
-    commands.push({ kind: "synthesize", seq, text: item.record.text });
+    commands.push({ kind: "synthesize", epoch: state.epoch, seq, text: item.record.text });
     changed = true;
   }
 
@@ -327,24 +414,32 @@ function step(state: PlaybackState, now: number, commands: PlaybackCommand[]): v
 function resetEpoch(state: PlaybackState, commands: PlaybackCommand[]): void {
   commands.push({ kind: "warn", message: "seq の採番がやり直されました。再生キューの状態をリセットします" });
 
+  const previous = state.epoch;
+  state.epoch++;
+
   for (const [seq, item] of state.items) {
     if (item.status === "playing") {
-      state.orphans.set(seq, item.file);
+      state.orphans.set(orphanKey(previous, seq), item.file);
     } else if (item.file) {
-      commands.push({ kind: "discardFile", seq, file: item.file });
+      commands.push({ kind: "discardFile", epoch: previous, seq, file: item.file });
     }
     state.items.delete(seq);
+    trackDelete(state, seq);
   }
 
   state.seen.clear();
   state.maxSeqSeen = 0;
+  state.maxTsSeen = "";
+  state.maxSeqConsumed = 0;
   state.pendingAck = null;
   state.headSeq = null;
   state.stallWarned = false;
+  // ドライバ側の間引きバッファに残っている旧エポックの ack も落とす
+  commands.push({ kind: "dropPendingAck" });
 }
 
 function onReceived(state: PlaybackState, record: SpeechRecord, commands: PlaybackCommand[]): void {
-  const { seq } = record;
+  const { seq, ts } = record;
   const key = seenKey(record);
 
   if (state.seen.has(key)) {
@@ -358,37 +453,56 @@ function onReceived(state: PlaybackState, record: SpeechRecord, commands: Playba
   const existing = state.items.get(seq);
   if (existing) {
     // 処理中のものの再送。同じ ts なら黙って捨てる（合成をやり直す意味が無い）
-    if (existing.record.ts === record.ts) return;
+    if (existing.record.ts === ts) return;
     // 同じ seq で別の ts ＝ エポックが変わっている
     resetEpoch(state, commands);
-  } else if (seq <= state.maxSeqSeen) {
-    // 知らない (seq, ts) なのに seq が戻っている ＝ エポックが変わっている
+  } else if (seq <= state.maxSeqSeen && ts > state.maxTsSeen) {
+    // seq が戻っているのに ts は進んでいる ＝ 採番がやり直された
     resetEpoch(state, commands);
+  } else if (seq <= state.maxSeqConsumed) {
+    // ★ 消費済みの範囲なのに `seen` に無い ＝ 上限から溢れたキーの再送。
+    //   ここを resetEpoch に落とすと、追いつきが `seenCapacity` を超えるたびに状態を捨てて
+    //   **同じ文を2回喋る**。`seenCapacity` はサーバー側の設定とズレうるので溢れは起きる
+    emitAck(state, seq, commands);
+    return;
   }
 
-  state.items.set(seq, { record, status: "pending", file: null, doneReason: null, attempts: 0 });
+  state.items.set(seq, { record, status: "pending", file: null, attempts: 0 });
+  trackInsert(state, seq);
   if (seq > state.maxSeqSeen) state.maxSeqSeen = seq;
+  if (ts > state.maxTsSeen) state.maxTsSeen = ts;
+
+  // ここまで来たなら、このフレームは今のエポックのもの。溜めてある ack を出してよい
+  flushPendingAck(state, commands);
+}
+
+/**
+ * 切断中に溜めた ack を、**エポックが変わっていないと確認できてから**送る。
+ *
+ * ★ `connected` では呼ばない（上の case のコメント参照）。呼び出し口は
+ *   「今のエポックのフレームを受け入れた直後」の1箇所だけにする。
+ */
+function flushPendingAck(state: PlaybackState, commands: PlaybackCommand[]): void {
+  const held = state.pendingAck;
+  if (held === null || !state.connected) return;
+  state.pendingAck = null;
+  if (held.epoch === state.epoch) commands.push({ kind: "ack", seq: held.seq });
 }
 
 /** 孤児（エポックリセットで items から外した再生中の item）の後始末。扱ったら true */
-function settleOrphan(state: PlaybackState, seq: number, commands: PlaybackCommand[]): boolean {
-  if (!state.orphans.has(seq)) return false;
-  const file = state.orphans.get(seq);
-  if (file) commands.push({ kind: "discardFile", seq, file });
-  state.orphans.delete(seq);
+function settleOrphan(state: PlaybackState, epoch: number, seq: number, commands: PlaybackCommand[]): boolean {
+  const key = orphanKey(epoch, seq);
+  if (!state.orphans.has(key)) return false;
+  const file = state.orphans.get(key);
+  if (file) commands.push({ kind: "discardFile", epoch, seq, file });
+  state.orphans.delete(key);
   return true;
 }
 
 /**
- * イベントを1つ入れて、実行すべきコマンドを受け取る。
- *
- * `state` は in-place で更新され、同じ参照が返る（呼び出し側の書き味を揃えるためだけの戻り値）。
+ * イベントを1つ入れて、実行すべきコマンドを受け取る。`state` は in-place で更新される。
  */
-export function reduce(
-  state: PlaybackState,
-  event: PlaybackEvent,
-  now: number,
-): { state: PlaybackState; commands: PlaybackCommand[] } {
+export function reduce(state: PlaybackState, event: PlaybackEvent, now: number): PlaybackCommand[] {
   const commands: PlaybackCommand[] = [];
 
   switch (event.kind) {
@@ -397,10 +511,12 @@ export function reduce(
       break;
 
     case "synthesized": {
-      const item = state.items.get(event.seq);
+      // ★ エポックを先に見る。採番のやり直しを跨いだ結果を新しい item に入れると、
+      //   別の文の音声で ready になり、鳴っている内容と ack がずれる
+      const item = event.epoch === state.epoch ? state.items.get(event.seq) : undefined;
       // エポックリセットや stale で消えた後に合成が返ってきた。WAV だけ捨てる
       if (!item || item.status !== "synthesizing") {
-        commands.push({ kind: "discardFile", seq: event.seq, file: event.file });
+        commands.push({ kind: "discardFile", epoch: event.epoch, seq: event.seq, file: event.file });
         break;
       }
       item.status = "ready";
@@ -409,7 +525,7 @@ export function reduce(
     }
 
     case "synthesisFailed": {
-      const item = state.items.get(event.seq);
+      const item = event.epoch === state.epoch ? state.items.get(event.seq) : undefined;
       if (!item || item.status !== "synthesizing") break;
       if (item.attempts < state.options.synthesisAttempts) {
         // pending へ戻せば、次の step で窓が拾い直す
@@ -417,34 +533,36 @@ export function reduce(
         break;
       }
       commands.push({ kind: "warn", message: `seq=${event.seq} の合成に失敗したので飛ばします: ${event.reason}` });
-      finish(item, "synthesis-failed");
+      finish(item);
       break;
     }
 
     case "played": {
-      if (settleOrphan(state, event.seq, commands)) break;
-      const item = state.items.get(event.seq);
+      if (settleOrphan(state, event.epoch, event.seq, commands)) break;
+      const item = event.epoch === state.epoch ? state.items.get(event.seq) : undefined;
       if (!item || item.status !== "playing") break;
-      finish(item, "played");
+      finish(item);
       break;
     }
 
     case "playbackFailed": {
-      if (settleOrphan(state, event.seq, commands)) break;
-      const item = state.items.get(event.seq);
+      if (settleOrphan(state, event.epoch, event.seq, commands)) break;
+      const item = event.epoch === state.epoch ? state.items.get(event.seq) : undefined;
       if (!item || item.status !== "playing") break;
       // 再生はリトライしない。途中まで鳴った文がもう一度頭から鳴る
       commands.push({ kind: "warn", message: `seq=${event.seq} の再生に失敗しました: ${event.reason}` });
-      finish(item, "playback-failed");
+      finish(item);
       break;
     }
 
     case "connected":
+      // ★ ここで保留 ack を流さないこと。ws は必ず `open` → `message` の順に発火するので、
+      //   この時点では**サーバーが作り直されたかどうかを知る手段が無い**。
+      //   旧エポックの `ack(500)` を新しいサーバーに打つと、`dispatcher.ack` は
+      //   `max(delivered ≤ 500)` にクランプし、`ackUpTo` はファイル名で範囲削除するため、
+      //   **配信済み・未発話の entry**（長い切断なら最大 500 件）が消えて復旧できない。
+      //   最初のフレームでエポックが変わっていないと確認できてから `flushPendingAck` で流す
       state.connected = true;
-      if (state.pendingAck !== null) {
-        commands.push({ kind: "ack", seq: state.pendingAck });
-        state.pendingAck = null;
-      }
       break;
 
     case "disconnected":
@@ -458,5 +576,5 @@ export function reduce(
   }
 
   step(state, now, commands);
-  return { state, commands };
+  return commands;
 }

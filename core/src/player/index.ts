@@ -18,13 +18,21 @@ import { acquireLock } from "../core/lock";
 import { getPlayerLockDir, getPlayerTmpDir } from "../core/paths";
 import { createAudioPlayer, playbackTimeoutMs } from "./audioPlayer";
 import { createSpeechClient, deriveServerUrl } from "./client";
+import type { SpeechClient } from "./client";
 import { createDefaultOptions, createPlaybackState, reduce } from "./playbackQueue";
 import type { PlaybackCommand, PlaybackEvent } from "./playbackQueue";
 import { parseSpeechFrame } from "./speechFrame";
 import { createVoicevoxClient, flattenStyles, hasStyle } from "./voicevoxClient";
 import type { Speaker } from "./voicevoxClient";
 
-/** `server/index.ts` と同じ形。どのリソースが閉じられなかったか追えるようにする */
+/**
+ * 終了処理の1ステップの制限時間。`server/index.ts` と同じ形で、どのリソースが閉じられなかったかを
+ * 名指しで報告するために分けてある。
+ *
+ * ★ `client.close()` が持つ terminate() 救済の猶予（1秒）より大きくすること。ここが猶予以下だと、
+ *   `step()` の watchdog が先に諦めて次へ進み、応答しないソケットを terminate する経路に
+ *   到達できない。`SHUTDOWN_TIMEOUT_MS`（全体の上限）は超えないこと。
+ */
 const SHUTDOWN_STEP_TIMEOUT_MS = 2_500;
 const SHUTDOWN_TIMEOUT_MS = 6_000;
 
@@ -119,13 +127,37 @@ async function main(): Promise<void> {
   });
 
   let stopping = false;
+  let client: SpeechClient | undefined;
+  let tick: NodeJS.Timeout | undefined;
+
+  // ★ 終了処理の登録は `waitForEngine` より**前**に置くこと。後ろに置くと、`stopping` に書き込む
+  //   唯一の場所がこのクロージャなので `while (!stopping())` が実質 `while(true)` になり、
+  //   下の `if (stopping) return` も決して発火しない。さらに、エンジンを起動し忘れて待っている間
+  //   （ドキュメントが案内している順序）に Ctrl-C すると、シグナルハンドラがまだ存在しないので
+  //   `lock.release()` も `audio.cleanup()` も走らず、`player.lock/` と `player-tmp/` が残る。
+  //   `unhandledRejection` / `uncaughtException` のガードもその間ずっと不在になる
+  installShutdown(async () => {
+    stopping = true;
+    if (tick) clearInterval(tick);
+    const socket = client;
+    if (socket) await step("websocket client", () => socket.close());
+    // 親が exit しても afplay は死なない。プロセスが消えた後も音が鳴り続ける
+    audio.stopAll();
+    audio.cleanup();
+    lock.release();
+  });
+
   await waitForEngine(tts, config.get("ttsSpeakerId"), () => stopping);
   if (stopping) return;
 
-  /** seq ごとの再生タイムアウト。合成した WAV の実長から決まる */
-  const playbackTimeouts = new Map<number, number>();
+  /**
+   * 再生タイムアウト。合成した WAV の実長から決まる。
+   * キーは `${epoch}:${seq}` — `seq` は採番のやり直しを跨いで一意でない
+   */
+  const playbackTimeouts = new Map<string, number>();
+  const timeoutKey = (epoch: number, seq: number) => `${epoch}:${seq}`;
 
-  const client = createSpeechClient({
+  client = createSpeechClient({
     url,
     onFrame: (raw) => {
       const record = parseSpeechFrame(raw);
@@ -141,23 +173,28 @@ async function main(): Promise<void> {
   });
 
   function dispatch(event: PlaybackEvent): void {
-    const { commands } = reduce(state, event, Date.now());
+    const commands = reduce(state, event, Date.now());
     for (const command of commands) execute(command);
   }
 
   function execute(command: PlaybackCommand): void {
     switch (command.kind) {
       case "synthesize":
-        void synthesize(command.seq, command.text);
+        void synthesize(command.epoch, command.seq, command.text);
         break;
       case "play":
-        void play(command.seq, command.file);
+        void play(command.epoch, command.seq, command.file);
         break;
       case "ack":
-        client.ack(command.seq);
+        // client の生成前にコマンドが出ることは無いが、`installShutdown` を先に登録した都合で
+        // 型の上では undefined になりうる
+        client?.ack(command.seq);
+        break;
+      case "dropPendingAck":
+        client?.dropPendingAck();
         break;
       case "discardFile":
-        playbackTimeouts.delete(command.seq);
+        playbackTimeouts.delete(timeoutKey(command.epoch, command.seq));
         audio.discard(command.file);
         break;
       case "log":
@@ -169,27 +206,30 @@ async function main(): Promise<void> {
     }
   }
 
-  async function synthesize(seq: number, text: string): Promise<void> {
+  async function synthesize(epoch: number, seq: number, text: string): Promise<void> {
     try {
       const wav = await tts.synthesize(text);
+      // ★ WAV を書き終えてから Map に入れること。`write` が投げる（ENOSPC、終了処理で
+      //   一時dir が消える）と item は `file === null` で done に落ち、`discardFile` が
+      //   出ないので、先に set していたエントリが**永久に残る**
+      const file = audio.write(epoch, seq, wav);
       // ★ 再生のタイムアウトは WAV の実長から決める。固定値だと長文が切れるか、
       //   ハングを見逃すかのどちらかになる
-      playbackTimeouts.set(seq, playbackTimeoutMs(wav));
-      const file = audio.write(seq, wav);
-      dispatch({ kind: "synthesized", seq, file });
+      playbackTimeouts.set(timeoutKey(epoch, seq), playbackTimeoutMs(wav));
+      dispatch({ kind: "synthesized", epoch, seq, file });
     } catch (err) {
-      dispatch({ kind: "synthesisFailed", seq, reason: err instanceof Error ? err.message : String(err) });
+      dispatch({ kind: "synthesisFailed", epoch, seq, reason: err instanceof Error ? err.message : String(err) });
     }
   }
 
-  async function play(seq: number, file: string): Promise<void> {
+  async function play(epoch: number, seq: number, file: string): Promise<void> {
     // 合成を経ずにここへ来ることは無いが、取り違えたときに固定値へ倒れる方が安全
-    const timeout = playbackTimeouts.get(seq) ?? playbackTimeoutMs(new ArrayBuffer(0));
+    const timeout = playbackTimeouts.get(timeoutKey(epoch, seq)) ?? playbackTimeoutMs(new ArrayBuffer(0));
     try {
       await audio.play(file, timeout);
-      dispatch({ kind: "played", seq });
+      dispatch({ kind: "played", epoch, seq });
     } catch (err) {
-      dispatch({ kind: "playbackFailed", seq, reason: err instanceof Error ? err.message : String(err) });
+      dispatch({ kind: "playbackFailed", epoch, seq, reason: err instanceof Error ? err.message : String(err) });
     }
   }
 
@@ -198,19 +238,9 @@ async function main(): Promise<void> {
   // ★ unref しないこと。player は常駐プロセスだが、server と違って listen しているものが無い。
   //   接続が切れている間はこれが唯一の生存理由になり、unref すると黙って終了する
   //   （`server/index.ts` の poll が unref できるのは WebSocketServer が参照を持つため）
-  const tick = setInterval(() => dispatch({ kind: "tick" }), TICK_INTERVAL_MS);
+  tick = setInterval(() => dispatch({ kind: "tick" }), TICK_INTERVAL_MS);
 
   console.log("[Player] Ready");
-
-  installShutdown(async () => {
-    stopping = true;
-    clearInterval(tick);
-    await step("websocket client", () => client.close());
-    // 親が exit しても afplay は死なない。プロセスが消えた後も音が鳴り続ける
-    audio.stopAll();
-    audio.cleanup();
-    lock.release();
-  });
 }
 
 /**

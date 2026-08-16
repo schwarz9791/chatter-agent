@@ -100,4 +100,21 @@ describe("既定引数", () => {
   it("引数なしでも実環境から解決できる", () => {
     expect(getSpoolDir().endsWith(path.join("chatter-agent", "spool"))).toBe(true);
   });
+
+  it("★ 既定引数は呼び出しのたびに評価される（import 時に homedir を固定しない）", () => {
+    // `currentPathEnv()` をモジュールスコープへ巻き上げると、プロセス起動後に
+    // XDG_CONFIG_HOME を差し替えても効かなくなる。`endsWith` を見るだけのテストでは
+    // その壊し方を検出できないので、環境を差し替えて確かめる
+    const before = process.env.XDG_CONFIG_HOME;
+    try {
+      process.env.XDG_CONFIG_HOME = "/tmp/one";
+      expect(getSpoolDir()).toBe(path.join("/tmp/one", "chatter-agent", "spool"));
+
+      process.env.XDG_CONFIG_HOME = "/tmp/two";
+      expect(getSpoolDir()).toBe(path.join("/tmp/two", "chatter-agent", "spool"));
+    } finally {
+      if (before === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = before;
+    }
+  });
 });

@@ -191,6 +191,50 @@ const parseStringList: Parser<string[]> = (raw) => {
 };
 
 /**
+ * `setTimeout` / `AbortSignal.timeout` が受け付ける上限（2^31-1）。
+ *
+ * ★ これを超えると静かに壊れる。Node 24 実測: `AbortSignal.timeout(4294967295)` は
+ *   `TimeoutOverflowWarning` を出して **1ms に化け**（全リクエストが即 abort し、
+ *   「エンジンがタイムアウトしました」という**設定ではなくエンジンを指すメッセージ**が出る）、
+ *   `AbortSignal.timeout(99999999999)` は `RangeError` を投げる（`waitForEngine` が
+ *   永久にループして接続しない）。「実質無制限」のつもりで大きい数を書くと踏む
+ */
+const MAX_TIMER_MS = 2_147_483_647;
+
+const parseTimeoutMs: Parser<number> = (raw) => {
+  const n = toInt(raw);
+  return n !== undefined && n >= 1 && n <= MAX_TIMER_MS ? n : undefined;
+};
+
+/**
+ * 再生コマンドの引数。
+ *
+ * ★ `parseStringList` を流用しないこと。あれは**集合**（`allowedOrigins`）用で、空入力に対して
+ *   `undefined` ではなく `[]` を返す。`collect()` は `undefined` のときだけ既定値へ落とすので、
+ *   `CHATTER_AGENT_PLAYER_ARGS=`（ラッパーや CI で普通に起きる）が既定の `["{file}"]` を
+ *   上書きし、`afplay` が引数なしで起動して**全文が再生に失敗し、ack されてキューから消える**。
+ *   位置引数として意味を成すかどうかをここで検証する。
+ */
+const parsePlayerArgs: Parser<string[]> = (raw) => {
+  let items: unknown[];
+  if (typeof raw === "string") items = raw.split(",");
+  else if (Array.isArray(raw)) items = raw;
+  else return undefined;
+
+  const out: string[] = [];
+  for (const item of items) {
+    if (typeof item !== "string") return undefined;
+    const trimmed = item.trim();
+    if (trimmed) out.push(trimmed);
+  }
+
+  // 引数ゼロ、あるいは WAV のパスを渡す先が無い並びは設定ミス。既定値に倒して警告を出す
+  if (out.length === 0) return undefined;
+  if (!out.some((arg) => arg.includes("{file}"))) return undefined;
+  return out;
+};
+
+/**
  * スキームを絞った URL のパーサを作る。
  *
  * 素通しにすると、`localhost:10101`（スキーム忘れ）や末尾スラッシュ付きが
@@ -231,9 +275,9 @@ const SPECS = {
   ttsBaseUrl: { env: "CHATTER_AGENT_TTS_URL", parse: makeUrlParser(["http:", "https:"]) },
   ttsSpeakerId: { env: "CHATTER_AGENT_TTS_SPEAKER_ID", parse: parseNonNegativeInt },
   synthesisLookahead: { env: "CHATTER_AGENT_SYNTHESIS_LOOKAHEAD", parse: parseNonNegativeInt },
-  synthesisTimeoutMs: { env: "CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS", parse: parsePositiveInt },
+  synthesisTimeoutMs: { env: "CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS", parse: parseTimeoutMs },
   playerCommand: { env: "CHATTER_AGENT_PLAYER_COMMAND", parse: parseNonEmptyString },
-  playerArgs: { env: "CHATTER_AGENT_PLAYER_ARGS", parse: parseStringList },
+  playerArgs: { env: "CHATTER_AGENT_PLAYER_ARGS", parse: parsePlayerArgs },
   playerServerUrl: { env: "CHATTER_AGENT_PLAYER_SERVER_URL", parse: makeUrlParser(["ws:", "wss:"]) },
   speechMaxAgeMs: { env: "CHATTER_AGENT_SPEECH_MAX_AGE_MS", parse: parseNonNegativeInt },
 } as const satisfies { [K in ConfigKey]: { env: string; parse: Parser<ChatterAgentConfig[K]> } };

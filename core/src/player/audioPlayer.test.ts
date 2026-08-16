@@ -96,14 +96,14 @@ describe("playbackTimeoutMs", () => {
 describe("write / discard", () => {
   it("seq をゼロ埋めしたファイル名で書く（配信キューと同じ規則）", () => {
     const p = player("/usr/bin/true", []);
-    const file = p.write(42, wav(0.1));
-    expect(path.basename(file)).toBe("000000000042.wav");
+    const file = p.write(0, 42, wav(0.1));
+    expect(path.basename(file)).toBe("0-000000000042.wav");
     expect(fs.existsSync(file)).toBe(true);
   });
 
   it("消したファイルを二度消しても落ちない", () => {
     const p = player("/usr/bin/true", []);
-    const file = p.write(1, wav(0.1));
+    const file = p.write(0, 1, wav(0.1));
     p.discard(file);
     p.discard(file);
     expect(fs.existsSync(file)).toBe(false);
@@ -111,7 +111,7 @@ describe("write / discard", () => {
 
   it("reset は前回の残骸を消す", () => {
     const p = player("/usr/bin/true", []);
-    p.write(1, wav(0.1));
+    p.write(0, 1, wav(0.1));
     p.reset();
     expect(fs.readdirSync(tmpDir)).toEqual([]);
   });
@@ -120,19 +120,19 @@ describe("write / discard", () => {
 describe("play", () => {
   it("正常終了で解決する", async () => {
     const p = player("/usr/bin/true", ["{file}"]);
-    const file = p.write(1, wav(0.1));
+    const file = p.write(0, 1, wav(0.1));
     await expect(p.play(file, 5000)).resolves.toBeUndefined();
   });
 
   it("異常終了は理由つきで reject する", async () => {
     const p = player("/usr/bin/false", ["{file}"]);
-    const file = p.write(1, wav(0.1));
+    const file = p.write(0, 1, wav(0.1));
     await expect(p.play(file, 5000)).rejects.toThrow("異常終了");
   });
 
   it("★ コマンドが無ければ error イベントで決着する（exit だけ待つと永久に止まる）", async () => {
     const p = player("/nonexistent/player", ["{file}"]);
-    const file = p.write(1, wav(0.1));
+    const file = p.write(0, 1, wav(0.1));
     await expect(p.play(file, 5000)).rejects.toThrow("起動できません");
   });
 
@@ -140,7 +140,7 @@ describe("play", () => {
     // Bluetooth が切れた afplay は戻ってこないことがある。head-of-line blocking なので
     // 1回のハングで以後すべてが無音になる
     const p = player("/bin/sleep", ["30"]);
-    const file = p.write(1, wav(0.1));
+    const file = p.write(0, 1, wav(0.1));
     await expect(p.play(file, 200)).rejects.toThrow("終わりませんでした");
   });
 
@@ -148,13 +148,13 @@ describe("play", () => {
     // cat は引数のファイルを読むので、置換に失敗していれば
     // "{file}" という存在しないパスとして異常終了する
     const p = player("/bin/cat", ["{file}"]);
-    const file = p.write(7, wav(0.1));
+    const file = p.write(0, 7, wav(0.1));
     await expect(p.play(file, 5000)).resolves.toBeUndefined();
   });
 
   it("stopAll は再生中のプロセスを止める", async () => {
     const p = player("/bin/sleep", ["30"]);
-    const file = p.write(1, wav(0.1));
+    const file = p.write(0, 1, wav(0.1));
     const playing = p.play(file, 30_000);
     // 起動を待ってから止める
     await new Promise((r) => setTimeout(r, 50));
@@ -166,7 +166,7 @@ describe("play", () => {
 describe("cleanup", () => {
   it("一時ディレクトリごと消す", () => {
     const p = player("/usr/bin/true", []);
-    p.write(1, wav(0.1));
+    p.write(0, 1, wav(0.1));
     p.cleanup();
     expect(fs.existsSync(tmpDir)).toBe(false);
   });

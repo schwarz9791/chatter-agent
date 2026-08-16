@@ -30,7 +30,7 @@ function start(overrides: Partial<PlaybackOptions> = {}): PlaybackState {
 /** イベントを順に流し、出たコマンドを全部集める */
 function run(state: PlaybackState, events: PlaybackEvent[], now = T0): PlaybackCommand[] {
   const out: PlaybackCommand[] = [];
-  for (const event of events) out.push(...reduce(state, event, now).commands);
+  for (const event of events) out.push(...reduce(state, event, now));
   return out;
 }
 
@@ -46,8 +46,8 @@ function speak(state: PlaybackState, seq: number, now = T0): PlaybackCommand[] {
   return run(
     state,
     [
-      { kind: "synthesized", seq, file: `/tmp/${seq}.wav` },
-      { kind: "played", seq },
+      { kind: "synthesized", epoch: 0, seq, file: `/tmp/${seq}.wav` },
+      { kind: "played", epoch: 0, seq },
     ],
     now,
   );
@@ -57,10 +57,10 @@ describe("順序と先読み", () => {
   it("受信すると合成が始まり、合成が終われば head から再生される", () => {
     const state = start();
     const queued = run(state, [{ kind: "received", record: record(1) }]);
-    expect(only(queued, "synthesize")).toEqual([{ kind: "synthesize", seq: 1, text: "文1。" }]);
+    expect(only(queued, "synthesize")).toEqual([{ kind: "synthesize", epoch: 0, seq: 1, text: "文1。" }]);
 
-    const playing = run(state, [{ kind: "synthesized", seq: 1, file: "/tmp/1.wav" }]);
-    expect(only(playing, "play")).toEqual([{ kind: "play", seq: 1, file: "/tmp/1.wav" }]);
+    const playing = run(state, [{ kind: "synthesized", epoch: 0, seq: 1, file: "/tmp/1.wav" }]);
+    expect(only(playing, "play")).toEqual([{ kind: "play", epoch: 0, seq: 1, file: "/tmp/1.wav" }]);
   });
 
   it("先読みの件数だけ合成を先行させる（再生中の1件を含む）", () => {
@@ -90,11 +90,11 @@ describe("順序と先読み", () => {
     );
 
     // seq 2 だけ合成完了
-    const commands = run(state, [{ kind: "synthesized", seq: 2, file: "/tmp/2.wav" }]);
+    const commands = run(state, [{ kind: "synthesized", epoch: 0, seq: 2, file: "/tmp/2.wav" }]);
     expect(only(commands, "play")).toEqual([]);
 
     // seq 1 が揃って初めて 1 から鳴る
-    const after = run(state, [{ kind: "synthesized", seq: 1, file: "/tmp/1.wav" }]);
+    const after = run(state, [{ kind: "synthesized", epoch: 0, seq: 1, file: "/tmp/1.wav" }]);
     expect(only(after, "play").map((c) => c.seq)).toEqual([1]);
   });
 
@@ -132,9 +132,9 @@ describe("順序と先読み", () => {
       [3, 1, 2].map((seq) => ({ kind: "received", record: record(seq) })),
     );
     const commands = run(state, [
-      { kind: "synthesized", seq: 3, file: "/tmp/3.wav" },
-      { kind: "synthesized", seq: 2, file: "/tmp/2.wav" },
-      { kind: "synthesized", seq: 1, file: "/tmp/1.wav" },
+      { kind: "synthesized", epoch: 0, seq: 3, file: "/tmp/3.wav" },
+      { kind: "synthesized", epoch: 0, seq: 2, file: "/tmp/2.wav" },
+      { kind: "synthesized", epoch: 0, seq: 1, file: "/tmp/1.wav" },
     ]);
     expect(only(commands, "play").map((c) => c.seq)).toEqual([1]);
   });
@@ -145,10 +145,10 @@ describe("ack", () => {
     const state = start();
     run(state, [{ kind: "received", record: record(1) }]);
 
-    const synthesized = run(state, [{ kind: "synthesized", seq: 1, file: "/tmp/1.wav" }]);
+    const synthesized = run(state, [{ kind: "synthesized", epoch: 0, seq: 1, file: "/tmp/1.wav" }]);
     expect(only(synthesized, "ack")).toEqual([]);
 
-    const played = run(state, [{ kind: "played", seq: 1 }]);
+    const played = run(state, [{ kind: "played", epoch: 0, seq: 1 }]);
     expect(only(played, "ack")).toEqual([{ kind: "ack", seq: 1 }]);
   });
 
@@ -180,17 +180,17 @@ describe("ack", () => {
     );
 
     // seq 1 を再生中にしておく
-    run(state, [{ kind: "synthesized", seq: 1, file: "/tmp/1.wav" }]);
+    run(state, [{ kind: "synthesized", epoch: 0, seq: 1, file: "/tmp/1.wav" }]);
 
     // seq 3 の合成が失敗。ここで ack(3) が出ると seq 1, 2 のキューが道連れになる
-    const failed = run(state, [{ kind: "synthesisFailed", seq: 3, reason: "500" }]);
+    const failed = run(state, [{ kind: "synthesisFailed", epoch: 0, seq: 3, reason: "500" }]);
     expect(only(failed, "ack")).toEqual([]);
 
     // 1 → 2 と順に片付いて初めて 3 まで ack が進む
-    expect(only(run(state, [{ kind: "played", seq: 1 }]), "ack")).toEqual([{ kind: "ack", seq: 1 }]);
+    expect(only(run(state, [{ kind: "played", epoch: 0, seq: 1 }]), "ack")).toEqual([{ kind: "ack", seq: 1 }]);
     const rest = run(state, [
-      { kind: "synthesized", seq: 2, file: "/tmp/2.wav" },
-      { kind: "played", seq: 2 },
+      { kind: "synthesized", epoch: 0, seq: 2, file: "/tmp/2.wav" },
+      { kind: "played", epoch: 0, seq: 2 },
     ]);
     // 2 の完了で 2 と（失敗済みの）3 がまとめて片付く。累積なので ack は1回
     expect(only(rest, "ack")).toEqual([{ kind: "ack", seq: 3 }]);
@@ -203,24 +203,50 @@ describe("ack", () => {
       [1, 2, 3].map((seq) => ({ kind: "received", record: record(seq) })),
     );
     const commands = run(state, [
-      { kind: "synthesisFailed", seq: 2, reason: "500" },
-      { kind: "synthesisFailed", seq: 3, reason: "500" },
-      { kind: "synthesisFailed", seq: 1, reason: "500" },
+      { kind: "synthesisFailed", epoch: 0, seq: 2, reason: "500" },
+      { kind: "synthesisFailed", epoch: 0, seq: 3, reason: "500" },
+      { kind: "synthesisFailed", epoch: 0, seq: 1, reason: "500" },
     ]);
     expect(only(commands, "ack")).toEqual([{ kind: "ack", seq: 3 }]);
   });
 
-  it("切断中の ack は溜めて、再接続でまとめて送る", () => {
+  it("切断中の ack は溜めて、再接続後に最初のフレームで送る", () => {
     const state = start();
     run(state, [{ kind: "received", record: record(1) }]);
-    run(state, [{ kind: "synthesized", seq: 1, file: "/tmp/1.wav" }]);
+    run(state, [{ kind: "synthesized", epoch: 0, seq: 1, file: "/tmp/1.wav" }]);
 
-    const offline = run(state, [{ kind: "disconnected" }, { kind: "played", seq: 1 }]);
+    const offline = run(state, [{ kind: "disconnected" }, { kind: "played", epoch: 0, seq: 1 }]);
     expect(only(offline, "ack")).toEqual([]);
-    expect(state.pendingAck).toBe(1);
+    expect(state.pendingAck).toEqual({ epoch: 0, seq: 1 });
 
-    const online = run(state, [{ kind: "connected" }]);
-    expect(only(online, "ack")).toEqual([{ kind: "ack", seq: 1 }]);
+    // ★ connected だけでは流さない（サーバーが同じものかまだ分からない）
+    expect(only(run(state, [{ kind: "connected" }]), "ack")).toEqual([]);
+    expect(state.pendingAck).toEqual({ epoch: 0, seq: 1 });
+
+    // 同じエポックのフレームが届いて初めて、溜めていた ack が出る
+    const resumed = run(state, [{ kind: "received", record: record(2) }]);
+    expect(only(resumed, "ack")).toEqual([{ kind: "ack", seq: 1 }]);
+    expect(state.pendingAck).toBeNull();
+  });
+
+  it("★ ws の順序（open → message）で、サーバーが作り直されていたら保留 ack を出さない", () => {
+    // `connected` より先に `received` を食わせるテストは **ws が生成しえない順序**で、
+    // false confidence になる。実際は必ず open → message なので、`connected` の時点では
+    // サーバーが同じものか判断できない。ここで ack を出すと、新しいサーバーの
+    // `ackUpTo` が配信済み・未発話の entry（最大 500 件）を消す
+    const state = start();
+    run(state, [{ kind: "received", record: record(5) }]);
+    run(state, [{ kind: "synthesized", epoch: 0, seq: 5, file: "/tmp/5.wav" }]);
+    run(state, [{ kind: "disconnected" }, { kind: "played", epoch: 0, seq: 5 }]);
+    expect(state.pendingAck).toEqual({ epoch: 0, seq: 5 });
+
+    // 再接続。ws の順序どおり connected が先
+    expect(only(run(state, [{ kind: "connected" }]), "ack")).toEqual([]);
+
+    // そのあとで「採番がやり直された」フレームが届く
+    const fresh = run(state, [{ kind: "received", record: record(1, { ts: "2026-08-16T00:00:00.000Z" }) }]);
+    expect(only(fresh, "ack")).toEqual([]);
+    expect(only(fresh, "dropPendingAck")).toHaveLength(1);
     expect(state.pendingAck).toBeNull();
   });
 });
@@ -266,6 +292,41 @@ describe("重複排除", () => {
     expect([...state.seen].some((key) => key.startsWith("1:"))).toBe(false);
     expect([...state.seen].some((key) => key.startsWith("4:"))).toBe(true);
   });
+
+  it("★ seen から溢れた消費済みの再送を、採番のやり直しと取り違えない", () => {
+    // `seenCapacity` はサーバー側の `speechQueueMaxEntries` とズレうる（リモート / 別ルート /
+    // 設定違い）ので溢れは起きる。ここを resetEpoch に落とすと**同じ文を2回喋る**
+    const state = start({ seenCapacity: 3 });
+    for (const seq of [1, 2, 3, 4, 5]) {
+      run(state, [{ kind: "received", record: record(seq) }]);
+      speak(state, seq);
+    }
+    // seq 1 は seen から溢れている
+    expect([...state.seen].some((key) => key.startsWith("1:"))).toBe(false);
+
+    // その seq 1 が **元の ts のまま** 再送される
+    const resent = run(state, [{ kind: "received", record: record(1) }]);
+    expect(only(resent, "synthesize")).toEqual([]);
+    expect(only(resent, "warn")).toEqual([]);
+    expect(only(resent, "ack")).toEqual([{ kind: "ack", seq: 1 }]);
+    expect(state.epoch).toBe(0);
+  });
+
+  it("★ 追いつきが seq 昇順で来なくても、未消費のフレームを捨てない", () => {
+    // 受信ベースの水位だけで「seq が戻った」を判定すると、順序が乱れただけの
+    // 未消費フレームを再送と誤読して**無音になる**
+    const state = start({ lookahead: 3 });
+    const commands = run(
+      state,
+      [3, 1, 2].map((seq) => ({ kind: "received", record: record(seq) })),
+    );
+    expect(
+      only(commands, "synthesize")
+        .map((c) => c.seq)
+        .sort(),
+    ).toEqual([1, 2, 3]);
+    expect(state.epoch).toBe(0);
+  });
 });
 
 describe("採番のやり直し（エポック変化）", () => {
@@ -280,7 +341,9 @@ describe("採番のやり直し（エポック変化）", () => {
 
     const fresh = record(1, { ts: "2026-08-16T00:00:00.000Z", text: "新しい1。" });
     const commands = run(state, [{ kind: "received", record: fresh }]);
-    expect(only(commands, "synthesize")).toEqual([{ kind: "synthesize", seq: 1, text: "新しい1。" }]);
+    // エポックが1つ進んでいるので、合成も新しいエポックで走る
+    expect(only(commands, "synthesize")).toEqual([{ kind: "synthesize", epoch: 1, seq: 1, text: "新しい1。" }]);
+    expect(state.epoch).toBe(1);
   });
 
   it("★ エポックが変わったら保留 ack を捨てる", () => {
@@ -288,9 +351,9 @@ describe("採番のやり直し（エポック変化）", () => {
     // 範囲削除するため、まだ喋っていない新しい seq 1, 2 が消える
     const state = start();
     run(state, [{ kind: "received", record: record(5) }]);
-    run(state, [{ kind: "synthesized", seq: 5, file: "/tmp/5.wav" }]);
-    run(state, [{ kind: "disconnected" }, { kind: "played", seq: 5 }]);
-    expect(state.pendingAck).toBe(5);
+    run(state, [{ kind: "synthesized", epoch: 0, seq: 5, file: "/tmp/5.wav" }]);
+    run(state, [{ kind: "disconnected" }, { kind: "played", epoch: 0, seq: 5 }]);
+    expect(state.pendingAck).toEqual({ epoch: 0, seq: 5 });
 
     run(state, [{ kind: "received", record: record(1, { ts: "2026-08-16T00:00:00.000Z" }) }]);
     expect(state.pendingAck).toBeNull();
@@ -305,10 +368,10 @@ describe("採番のやり直し（エポック変化）", () => {
       state,
       [2, 3].map((seq) => ({ kind: "received", record: record(seq) })),
     );
-    run(state, [{ kind: "synthesized", seq: 3, file: "/tmp/3.wav" }]);
+    run(state, [{ kind: "synthesized", epoch: 0, seq: 3, file: "/tmp/3.wav" }]);
 
     const commands = run(state, [{ kind: "received", record: record(1, { ts: "2026-08-16T00:00:00.000Z" }) }]);
-    expect(only(commands, "discardFile")).toEqual([{ kind: "discardFile", seq: 3, file: "/tmp/3.wav" }]);
+    expect(only(commands, "discardFile")).toEqual([{ kind: "discardFile", epoch: 0, seq: 3, file: "/tmp/3.wav" }]);
     expect(only(commands, "warn")).toHaveLength(1);
     expect(state.items.has(2)).toBe(false);
     expect(state.items.has(3)).toBe(false);
@@ -317,13 +380,50 @@ describe("採番のやり直し（エポック変化）", () => {
   it("★ 再生中の音は最後まで流すが、その完了では ack しない", () => {
     const state = start();
     run(state, [{ kind: "received", record: record(5) }]);
-    run(state, [{ kind: "synthesized", seq: 5, file: "/tmp/5.wav" }]);
+    run(state, [{ kind: "synthesized", epoch: 0, seq: 5, file: "/tmp/5.wav" }]);
     run(state, [{ kind: "received", record: record(1, { ts: "2026-08-16T00:00:00.000Z" }) }]);
 
-    const finished = run(state, [{ kind: "played", seq: 5 }]);
+    const finished = run(state, [{ kind: "played", epoch: 0, seq: 5 }]);
     expect(only(finished, "ack")).toEqual([]);
     // WAV の後始末だけは行う
-    expect(only(finished, "discardFile")).toEqual([{ kind: "discardFile", seq: 5, file: "/tmp/5.wav" }]);
+    expect(only(finished, "discardFile")).toEqual([{ kind: "discardFile", epoch: 0, seq: 5, file: "/tmp/5.wav" }]);
+  });
+
+  it("★ 旧エポックの合成結果を新しい item が拾わない", () => {
+    // seq だけで突き合わせると、「こんにちは」を鳴らしながら「さようなら」を ack する
+    const state = start();
+    run(state, [{ kind: "received", record: record(1, { text: "こんにちは。" }) }]);
+    run(state, [{ kind: "received", record: record(1, { ts: "2026-08-16T00:00:00.000Z", text: "さようなら。" }) }]);
+    expect(state.epoch).toBe(1);
+
+    // 旧エポックで投げた合成が今ごろ返ってくる
+    const late = run(state, [{ kind: "synthesized", epoch: 0, seq: 1, file: "/tmp/OLD.wav" }]);
+    expect(only(late, "play")).toEqual([]);
+    expect(only(late, "discardFile")).toEqual([{ kind: "discardFile", epoch: 0, seq: 1, file: "/tmp/OLD.wav" }]);
+    // 新しい item は合成待ちのまま。古い WAV を掴んでいない
+    expect(state.items.get(1)?.status).toBe("synthesizing");
+    expect(state.items.get(1)?.file).toBeNull();
+  });
+
+  it("★ 一時ファイルのパスがエポックを跨いで衝突しない", () => {
+    // discardFile / play / synthesize がすべて (epoch, seq) を持つので、
+    // ドライバは同じ seq でも別のパスを組める
+    const state = start();
+    run(state, [{ kind: "received", record: record(1) }]);
+    const first = run(state, [{ kind: "synthesized", epoch: 0, seq: 1, file: "/tmp/e0-1.wav" }]);
+    expect(only(first, "play")).toEqual([{ kind: "play", epoch: 0, seq: 1, file: "/tmp/e0-1.wav" }]);
+
+    // 再生中に採番がやり直される → 旧 item は orphan
+    run(state, [{ kind: "received", record: record(1, { ts: "2026-08-16T00:00:00.000Z" }) }]);
+    const second = run(state, [{ kind: "synthesized", epoch: 1, seq: 1, file: "/tmp/e1-1.wav" }]);
+    // 新しい方は鳴らない（head が orphan ではなく新 item で、まだ古い方が再生中でもない）
+    expect(only(second, "play")).toEqual([{ kind: "play", epoch: 1, seq: 1, file: "/tmp/e1-1.wav" }]);
+
+    // 旧エポックの再生完了は orphan として処理され、**新しい item の完了を飲まない**
+    const orphanDone = run(state, [{ kind: "played", epoch: 0, seq: 1 }]);
+    expect(only(orphanDone, "ack")).toEqual([]);
+    expect(only(orphanDone, "discardFile")).toEqual([{ kind: "discardFile", epoch: 0, seq: 1, file: "/tmp/e0-1.wav" }]);
+    expect(state.items.get(1)?.status).toBe("playing");
   });
 
   it("同じ seq が別の ts で来たらエポック変化として扱う", () => {
@@ -340,11 +440,11 @@ describe("失敗の扱い", () => {
     const state = start({ synthesisAttempts: 2 });
     run(state, [{ kind: "received", record: record(1) }]);
 
-    const retried = run(state, [{ kind: "synthesisFailed", seq: 1, reason: "500" }]);
+    const retried = run(state, [{ kind: "synthesisFailed", epoch: 0, seq: 1, reason: "500" }]);
     expect(only(retried, "synthesize").map((c) => c.seq)).toEqual([1]);
     expect(only(retried, "ack")).toEqual([]);
 
-    const given = run(state, [{ kind: "synthesisFailed", seq: 1, reason: "500" }]);
+    const given = run(state, [{ kind: "synthesisFailed", epoch: 0, seq: 1, reason: "500" }]);
     expect(only(given, "synthesize")).toEqual([]);
     expect(only(given, "ack")).toEqual([{ kind: "ack", seq: 1 }]);
     expect(only(given, "warn")).toHaveLength(1);
@@ -353,9 +453,9 @@ describe("失敗の扱い", () => {
   it("再生の失敗はリトライしない（途中まで鳴った文が頭から鳴り直す）", () => {
     const state = start();
     run(state, [{ kind: "received", record: record(1) }]);
-    run(state, [{ kind: "synthesized", seq: 1, file: "/tmp/1.wav" }]);
+    run(state, [{ kind: "synthesized", epoch: 0, seq: 1, file: "/tmp/1.wav" }]);
 
-    const commands = run(state, [{ kind: "playbackFailed", seq: 1, reason: "exit 1" }]);
+    const commands = run(state, [{ kind: "playbackFailed", epoch: 0, seq: 1, reason: "exit 1" }]);
     expect(only(commands, "play")).toEqual([]);
     expect(only(commands, "ack")).toEqual([{ kind: "ack", seq: 1 }]);
   });
@@ -363,9 +463,9 @@ describe("失敗の扱い", () => {
   it("失敗した文の WAV も消す", () => {
     const state = start();
     run(state, [{ kind: "received", record: record(1) }]);
-    run(state, [{ kind: "synthesized", seq: 1, file: "/tmp/1.wav" }]);
-    const commands = run(state, [{ kind: "playbackFailed", seq: 1, reason: "timeout" }]);
-    expect(only(commands, "discardFile")).toEqual([{ kind: "discardFile", seq: 1, file: "/tmp/1.wav" }]);
+    run(state, [{ kind: "synthesized", epoch: 0, seq: 1, file: "/tmp/1.wav" }]);
+    const commands = run(state, [{ kind: "playbackFailed", epoch: 0, seq: 1, reason: "timeout" }]);
+    expect(only(commands, "discardFile")).toEqual([{ kind: "discardFile", epoch: 0, seq: 1, file: "/tmp/1.wav" }]);
   });
 
   it("約物だけの断片は合成に出さず、そのまま ack する", () => {
@@ -379,10 +479,10 @@ describe("失敗の扱い", () => {
   it("捨てた後に合成が返ってきたら WAV だけ消す", () => {
     const state = start({ synthesisAttempts: 1 });
     run(state, [{ kind: "received", record: record(1) }]);
-    run(state, [{ kind: "synthesisFailed", seq: 1, reason: "timeout" }]);
+    run(state, [{ kind: "synthesisFailed", epoch: 0, seq: 1, reason: "timeout" }]);
 
-    const late = run(state, [{ kind: "synthesized", seq: 1, file: "/tmp/1.wav" }]);
-    expect(only(late, "discardFile")).toEqual([{ kind: "discardFile", seq: 1, file: "/tmp/1.wav" }]);
+    const late = run(state, [{ kind: "synthesized", epoch: 0, seq: 1, file: "/tmp/1.wav" }]);
+    expect(only(late, "discardFile")).toEqual([{ kind: "discardFile", epoch: 0, seq: 1, file: "/tmp/1.wav" }]);
     expect(only(late, "play")).toEqual([]);
   });
 });
@@ -410,7 +510,7 @@ describe("古い発話", () => {
   it("再生中のものは古くなっても止めない", () => {
     const state = start({ maxAgeMs: 60_000 });
     run(state, [{ kind: "received", record: record(1) }]);
-    run(state, [{ kind: "synthesized", seq: 1, file: "/tmp/1.wav" }]);
+    run(state, [{ kind: "synthesized", epoch: 0, seq: 1, file: "/tmp/1.wav" }]);
     const commands = run(state, [{ kind: "tick" }], T0 + 120_000);
     expect(only(commands, "ack")).toEqual([]);
     expect(state.items.get(1)?.status).toBe("playing");
@@ -455,7 +555,7 @@ describe("切断", () => {
       state,
       [1, 2, 3].map((seq) => ({ kind: "received", record: record(seq) })),
     );
-    run(state, [{ kind: "synthesized", seq: 1, file: "/tmp/1.wav" }]);
+    run(state, [{ kind: "synthesized", epoch: 0, seq: 1, file: "/tmp/1.wav" }]);
 
     run(state, [{ kind: "disconnected" }]);
     expect(state.items.size).toBe(3);

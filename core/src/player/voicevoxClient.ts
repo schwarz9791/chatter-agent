@@ -35,8 +35,6 @@ export interface VoicevoxClientOptions {
    *   **以後すべてが無音になり、しかもエラーが1行も出ない**。
    */
   timeoutMs: number;
-  /** テストから差し替える。既定はグローバルの fetch */
-  fetchImpl?: typeof fetch;
 }
 
 export interface VoicevoxClient {
@@ -58,16 +56,21 @@ function describe(op: string, err: unknown): Error {
 
 export function createVoicevoxClient(options: VoicevoxClientOptions): VoicevoxClient {
   const { baseUrl, speakerId, timeoutMs } = options;
-  const doFetch = options.fetchImpl ?? fetch;
 
   async function request(op: string, url: string, init: RequestInit): Promise<Response> {
     let res: Response;
     try {
-      res = await doFetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+      res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
     } catch (err) {
       throw describe(op, err);
     }
-    if (!res.ok) throw new Error(`${op} が ${res.status} を返しました`);
+    if (!res.ok) {
+      // ★ ボディを捨ててから throw すること。読み切らないと undici が接続を再利用できず、
+      //   失敗のたびに新しい TCP 接続が開く。実測では 422 を 30 回受けるのに 58 本開いた。
+      //   `ttsSpeakerId` を間違えると全文がこの経路に乗るので、1文あたり2本ずつ増える
+      await res.body?.cancel().catch(() => {});
+      throw new Error(`${op} が ${res.status} を返しました`);
+    }
     return res;
   }
 

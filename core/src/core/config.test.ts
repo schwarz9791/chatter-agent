@@ -31,6 +31,15 @@ function store(env: NodeJS.ProcessEnv = {}) {
   return createConfigStore({ filePath, env, defaults: DEFAULTS });
 }
 
+/**
+ * ★ `DEFAULTS` は `store()` に注入している値なので、それとの比較は同語反復になる。
+ *   本番の既定値が動いたことを検出できるのはこのテストだけ。
+ *   ここが緑なら `docs/core.md` の表とコミット済みバンドルも同じ値である、という関係にする
+ */
+it("テストの DEFAULTS が本番の既定値と一致している", () => {
+  expect(createDefaultConfig()).toEqual(DEFAULTS);
+});
+
 function write(content: unknown): void {
   fs.writeFileSync(filePath, typeof content === "string" ? content : JSON.stringify(content));
 }

@@ -217,46 +217,39 @@ describe("実測ログに近い流れ", () => {
 });
 
 /**
- * `MessageDisplay` の delta は「最後の flush を除いて必ず行単位」で届く。
- * 実機（Claude Code 2.1.233）でも非 final の delta は全て改行で終わっていた。
+ * revert 対象の回帰テスト（PR #15 レビュー #3）。
  *
- * 行が閉じていれば最後の文はもう伸びないので、保留する理由が無い。
- * 入れる前は段落ごとに最後の1文が次の delta まで待っており、delta の間隔ぶん遅れていた。
+ * 行が閉じていることは「もう変化しない」ことを意味しない。後続の delta が複数行構文
+ * （引用+タグ、コードフェンス、表）を閉じると、`cleanTextForSpeech` が既に発話済みの
+ * 範囲まで削除・変形する。`truncateAtUnstableTail` の切り詰め位置は別ルールが決めるため、
+ * `safe` の中に未閉じ構文が残ったまま `safe` が `\n` で終わりうる。
+ *
+ * ここで守っているのは2つ:
+ * - **未閉じ構文が混ざらない**（生のマークアップ・記号が読み上げられない）
+ * - **同じ文が二度出ない**（一度出した範囲が後から変わらない。`emitted` が文数で
+ *   進捗を持てる根拠がこれ）
+ *
+ * 行境界はこのどちらの根拠にもならない。`endsAtLineBoundary` はこれを見誤っていた。
  */
-describe("行が閉じていれば保留しない", () => {
-  it("delta が改行で終わっていれば、まだ final でなくても最後の文を出す", () => {
-    const r = assemble({ deltas: ["確認します。ログを見ます。\n"] });
-    expect(r.sentences).toEqual(["確認します。", "ログを見ます。"]);
-    expect(r.emitted).toBe(2);
+describe("行境界だけでは保留を外せない（endsAtLineBoundary の revert）", () => {
+  it("引用のあとの未閉じタグは、行が変わっても保留する", () => {
+    const { total } = stream(["> 引用です。\n", "<div\n", "`未閉じ\n", "</div>\n", "<div>\n"]);
+    expect(total).toEqual(["引用です。"]);
   });
 
-  it("1文だけの段落でも、行が閉じていれば即座に出す（final を待たない）", () => {
-    const r = assemble({ deltas: ["確認します。\n"] });
-    expect(r.sentences).toEqual(["確認します。"]);
+  it("バッククォート1つの行から始まっても、未閉じインラインコードとして保留する", () => {
+    const { total } = stream(["`\n", "```文C。\n", "abc1234\n", "文A。```\n", "|a|b|\n"]);
+    expect(total).toEqual([]);
   });
 
-  it("行が閉じていなければ従来どおり最後の文を保留する", () => {
-    const r = assemble({ deltas: ["確認します。ログを見ます。"] });
-    expect(r.sentences).toEqual(["確認します。"]);
+  it("コードフェンスの直後の行は、閉じるまで手前の文も含めて保留する", () => {
+    const { total } = stream(["説明します。\n", "```ts\n", "const secret = 1;\n"]);
+    expect(total).toEqual([]);
   });
 
-  it("句点で終わっているだけでは保留を外さない", () => {
-    // 未閉じの `<` が切り落とされて句点止まりになった形。行はまだ閉じていないので、
-    // 次の delta でこの文の続きが来る（`<span>` を挟んで同じ行が伸びる）可能性がある
-    const r = assemble({ deltas: ["確認します。<div"] });
-    expect(r.sentences).toEqual([]);
-  });
-
-  it("行単位の delta が続いても二重に出さない", () => {
-    const { steps, total } = stream(["一段落目です。まだ続きます。\n", "二段落目です。ここまで。\n"], true);
-    expect(steps[0]).toEqual(["一段落目です。", "まだ続きます。"]);
-    expect(steps[1]).toEqual(["二段落目です。", "ここまで。"]);
-    expect(new Set(total).size).toBe(total.length);
-  });
-
-  it("未閉じのコードフェンスは行が閉じていても出さない", () => {
-    const r = assemble({ deltas: ["こう書きます。\n```ts\nconst secret = 1;\n"] });
-    expect(r.sentences).toEqual(["こう書きます。"]);
+  it("表の行が閉じていなければ、直前の文だけを保留する", () => {
+    const { total } = stream(["手順です。\n", "| A | B |\n", "| C | D\n"]);
+    expect(total).toEqual(["手順です。"]);
   });
 });
 

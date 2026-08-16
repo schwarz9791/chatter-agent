@@ -50,24 +50,6 @@ function endsAtBoundary(text: string): boolean {
 }
 
 /**
- * 行として閉じているか。**まだ delta が続くときの保留を外してよいかの判定。**
- *
- * ★ `MessageDisplay` の delta は「最後の flush を除いて必ず行単位」で届く
- *   （Claude Code のスキーマ記述 / 実測でも非 final の delta は全て改行で終わっていた）。
- *   `splitIntoSentences` は改行でも分割するので、蓄積テキストが行として閉じていれば
- *   **最後の文はもう伸びない**。保留する理由が無い。
- *
- * ★ 句点（`。！？`）だけでは足りないので `endsAtBoundary` を流用しないこと。
- *   `truncateAtUnstableTail` が行の途中で切ると句点で終わりうるが、その先は次の delta で伸びる。
- *
- * これを入れる前は、段落ごとに**最後の1文だけが次の delta まで待って**いた。
- * delta の間隔ぶんそのまま遅れるので、1文しかない段落は丸ごと遅れる。
- */
-function endsAtLineBoundary(text: string): boolean {
-  return /[\n\r]\s*$/.test(text);
-}
-
-/**
  * 全文を組み直し、確定した文のうち未出力のものを返す。
  *
  * 未確定の末尾（未閉じの ``` や `<` など）を先に切り落とすのが要で、これにより
@@ -98,9 +80,6 @@ export function assembleSentences(input: AssembleInput): AssembleResult {
 
 function resolveLimit(total: number, input: AssembleInput, safe: string): number {
   if (input.final) return total;
-
-  // 行が閉じているなら、まだ delta が続いていても最後の文は確定している
-  if (endsAtLineBoundary(safe)) return total;
 
   // 後続イベントによる保留解除。まだ final は届いていないので、
   // **文として閉じていない断片は出さない**（途中まで読み上げると聞き手には事故に聞こえる）

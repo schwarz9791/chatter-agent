@@ -48,8 +48,12 @@ export function parseSpeechFrame(raw: string): SpeechRecord | null {
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
   const r = parsed as Record<string, unknown>;
 
+  // ★ 1 始まり。0 を通さないこと。`speechLog` の採番は 1 からで、0 は
+  //   `playbackQueue` の水位の初期値（未受信）と衝突する。seq 0 のフレームは
+  //   初期状態で「seq が戻った」と読まれて余計な resetEpoch を起こすうえ、
+  //   `dispatcher.ack` が 0 を no-op として扱うのでそのキューは永久に消えない
   const seq = r.seq;
-  if (typeof seq !== "number" || !Number.isSafeInteger(seq) || seq < 0) return null;
+  if (typeof seq !== "number" || !Number.isSafeInteger(seq) || seq < 1) return null;
 
   const text = r.text;
   if (typeof text !== "string") return null;
@@ -84,6 +88,10 @@ export function parseSpeechFrame(raw: string): SpeechRecord | null {
  * 判定は「音になる文字が1つでもあるか」。約物・空白・制御文字しか無ければ false。
  */
 export function hasSpeakableText(text: string): boolean {
-  // \p{L} 文字 / \p{N} 数字 / \p{S} 記号（℃ や € など読まれうるもの）
-  return /[\p{L}\p{N}\p{S}]/u.test(text);
+  // \p{L} 文字 / \p{N} 数字。
+  //
+  // ★ `\p{S}` を丸ごと通さないこと。あれは数学記号と ASCII の演算子まで含むので、
+  //   `=>` / `^^` / `` ` `` / `+` / `~` / `$` だけの断片が「読める」と判定されて
+  //   `/audio_query` に届く。読まれうる記号（通貨・単位）は個別に許す
+  return /[\p{L}\p{N}\p{Sc}]/u.test(text) || /[℃℉°%‰]/u.test(text);
 }

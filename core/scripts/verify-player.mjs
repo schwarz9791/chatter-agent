@@ -262,20 +262,24 @@ async function stopPlayer(handle) {
   if (handle.exited === null) handle.child.kill("SIGKILL");
 }
 
-/** 鳴った順（ファイル名 = ゼロ埋めした seq） */
+/** 鳴った順。ファイル名は `<epoch>-<ゼロ埋めした seq>.wav` */
 function played() {
   if (!fs.existsSync(playLog)) return [];
   return fs
     .readFileSync(playLog, "utf-8")
     .split("\n")
     .filter(Boolean)
-    .map((name) => Number(name.replace(".wav", "")));
+    .map((name) => Number(name.replace(".wav", "").split("-").pop()));
 }
 
 function cleanup() {
   for (const handle of running) handle.child.kill("SIGKILL");
   engine?.close();
   fs.rmSync(root, { recursive: true, force: true });
+  // ★ 孫（fake-player）は `running` に居ない。player を SIGKILL すると
+  //   `audio.stopAll()` が飛ぶので、hang モードの偽プレイヤーが残りうる。
+  //   fake-player 側に自死のタイマーを持たせてあるが、ここでも掃除する
+  spawnSync("/usr/bin/pkill", ["-f", FAKE_PLAYER], { stdio: "ignore" });
 }
 
 // ── 検証 ───────────────────────────────────────────────────────────────────
@@ -454,7 +458,31 @@ try {
   }
 
   {
-    show("⑧ 二重起動は失敗する");
+    // ★ ここが無いと `playbackFailed → ack → サーバーのキューから削除`（player で最も
+    //   破壊的な経路）の end-to-end カバレッジがゼロになる。`played()` が証明しているのは
+    //   「偽プレイヤーが起動した」ことだけで、「聞こえた」ことではない
+    show("⑧ 再生コマンドが失敗しても止まらず、ack は進む");
+    const stub = createStubServer();
+    await stub.ready;
+    const player = await startReadyPlayer(
+      playerEnv({ CHATTER_AGENT_PLAYER_SERVER_URL: stub.url(), FAKE_PLAYER_MODE: "fail" }),
+    );
+
+    seqCounter = 0;
+    for (const text of ["いち。", "に。", "さん。"]) stub.send(record(text));
+
+    // 3文とも再生に失敗するが、head で ack して先へ進む
+    const drained = await until(() => stub.lastAck() === 3, 15_000);
+    check("★ 全文が再生に失敗しても ack が最後まで進む", drained, JSON.stringify(stub.state.acks));
+    check("3文とも起動は試みている", played().length === 3, JSON.stringify(played()));
+    check("失敗を黙って飲み込まない", player.log.includes("再生に失敗しました"), player.log);
+
+    await stopPlayer(player);
+    await stub.close();
+  }
+
+  {
+    show("⑨ 二重起動は失敗する");
     const stub = createStubServer();
     await stub.ready;
     const env = playerEnv({ CHATTER_AGENT_PLAYER_SERVER_URL: stub.url() });
@@ -474,7 +502,7 @@ try {
   }
 
   {
-    show("⑨ 一時ファイルを残さない");
+    show("⑩ 一時ファイルを残さない");
     const stub = createStubServer();
     await stub.ready;
     const player = await startReadyPlayer(playerEnv({ CHATTER_AGENT_PLAYER_SERVER_URL: stub.url() }));
@@ -493,7 +521,7 @@ try {
   }
 
   {
-    show("⑩ エンジンが落ちていたら接続しない（バックログを消さない）");
+    show("⑪ エンジンが落ちていたら接続しない（バックログを消さない）");
     const stub = createStubServer();
     await stub.ready;
     // 誰も listen していないポートをエンジンに指定する
@@ -515,7 +543,7 @@ try {
   }
 
   {
-    show("⑪ 本物の server と CLI を通したエンドツーエンド");
+    show("⑫ 本物の server と CLI を通したエンドツーエンド");
     const PORT = 18571;
     const chainEnv = {
       ...playerEnv(),
@@ -526,12 +554,15 @@ try {
     delete chainEnv.CHATTER_AGENT_PLAYER_SERVER_URL;
 
     const server = spawn(process.execPath, [SERVER], { env: chainEnv, stdio: ["ignore", "pipe", "pipe"] });
-    running.push({ child: server, log: "", exited: null });
-    let serverLog = "";
-    server.stdout.on("data", (d) => (serverLog += d));
-    server.stderr.on("data", (d) => (serverLog += d));
-    const serverUp = await until(() => serverLog.includes("[Server] Ready"));
-    if (!serverUp) throw new Error(`server が起動しませんでした:\n${serverLog}`);
+    // ★ handle に繋ぐこと。別変数に溜めると、失敗時の一括出力（running を回る）に
+    //   出てこず、唯一の end-to-end シナリオが落ちたときに空のログしか読めない
+    const serverHandle = { child: server, log: "", exited: null };
+    running.push(serverHandle);
+    server.stdout.on("data", (d) => (serverHandle.log += d));
+    server.stderr.on("data", (d) => (serverHandle.log += d));
+    server.on("exit", (code) => (serverHandle.exited = code ?? -1));
+    const serverUp = await until(() => serverHandle.log.includes("[Server] Ready"));
+    if (!serverUp) throw new Error(`server が起動しませんでした:\n${serverHandle.log}`);
 
     const player = await startReadyPlayer(chainEnv);
 

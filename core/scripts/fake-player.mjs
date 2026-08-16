@@ -26,8 +26,11 @@ fs.appendFileSync(log, `${path.basename(file ?? "?")}\n`);
 const mode = process.env.FAKE_PLAYER_MODE ?? "ok";
 if (mode === "fail") process.exit(1);
 if (mode === "hang") {
-  // SIGTERM を受け取れる状態のまま返らない。タイムアウトの検証用
+  // SIGTERM を受け取れる状態のまま返らない。タイムアウトの検証用。
+  // ★ 上限を入れること。親を SIGKILL されると孤児になり、遅い CI では
+  //   ハーネスが exit 0 した後もプロセスが残る
   setInterval(() => {}, 1000);
+  setTimeout(() => process.exit(3), 120_000);
 } else {
   setTimeout(() => process.exit(0), Number(process.env.FAKE_PLAYER_MS ?? 20));
 }

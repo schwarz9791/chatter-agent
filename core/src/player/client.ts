@@ -47,6 +47,14 @@ export interface SpeechClient {
   start(): void;
   /** 累積 ack。短時間に何度呼んでも、最大値が1回だけ飛ぶ */
   ack(seq: number): void;
+  /**
+   * まだ送っていない ack を捨てる。
+   *
+   * ★ 採番のやり直しを検出したら必ず呼ぶこと。間引きバッファ（20ms）に旧エポックの ack が
+   *   残っていると、**切断を挟まなくても**それが新しいサーバーへ飛び、`ackUpTo` が
+   *   まだ喋っていない entry を消す。reducer 側の `pendingAck` を消すだけでは足りない
+   */
+  dropPendingAck(): void;
   /** 再接続をやめて閉じる */
   close(): Promise<void>;
 }
@@ -100,11 +108,16 @@ export function createSpeechClient(options: SpeechClientOptions): SpeechClient {
   }
 
   function flushAck(): void {
+    if (ackTimer) clearTimeout(ackTimer);
     ackTimer = null;
     if (pendingAck === null) return;
+
+    // ★ 送れると分かってから消費すること。先に消すと、reducer が `connected` のまま ack を出した
+    //   直後にソケットが CLOSING（`close` イベントがまだ届いていない）だったケースで、
+    //   ack が client 側からも reducer 側からも消えて復旧手段が無くなる
+    if (socket?.readyState !== WebSocket.OPEN) return;
     const seq = pendingAck;
     pendingAck = null;
-    if (socket?.readyState !== WebSocket.OPEN) return;
     socket.send(JSON.stringify({ type: "spoken", seq }));
   }
 
@@ -146,10 +159,18 @@ export function createSpeechClient(options: SpeechClientOptions): SpeechClient {
     next.on("ping", () => armWatchdog());
 
     next.on("unexpected-response", (_req, res) => {
-      // 401 は Origin 検査。ネイティブから張っている限り起きないが、
-      // 起きたときに理由が分からないと詰まる
+      // 401 は Origin 検査。ネイティブから張っている限り起きないが、理由が分からないと詰まる
       const hint = res.statusCode === 401 ? "（allowedOrigins に弾かれた可能性があります）" : "";
       console.error(`[Player] ハンドシェイクに失敗しました: ${res.statusCode}${hint}`);
+
+      // ★ このハンドラを張ったら、自分で接続を畳むこと。
+      //   ws は `emit("unexpected-response", …)` が **false を返したときだけ**（＝リスナが1つも
+      //   無いときだけ）`abortHandshake` を呼ぶ（ws@8.21.3 websocket.js:928）。ログを出すだけだと
+      //   emit が true を返すので `error` も `close` も発火せず、readyState は CONNECTING のまま
+      //   固着する。`close` が `scheduleReconnect()` を呼ぶ唯一の経路なので、**再起動するまで
+      //   永久に無音**になる（watchdog も `open` でしか張らないので救済されない）。
+      //   → docs/protocol.md のクライアント責務5に反する
+      next.terminate();
     });
 
     next.on("error", (err) => {
@@ -187,8 +208,17 @@ export function createSpeechClient(options: SpeechClientOptions): SpeechClient {
       ackTimer.unref();
     },
 
+    dropPendingAck() {
+      if (ackTimer) clearTimeout(ackTimer);
+      ackTimer = null;
+      pendingAck = null;
+    },
+
     close() {
       closed = true;
+      // 喋り終えた直後に Ctrl-C しても、間引き中の ack は投げてから閉じる。
+      // 落とすと次回起動でその文がもう一度鳴る
+      flushAck();
       if (reconnectTimer) clearTimeout(reconnectTimer);
       reconnectTimer = null;
       if (ackTimer) clearTimeout(ackTimer);

@@ -42,7 +42,10 @@ describe("parseSpeechFrame", () => {
     expect(parseSpeechFrame('"text"')).toBeNull();
   });
 
-  it("★ seq は非負の安全整数だけを通す（Map のキー・ack の値・一時ファイル名の材料）", () => {
+  it("★ seq は 1 始まりの安全整数だけを通す（Map のキー・ack の値・一時ファイル名の材料）", () => {
+    // 0 は水位の初期値と衝突して余計な resetEpoch を起こし、`dispatcher.ack` が
+    // 0 を no-op として扱うのでそのキューは永久に消えない
+    expect(parseSpeechFrame(frame({ seq: 0 }))).toBeNull();
     expect(parseSpeechFrame(frame({ seq: -1 }))).toBeNull();
     expect(parseSpeechFrame(frame({ seq: 1.5 }))).toBeNull();
     expect(parseSpeechFrame(frame({ seq: "1" }))).toBeNull();
@@ -103,8 +106,21 @@ describe("hasSpeakableText", () => {
     expect(hasSpeakableText("、")).toBe(false);
   });
 
-  it("記号でも読まれうるものは true", () => {
+  it("読まれうる記号（単位・通貨）は true", () => {
     expect(hasSpeakableText("℃")).toBe(true);
-    expect(hasSpeakableText("+")).toBe(true);
+    expect(hasSpeakableText("%")).toBe(true);
+    expect(hasSpeakableText("¥")).toBe(true);
+    expect(hasSpeakableText("$")).toBe(true);
+  });
+
+  it("★ コードの断片だけの行は false（\\p{S} を丸ごと通すと届いてしまう）", () => {
+    // 文分割は `=>` や `^^` だけの断片を作ることがある。/audio_query は
+    // 空の WAV か 4xx を返すので、合成に出す前にここで落とす
+    expect(hasSpeakableText("=>")).toBe(false);
+    expect(hasSpeakableText("^^")).toBe(false);
+    expect(hasSpeakableText("```")).toBe(false);
+    expect(hasSpeakableText("+")).toBe(false);
+    expect(hasSpeakableText("~")).toBe(false);
+    expect(hasSpeakableText("<=")).toBe(false);
   });
 });

@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect, afterEach, vi } from "vitest";
+import * as http from "http";
 import { WebSocketServer } from "ws";
 import type { WebSocket as WsSocket } from "ws";
 import type { AddressInfo } from "net";
@@ -12,12 +13,17 @@ import { createSpeechClient, deriveServerUrl } from "./client";
 import type { SpeechClient } from "./client";
 
 const servers: WebSocketServer[] = [];
+const httpServers: http.Server[] = [];
 const clients: SpeechClient[] = [];
 
 afterEach(async () => {
   for (const client of clients.splice(0)) await client.close();
   for (const server of servers.splice(0)) {
     for (const socket of server.clients) socket.terminate();
+    await new Promise<void>((done) => server.close(() => done()));
+  }
+  for (const server of httpServers.splice(0)) {
+    server.closeAllConnections();
     await new Promise<void>((done) => server.close(() => done()));
   }
   vi.restoreAllMocks();
@@ -141,6 +147,41 @@ describe("ack", () => {
     expect(JSON.parse(s.received[0])).toEqual({ type: "spoken", seq: 100 });
   });
 
+  it("★ dropPendingAck が間引き中の ack を捨てる", async () => {
+    // 採番のやり直しは切断を伴わない。20ms のバッファに旧エポックの ack が残っていると、
+    // 同じソケット上でそれが飛び、まだ喋っていない entry が消える
+    const s = await stub();
+    const { client } = connect(s.url);
+    await until(() => s.sockets.length === 1);
+
+    client.ack(500);
+    client.dropPendingAck();
+    await sleep(150);
+    expect(s.received).toEqual([]);
+
+    // 捨てた後も次の ack は普通に送れる
+    client.ack(1);
+    await until(() => s.received.length === 1);
+    expect(JSON.parse(s.received[0])).toEqual({ type: "spoken", seq: 1 });
+  });
+
+  it("★ 送れなかった ack を捨てない（次の機会に再送する）", async () => {
+    // readyState を見る前に値を消すと、reducer 側からも消えていて復旧手段が無くなる
+    const s = await stub();
+    const { client } = connect(s.url);
+    await until(() => s.sockets.length === 1);
+
+    // サーバー側から切る。client は再接続する
+    s.sockets[0].terminate();
+    await sleep(30);
+    client.ack(7);
+    await sleep(80);
+
+    await until(() => s.sockets.length === 2, 5000);
+    await until(() => s.received.length === 1, 5000);
+    expect(JSON.parse(s.received[0])).toEqual({ type: "spoken", seq: 7 });
+  });
+
   it("接続前の ack は接続後に送られる", async () => {
     const s = await stub();
     const { client } = connect(s.url);
@@ -199,6 +240,31 @@ describe("再接続", () => {
     await client.close();
     await sleep(200);
     expect(s.sockets).toHaveLength(1);
+  });
+
+  it("★ ハンドシェイクが 101 以外で返っても繋ぎ直す", async () => {
+    // ws は emit("unexpected-response", …) が false を返したとき（＝リスナが1つも無いとき）
+    // だけ abortHandshake を呼ぶ。ログを出すだけのリスナを張ると error も close も発火せず、
+    // readyState が CONNECTING のまま固着して**再起動するまで永久に無音**になる。
+    // 踏む条件: playerServerUrl が HTTP ポートを向いている / プロキシが 502 を返す / 401
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    let handshakes = 0;
+    const denier = http.createServer((_req, res) => {
+      handshakes++;
+      res.writeHead(401);
+      res.end();
+    });
+    httpServers.push(denier);
+    await new Promise<void>((done) => denier.listen(0, "127.0.0.1", () => done()));
+    const { port } = denier.address() as AddressInfo;
+
+    const { events } = connect(`ws://127.0.0.1:${port}`);
+
+    // 1回で終わらず、繋ぎ直して何度も叩きにいく
+    await until(() => handshakes >= 3, 5000);
+    expect(events).not.toContain("connected");
   });
 });
 

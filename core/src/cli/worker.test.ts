@@ -206,7 +206,7 @@ describe("後続イベントによる保留解除（設計書からの上積み�
     appendDelta("m2", 0, "次に進みます。");
     drain();
 
-    appendDelta("m1", 1, "", true); // 80 秒遅れの final（中身は無し）
+    appendDelta("m1", 1, "", true); // 大きく遅れて届く final（中身は無し）
     drain();
 
     expect(texts().filter((t) => t === "ログを見ます。")).toHaveLength(1);

@@ -90,7 +90,7 @@ delta m-aaa 2 false $'こう書きます。\n```ts\nconst secret = 1;\n'
 spoken
 
 show "③ 別メッセージが始まると、前メッセージの保留中の最終文が先に流れる"
-echo "[m-aaa の final はまだ 34〜80 秒先。ここで m-bbb が始まる]"
+echo "[m-aaa の final はまだ先。ここで m-bbb が始まる]"
 delta m-bbb 0 false "次の作業に入ります。ログを確認します。"
 spoken
 
@@ -99,7 +99,7 @@ prompt '{"session_id":"sess-1","prompt_id":"p9","hook_event_name":"PreToolUse","
 prompt '{"session_id":"sess-1","prompt_id":"p9","hook_event_name":"Notification","message":"Claude needs your permission"}'
 spoken
 
-show "⑤ 34〜80 秒遅れて届く final:true。フェンスが閉じてブロックが消え、最後の文だけが出る"
+show "⑤ 大きく遅れて届く final:true。フェンスが閉じてブロックが消え、最後の文だけが出る"
 delta m-aaa 3 true $'const secret = 1;\n```\nこれは実装方針に関わる分岐があるので確認させてください。'
 spoken
 

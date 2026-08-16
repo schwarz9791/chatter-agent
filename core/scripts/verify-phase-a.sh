@@ -132,6 +132,31 @@ CHATTER_AGENT_DISABLE=0 feed_message m-ddd 1 false "ゼロは解除です。"
 delta m-ddd 2 true ""
 spoken
 
+show "⑧ 並行して追記しても行が割れない（_lib.sh の LC_ALL=C）"
+
+# ★ マルチバイトのロケールだと bash の printf は 1024 バイトごとに write を分ける。
+#   hook は並行して走りうるので、同じ .jsonl への追記が境界で割り込まれ、UTF-8 の途中で千切れる。
+#   割れた行は JSON として読めず、core は飛ばすので index の連番が途切れ、そのメッセージの
+#   以降の delta が丸ごと発話されなくなる。日本語の payload は 1024 バイトを普通に超えるので実際に踏む。
+LONG=$(node -e 'process.stdout.write("あ".repeat(700))')
+for i in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19; do
+  feed_message m-race "$i" false "$LONG" &
+done
+wait
+node -e '
+  const fs = require("fs");
+  const path = `${process.argv[1]}/m-race.jsonl`;
+  const buf = fs.readFileSync(path);
+  const lines = buf.toString("utf8").split("\n").filter((l) => l.trim());
+  const broken = lines.filter((l) => { try { JSON.parse(l); return false; } catch { return true; } });
+  console.log(`  ${lines.length} 行中 壊れた行 ${broken.length}`);
+  if (lines.length !== 20 || broken.length > 0) {
+    console.error("並行追記で行が割れた。plugin/scripts/_lib.sh の LC_ALL=C が外れていないか確認すること");
+    process.exit(1);
+  }
+' "$SPOOL"
+rm -f "$SPOOL/m-race.jsonl"
+
 show "結果の検証"
 node -e '
   const fs = require("fs");

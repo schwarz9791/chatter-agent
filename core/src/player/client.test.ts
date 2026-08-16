@@ -165,29 +165,33 @@ describe("ack", () => {
     expect(JSON.parse(s.received[0])).toEqual({ type: "spoken", seq: 1 });
   });
 
-  it("★ 送れなかった ack を捨てない（次の機会に再送する）", async () => {
-    // readyState を見る前に値を消すと、reducer 側からも消えていて復旧手段が無くなる
+  it("★ 送れなかった ack を捨てず、かつ再接続の open で勝手に送らない", async () => {
+    // 捨てると reducer 側からも消えていて復旧手段が無くなる。かといって open で流すと、
+    // ランタイムルートが作り直された先の**新しいサーバー**へ旧エポックの ack が飛び、
+    // 配信済み・未発話の entry がまとめて消える。`dropPendingAck` は最初のフレームを
+    // 見るまで出ないので、open で流す実装では構造的に間に合わない
+    vi.spyOn(console, "warn").mockImplementation(() => {});
     const s = await stub();
-    const { client } = connect(s.url);
+    // 再接続を遅らせて、切断中に ack が溜まる窓を確実に作る
+    const { client } = connect(s.url, { backoffMinMs: 2000 });
     await until(() => s.sockets.length === 1);
 
-    // サーバー側から切る。client は再接続する
     s.sockets[0].terminate();
-    await sleep(30);
-    client.ack(7);
-    await sleep(80);
+    await sleep(50);
+    client.ack(500);
+    // 間引きタイマー（20ms）は発火済み。送れないので client 側に残る
+    await sleep(100);
+    expect(s.received).toEqual([]);
 
-    await until(() => s.sockets.length === 2, 5000);
+    // 繋ぎ直しても、フレームを1つも受けていないうちは送らない
+    await until(() => s.sockets.length === 2, 8000);
+    await sleep(200);
+    expect(s.received).toEqual([]);
+
+    // 次に ack が出た時点で、溜めていた最大値ごと送られる（累積 ack なので取りこぼさない）
+    client.ack(501);
     await until(() => s.received.length === 1, 5000);
-    expect(JSON.parse(s.received[0])).toEqual({ type: "spoken", seq: 7 });
-  });
-
-  it("接続前の ack は接続後に送られる", async () => {
-    const s = await stub();
-    const { client } = connect(s.url);
-    client.ack(7);
-    await until(() => s.received.length === 1);
-    expect(JSON.parse(s.received[0])).toEqual({ type: "spoken", seq: 7 });
+    expect(JSON.parse(s.received[0])).toEqual({ type: "spoken", seq: 501 });
   });
 });
 

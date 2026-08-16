@@ -4,7 +4,7 @@
 
 **Claude Code の発言を、VRM キャラクターがリアルタイムで読み上げるシステム。**
 
-読み上げるのは**表示側アプリ**。デスクトップ版 `chatter-mascot` と、Android XR グラス（XREAL Aura）向けの `chatter-mascot-xr` が、どちらも同じサーバーに繋ぐ。**どちらから着手するかも、デスクトップ版のフレームワーク（Electron / Tauri / Wails）も決めていない**（→ [#11](https://github.com/schwarz9791/chatter-agent/issues/11)）。
+読み上げるのは**表示側アプリ**。デスクトップ版 `chatter-mascot` と、Android XR グラス（XREAL Aura）向けの `chatter-mascot-xr` が、どちらも同じサーバーに繋ぐ。**どちらから着手するかも、デスクトップ版のフレームワーク（Electron / Tauri / Wails）も決めていない**（→ [#16](https://github.com/schwarz9791/chatter-agent/issues/16)）。
 
 [CC Mascot](https://github.com/kazakago/cc-mascot)（Mac / Electron）と目的は同じだが、**発言の取得方式が根本的に違う**。CC Mascot は Claude Code が書く jsonl ログを監視するが、本プロジェクトは **Claude Code の `MessageDisplay` hook から直接テキストを受け取る**。
 
@@ -35,7 +35,10 @@ hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公�
 | `.github/workflows/` | CI（typecheck / lint / format / bundle / test / verify） | 稼働中 |
 
 実装フェーズは **A**（plugin + CLI で記録と配信キューが正しく育つ）→ **B**（WebSocket 配信）→ **C**（表示側アプリ）。
-**Phase C をデスクトップ版と XR 版のどちらから始めるかは決めていない。**
+**Phase C をデスクトップ版と XR 版のどちらから始めるかは決めていない。** ただし **C は「発話」と「VRM 表示」に分けてある**
+（[#11](https://github.com/schwarz9791/chatter-agent/issues/11) / [#12](https://github.com/schwarz9791/chatter-agent/issues/12) が発話、
+[#16](https://github.com/schwarz9791/chatter-agent/issues/16) / [#17](https://github.com/schwarz9791/chatter-agent/issues/17) が表示）。
+**発話はフレームワーク選定を待たずに着手できる。**
 
 **Phase A / B は core 側だけ完了している。** `npm run verify:phase-a` / `verify:phase-b`（CI の `verify` ジョブでも回る）で spool を手で置いた確認までは通っているが、
 **受け入れ基準の「ターミナル表示と体感で同時」は実機で未確認。** ここは `plugin/` を作らないと測れない。

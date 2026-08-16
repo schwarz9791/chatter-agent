@@ -1389,8 +1389,9 @@ function trailingHexRunAt(scan) {
 * delta の集合から「確定した文」だけを切り出す。chatter-agent の中核。
 *
 * ★ `final:true` を待ってはいけない（CLAUDE.md「絶対に守ること」1 / 設計書 §2-4）。
-*   最終チャンクは実測で 34〜80 秒遅れて届く。メッセージが閉じるとき＝次のツール呼び出しが
-*   始まるときに flush され、その手前の thinking を待つため。
+*   最終チャンクはメッセージが閉じるとき＝次のブロックが始まるときに flush されるので、
+*   その手前でモデルが生成した分だけ遅れる。`AskUserQuestion` の直前だと数十秒に達する。
+*   **秒数は仕様ではない**（モデル・thinking の量・ツール入力の大きさで動く）。
 *
 * そこで delta が届くたびに全体を組み直し、**最後の文を除いた**未出力分だけを流す。
 * 最後の文はまだ伸びうるので保留する。
@@ -1414,7 +1415,7 @@ function endsAtBoundary(text) {
 *   `truncateAtUnstableTail` が行の途中で切ると句点で終わりうるが、その先は次の delta で伸びる。
 *
 * これを入れる前は、段落ごとに**最後の1文だけが次の delta まで待って**いた。
-* 実測で 1.4〜5.7 秒（`final` 直前の段落では最大）。
+* delta の間隔ぶんそのまま遅れるので、1文しかない段落は丸ごと遅れる。
 */
 function endsAtLineBoundary(text) {
 	return /[\n\r]\s*$/.test(text);

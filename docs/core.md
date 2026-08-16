@@ -237,7 +237,7 @@ config に載せない環境変数:
    複雑になる（取りこぼしと二重配信を両方踏んだ）。分けた経緯は [#8](https://github.com/schwarz9791/chatter-agent/issues/8)、
    結果の契約は [`protocol.md`](./protocol.md)
 2. **spool の処理順は mtime ではなく birthtime。** `<message_id>.jsonl` は delta ごとに追記されて
-   mtime が動き続けるので、`final:true` が 34〜80 秒遅れて届くと先行メッセージの mtime が後発より
+   mtime が動き続けるので、`final:true` が大きく遅れて届くと先行メッセージの mtime が後発より
    新しくなり、順序が入れ替わる
 3. **未確定なのはフェンスだけではない。** 設計書 §4-2 は「未閉じの ``` 以降は保留」としているが、
    `cleanTextForSpeech` が領域ごと削除する構文は他にもある。**`<` が閉じると、既に発話した文まで
@@ -251,7 +251,7 @@ config に載せない環境変数:
   → `messageAssembler.ts` の `endsAtLineBoundary`
 
   **これが受け入れ基準を決めた。** 入れる前は段落ごとに最後の1文だけが次の delta を待っており、
-  実測で 1.4〜5.7 秒遅れていた。1文しかない段落は丸ごと遅れる。入れた後は delta 到着から
+  delta の間隔ぶんそのまま遅れていた（1文しかない段落は丸ごと遅れる）。入れた後は delta 到着から
   `speech.jsonl` まで**約 50ms**。
 
   句点（`。！？`）で終わっているだけでは外さない。`truncateAtUnstableTail` が行の途中で切ると

@@ -118,7 +118,7 @@ describe("scanSpool", () => {
   });
 
   it("先に始まったメッセージが後から追記されても順序が入れ替わらない", () => {
-    // ★ mtime で並べるとここが壊れる。final:true は 34〜80 秒遅れて届くため、
+    // ★ mtime で並べるとここが壊れる。final:true は大きく遅れて届くため、
     //   先行メッセージの mtime が後発より新しくなるのが普通に起きる
     const first = writeMessage("first", [delta(0, "あ。")]);
     tick();

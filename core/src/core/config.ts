@@ -94,10 +94,11 @@ export interface ChatterAgentConfig {
    *
    * ★ 既定 OFF。有効にすると `aiSummaryThreshold` を超えたメッセージのたびに `claude -p` が
    *   走るので、ユーザーの課金を消費する。
-   * ★ **代償は遅延の方が大きい。** 実測（同一マシン・`--model haiku`・227文字の入力）で
-   *   要約1回に **10〜17秒**かかった（うち約5秒は CLI の起動オーバーヘッド）。`final` の待ちが
-   *   中央値0秒（→ `CLAUDE.md`）なのに対し、これは丸ごと発話の遅れとして乗る。
-   *   秒数は環境で変わるので**仕様として扱わないこと**。
+   * ★ **代償は遅延の方が大きい。** 要約1回の所要時間は**入力の長さから予測できない**
+   *   （実測10件で相関が見られず、短い入力がタイムアウトし長い入力が10秒台で返ることがあった。
+   *   → `aiSummaryTimeoutMs`）。ばらつきの支配要因は AI の生成時間で、環境（マシン・
+   *   ネットワーク・モデル）でも変わる。`final` の待ちが中央値0秒（→ `CLAUDE.md`）なのに対し、
+   *   要約に掛かった秒数は丸ごと発話の遅れとして乗る。**秒数を仕様として扱わないこと**。
    */
   aiSummaryEnabled: boolean;
   /**
@@ -118,14 +119,27 @@ export interface ChatterAgentConfig {
   aiSummaryModel: string;
   /**
    * 要約1回の上限。超えたら要約を諦めて原文をそのまま読み上げる（発話は止めない）。
-   * 既定 30 秒は、実測 10〜17秒（→ `aiSummaryEnabled`）の2倍強を見た値。
+   *
+   * ★ 既定 60 秒。実測10件（`summarizer.log`）では入力の長さと所要時間が相関せず
+   *   （→ `aiSummaryEnabled`）、旧既定の30秒では3/10（30%）がタイムアウトしていた。
+   *   タイムアウトすると、要約がいちばん効くはずの長い発言ほど、待たされた末に原文が
+   *   そのまま全文読み上げられるという逆転が起きる。**「実測値の N 倍」という決め方はしていない**
+   *   （相関しないものに倍率を掛けても意味が無いため）。60秒は「実測でタイムアウトが
+   *   3割起きた30秒では短すぎた」という根拠だけを持つ値で、秒数自体は仕様ではない。
    */
   aiSummaryTimeoutMs: number;
   /**
-   * 1回のドレインで要約してよいメッセージ数の上限。
+   * 1回のドレインで要約してよいメッセージ数の上限。既定は3、上限は8（`parseAiSummaryMaxPerDrain`）。
    *
    * ★ 上限が要る理由: CLI が長時間動かなかった後のドレインでは長文が複数溜まっていることがあり、
    *   全部要約すると `aiSummaryTimeoutMs × N` だけ発話が遅れる。超えた分は要約せず原文で出す。
+   * ★ **上限8は `aiSummaryTimeoutMs` の既定と連動している。** 1回のドレインは最悪
+   *   `aiSummaryMaxPerDrain × aiSummaryTimeoutMs` の間ロックを保持しうるので、既定60秒と
+   *   掛けると上限8でも最悪480秒。
+   * ★ **上限8は `workerState.ts` の `SUMMARIZER_SESSION_LIMIT`（64）とも連動している。**
+   *   64 ÷ 8 = 8ドレイン分の要約セッションIDを覚えられる計算になっている。上限をこれより
+   *   大きくすると、1ドレイン内で自分のセッションIDがリング（`summarizerSessionIds`）から
+   *   押し出されうるようになり、無限ループ防止の第2層（`isSummarizerSession`）が素通しになる。
    */
   aiSummaryMaxPerDrain: number;
 }
@@ -153,7 +167,7 @@ export function createDefaultConfig(): ChatterAgentConfig {
     aiSummaryThreshold: 200,
     aiSummaryCommand: "claude",
     aiSummaryModel: "haiku",
-    aiSummaryTimeoutMs: 30_000,
+    aiSummaryTimeoutMs: 60_000,
     aiSummaryMaxPerDrain: 3,
   };
 }
@@ -199,6 +213,26 @@ function toInt(raw: unknown): number | undefined {
 const parsePort: Parser<number> = (raw) => {
   const n = toInt(raw);
   return n !== undefined && n >= 1 && n <= 65535 ? n : undefined;
+};
+
+/**
+ * `aiSummaryMaxPerDrain` 専用。`parsePositiveInt` は `n >= 1` しか見ないので、
+ * `aiSummaryMaxPerDrain: 1000000` のような値がそのまま素通りしてしまう（issue #38 レビュー G1-b）。
+ * `parsePort`（1〜65535）と同じ「上限付きパーサ」の形。
+ *
+ * ★ 上限 8 の根拠は2つ、いずれも `aiSummaryTimeoutMs` / `workerState.ts` の
+ *   `SUMMARIZER_SESSION_LIMIT` と連動しているので、上限だけを単独で動かさないこと:
+ *
+ * 1. 1回のドレインで要約する件数 × `aiSummaryTimeoutMs` の間ロックを保持する。
+ *    既定60秒 × 上限8 で最悪480秒（→ `aiSummaryTimeoutMs` の docstring）。
+ * 2. `workerState.ts` の `SUMMARIZER_SESSION_LIMIT`（64）は「64 ÷ 8 = 8ドレイン分の
+ *    要約セッションIDを覚えられる」という計算で決めてある。上限をこれより緩めると、
+ *    1ドレイン内で自分のセッションIDがリングから押し出され、無限ループ防止の第2層
+ *    （`isSummarizerSession`）が素通しになる。
+ */
+const parseAiSummaryMaxPerDrain: Parser<number> = (raw) => {
+  const n = toInt(raw);
+  return n !== undefined && n >= 1 && n <= 8 ? n : undefined;
 };
 
 const parsePositiveInt: Parser<number> = (raw) => {
@@ -348,7 +382,7 @@ const SPECS = {
   aiSummaryCommand: { env: "CHATTER_AGENT_AI_SUMMARY_COMMAND", parse: parseNonEmptyString },
   aiSummaryModel: { env: "CHATTER_AGENT_AI_SUMMARY_MODEL", parse: parseAiSummaryModel },
   aiSummaryTimeoutMs: { env: "CHATTER_AGENT_AI_SUMMARY_TIMEOUT_MS", parse: parseTimeoutMs },
-  aiSummaryMaxPerDrain: { env: "CHATTER_AGENT_AI_SUMMARY_MAX_PER_DRAIN", parse: parsePositiveInt },
+  aiSummaryMaxPerDrain: { env: "CHATTER_AGENT_AI_SUMMARY_MAX_PER_DRAIN", parse: parseAiSummaryMaxPerDrain },
 } as const satisfies { [K in ConfigKey]: { env: string; parse: Parser<ChatterAgentConfig[K]> } };
 
 const CONFIG_KEYS = Object.keys(SPECS) as ConfigKey[];

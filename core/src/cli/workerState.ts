@@ -20,6 +20,14 @@ import { writeFileAtomic } from "../core/atomicWrite";
  */
 const TOMBSTONE_LIMIT = 64;
 
+/**
+ * 要約セッションIDの保持件数（有界リング）。
+ *
+ * 要約は1回のドレインで既定3回まで（`aiSummaryMaxPerDrain`）しか起動しない。数ドレイン分を
+ * 覚えていれば、要約 CLI 自身の出力が spool に混ざって届いたときに拾い切れる
+ */
+const SUMMARIZER_SESSION_LIMIT = 16;
+
 export interface WorkerState {
   /** 直前に読み上げた PreToolUse の prompt_id。付随する Notification を1回だけ捨てるために使う */
   pairedPromptId: string | null;
@@ -39,10 +47,31 @@ export interface WorkerState {
    * `removeEntry` が失敗して spool ファイルが残っても、次のドレインで再 publish されない。
    */
   publishedMessageIds: string[];
+  /**
+   * 要約 CLI に渡した session_id。この session_id の payload は発話せず捨てる
+   * （無限ループ防止の第2層。issue #31）。
+   *
+   * 要約（`summarizer/summaryPipeline.ts`）は `claude -p` をヘッドレス実行するので、
+   * **その出力自身が `MessageDisplay` hook を発火させうる**。第1層（要約 CLI を
+   * `CHATTER_AGENT_DISABLE=1` を付けて spawn する）が本命の対策で、これはそれが効かなかった
+   * とき（環境変数が子プロセスまで伝播しない設定ミス等）に備える保険。
+   *
+   * cc-mascot は要約プロセスのログファイルパスをエンコードして除外していたが、chatter-agent は
+   * `session_id` が hook payload（`MessageDisplay` 等）に直接入っているので、こちらの方が
+   * 迂遠なパス突き合わせを介さず正確に塞げる。
+   */
+  summarizerSessionIds: string[];
 }
 
 export function emptyWorkerState(): WorkerState {
-  return { pairedPromptId: null, pairedPromptAt: 0, lastText: "", lastTextAt: 0, publishedMessageIds: [] };
+  return {
+    pairedPromptId: null,
+    pairedPromptAt: 0,
+    lastText: "",
+    lastTextAt: 0,
+    publishedMessageIds: [],
+    summarizerSessionIds: [],
+  };
 }
 
 export function readWorkerState(statePath: string): WorkerState {
@@ -57,6 +86,13 @@ export function readWorkerState(statePath: string): WorkerState {
         lastTextAt: typeof record.lastTextAt === "number" ? record.lastTextAt : 0,
         publishedMessageIds: Array.isArray(record.publishedMessageIds)
           ? record.publishedMessageIds.filter((id): id is string => typeof id === "string").slice(-TOMBSTONE_LIMIT)
+          : [],
+        // ★ 足し忘れると永続化した意味が消える（readWorkerState を通らず emptyWorkerState() の
+        //   空配列に戻ってしまい、プロセスを跨いだ第2層の抑制が効かない）
+        summarizerSessionIds: Array.isArray(record.summarizerSessionIds)
+          ? record.summarizerSessionIds
+              .filter((id): id is string => typeof id === "string")
+              .slice(-SUMMARIZER_SESSION_LIMIT)
           : [],
       };
     }
@@ -83,5 +119,21 @@ export function addTombstone(state: WorkerState, messageId: string): void {
   state.publishedMessageIds.push(messageId);
   if (state.publishedMessageIds.length > TOMBSTONE_LIMIT) {
     state.publishedMessageIds.splice(0, state.publishedMessageIds.length - TOMBSTONE_LIMIT);
+  }
+}
+
+/** `sessionId` が要約 CLI に渡した session_id として記録されているか（無限ループ防止の第2層） */
+export function isSummarizerSession(state: WorkerState, sessionId: string): boolean {
+  return state.summarizerSessionIds.includes(sessionId);
+}
+
+/**
+ * `sessionId` を要約 CLI に渡した session_id として記録する。有界リングなので、上限を超えた分は
+ * 古いものから捨てる（呼び出し元で `writeWorkerState` して永続化すること）。
+ */
+export function addSummarizerSession(state: WorkerState, sessionId: string): void {
+  state.summarizerSessionIds.push(sessionId);
+  if (state.summarizerSessionIds.length > SUMMARIZER_SESSION_LIMIT) {
+    state.summarizerSessionIds.splice(0, state.summarizerSessionIds.length - SUMMARIZER_SESSION_LIMIT);
   }
 }

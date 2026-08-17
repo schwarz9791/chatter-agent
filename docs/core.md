@@ -13,7 +13,7 @@ core/src/
 ├── cli/          chatter-agent-speak（spool を読む単一ワーカー）
 │   ├── index.ts             エントリ。無効化判定 → ロック → ドレイン → 解放
 │   ├── spool.ts             走査（到着順）/ 分類 / 読み取り / 削除 / 孤児掃除
-│   ├── messageAssembler.ts  ★中核。メッセージ全文の delta 結合 → 文の切り出し（純粋関数）
+│   ├── messageAssembler.ts  delta の結合だけを担う薄い adapter（純粋関数）。整形の本体は `text/speechText.ts`
 │   ├── publish.ts           記録と配信キューの両方に書く合成。append できた時点で「出した」が確定する
 │   ├── worker.ts            ドレインループ。応答待ち通知の整形もここ
 │   └── workerState.ts       プロセスを跨いで持ち回る重複抑制の状態
@@ -37,6 +37,9 @@ core/src/
 │   ├── speechLog.ts         記録への追記 / seq 採番 / state 整合
 │   └── speechQueue.ts       配信キュー。list/read/enqueue/ackUpTo/dropOlderThan/trim/sweepTmp
 ├── text/         テキスト整形・文分割        ← textFilter.ts のみ cc-mascot 由来
+│   └── speechText.ts        ★中核。メッセージ全文の整形 → 文の切り出し（`toSpeechSentences`。純粋関数）。
+│                             `cli/` からも `summarizer/` からも参照するため、`summarizer/ → cli/` の
+│                             逆依存を作らないよう `cli/messageAssembler.ts` から移設した（issue #38）
 ├── emotion/      ルールベース感情判定        ← cc-mascot 由来
 ├── prompt/       応答待ち通知の整形
 └── summarizer/   AI要約（既定OFF。issue #31）
@@ -272,16 +275,24 @@ player だけが読むキー。**別ファイルに分けないこと。** `SPEC
 | `aiSummaryThreshold` | `200` | `CHATTER_AGENT_AI_SUMMARY_THRESHOLD` |
 | `aiSummaryCommand` | `"claude"` | `CHATTER_AGENT_AI_SUMMARY_COMMAND` |
 | `aiSummaryModel` | `"haiku"`（空文字なら `--model` を渡さない） | `CHATTER_AGENT_AI_SUMMARY_MODEL` |
-| `aiSummaryTimeoutMs` | `30000` | `CHATTER_AGENT_AI_SUMMARY_TIMEOUT_MS` |
-| `aiSummaryMaxPerDrain` | `3` | `CHATTER_AGENT_AI_SUMMARY_MAX_PER_DRAIN` |
+| `aiSummaryTimeoutMs` | `60000` | `CHATTER_AGENT_AI_SUMMARY_TIMEOUT_MS` |
+| `aiSummaryMaxPerDrain` | `3`（上限8。`parseAiSummaryMaxPerDrain`） | `CHATTER_AGENT_AI_SUMMARY_MAX_PER_DRAIN` |
 
 - `aiSummaryEnabled` は**既定 OFF**。有効にすると `aiSummaryThreshold` を超えたメッセージのたびに `claude -p`
-  が走り、ユーザーの課金を消費する。**代償は遅延の方が大きい**: 実機実測（同一マシン・`--model haiku`・227文字の
-  入力）で要約1回に**10.7〜16.8秒**（うち CLI の起動オーバーヘッドが約5.2秒）かかった。`final` の待ちが中央値0秒
+  が走り、ユーザーの課金を消費する。**代償は遅延の方が大きい**: 要約は AI の生成なので、所要時間は
+  **入力の長さから予測できない**（実機実測10件で相関が見られず、短い入力がタイムアウトし長い入力が
+  10秒台で返ることもあった。詳細は下記と [`plugin.md`](./plugin.md)）。`final` の待ちが中央値0秒
   （→ `CLAUDE.md`）なのに対し、これは丸ごと発話の遅れとして乗る。秒数は環境で変わるので仕様として扱わないこと
-- `aiSummaryTimeoutMs` の既定 30 秒は、上の実測（10.7〜16.8秒）の2倍弱を見た値
+- `aiSummaryTimeoutMs` の既定は**60秒**。実機実測10件（`summarizer.log`）では入力の長さと所要時間が
+  相関せず、旧既定の30秒では10件中3件（30%）がタイムアウトしていた。**「実測値の N 倍」という決め方は
+  していない**——相関しないものに倍率を掛けても意味が無いため。60秒は「旧既定30秒ではタイムアウトが
+  3割起きた」という実測だけを根拠にした値で、秒数自体を仕様として扱わないことは変わらない
 - `aiSummaryMaxPerDrain` は移植元の「滞留ガード」（同時実行数の待ち行列が閾値を超えたらスキップ）の読み替え。
-  同期実行では待ち行列の概念が無いので、「1回のドレインで要約してよい回数の上限」に置き換えてある
+  同期実行では待ち行列の概念が無いので、「1回のドレインで要約してよい回数の上限」に置き換えてある。
+  上限8が入った（`parseAiSummaryMaxPerDrain`）。1回のドレインは最悪 `aiSummaryMaxPerDrain × aiSummaryTimeoutMs`
+  の間ロックを保持しうるため（既定なら 8 × 60秒 = 最悪480秒）、また `workerState.ts` の
+  `SUMMARIZER_SESSION_LIMIT`（64）は「64 ÷ 8 = 8ドレイン分の要約セッションIDを覚えられる」計算になっている
+  ため、上限だけを単独で動かさないこと
 
 **`speechLogGenerations`（記録の退避世代数）は [#8](https://github.com/schwarz9791/chatter-agent/issues/8) で廃止した。** 誰も `speech.jsonl` を tail しなくなったので、
 複数世代を繰り下げる必要がなくなり、`speechLogMaxBytes` を超えたら `speech.1.jsonl` に退避する1世代だけになった。

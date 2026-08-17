@@ -53,7 +53,7 @@ chatter-mascot         表示側アプリ（Unity）。TTS → 再生 → VRM描
 | | 状態 |
 |---|---|
 | `plugin/` | 実装済み。実機で確認済み |
-| `core/` | CLI + WebSocket サーバー + 発話 CLI とも実装済み。AI要約（既定OFF）のみ未着手 |
+| `core/` | CLI + WebSocket サーバー + 発話 CLI + AI要約（既定OFF）とも実装済み |
 | `apps/` | 未作成 |
 
 実装フェーズは **A**（plugin + CLI で記録と配信キューが育つ）→ **B**（WebSocket 配信）→ **C**（表示側アプリ）。**C は Unity + UniVRM で1プロジェクトにまとめ、発話 → VRM 表示 → プラットフォーム固有（デスクトップの透過ウィンドウ / XR の Full Space）の順に積みます。**

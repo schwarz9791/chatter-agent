@@ -29,21 +29,37 @@ export type Summarize = (text: string, registerSessionId: (sessionId: string) =>
  *
  * - `ok`            要約を採用した
  * - `timeout`       CLI がタイムアウトで強制終了された
+ * - `overflow`      stdout/stderr が `maxBuffer` を超えた（ENOBUFS）。timeout と誤報しない
  * - `error`         CLI が非ゼロ終了、または起動自体に失敗した（ENOENT 等）
- * - `invalid`       CLI は正常終了したが、出力が空 or 原文以上の長さだった（採用しない）
+ * - `invalid`       CLI は正常終了したが、出力が空 or 原文以上の長さ or 上限文字数超えだった（採用しない）
+ * - `internal`      pipeline 内部の例外（getter の実装ミス、registerSessionId の失敗など）。
+ *                    **CLI は起動していない。** `error`（CLI 起動後の失敗）と混同しないこと
+ *                    （issue #38 レビュー D1(a)）
  * - `skipped-limit` このドレインでの要約実行回数が上限に達していた（CLI を起動していない）
  * - `no-command`    要約コマンドの絶対パスが解決できなかった（CLI を起動していない）
  */
-export type SummaryOutcome = "ok" | "timeout" | "error" | "invalid" | "skipped-limit" | "no-command";
+export type SummaryOutcome =
+  | "ok"
+  | "timeout"
+  | "overflow"
+  | "error"
+  | "invalid"
+  | "internal"
+  | "skipped-limit"
+  | "no-command";
 
 /**
  * `claudeCli.ts` の `runClaudeCli` の結果。
  *
- * ★ タイムアウトと「CLI がエラー終了した」を区別できる形にしてある。両者とも
- *   `execFileSync` は同じく throw するので、`err.signal` を見て呼び出し側（`runClaudeCli`）が
- *   ここに振り分ける。実測ログで「詰まっているのか」「壊れているのか」を見分けたいため。
+ * ★ タイムアウト・maxBuffer 超過・その他のエラーを区別できる形にしてある。`execFileSync` は
+ *   どれも同じく throw するので、呼び出し側（`runClaudeCli`）が `err.code` を見てここに振り分ける
+ *   （`err.signal` の有無では判別できない。Node 24 実測では maxBuffer 超過でも
+ *   `{ code: "ENOBUFS", signal: "SIGKILL" }` が付き、子プロセスの自死や外部からの kill で
+ *   `SIGTERM` が付くこともある）。実測ログで「詰まっているのか」「溢れたのか」「壊れているのか」
+ *   を見分けたいため。
  */
 export type ClaudeCliResult =
   | { ok: true; stdout: string }
-  | { ok: false; reason: "timeout" }
+  | { ok: false; reason: "timeout"; detail?: string }
+  | { ok: false; reason: "overflow"; detail: string }
   | { ok: false; reason: "error"; detail: string };

@@ -15,6 +15,7 @@ import {
   getEventSessionId,
 } from "../prompt/promptEventFormatter";
 import { cleanTextForSpeech, splitIntoSentences } from "../text/textFilter";
+import { toSpeechSentences } from "../text/speechText";
 import { acquireLock, type Lock } from "../core/lock";
 import type { SpeechEntry } from "../core/speechLog";
 import type { Emotion, SpeechRecord } from "../core/types";
@@ -31,8 +32,10 @@ import {
 } from "./spool";
 import {
   addSummarizerSession,
+  addSummaryAttempt,
   addTombstone,
   isSummarizerSession,
+  isSummaryAttempted,
   isTombstoned,
   readWorkerState,
   writeWorkerState,
@@ -44,9 +47,22 @@ import {
  *
  * ★ 長く待ってよい理由: CLI は hook からデタッチ起動されているので、ここで待っても hook 自体は
  *   ブロックしない。長く待っても実害は「node プロセスが数個並ぶ」だけ。
- * ★ 長く待つ必要がある理由: `final:true` の delta と `permission_prompt` の Notification は
- *   **そのターン最後の hook イベント**。ここでロックを取り損ねると、次に誰かが hook を
- *   発火させるまで発話が沈黙する。`AskUserQuestion` の場合、それは**ユーザーが既に回答した後**になる。
+ *
+ * ★★ D3（issue #38 レビュー）で根拠を書き換えた。旧コメントは「ここでロックを取り損ねると、
+ *   次に誰かが hook を発火させるまで発話が沈黙する」としていたが、これは `drainSpool` の
+ *   多パス構造（下の for ループ、`unchangedStreak` が2になるまで `scanSpool` をやり直す）を
+ *   勘定に入れていなかった。実際には、**長時間ロックを保持しているワーカーが、その間に
+ *   届いた spool を同じドレインの次のパスで拾う。** ロックを取れなかったプロセスがここで
+ *   諦めても、通知は失われず先行ワーカーが処理する（自分が処理するか先行ワーカーが処理するか
+ *   の違いでしかなく、発話される時刻自体は変わらない）。
+ *
+ *   要約 ON では、先行ワーカーがロックを保持する時間が `aiSummaryMaxPerDrain ×
+ *   aiSummaryTimeoutMs`（既定なら 3 回 × 60秒 = 180秒、設定の上限なら 8 回 × 60秒 = 480秒）
+ *   まで伸びうる。それでも3秒で足りる理由は上と同じで、待つ側が3秒で諦めても要約中の
+ *   先行ワーカーが自分のドレインの中で拾うため。
+ *
+ * ★ **定数 `3_000` は変えないこと。** 伸ばすと、delta が0.5〜3.5秒間隔で届くぶんだけ
+ *   待機プロセス（各約49MB）が積み上がる一方、発話される時刻は上の理由により変わらない。
  *   旧予算（4回試行 × 120ms ≒ 360ms、Node の起動込みで実測 408〜420ms）は、先行 worker が
  *   ロックを 500ms 以上保持しただけで超えていた。実測されたドレイン所要時間に対して
  *   十分な余裕を持たせ、3秒を予算にする。
@@ -161,6 +177,33 @@ function tryRemoveEntry(entry: SpoolEntry): void {
   }
 }
 
+/**
+ * state の永続化を try/catch で包む（issue #38 レビュー A4）。
+ *
+ * tombstone と spool 削除は**どちらか一方が成功すれば再 publish を防げる**（tombstone が
+ * あれば `isTombstoned` で弾かれる。spool が無ければそもそも組み直されない）。ここを
+ * 素の `writeWorkerState` のままにしておくと、throw したときに `processMessage` が
+ * `tryRemoveEntry` の手前で抜けてしまい、「publish 済み・tombstone 未永続化・spool 残存」
+ * という**両方失敗**の状態で `drainSpool` 全体が落ちる。次のドレインで同じメッセージが
+ * 再 publish される（#30 でメッセージ単位にしたので、二重に読み上げられるのは1文ではなく
+ * **メッセージ全文**）。ここで try/catch し、必ず `tryRemoveEntry` まで到達させることで、
+ * 少なくとも spool 削除の方を成功させ、上の「どちらか一方」を満たす。
+ *
+ * ★★ **ここで包むのは「publish 後」の書き込みだけ。** `summarizeSentences` 内の
+ *   `registerSessionId` コールバックからの `writeWorkerState` は**意図的に**包んでいない
+ *   （そちらのコメント参照）。この非対称性を「統一しよう」と直すと、無限ループ防止の
+ *   第2層が登録されないまま要約 CLI が起動する穴が開く。
+ */
+function tryWriteWorkerState(statePath: string, state: WorkerState): boolean {
+  try {
+    writeWorkerState(statePath, state);
+    return true;
+  } catch (err) {
+    console.warn("[Worker] state の永続化に失敗しました:", err);
+    return false;
+  }
+}
+
 export function drainSpool(deps: DrainDeps): DrainResult {
   const now = deps.now ?? Date.now;
 
@@ -242,7 +285,15 @@ export function drainSpool(deps: DrainDeps): DrainResult {
     if (unchangedStreak >= 2) break;
   }
 
-  if (stateDirty) writeWorkerState(deps.workerStatePath, state);
+  // ★ A4: tryWriteWorkerState にしてある。ここが失敗しても drainSpool 全体を落とさない。
+  //   ここに来る stateDirty は2種類ある:
+  //     - `processPrompt` が立てた分（元からの設計。ペア判定の状態をまとめて1回で書く）
+  //     - `processMessage` の永続化が失敗して `!persisted` を返した分（＝**ここが再試行の場**）
+  //   後者がここでも失敗すると tombstone は永続化されないまま終わるが、そのメッセージの
+  //   spool は `tryRemoveEntry` で消えているので、次のドレインで組み直されることはない
+  //   （tombstone と spool 削除の「どちらか一方が成功すれば足りる」— `tryWriteWorkerState`
+  //   のヘッダ参照）。state はメモリ上のものなので、プロセス終了で消えて次回には残らない
+  if (stateDirty) tryWriteWorkerState(deps.workerStatePath, state);
 
   return { written, passes, orphansRemoved };
 }
@@ -292,20 +343,42 @@ interface EntryOutcome {
 
 const NOTHING: EntryOutcome = { written: 0, changed: false, stateDirty: false };
 
+/** `summarizeSentences` の戻り値（issue #38 レビュー E1）。 */
+interface SummarizeResult {
+  /** 実際に publish する文の列（要約後 or フォールバックした元の `sentences`） */
+  spoken: string[];
+  /**
+   * 要約が実際に効いたか。true のときだけ、呼び出し元は原文（要約前の全文）由来の感情を
+   * 全文で共有してよい（E1 参照）。
+   */
+  summarized: boolean;
+}
+
 /**
  * 長いメッセージを要約する（issue #31）。`processMessage` の `assembleSentences` の直後、
  * `deps.publish` の手前に挟む。
  *
- * ★ `final` 経由でも救済経路（`hasNewer` で打ち切ったメッセージ）でも通す。救済されたメッセージは
- *   本来より短い状態で閾値判定されるが、issue #31「決めること4」で許容と決定済み
- *   （要約は長いメッセージだけが対象で、常に要約される必要はない。短く打ち切られて閾値を
- *   下回れば単に要約されないだけで、発話そのものは救済経路のとおり出る）。
+ * ★ A3（issue #38 レビュー）: 呼び出し元（`processMessage`）は `content.final` のときだけ
+ *   この関数を呼ぶ。救済経路（`!content.final && hasNewer`）では呼ばれない —
+ *   そちらのコメント（`processMessage` 側）を参照。
  *
  * ★ `processPrompt` からは呼ばない（そちら側にコメントあり）。
  */
-function summarizeSentences(sentences: string[], deps: DrainDeps, state: WorkerState): string[] {
+function summarizeSentences(
+  sentences: string[],
+  deps: DrainDeps,
+  state: WorkerState,
+  messageId: string,
+): SummarizeResult {
   // 文が0本なら要約を呼ぶ意味が無い（空文字列を渡しても閾値判定で弾かれるだけ）
-  if (sentences.length === 0) return sentences;
+  if (sentences.length === 0) return { spoken: sentences, summarized: false };
+
+  // ★ A4（issue #38 レビュー）: 再要約を高々1回に抑える。要約中（数十秒）に親プロセスが
+  //   死ぬと（OOM、maxBuffer 到達、Claude Code の終了、スリープ）、tombstone も spool 削除も
+  //   されないので、次のドレインが同じメッセージを再 assemble してここへまた来る。要約 CLI が
+  //   親を落とすタイプの障害だと、これがドレインのたびに繰り返され、数十秒を無限に燃やし
+  //   続ける。★ 発話は絶対に落とさない: スキップするのは要約だけで、sentences はそのまま返す
+  if (isSummaryAttempted(state, messageId)) return { spoken: sentences, summarized: false };
 
   // ★ join("") ではなく join("\n") にすること。splitIntoSentences（text/textFilter.ts）は
   //   改行でも文を割るので、空文字で繋ぐと改行区切りだった文同士が地続きになり、要約に渡す
@@ -324,9 +397,18 @@ function summarizeSentences(sentences: string[], deps: DrainDeps, state: WorkerS
   //   ここで即座に永続化する。`drainSpool` 末尾の `writeWorkerState` に任せて遅延させると、
   //   要約中に親（chatter-agent-speak）が落ちたときにこのセッションIDが登録されないまま、
   //   要約 CLI 自身の spool 出力が残り、次のドレインで読み上げられてしまう
-  //   （無限ループ防止の第2層が素通しになる）
+  //   （無限ループ防止の第2層が素通しになる）。
+  //
+  // ★★ ここは意図的に try/catch で**包まない**（A4 の非対称性。`tryWriteWorkerState` の
+  //   ヘッダと対で読むこと）。ここで throw すると `summaryPipeline.ts` の `createSummaryPipeline`
+  //   が返す関数を包んでいる catch が拾って原文返却になり、`execFileSync` に到達しない。
+  //   つまり「session id を永続化できなければ
+  //   要約 CLI を起動しない」という無限ループ防止・第2層の安全側の挙動が、この書き方（包まない）
+  //   で成立している。ここを try/catch で包むと、登録されないまま CLI が起動する穴が開く。
+  //   将来「publish 後の書き込み（`tryWriteWorkerState`）と統一しよう」と直されると危険。
   const summary = deps.summarize(original, (sessionId) => {
     addSummarizerSession(state, sessionId);
+    addSummaryAttempt(state, messageId); // ← A4 で追加。writeWorkerState は1回のまま
     writeWorkerState(deps.workerStatePath, state);
   });
 
@@ -335,16 +417,20 @@ function summarizeSentences(sentences: string[], deps: DrainDeps, state: WorkerS
   //   包んで保証している。ここで握ると「throw しうる」という誤ったシグナルが残ってしまう
 
   // 要約しなかった／フォールバックした（原文をそのまま返した）。無駄な再整形をしない
-  if (summary === original) return sentences;
+  if (summary === original) return { spoken: sentences, summarized: false };
 
-  const resplit = splitIntoSentences(cleanTextForSpeech(summary)).filter((s) => s.length > 0);
+  // ★ A2（issue #38 レビュー）: cleanTextForSpeech / splitIntoSentences の直呼びをやめ、
+  //   toSpeechSentences（text/speechText.ts）に一本化した。これで要約結果も
+  //   truncateAtUnstableTail を通るようになり、未閉じのコードフェンスや表の行が
+  //   要約結果に含まれていても読み上げに漏れない（旧実装はここだけこの防御を素通りしていた）
+  const resplit = toSpeechSentences(summary);
 
   // ★ 要約結果が記号だけだった等で全部落ちたら、元の文をそのまま返す。ここでフォールバック
   //   しないと、メッセージが無言で消える（発話が丸ごと欠落し、しかも publish しないので
   //   ログにも残らない）。要約の失敗は「要約前の発話」に倒すべきで、無発話に倒してはいけない
-  if (resplit.length === 0) return sentences;
+  if (resplit.length === 0) return { spoken: sentences, summarized: false };
 
-  return resplit;
+  return { spoken: resplit, summarized: true };
 }
 
 function processMessage(
@@ -371,15 +457,31 @@ function processMessage(
   //   （CLAUDE.md 承認済み計画 A-3(e)）。`final` 経由（もう続きは来ない）ではそのまま全部出す
   const sentences = assembleSentences(content.deltas, { dropUnterminatedTail: !content.final });
 
-  // 長いメッセージはここで要約する（issue #31）。0本ならそのまま、要約が効かなければ
-  // 元の sentences がそのまま返る（summarizeSentences 参照）
-  const spoken = summarizeSentences(sentences, deps, state);
+  const messageId = content.messageId ?? entry.messageId;
+
+  // ★ A3（issue #38 レビュー）: 要約するのは content.final のときだけ。救済経路
+  //   （!content.final && hasNewer）は「続きが来ないと確定した」わけではなく「次のイベントが
+  //   来たので打ち切った」だけなので、ここで数十秒かけて要約する筋が無い。さらに、待って
+  //   いる間に届いた本物の final:true は、その頃には tombstone が打たれているので次の
+  //   ドレインで破棄される。要約 ON では待ち時間が約1ms → 数十秒に広がるので、完全な
+  //   メッセージを取りこぼす確率が桁違いに上がる（要約されなかった場合と違い、二度と発話
+  //   されない形で消える）
+  const { spoken, summarized } = content.final
+    ? summarizeSentences(sentences, deps, state, messageId)
+    : { spoken: sentences, summarized: false };
+
+  // ★ E1（issue #38 レビュー）: 要約が効いたときだけ、原文（要約前の全文）由来の感情を
+  //   全文で共有する。RuleBasedEmotionClassifier の文末パターン
+  //   （emotion/ruleBasedEmotionClassifier.ts の sentenceEndPatterns）はほぼ全部が
+  //   ！/？/…/♪/絵文字で、要約プロンプトの指示に従ってモデルが記号を落とすと、要約後の
+  //   文はほぼ確実に neutral に潰れる。要約が効かなかった（summarized: false）ときは
+  //   従来どおり文ごとに判定する（文ごとに表情が変わるのが正しい）
+  const sharedEmotion = summarized ? deps.classify(sentences.join("\n")) : null;
 
   // ★ メッセージ1つ分をまとめて1回だけ publish すること。分けて呼ぶと `ts` が割れる
   //   （`speechLog.append` は呼び出しごとに1回だけ時刻を取る）。クライアントは
   //   `(seq, ts)` で重複排除する契約なので、`ts` の同値性は契約の一部（docs/protocol.md）
   if (spoken.length > 0) {
-    const messageId = content.messageId ?? entry.messageId;
     deps.publish(
       spoken.map((text): SpeechEntry => ({
         source: "claude-code",
@@ -388,7 +490,7 @@ function processMessage(
         messageId,
         kind: "assistant",
         text,
-        emotion: deps.classify(text),
+        emotion: sharedEmotion ?? deps.classify(text),
       })),
     );
   }
@@ -396,8 +498,16 @@ function processMessage(
   // ★ 書き込み順序が肝（CLAUDE.md 承認済み計画 A-3(b)）。publish → tombstone を永続化 →
   //   removeEntry の順にする。こうすると removeEntry が失敗しても、次のドレインで
   //   再 publish されない（tombstone が exactly-once の記録になる）。
+  //
+  // ★ A4（issue #38 レビュー）: writeWorkerState を tryWriteWorkerState に変えた。素の
+  //   writeWorkerState が throw すると、この後の tryRemoveEntry に到達できず「publish 済み・
+  //   tombstone 未永続化・spool 残存」という最悪の状態で drainSpool 全体が落ち、次のドレインで
+  //   同じメッセージが再 publish される（二重発話。#30 でメッセージ単位にしたので被害は
+  //   メッセージ全文）。tombstone と spool 削除はどちらか一方が成功すれば再 publish を防げるので
+  //   （tombstone があれば isTombstoned で弾かれ、spool が無ければそもそも組み直されない）、
+  //   ここでは「失敗しても必ず tryRemoveEntry まで進む」ことを優先する。
   addTombstone(state, entry.messageId);
-  writeWorkerState(deps.workerStatePath, state);
+  const persisted = tryWriteWorkerState(deps.workerStatePath, state);
 
   // ★ 書き込みが成功してから消す（processPrompt と同じ順序）。先に消すと、publish が
   //   失敗したときにメッセージが復旧不能に失われる。
@@ -406,7 +516,9 @@ function processMessage(
   //   されないが、spool にファイルが残り続けてしまう）
   tryRemoveEntry(entry);
 
-  return { written: spoken.length, changed: true, stateDirty: false };
+  // ★ A4: state の永続化に失敗していれば stateDirty を立てて、drainSpool 末尾の
+  //   tryWriteWorkerState で再試行させる
+  return { written: spoken.length, changed: true, stateDirty: !persisted };
 }
 
 /**

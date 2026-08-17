@@ -579,6 +579,16 @@ describe("AI要約", () => {
     expect(texts()).toEqual(["確認します。", "ログを見ます。"]);
   });
 
+  it("★ 未閉じのコードフェンスを含む要約は、コード片を読み上げに漏らさない（A2: toSpeechSentences への一本化）", () => {
+    appendDelta("m1", 0, "とても長いメッセージです。", true);
+    // 要約結果に未閉じのコードフェンスが含まれるケース。旧実装（splitIntoSentences +
+    // cleanTextForSpeech の直呼び）は truncateAtUnstableTail を通らないので、この
+    // "const x = 1;" がそのまま publish されてしまっていた
+    drain({ summarize: () => "変更しました。\n```\nconst x = 1;" });
+    expect(texts()).toEqual(["変更しました。"]);
+    expect(texts().join("")).not.toContain("const x");
+  });
+
   it("要約が原文をそのまま返したら、元の文の並びがそのまま出る", () => {
     appendDelta("m1", 0, "あ。い。う。", true);
     drain({ summarize: (text) => text });
@@ -596,6 +606,27 @@ describe("AI要約", () => {
     });
     expect(summarizeCalls).toBe(0);
     expect(texts()).toEqual(["許可してください。"]);
+  });
+
+  it("★ 救済経路（final を待たず hasNewer で publish される経路）では要約されない（A3: summarize が呼ばれないことまで見る）", () => {
+    let summarizeCalls = 0;
+    const summarize: DrainDeps["summarize"] = (text) => {
+      summarizeCalls++;
+      return text;
+    };
+
+    // final なし。次のメッセージの到着で救済されるまで待つ
+    appendDelta("m1", 0, "確認します。ログを見ます。");
+    drain({ summarize });
+    expect(summarizeCalls).toBe(0);
+
+    tick();
+    appendDelta("m2", 0, "次に進みます。");
+    drain({ summarize });
+
+    // m1 は救済されて全文出るが、打ち切りに数十秒かけて要約する筋が無いので summarize は呼ばれない
+    expect(texts()).toEqual(["確認します。", "ログを見ます。"]);
+    expect(summarizeCalls).toBe(0);
   });
 
   it("★ 第2層: 要約セッションの session_id を持つ delta は発話されず spool から消える（message）", () => {
@@ -664,6 +695,98 @@ describe("AI要約", () => {
 
     expect(texts()).not.toContain("要約プロセス自身の出力です。");
     expect(fs.existsSync(path.join(spoolDir, "m2.0.json"))).toBe(false);
+  });
+
+  it("★ A4: 要約を試みた message_id は次のドレインでスキップされる（再要約を高々1回に抑える）", () => {
+    appendDelta("m1", 0, "長いメッセージ。", true);
+
+    let summarizeCalls = 0;
+    drain({
+      summarize: (text, registerSessionId) => {
+        summarizeCalls++;
+        registerSessionId("summarizer-sess-1");
+        return text; // 要約は不採用（原文フォールバック）だが、試みたこと自体は記録される
+      },
+    });
+    expect(summarizeCalls).toBe(1);
+    expect(texts()).toEqual(["長いメッセージ。"]);
+
+    // ★ 「要約中に親プロセスが落ちて tombstone が永続化されなかった」状況を模す。
+    //   summaryAttemptedMessageIds は registerSessionId のコールバックの中で
+    //   （summarize 呼び出し時点で）既に永続化されているので、tombstone だけを
+    //   意図的に外した state を用意する
+    const statePath = path.join(dir, "speak.state.json");
+    const state = readWorkerState(statePath);
+    state.publishedMessageIds = state.publishedMessageIds.filter((id) => id !== "m1");
+    writeWorkerState(statePath, state);
+
+    tick();
+    appendDelta("m1", 0, "長いメッセージ。", true); // 同じ message_id が再度届く
+    drain({
+      summarize: (text, registerSessionId) => {
+        summarizeCalls++;
+        registerSessionId("summarizer-sess-2");
+        return text;
+      },
+    });
+
+    // summarize は再度呼ばれない（summaryAttemptedMessageIds に載っているため）が、
+    // 発話そのものは失われず、原文がそのまま publish される
+    expect(summarizeCalls).toBe(1);
+    expect(texts().filter((t) => t === "長いメッセージ。")).toHaveLength(2);
+  });
+});
+
+/**
+ * A4（issue #38 レビュー）: state の永続化が publish の後で失敗しても、二重発話（次の
+ * ドレインでの再 publish）を防ぐために spool 削除まで必ず到達すること。
+ */
+describe("state の永続化が失敗したときの安全側の挙動（A4）", () => {
+  it("★ state を永続化できなくても drainSpool は落ちず、publish 済みメッセージの spool は消える", () => {
+    appendDelta("m1", 0, "確認します。", true);
+
+    // 親ディレクトリごと存在しないパスにして、writeWorkerState を自然に失敗させる
+    // （summaryPipeline.test.ts の brokenLogPath と同じ手法。vi.mock は使わない）
+    const brokenStatePath = path.join(dir, "no-such-dir", "nested", "speak.state.json");
+
+    expect(() => drain({ workerStatePath: brokenStatePath })).not.toThrow();
+    // publish は成功している（tombstone の永続化とは独立）
+    expect(texts()).toEqual(["確認します。"]);
+    // tombstone は永続化できていないはずだが、tryRemoveEntry には到達しているので
+    // spool ファイルは消えている（tombstone と spool 削除のどちらか一方が成功すればよい）
+    expect(fs.existsSync(path.join(spoolDir, "m1.0.json"))).toBe(false);
+  });
+});
+
+/**
+ * E1（issue #38 レビュー）: 要約が効いたときは、原文（要約前の全文）由来の感情を全文で共有する。
+ * 要約が効かなかったときは、従来どおり文ごとに判定する。
+ */
+describe("感情判定（E1）", () => {
+  it("★ 要約が効いたとき、publish される全文が同じ emotion になる（原文全体で判定する）", () => {
+    appendDelta("m1", 0, "元のメッセージです。", true);
+    drain({
+      summarize: () => "要約その1！要約その2？要約その3。",
+      // 要約後の文には「元の」が含まれない。文ごとに判定していたら neutral になるはずの値
+      classify: (text) => (text.includes("元の") ? "happy" : "neutral"),
+    });
+
+    const rows = records();
+    expect(rows.map((r) => r.text)).toEqual(["要約その1！", "要約その2？", "要約その3。"]);
+    // 原文（sentences.join）で判定した1つの emotion が全文で共有されている
+    expect(rows.map((r) => r.emotion)).toEqual(["happy", "happy", "happy"]);
+  });
+
+  it("要約が効かなかったとき（原文フォールバック）は、従来どおり文ごとに emotion が判定される", () => {
+    appendDelta("m1", 0, "うれしいです。むずかしいです。", true);
+    drain({
+      summarize: (text) => text, // 要約が効かない
+      classify: (text) => (text.includes("うれしい") ? "happy" : "neutral"),
+    });
+
+    const rows = records();
+    expect(rows.map((r) => r.text)).toEqual(["うれしいです。", "むずかしいです。"]);
+    expect(rows.map((r) => r.emotion)).toEqual(["happy", "neutral"]);
   });
 });
 

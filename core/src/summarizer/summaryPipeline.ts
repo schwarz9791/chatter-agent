@@ -15,9 +15,9 @@
 
 import { randomUUID } from "crypto";
 import * as fs from "fs";
-import { cleanTextForSpeech } from "../text/textFilter";
+import { toSpeechSentences } from "../text/speechText";
 import { buildSummaryArgs, findCommandPath, runClaudeCli } from "./claudeCli";
-import { SUMMARY_INSTRUCTION } from "./prompt";
+import { SUMMARY_INSTRUCTION, SUMMARY_MAX_CHARS } from "./prompt";
 import type { Summarize, SummaryOutcome } from "./types";
 
 export interface SummaryPipelineDeps {
@@ -61,7 +61,7 @@ export function createSummaryPipeline(deps: SummaryPipelineDeps): Summarize {
   let summarizedCount = 0;
 
   /**
-   * 実測ログへの1行追記。`<ISO時刻>\t<結果>\t<所要ms>\t<原文長>\t<要約長>`。
+   * 実測ログへの1行追記。`<ISO時刻>\t<結果>\t<所要ms>\t<原文長>\t<要約長>\t<detail>`。
    *
    * ★ ログの書き込み失敗で発話を止めないこと。要約の判定結果は既に確定しているので、
    *   実測用の窓が壊れているだけで発話そのものには影響させない。
@@ -70,11 +70,25 @@ export function createSummaryPipeline(deps: SummaryPipelineDeps): Summarize {
    * ★ このログは issue #31 の完了条件（要約 ON のときの実際の遅延を実測して記録する）のための
    *   窓であり、hook 経路では `console.warn` が `/dev/null` に消えるのでここしか実測の術が無い。
    *   実測が終わったら消してよい（ローテートは持たせていない）。
+   * ★ D1(b)（issue #38 レビュー）: 6列目 `detail` を追加した。`claudeCli.ts` が拾った stderr の
+   *   抜粋（timeout/overflow/error のときだけ持つ）を渡す。ここが空のままだと、本物の CLI 失敗
+   *   （OAuth トークン切れ、フラグ拒否）の原因が「1行のログ」から追えなくなる（上の★のとおり、
+   *   hook 経路ではこのログ以外に手がかりが残らない）。改行・タブは1行に収まるよう潰す。
+   * ★★ 既存の列（1〜5列目）は動かさないこと。`scripts/verify-phase-a.sh` が `split("\t")[1]`
+   *   で2列目（outcome）を見ている。6列目の追加は影響しないが、変更したら
+   *   `npm run verify:phase-a` で確認すること。
    */
-  function log(outcome: SummaryOutcome, startedAt: number, textLength: number, summaryLength: number): void {
+  function log(
+    outcome: SummaryOutcome,
+    startedAt: number,
+    textLength: number,
+    summaryLength: number,
+    detail = "",
+  ): void {
     try {
       const elapsedMs = now() - startedAt;
-      const line = `${new Date(now()).toISOString()}\t${outcome}\t${elapsedMs}\t${textLength}\t${summaryLength}\n`;
+      const safeDetail = detail.replace(/\s+/g, " ");
+      const line = `${new Date(now()).toISOString()}\t${outcome}\t${elapsedMs}\t${textLength}\t${summaryLength}\t${safeDetail}\n`;
       fs.appendFileSync(deps.logPath, line);
     } catch {
       // 上のヘッダ参照。書けなくても発話は止めない
@@ -129,26 +143,48 @@ export function createSummaryPipeline(deps: SummaryPipelineDeps): Summarize {
 
       // 5. 実行 → 失敗/タイムアウト → 原文
       if (!result.ok) {
-        log(result.reason, startedAt, text.length, 0);
+        log(result.reason, startedAt, text.length, 0, result.detail ?? "");
         return text;
       }
 
-      // 6. 成功 → 再クリーニング（★ CLI が Markdown 等を返した場合の保険。移植元と同じ）
-      const summary = cleanTextForSpeech(result.stdout).trim();
+      // 6. 成功。★ A2（issue #38 レビュー）: 返すのは素の stdout。ここで整形して返すと、
+      //   worker.ts 側でもう一度整形されることになり、cleanTextForSpeech の非冪等性
+      //   （バッククォートで囲まれた見出し・リスト・表が2パス目で消える）を踏む。
+      //   整形は worker.ts の summarizeSentences（toSpeechSentences 呼び出し。＝通常の
+      //   発話経路と同じ1箇所）に集約する
+      const summary = result.stdout.trim();
 
-      // 7. 空 or 原文以上の長さ → 不採用（「短くならなかった要約を採用しない」妥当性検証）
-      if (!summary || summary.length >= text.length) {
-        log("invalid", startedAt, text.length, summary.length);
+      // 7. 妥当性の判定は「実際に読み上げる文字列」で行う。比較相手の text は整形済み
+      //   （worker.ts の sentences.join("\n")）なので、素の Markdown 長で比べると不公平になる。
+      //   ★ ここで作った spoken は**捨てる**（計測用）。発話に載るのは上の summary で、
+      //   整形は worker.ts の summarizeSentences の toSpeechSentences（＝通常の発話経路と
+      //   同じ1箇所）が行う
+      const spoken = toSpeechSentences(summary).join("\n");
+
+      // ★ A1（issue #38 レビュー）: 「空でない かつ 原文より短い」だけでなく、上限文字数も見る。
+      //   `claude -p` が exit 0 のままレート制限の通知（`Claude usage limit reached...`）や
+      //   拒否文を stdout に出すと、これまではそれがそのまま要約として採用されていた
+      //   （原文はどこにも残らない。実測で 744文字 → 335文字が ok で通り、そのまま読み上げられた）。
+      //   SUMMARY_MAX_CHARS（120）の2倍（240文字）にする根拠: 実測の ok 7件の要約長は
+      //   65 / 80 / 82 / 102 / 116 / 118 / 335 で、240 で切ると外れ値の335だけが弾かれ他は
+      //   全部通る。これより厳しくすると、数十秒待った末に invalid で原文フォールバックする
+      //   回数が増え、遅延だけ払って効果ゼロになる。
+      if (!spoken || spoken.length >= text.length || spoken.length > SUMMARY_MAX_CHARS * 2) {
+        log("invalid", startedAt, text.length, spoken.length);
         return text;
       }
 
       // 8. 採用
-      log("ok", startedAt, text.length, summary.length);
+      log("ok", startedAt, text.length, spoken.length);
       return summary;
-    } catch {
-      // 想定していない例外（getter の実装ミス、fs の権限、CLI 名の異常値など）。
-      // 原文を返して発話を続ける。`log` 自身も内部で例外を握るので、ここから再度漏れない
-      log("error", startedAt, text.length, 0);
+    } catch (err) {
+      // ★ D1(a)（issue #38 レビュー）: ここは "error"（CLI が非ゼロ終了、または起動自体に
+      //   失敗した）とは別の outcome にする。ここで拾うのは execFileSync に到達すらしていない
+      //   例外（getter の実装ミス、registerSessionId の失敗＝ディスクフルや読み取り専用 FS など、
+      //   pipeline 内部の例外）。"error" のまま記録すると、運用者は「claude CLI が壊れている」と
+      //   結論し、真の障害（無限ループ防止の第2層が黙って無効になっている等）に辿り着けない。
+      const detail = err instanceof Error ? err.message : String(err);
+      log("internal", startedAt, text.length, 0, detail);
       return text;
     }
   };

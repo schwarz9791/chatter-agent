@@ -25,6 +25,13 @@ const DEFAULTS: ChatterAgentConfig = {
   playerArgs: ["{file}"],
   playerServerUrl: "",
   speechMaxAgeMs: 0,
+
+  aiSummaryEnabled: false,
+  aiSummaryThreshold: 200,
+  aiSummaryCommand: "claude",
+  aiSummaryModel: "haiku",
+  aiSummaryTimeoutMs: 30_000,
+  aiSummaryMaxPerDrain: 3,
 };
 
 function store(env: NodeJS.ProcessEnv = {}) {
@@ -182,10 +189,10 @@ describe("createConfigStore", () => {
   });
 
   it("未知のキーは無視して警告する", () => {
-    write({ port: 9000, aiSummaryEnabled: true });
+    write({ port: 9000, totallyUnknownKey: true });
     const s = store();
     expect(s.get("port")).toBe(9000);
-    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("aiSummaryEnabled"));
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("totallyUnknownKey"));
   });
 
   it("トップレベルがオブジェクトでなければ既定値を使う", () => {
@@ -272,5 +279,90 @@ describe("isSpeakDisabled（#4）", () => {
     expect(isSpeakDisabled({})).toBe(false);
     expect(isSpeakDisabled({ CHATTER_AGENT_DISABLE: "" })).toBe(false);
     expect(isSpeakDisabled({ CHATTER_AGENT_DISABLE: "maybe" })).toBe(false);
+  });
+});
+
+describe("aiSummary*（#31）", () => {
+  it("既定はOFF・閾値200・claude/haiku・タイムアウト30秒・1ドレイン3件まで", () => {
+    const c = createDefaultConfig();
+    expect(c.aiSummaryEnabled).toBe(false);
+    expect(c.aiSummaryThreshold).toBe(200);
+    expect(c.aiSummaryCommand).toBe("claude");
+    expect(c.aiSummaryModel).toBe("haiku");
+    expect(c.aiSummaryTimeoutMs).toBe(30_000);
+    expect(c.aiSummaryMaxPerDrain).toBe(3);
+  });
+
+  it("config.json から読める", () => {
+    write({
+      aiSummaryEnabled: true,
+      aiSummaryThreshold: 100,
+      aiSummaryCommand: "/usr/local/bin/claude",
+      aiSummaryModel: "sonnet",
+      aiSummaryTimeoutMs: 5000,
+      aiSummaryMaxPerDrain: 1,
+    });
+    const s = store();
+    expect(s.get("aiSummaryEnabled")).toBe(true);
+    expect(s.get("aiSummaryThreshold")).toBe(100);
+    expect(s.get("aiSummaryCommand")).toBe("/usr/local/bin/claude");
+    expect(s.get("aiSummaryModel")).toBe("sonnet");
+    expect(s.get("aiSummaryTimeoutMs")).toBe(5000);
+    expect(s.get("aiSummaryMaxPerDrain")).toBe(1);
+  });
+
+  it("環境変数からも読める", () => {
+    const s = store({
+      CHATTER_AGENT_AI_SUMMARY_ENABLED: "true",
+      CHATTER_AGENT_AI_SUMMARY_THRESHOLD: "150",
+      CHATTER_AGENT_AI_SUMMARY_COMMAND: "/opt/claude",
+      CHATTER_AGENT_AI_SUMMARY_MODEL: "opus",
+      CHATTER_AGENT_AI_SUMMARY_TIMEOUT_MS: "10000",
+      CHATTER_AGENT_AI_SUMMARY_MAX_PER_DRAIN: "5",
+    });
+    expect(s.get("aiSummaryEnabled")).toBe(true);
+    expect(s.get("aiSummaryThreshold")).toBe(150);
+    expect(s.get("aiSummaryCommand")).toBe("/opt/claude");
+    expect(s.get("aiSummaryModel")).toBe("opus");
+    expect(s.get("aiSummaryTimeoutMs")).toBe(10_000);
+    expect(s.get("aiSummaryMaxPerDrain")).toBe(5);
+  });
+
+  // ★ ここが回帰すると `--model ""` がそのまま要約 CLI に渡って壊れる。空文字は
+  //   「--model を渡さず CLI 自身の既定モデルに従う」という意味を持つ有効値であって、
+  //   不正値ではないので既定値の "haiku" へ倒してはいけない（parseNonEmptyString と混同しないこと）
+  it("★ aiSummaryModel に空文字を渡すと空文字のまま通る（既定値 haiku に倒れない）", () => {
+    write({ aiSummaryModel: "" });
+    expect(store().get("aiSummaryModel")).toBe("");
+    expect(store({ CHATTER_AGENT_AI_SUMMARY_MODEL: "" }).get("aiSummaryModel")).toBe("");
+  });
+
+  it("aiSummaryModel は前後の空白を trim する", () => {
+    expect(store({ CHATTER_AGENT_AI_SUMMARY_MODEL: " sonnet " }).get("aiSummaryModel")).toBe("sonnet");
+  });
+
+  it("aiSummaryThreshold が0や負値なら既定値に倒れる", () => {
+    write({ aiSummaryThreshold: 0 });
+    expect(store().get("aiSummaryThreshold")).toBe(200);
+    write({ aiSummaryThreshold: -1 });
+    expect(store().get("aiSummaryThreshold")).toBe(200);
+  });
+
+  it("aiSummaryMaxPerDrain が0や負値なら既定値に倒れる", () => {
+    write({ aiSummaryMaxPerDrain: 0 });
+    expect(store().get("aiSummaryMaxPerDrain")).toBe(3);
+    write({ aiSummaryMaxPerDrain: -1 });
+    expect(store().get("aiSummaryMaxPerDrain")).toBe(3);
+  });
+
+  it("aiSummaryTimeoutMs が MAX_TIMER_MS（2^31-1）を超えると既定値に倒れる", () => {
+    // setTimeout / AbortSignal.timeout の上限を超えると静かに壊れる（→ parseTimeoutMs のコメント）
+    write({ aiSummaryTimeoutMs: 2_147_483_648 });
+    expect(store().get("aiSummaryTimeoutMs")).toBe(30_000);
+  });
+
+  it("aiSummaryEnabled は既存の真偽値パーサと同じトークンを受ける", () => {
+    expect(store({ CHATTER_AGENT_AI_SUMMARY_ENABLED: "1" }).get("aiSummaryEnabled")).toBe(true);
+    expect(store({ CHATTER_AGENT_AI_SUMMARY_ENABLED: "off" }).get("aiSummaryEnabled")).toBe(false);
   });
 });

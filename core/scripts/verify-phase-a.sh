@@ -30,6 +30,15 @@ for hook in "$ON_MESSAGE" "$ON_PROMPT"; do
   fi
 done
 
+# AI要約（issue #31）の受け入れ確認に使う偽の要約 CLI。claudeCli.ts が execFileSync で
+# 直接 exec するので、node 経由でラップされる fake-player.mjs と違って実行ビットが要る
+# （→ fake-summarizer.mjs 冒頭のコメント）。
+FAKE_SUMMARIZER="$REPO/core/scripts/fake-summarizer.mjs"
+if [ ! -x "$FAKE_SUMMARIZER" ]; then
+  echo "偽の要約 CLI が無いか実行権限がありません: $FAKE_SUMMARIZER" >&2
+  exit 1
+fi
+
 ROOT=$(mktemp -d)
 trap 'rm -rf "$ROOT"' EXIT
 export XDG_CONFIG_HOME="$ROOT"
@@ -482,6 +491,174 @@ spoken
 # m-orphan-b は意図的にストリーミング中のまま（final を送らない）でこの節を終える。
 # それ自体が検査したかった状態なので、final で閉じずに spool の残骸だけ片付ける
 rm -f "$SPOOL"/m-orphan-*
+
+# ★ ここから AI要約（issue #31）の受け入れ確認。要約は既定 OFF なので、CHATTER_AGENT_AI_SUMMARY_*
+#   は `VAR=val delta ...` の形で**その1回の呼び出しにだけ**渡す（上の
+#   `CHATTER_AGENT_DISABLE=0 delta m-zero ...` と同じ、R3 で確認済みの伝播規則）。
+#   ここでスクリプト冒頭のように export すると、後続はもう無いとはいえ、①〜⑬の「要約は
+#   既定 OFF なので結果が変わらないはず」という前提を壊しかねないので、あえてこの形を貫く。
+show "⑭ AI要約: 閾値を超えたメッセージは要約されて speech.jsonl に載る（issue #31）"
+
+# ★ aiSummaryCommand には要約 CLI の絶対パスを渡す。findCommandPath（core/src/summarizer/claudeCli.ts）
+#   は絶対パスをそのまま信頼し、存在確認すらしない。差し替えられることがそのまま検証の
+#   自動化になっている（playerCommand / playerArgs と同じ論法。→ docs/core.md「受け入れ確認」）。
+SUMMARIZER_RECORD_1="$ROOT/summarizer-record-1.jsonl"
+SUMMARIZER_REPLY_1="（要約）短くまとまりました。"
+
+# aiSummaryThreshold の既定 200 文字を超えるよう、文ごとに内容を変えて12文つなげる。
+# ★ 同じ文を繰り返すと「結果の検証」の重複チェック（重複した発話が無い）に引っかかる
+LONG_TEXT=$(node -e '
+  const parts = [];
+  for (let i = 0; i < 12; i++) parts.push(`要約の受け入れ確認に使う長いメッセージその${i}です。`);
+  process.stdout.write(parts.join(""));
+')
+
+CHATTER_AGENT_AI_SUMMARY_ENABLED=1 \
+  CHATTER_AGENT_AI_SUMMARY_COMMAND="$FAKE_SUMMARIZER" \
+  FAKE_SUMMARIZER_MODE=short \
+  FAKE_SUMMARIZER_REPLY="$SUMMARIZER_REPLY_1" \
+  FAKE_SUMMARIZER_RECORD="$SUMMARIZER_RECORD_1" \
+  delta m-summary-long 0 true "$LONG_TEXT"
+spoken
+
+node -e '
+  const fs = require("fs");
+  const rows = fs.readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const ok = rows.some((r) => r.text === process.argv[2]);
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  閾値を超えたメッセージが偽要約の返答に置き換わって記録されている`);
+  process.exit(ok ? 0 : 1);
+' "$LOG" "$SUMMARIZER_REPLY_1"
+
+# 偽要約が受け取った --session-id と原文の長さ（200字超）を検査する。
+# --session-id の値は後段⑰（無限ループ防止の第2層）で使う
+node -e '
+  const fs = require("fs");
+  const line = fs.readFileSync(process.argv[1], "utf8").trim().split("\n")[0];
+  const rec = JSON.parse(line);
+  const ok = typeof rec.sessionId === "string" && rec.sessionId.length > 0 && rec.textLength > 200;
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  偽要約が --session-id と200字超の原文を受け取っている (${JSON.stringify(rec)})`);
+  process.exit(ok ? 0 : 1);
+' "$SUMMARIZER_RECORD_1"
+
+# 実測ログ（summarizer.log。core/src/core/paths.ts の getSummarizerLogPath）に
+# `<ISO時刻>\tok\t...` の1行が残っているはず（summaryPipeline.ts の log()）
+node -e '
+  const fs = require("fs");
+  let lines = [];
+  try { lines = fs.readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean); } catch {}
+  const ok = lines.length === 1 && lines[0].split("\t")[1] === "ok";
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  実測ログ（summarizer.log）に ok の判定が1行残っている${ok ? "" : ` (${JSON.stringify(lines)})`}`);
+  process.exit(ok ? 0 : 1);
+' "$RUNTIME/summarizer.log"
+
+# 後段⑰（第2層）で使う session_id を取り出す
+SUMMARIZER_SESSION_ID=$(node -e '
+  const fs = require("fs");
+  const line = fs.readFileSync(process.argv[1], "utf8").trim().split("\n")[0];
+  console.log(JSON.parse(line).sessionId);
+' "$SUMMARIZER_RECORD_1")
+
+show "⑮ AI要約: 閾値以下のメッセージは要約されない（偽要約が一度も起動しない）"
+
+# ★ 起動していないことは「記録ファイルが作られない」ことで確認する。FAKE_SUMMARIZER_RECORD は
+#   偽要約プロセス自身が execFileSync された後に書くので、ファイルの有無がそのまま
+#   「起動されたか」の証拠になる（summaryPipeline.ts の「2. 閾値以下 → 原文」は
+#   findCommandPath より前で return するので、コマンド解決すら起きない）
+SUMMARIZER_RECORD_2="$ROOT/summarizer-record-2.jsonl"
+SHORT_TEXT="これは短い発言です。"
+
+CHATTER_AGENT_AI_SUMMARY_ENABLED=1 \
+  CHATTER_AGENT_AI_SUMMARY_COMMAND="$FAKE_SUMMARIZER" \
+  FAKE_SUMMARIZER_RECORD="$SUMMARIZER_RECORD_2" \
+  delta m-summary-short 0 true "$SHORT_TEXT"
+spoken
+
+node -e '
+  const fs = require("fs");
+  const [logPath, recordPath, text] = process.argv.slice(1);
+  const rows = fs.readFileSync(logPath, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const spokenOriginal = rows.some((r) => r.text === text);
+  const notInvoked = !fs.existsSync(recordPath);
+  const ok = spokenOriginal && notInvoked;
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  閾値以下のメッセージは原文のまま発話され、偽要約は起動していない${ok ? "" : ` (spokenOriginal=${spokenOriginal} recordExists=${!notInvoked})`}`);
+  process.exit(ok ? 0 : 1);
+' "$LOG" "$SUMMARIZER_RECORD_2" "$SHORT_TEXT"
+
+show "⑯ ★ AI要約: 要約 CLI が exit 1 で失敗しても、原文がそのまま読み上げられる（発話が止まらないことがこの機能の生命線）"
+
+# ★ ここが要約機能の生命線。summaryPipeline.ts の「5. 実行 → 失敗/タイムアウト → 原文」の
+#   フォールバックが、ユニットテストだけでなく実際の hook → CLI の経路でも効くことを見る。
+#   要約が失敗した「せいで」発話まで欠落したら、機能の存在自体が発話の信頼性を損なうことになる
+SUMMARIZER_RECORD_3="$ROOT/summarizer-record-3.jsonl"
+LONG_TEXT_FAIL=$(node -e '
+  const parts = [];
+  for (let i = 0; i < 10; i++) parts.push(`要約が失敗しても発話が止まらないことを確認する長い文章その${i}です。`);
+  process.stdout.write(parts.join(""));
+')
+
+CHATTER_AGENT_AI_SUMMARY_ENABLED=1 \
+  CHATTER_AGENT_AI_SUMMARY_COMMAND="$FAKE_SUMMARIZER" \
+  FAKE_SUMMARIZER_MODE=fail \
+  FAKE_SUMMARIZER_RECORD="$SUMMARIZER_RECORD_3" \
+  delta m-summary-fail 0 true "$LONG_TEXT_FAIL"
+spoken
+
+node -e '
+  const fs = require("fs");
+  const rows = fs.readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const ok = rows.some((r) => r.text.includes("要約が失敗しても発話が止まらないことを確認する長い文章その0です。"));
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  ★ 要約 CLI が失敗しても、原文がフォールバックとして発話される`);
+  process.exit(ok ? 0 : 1);
+' "$LOG"
+
+# 「そもそも起動していないだけ」ではないことの裏取り。record ファイルは偽要約自身が
+# execFileSync された後に書くので、これが在るのに発話が止まらなかった、が確認したいこと
+node -e '
+  const fs = require("fs");
+  const ok = fs.existsSync(process.argv[1]);
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  偽要約は実際に起動された上で失敗している（no-command 等ですり抜けていない）`);
+  process.exit(ok ? 0 : 1);
+' "$SUMMARIZER_RECORD_3"
+
+node -e '
+  const fs = require("fs");
+  let lines = [];
+  try { lines = fs.readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean); } catch {}
+  const last = lines[lines.length - 1] ?? "";
+  const ok = lines.length === 2 && last.split("\t")[1] === "error";
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  実測ログ（summarizer.log）に error の判定が追記されている${ok ? "" : ` (${JSON.stringify(lines)})`}`);
+  process.exit(ok ? 0 : 1);
+' "$RUNTIME/summarizer.log"
+
+show "⑰ ★ AI要約 第2層: 要約 CLI 自身の session_id を持つ delta は発話されず spool からも消える"
+
+# ★ 第1層（要約 CLI を CHATTER_AGENT_DISABLE=1 付きで spawn する。claudeCli.ts の runClaudeCli）
+#   はユニットテストでも検証できるが、ここで見たいのは第2層（workerState.ts の
+#   summarizerSessionIds）が **実際の hook → CLI の経路で**効いていること。これが今回の
+#   受け入れ確認で最も価値の高いシナリオ（ユニットテストでは「実際の hook が発火し、
+#   実際の CLI が spool を読んで捨てる」という経路そのものは検証できない）。
+#
+#   ⑭で偽要約が受け取った --session-id（＝要約 CLI に実際に渡った session_id。
+#   summaryPipeline.ts の summarizeSentences が execFileSync の**前**に
+#   registerSessionId → addSummarizerSession → writeWorkerState で永続化している）を、
+#   そのまま次の delta の session_id として流し込む。これは「要約 CLI 自身の Claude Code が
+#   MessageDisplay hook を発火させてしまった」場合のふりをしている。
+SUMMARIZER_SESSION_JSON=$(node -e 'console.log(JSON.stringify({ session_id: process.argv[1] }))' "$SUMMARIZER_SESSION_ID")
+SUMMARIZER_LOOP_TEXT="要約 CLI 自身が発火させた発言のふりです。"
+
+delta m-summarizer-loop 0 true "$SUMMARIZER_LOOP_TEXT" "$SUMMARIZER_SESSION_JSON"
+
+node -e '
+  const fs = require("fs");
+  const [logPath, spoolFile, text] = process.argv.slice(1);
+  let logged = false;
+  try { logged = fs.readFileSync(logPath, "utf8").includes(text); } catch {}
+  const wroteToSpool = fs.existsSync(spoolFile);
+  const ok = !logged && !wroteToSpool;
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  ★ 要約 CLI に渡した session_id を持つ delta は発話されず、spool からも消える${ok ? "" : ` (logged=${logged} wroteToSpool=${wroteToSpool})`}`);
+  process.exit(ok ? 0 : 1);
+' "$LOG" "$SPOOL/m-summarizer-loop.0.json" "$SUMMARIZER_LOOP_TEXT"
+spoken
 
 show "結果の検証"
 node -e '

@@ -12,6 +12,8 @@ import {
   getSpeechQueueDir,
   getSpeechStatePath,
   getSpoolDir,
+  getSummarizerHomeDir,
+  getSummarizerLogPath,
   getWorkerStatePath,
   type PathEnv,
 } from "./paths";
@@ -57,6 +59,8 @@ describe("ランタイムルート配下のパス", () => {
     expect(getServerLockDir(e)).toBe(`${root}/server.lock`);
     expect(getPlayerLockDir(e)).toBe(`${root}/player.lock`);
     expect(getPlayerTmpDir(e)).toBe(`${root}/player-tmp`);
+    expect(getSummarizerHomeDir(e)).toBe(`${root}/summarizer-home`);
+    expect(getSummarizerLogPath(e)).toBe(`${root}/summarizer.log`);
   });
 
   it("記録（speech.jsonl）と配信キュー（speech/）は別物", () => {

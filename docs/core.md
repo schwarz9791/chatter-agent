@@ -6,7 +6,7 @@
 
 ## 区画の分け方
 
-`summarizer/` 以外は実装済み（Phase A + B）。
+すべて実装済み（Phase A + B。`summarizer/` を含む）。
 
 ```
 core/src/
@@ -39,7 +39,11 @@ core/src/
 ├── text/         テキスト整形・文分割        ← textFilter.ts のみ cc-mascot 由来
 ├── emotion/      ルールベース感情判定        ← cc-mascot 由来
 ├── prompt/       応答待ち通知の整形
-└── summarizer/   AI要約（既定OFF）           **未着手**
+└── summarizer/   AI要約（既定OFF。issue #31）
+    ├── types.ts             Summarize / SummaryOutcome / ClaudeCliResult の型定義
+    ├── prompt.ts            要約 CLI に渡す指示文（SUMMARY_INSTRUCTION）
+    ├── claudeCli.ts         コマンド解決 / 引数組み立て / execFileSync での同期実行
+    └── summaryPipeline.ts   判定とフォールバック（createSummaryPipeline）。cli/worker.ts から呼ばれる
 ```
 
 判断ロジックは基本的に `cli/` と `core/` に置く。**`server/index.ts` と `wsServer.ts` は判断ロジックを持たない** — キューを読んで全クライアントへ流すだけの配線に留める。唯一の例外が `server/dispatcher.ts`（何を配信済みとし、何を消してよいか）で、`index.ts` に埋めるとユニットテストから触れないため純粋な部品として切り出してある。
@@ -173,7 +177,9 @@ npm run start:player     # 耳で聞くとき（AivisSpeech を起動してお�
 
 - **拡張子は `.mjs` でなければならない。** `plugin/bin/` に `package.json` を置かないので、`.js` だと Node が CJS として読んで壊れる
 - **CLI に npm 依存を持たせない。** `src/cli/` から到達する範囲は Node 標準だけで閉じる。ビルド後に
-  `grep '^import' plugin/bin/chatter-agent-speak.mjs` が `fs` / `os` / `path` だけであることを確認できる
+  `grep '^import' plugin/bin/chatter-agent-speak.mjs` を見ると確認できる。`summarizer/` を取り込んでから
+  `fs` / `os` / `path` に加えて `crypto`（`randomUUID`）と `child_process`（`execFileSync`）が増えたが、
+  いずれも Node 標準モジュールで npm 依存ではない
 - 出力は決定的なので、CI の `bundle` ジョブが `npm run build` 後の `git diff --exit-code` で腐敗を検出する
 
 ### ツールチェーン
@@ -211,6 +217,8 @@ cc-mascot から移植したコードを oxfmt で整形すると、上流との
 | 配信キュー | `{root}/speech/<seq>.json` | CLI が書く。上限超過は CLI が切り、ack と起動時の掃除は server が行う |
 | seq の state | `{root}/speech.state.json` | CLI |
 | 抑制の state | `{root}/speak.state.json` | CLI |
+| 要約 CLI の cwd | `{root}/summarizer-home/` | CLI（要約 CLI を隔離実行する作業ディレクトリ。プロジェクトの `CLAUDE.md` を読ませないため） |
+| 要約の実測ログ | `{root}/summarizer.log` | CLI（要約が有効なときだけ書く。既定 OFF なら1バイトも増えない） |
 | CLI のロック | `{root}/speak.lock/`（ディレクトリ） | CLI |
 | サーバーのロック | `{root}/server.lock/`（ディレクトリ） | **server**（bind の前に取る。2台目は起動に失敗する） |
 | player のロック | `{root}/player.lock/`（ディレクトリ） | **player**（接続の前に取る。2台目は起動に失敗する） |
@@ -253,6 +261,27 @@ player だけが読むキー。**別ファイルに分けないこと。** `SPEC
 - ★ **`playerServerUrl` が `host` と別なのは、既定の `0.0.0.0` が bind アドレスであって接続先ではないから。**
   空のときは `0.0.0.0` / `::` を `127.0.0.1` に読み替えて組み立てる
 - モジュール名は API ファミリ（`voicevoxClient`）、config キーはエンジン中立（`tts*`）で割り切ってある
+
+`chatter-agent-speak`（`summarizer/` の AI要約）だけが読むキー。**これも別ファイルに分けないこと。**
+理由は player のキーと同じだが、**警告を吐く側が逆になる**: これは `chatter-agent-speak` だけが読むキーなので、
+別ファイルに分けると今度は server と player が起動のたびに未知キー警告を吐く。
+
+| キー | 既定値 | 環境変数 |
+|---|---|---|
+| `aiSummaryEnabled` | `false` | `CHATTER_AGENT_AI_SUMMARY_ENABLED` |
+| `aiSummaryThreshold` | `200` | `CHATTER_AGENT_AI_SUMMARY_THRESHOLD` |
+| `aiSummaryCommand` | `"claude"` | `CHATTER_AGENT_AI_SUMMARY_COMMAND` |
+| `aiSummaryModel` | `"haiku"`（空文字なら `--model` を渡さない） | `CHATTER_AGENT_AI_SUMMARY_MODEL` |
+| `aiSummaryTimeoutMs` | `30000` | `CHATTER_AGENT_AI_SUMMARY_TIMEOUT_MS` |
+| `aiSummaryMaxPerDrain` | `3` | `CHATTER_AGENT_AI_SUMMARY_MAX_PER_DRAIN` |
+
+- `aiSummaryEnabled` は**既定 OFF**。有効にすると `aiSummaryThreshold` を超えたメッセージのたびに `claude -p`
+  が走り、ユーザーの課金を消費する。**代償は遅延の方が大きい**: 実機実測（同一マシン・`--model haiku`・227文字の
+  入力）で要約1回に**10.7〜16.8秒**（うち CLI の起動オーバーヘッドが約5.2秒）かかった。`final` の待ちが中央値0秒
+  （→ `CLAUDE.md`）なのに対し、これは丸ごと発話の遅れとして乗る。秒数は環境で変わるので仕様として扱わないこと
+- `aiSummaryTimeoutMs` の既定 30 秒は、上の実測（10.7〜16.8秒）の2倍弱を見た値
+- `aiSummaryMaxPerDrain` は移植元の「滞留ガード」（同時実行数の待ち行列が閾値を超えたらスキップ）の読み替え。
+  同期実行では待ち行列の概念が無いので、「1回のドレインで要約してよい回数の上限」に置き換えてある
 
 **`speechLogGenerations`（記録の退避世代数）は [#8](https://github.com/schwarz9791/chatter-agent/issues/8) で廃止した。** 誰も `speech.jsonl` を tail しなくなったので、
 複数世代を繰り下げる必要がなくなり、`speechLogMaxBytes` を超えたら `speech.1.jsonl` に退避する1世代だけになった。
@@ -306,6 +335,11 @@ config に載せない環境変数:
   Claude Code を2枚開いただけで**まだ伸びる途中のメッセージが分断される**
 - **ack をフロー制御として入れた。** TTS は生成よりずっと遅いので、キューは実質バッファ。
   「起動時に空にする」「上限で古い方から捨てる」も同じ原則（古い発話は無価値）で説明がつく
+- **AI要約（`summarizer/`、issue #31）を `assembleSentences` の外に置いた。** `cli/messageAssembler.ts` の
+  `assembleSentences` は純粋関数として保ちたいので、要約は `cli/worker.ts` の `summarizeSentences` として
+  `processMessage` 側に置き、文分割の結果を受けてから `deps.publish` の手前で呼ぶ。実行方式も移植元
+  （非同期 spawn + セマフォによる同時実行数の制限）から `execFileSync` の同期実行に変えた。呼び出し元の
+  `drainSpool` は完全に同期で、単一ワーカーのロックが直列化を担っているため、同時実行の制御自体が不要になった
 
 ### 消えた課題: ストリーミング中の保留
 

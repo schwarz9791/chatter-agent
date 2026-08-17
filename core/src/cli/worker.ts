@@ -18,6 +18,7 @@ import { cleanTextForSpeech, splitIntoSentences } from "../text/textFilter";
 import { acquireLock, type Lock } from "../core/lock";
 import type { SpeechEntry } from "../core/speechLog";
 import type { Emotion, SpeechRecord } from "../core/types";
+import type { Summarize } from "../summarizer/types";
 import { assembleSentences } from "./messageAssembler";
 import {
   cleanOrphans,
@@ -28,7 +29,15 @@ import {
   type MessageContent,
   type SpoolEntry,
 } from "./spool";
-import { addTombstone, isTombstoned, readWorkerState, writeWorkerState, type WorkerState } from "./workerState";
+import {
+  addSummarizerSession,
+  addTombstone,
+  isSummarizerSession,
+  isTombstoned,
+  readWorkerState,
+  writeWorkerState,
+  type WorkerState,
+} from "./workerState";
 
 /**
  * ロック取得に使ってよい合計の待ち時間予算。
@@ -108,6 +117,13 @@ export interface DrainDeps {
   /** これより無活動な spool は孤児として掃除する */
   spoolMaxAgeMs: number;
   classify: (text: string) => Emotion;
+  /**
+   * 長いメッセージを要約する。**throw しない**（→ summarizer/types.ts の Summarize）。
+   *
+   * 既定値は持たせない。渡し忘れを型で落とすため（要約が無言でスキップされる方が、
+   * 未設定に気付けないよりまし）
+   */
+  summarize: Summarize;
   now?: () => number;
 }
 
@@ -184,6 +200,22 @@ export function drainSpool(deps: DrainDeps): DrainResult {
         changed = true;
         continue;
       }
+
+      // ★ 無限ループ防止の第2層（workerState.ts の summarizerSessionIds 参照）。要約 CLI は
+      //   `claude -p` をヘッドレス実行するので、その出力自身が MessageDisplay hook を発火させうる。
+      //   第1層（CHATTER_AGENT_DISABLE=1 を付けて要約 CLI を spawn する）が本命で、これはそれが
+      //   効かなかったときの保険。tombstone と違い message 限定にする理由が無いので、
+      //   message / prompt の両方に効かせる（要約 CLI が応答待ち通知を出すことは無いはずだが、
+      //   経路を非対称にする理由が無い）。★ ここで弾いて loaded に入れないことが重要:
+      //   hasNewerInSameSession の候補計算はこの後の loaded を見るので、ここで弾かないと
+      //   要約セッションの delta が「同一セッションの後続」として救済の材料に混ざってしまう
+      const sessionId = sessionIdOf(item);
+      if (sessionId !== null && isSummarizerSession(state, sessionId)) {
+        tryRemoveEntry(item.entry);
+        changed = true;
+        continue;
+      }
+
       loaded.push(item);
     }
 
@@ -260,6 +292,61 @@ interface EntryOutcome {
 
 const NOTHING: EntryOutcome = { written: 0, changed: false, stateDirty: false };
 
+/**
+ * 長いメッセージを要約する（issue #31）。`processMessage` の `assembleSentences` の直後、
+ * `deps.publish` の手前に挟む。
+ *
+ * ★ `final` 経由でも救済経路（`hasNewer` で打ち切ったメッセージ）でも通す。救済されたメッセージは
+ *   本来より短い状態で閾値判定されるが、issue #31「決めること4」で許容と決定済み
+ *   （要約は長いメッセージだけが対象で、常に要約される必要はない。短く打ち切られて閾値を
+ *   下回れば単に要約されないだけで、発話そのものは救済経路のとおり出る）。
+ *
+ * ★ `processPrompt` からは呼ばない（そちら側にコメントあり）。
+ */
+function summarizeSentences(sentences: string[], deps: DrainDeps, state: WorkerState): string[] {
+  // 文が0本なら要約を呼ぶ意味が無い（空文字列を渡しても閾値判定で弾かれるだけ）
+  if (sentences.length === 0) return sentences;
+
+  // ★ join("") ではなく join("\n") にすること。splitIntoSentences（text/textFilter.ts）は
+  //   改行でも文を割るので、空文字で繋ぐと改行区切りだった文同士が地続きになり、要約に渡す
+  //   文章の切れ目が消えてしまう。ただし副作用として、閾値判定に使う文字数が改行の分だけ
+  //   水増しされる（文が10本なら区切りの改行9文字ぶん）。閾値ちょうど付近では誤差になりうるが、
+  //   「切れ目を保つ」方を優先する
+  //
+  // ★ 閾値（`aiSummaryThreshold`）が当たるのはこの連結結果 — つまり **`cleanTextForSpeech` を
+  //   通した後**のテキストの長さになる（`assembleSentences` が整形済みの文を返すため）。
+  //   コードブロックや URL が落ちた後の「実際に読み上げる文字数」で判定されるので、
+  //   生の Markdown がどれだけ長くても整形後に閾値を下回れば要約されない。これは意図した挙動で、
+  //   要約する理由が「読み上げが長すぎること」である以上、判定も読み上げる長さで行うのが正しい
+  const original = sentences.join("\n");
+
+  // ★ registerSessionId は要約 CLI を execFileSync する**前**に呼ばれる契約（summarizer/types.ts）。
+  //   ここで即座に永続化する。`drainSpool` 末尾の `writeWorkerState` に任せて遅延させると、
+  //   要約中に親（chatter-agent-speak）が落ちたときにこのセッションIDが登録されないまま、
+  //   要約 CLI 自身の spool 出力が残り、次のドレインで読み上げられてしまう
+  //   （無限ループ防止の第2層が素通しになる）
+  const summary = deps.summarize(original, (sessionId) => {
+    addSummarizerSession(state, sessionId);
+    writeWorkerState(deps.workerStatePath, state);
+  });
+
+  // ★ `deps.summarize` を try/catch で包まない。`Summarize`（summarizer/types.ts）は
+  //   「throw しない」を型で宣言した契約で、実装（summaryPipeline.ts）が本体を丸ごと try で
+  //   包んで保証している。ここで握ると「throw しうる」という誤ったシグナルが残ってしまう
+
+  // 要約しなかった／フォールバックした（原文をそのまま返した）。無駄な再整形をしない
+  if (summary === original) return sentences;
+
+  const resplit = splitIntoSentences(cleanTextForSpeech(summary)).filter((s) => s.length > 0);
+
+  // ★ 要約結果が記号だけだった等で全部落ちたら、元の文をそのまま返す。ここでフォールバック
+  //   しないと、メッセージが無言で消える（発話が丸ごと欠落し、しかも publish しないので
+  //   ログにも残らない）。要約の失敗は「要約前の発話」に倒すべきで、無発話に倒してはいけない
+  if (resplit.length === 0) return sentences;
+
+  return resplit;
+}
+
 function processMessage(
   item: Extract<Loaded, { content: MessageContent }>,
   hasNewer: boolean,
@@ -284,13 +371,17 @@ function processMessage(
   //   （CLAUDE.md 承認済み計画 A-3(e)）。`final` 経由（もう続きは来ない）ではそのまま全部出す
   const sentences = assembleSentences(content.deltas, { dropUnterminatedTail: !content.final });
 
+  // 長いメッセージはここで要約する（issue #31）。0本ならそのまま、要約が効かなければ
+  // 元の sentences がそのまま返る（summarizeSentences 参照）
+  const spoken = summarizeSentences(sentences, deps, state);
+
   // ★ メッセージ1つ分をまとめて1回だけ publish すること。分けて呼ぶと `ts` が割れる
   //   （`speechLog.append` は呼び出しごとに1回だけ時刻を取る）。クライアントは
   //   `(seq, ts)` で重複排除する契約なので、`ts` の同値性は契約の一部（docs/protocol.md）
-  if (sentences.length > 0) {
+  if (spoken.length > 0) {
     const messageId = content.messageId ?? entry.messageId;
     deps.publish(
-      sentences.map((text): SpeechEntry => ({
+      spoken.map((text): SpeechEntry => ({
         source: "claude-code",
         sessionId: content.sessionId,
         turnId: content.turnId,
@@ -315,9 +406,13 @@ function processMessage(
   //   されないが、spool にファイルが残り続けてしまう）
   tryRemoveEntry(entry);
 
-  return { written: sentences.length, changed: true, stateDirty: false };
+  return { written: spoken.length, changed: true, stateDirty: false };
 }
 
+/**
+ * ★ ここでは要約を呼ばない（issue #31）。応答待ち通知（kind: "prompt"）は長さによらず素通しする。
+ *   質問文や許可プロンプトを要約すると意味が変わってしまう（cc-mascot も同じ扱い）。
+ */
 function processPrompt(
   item: Extract<Loaded, { payload: unknown }>,
   deps: DrainDeps,

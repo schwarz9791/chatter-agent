@@ -28,7 +28,7 @@ hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公�
 | ディレクトリ | 内容 | 状態 |
 |---|---|---|
 | `plugin/` | Claude Code プラグイン（bash hook） | **実装済み。** 実機で動作確認している |
-| `core/` | `chatter-agent-core`（CLI + WebSocket サーバー + 発話 CLI） | **実装済み。** `summarizer/`（AI要約、既定OFF）だけ未着手 |
+| `core/` | `chatter-agent-core`（CLI + WebSocket サーバー + 発話 CLI） | **実装済み。** `summarizer/`（AI要約、既定OFF）も含めて完了（[#31](https://github.com/schwarz9791/chatter-agent/issues/31)） |
 | `core/src/player/` | `chatter-agent-player`（WebSocket → AivisSpeech → 再生 → ack） | **実装済み**（[#11](https://github.com/schwarz9791/chatter-agent/issues/11)）。**プロトコルの参照実装。捨てない** |
 | `apps/chatter-mascot/` | 表示側アプリ（**Unity + UniVRM**。macOS 常駐 + Android XR を1プロジェクトで） | 未作成 |
 | `docs/` | 作業規約 | protocol / core / plugin / origin の4本 |
@@ -72,6 +72,19 @@ Unity 側（#12）は同じ契約を踏むので、player が「正しい挙動�
 > メッセージ単位（[#30](https://github.com/schwarz9791/chatter-agent/issues/30)）での実機確認は**未実施**。
 > 特に「`AskUserQuestion` の直前でどれだけ沈黙するか」は測って [`docs/plugin.md`](./docs/plugin.md) に記録すること。
 
+**AI要約（`summarizer/`）も実装済みになった**（[#31](https://github.com/schwarz9791/chatter-agent/issues/31)）。
+**既定 OFF。** 有効にすると、長いメッセージ1件ごとに `claude -p` が走る。実機実測（同一マシン・`--model haiku`・
+227文字の入力）では要約1回に**10.7〜16.8秒**（うち CLI の起動オーバーヘッドが約5.2秒）かかった。
+`final` の待ちが中央値0秒（→「絶対に守ること」1）なのに対し、要約 ON ではこの秒数が丸ごと発話の遅れとして乗る。
+有効化は、この遅延と引き換えに要約による短縮を取るかどうかの判断になる。秒数はマシンとネットワークで変わるので
+**仕様として扱わないこと**。
+
+> ★ **上の秒数は `claude -p` を単体で叩いた実測で、要約 ON での実機確認は未実施。**
+> hook → CLI → 要約 → 発話の全経路を通したときに**実際どれだけ遅れて聞こえるか**は測っていない。
+> 自動の検証（`npm run verify:phase-a`）が見ているのは偽の要約コマンドを使った形と順序だけで、
+> 本物の `claude` は呼ばない。耳での確認と、`{root}/summarizer.log`（要約が有効なときだけ書かれる
+> 実測ログ）の集計は [`docs/plugin.md`](./docs/plugin.md) に記録すること（[#31](https://github.com/schwarz9791/chatter-agent/issues/31) の完了条件）。
+
 ## データフロー
 
 ```
@@ -83,7 +96,7 @@ plugin/scripts/*.sh          bash。payload を spool/<message_id>.<index>.json 
   ▼
 chatter-agent-speak (CLI)    ロックを取れた1プロセスだけが spool を順に処理
   │                          **final:true を待つ**（非 final では何もせず終わる）
-  │                          delta 結合 → Markdown除去 → 文分割 → 感情判定 → seq 採番
+  │                          delta 結合 → Markdown除去 → 文分割 → 要約（既定OFF） → 感情判定 → seq 採番
   ├──▶ speech.jsonl          記録。1文1行で残す。誰も読まない
   ▼
 speech/<seq>.json            配信キュー。1文1ファイル
@@ -224,6 +237,6 @@ Apache-2.0。cc-mascot（Apache-2.0, Copyright 2026 kazakago）の派生物。
 
 テキスト整形（`text/textFilter.ts`）と感情判定（`emotion/ruleBasedEmotionClassifier.ts`）は cc-mascot から**初回に一度だけ移植**し、以後はこのリポジトリのコードとして改変する。上流に追従する義務は負わないが、**帰属表示と改変の告知は Apache-2.0 の義務**として維持する。フォーク点・対象ファイル・ヘッダの書式は [`docs/origin.md`](./docs/origin.md)。
 
-**「cc-mascot のツリーにあった」＝「cc-mascot の著作物」ではない。** 応答待ち通知の整形（`prompt/`）と AI要約（`summarizer/`、未着手）は、cc-mascot の作業ブランチ上で書いた**自分の著作物**で、上流の `main` には存在しない。kazakago の帰属を付けないこと。判定手順は [`docs/origin.md`](./docs/origin.md)。
+**「cc-mascot のツリーにあった」＝「cc-mascot の著作物」ではない。** 応答待ち通知の整形（`prompt/`）と AI要約（`summarizer/`）は、cc-mascot の作業ブランチ上で書いた**自分の著作物**で、上流の `main` には存在しない。kazakago の帰属を付けないこと。判定手順は [`docs/origin.md`](./docs/origin.md)。
 
 cc-mascot 由来のコードを増減させたら `NOTICE` の記述が実態と合っているか確認すること。

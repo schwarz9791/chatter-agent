@@ -9,6 +9,7 @@ import type { SpeechRecord } from "../core/types";
 import { removeEntry, scanSpool } from "./spool";
 import { acquireLockWithRetry, drainSpool } from "./worker";
 import type { DrainDeps } from "./worker";
+import { addSummarizerSession, emptyWorkerState, readWorkerState, writeWorkerState } from "./workerState";
 
 // ★ scanSpool / removeEntry は「進展の無いパスの直後に届いた spool」の再現や、削除失敗の
 //   再現に差し替えが要る。モジュールごと差し替え、この2つだけ vi.fn でラップする
@@ -72,6 +73,8 @@ function drain(overrides: Partial<DrainDeps> = {}) {
     speakPrompts: true,
     spoolMaxAgeMs: 6 * HOUR,
     classify: () => "neutral",
+    // 既定は素通し（要約しない）。要約の挙動そのものを見るテストだけ個別に差し替える
+    summarize: (text) => text,
     now: () => clock,
     ...overrides,
   });
@@ -532,6 +535,135 @@ describe("応答待ち通知", () => {
 
     // 直前のドレインが書いた speak.state.json を読めていなければ、ここで抑制が効かない
     expect(texts()).not.toContain("許可を。");
+  });
+});
+
+/**
+ * 長いメッセージを要約してから読み上げる経路（issue #31）。`summarize`（drain() の既定は素通し）を
+ * 差し替えて確認する。無限ループ防止の第2層（summarizerSessionIds）もここでまとめて見る。
+ */
+describe("AI要約", () => {
+  it("要約が publish の手前で挟まり、要約後の文が記録される", () => {
+    appendDelta("m1", 0, "とても長いメッセージです。", true);
+    drain({ summarize: () => "要約結果。" });
+    expect(texts()).toEqual(["要約結果。"]);
+  });
+
+  it('★ 要約に渡すテキストは文を "\\n" で連結した全文（join("") にすると文の切れ目が消える）', () => {
+    appendDelta("m1", 0, "あ。い。う。", true);
+    let received = "";
+    drain({
+      summarize: (text) => {
+        received = text;
+        return text;
+      },
+    });
+    expect(received).toBe("あ。\nい。\nう。");
+  });
+
+  it("要約結果が複数文なら文に割り直して publish される（seq が連続・ts が同値＝メッセージ単位の契約が保たれる）", () => {
+    appendDelta("m1", 0, "長いメッセージ。", true);
+    drain({ summarize: () => "要約その1。要約その2。要約その3。" });
+
+    const rows = records();
+    expect(rows.map((r) => r.text)).toEqual(["要約その1。", "要約その2。", "要約その3。"]);
+    expect(rows.map((r) => r.seq)).toEqual([1, 2, 3]);
+    expect(new Set(rows.map((r) => r.ts)).size).toBe(1);
+  });
+
+  it("★ 要約結果が空になったら原文にフォールバックする（無言の欠落を防ぐ回帰テスト。仕様6）", () => {
+    appendDelta("m1", 0, "確認します。ログを見ます。", true);
+    // 要約 CLI がコードブロックの記号だけを返したケースを模す。cleanTextForSpeech で
+    // 中身ごと削られて空文字になり、splitIntoSentences の結果が0本になる
+    drain({ summarize: () => "```silent```" });
+    expect(texts()).toEqual(["確認します。", "ログを見ます。"]);
+  });
+
+  it("要約が原文をそのまま返したら、元の文の並びがそのまま出る", () => {
+    appendDelta("m1", 0, "あ。い。う。", true);
+    drain({ summarize: (text) => text });
+    expect(texts()).toEqual(["あ。", "い。", "う。"]);
+  });
+
+  it("★ kind: prompt は要約されない（summarize が呼ばれないことまで見る）", () => {
+    let summarizeCalls = 0;
+    writePrompt("n", { session_id: "sess-1", hook_event_name: "Notification", message: "許可してください。" });
+    drain({
+      summarize: (text) => {
+        summarizeCalls++;
+        return text;
+      },
+    });
+    expect(summarizeCalls).toBe(0);
+    expect(texts()).toEqual(["許可してください。"]);
+  });
+
+  it("★ 第2層: 要約セッションの session_id を持つ delta は発話されず spool から消える（message）", () => {
+    const statePath = path.join(dir, "speak.state.json");
+    const state = emptyWorkerState();
+    addSummarizerSession(state, "summarizer-sess");
+    writeWorkerState(statePath, state);
+
+    appendDelta("m1", 0, "要約プロセス自身の出力です。", true, "summarizer-sess");
+    drain();
+
+    expect(texts()).toEqual([]);
+    expect(fs.existsSync(path.join(spoolDir, "m1.0.json"))).toBe(false);
+  });
+
+  it("★ 第2層: 要約セッションの session_id を持つ応答待ち通知も発話されず spool から消える（prompt）", () => {
+    const statePath = path.join(dir, "speak.state.json");
+    const state = emptyWorkerState();
+    addSummarizerSession(state, "summarizer-sess");
+    writeWorkerState(statePath, state);
+
+    writePrompt("s", {
+      session_id: "summarizer-sess",
+      hook_event_name: "Notification",
+      message: "要約プロセスの通知です。",
+    });
+    drain();
+
+    expect(texts()).toEqual([]);
+    expect(fs.readdirSync(spoolDir)).toEqual([]);
+  });
+
+  it("★ 第2層の永続化: registerSessionId が呼ばれた時点で speak.state.json に既に書かれている", () => {
+    appendDelta("m1", 0, "長いメッセージ。", true);
+
+    let sawDuringCall = false;
+    drain({
+      summarize: (text, registerSessionId) => {
+        registerSessionId("sess-mid-call");
+        // summarize の中から state ファイルを直接読み、execFileSync の前に永続化される
+        // という契約（summarizer/types.ts の Summarize）が守られていることを確認する
+        const state = readWorkerState(path.join(dir, "speak.state.json"));
+        sawDuringCall = state.summarizerSessionIds.includes("sess-mid-call");
+        return text;
+      },
+    });
+
+    expect(sawDuringCall).toBe(true);
+  });
+
+  it("★ 第2層のレジストリはプロセスを跨いで効く", () => {
+    appendDelta("m1", 0, "長いメッセージ。", true);
+    drain({
+      summarize: (text, registerSessionId) => {
+        registerSessionId("summarizer-sess");
+        return text;
+      },
+    });
+    expect(texts()).toEqual(["長いメッセージ。"]);
+
+    tick();
+    appendDelta("m2", 0, "要約プロセス自身の出力です。", true, "summarizer-sess");
+    // drain() のたびに state をディスクから読み直しているので、別プロセスと同じ条件
+    // （「★ 抑制状態はプロセスを跨いで効く」と同じ形）
+    drain();
+
+    expect(texts()).not.toContain("要約プロセス自身の出力です。");
+    expect(fs.existsSync(path.join(spoolDir, "m2.0.json"))).toBe(false);
   });
 });
 

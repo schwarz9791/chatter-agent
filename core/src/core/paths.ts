@@ -136,3 +136,24 @@ export function getPlayerLockDir(e: PathEnv = currentPathEnv()): string {
 export function getPlayerTmpDir(e: PathEnv = currentPathEnv()): string {
   return path.join(getRuntimeDir(e), "player-tmp");
 }
+
+/**
+ * 要約 CLI の cwd。
+ *
+ * プロジェクトのディレクトリで走らせるとその `CLAUDE.md` が読み込まれてコンテキストが膨らむ
+ * （要約に不要なコストと遅延）。`-p`（print モード）では workspace trust ダイアログが skip
+ * されるので、見知らぬディレクトリで起動しても止まらない。
+ */
+export function getSummarizerHomeDir(e: PathEnv = currentPathEnv()): string {
+  return path.join(getRuntimeDir(e), "summarizer-home");
+}
+
+/**
+ * 要約の所要時間を実測するための追記ログ。
+ *
+ * hook 経路では `console.warn` が `/dev/null` に消えるので、実測の窓がここしかない。
+ * **要約が有効なときだけ書かれる**ので、既定 OFF のままなら1バイトも増えない。
+ */
+export function getSummarizerLogPath(e: PathEnv = currentPathEnv()): string {
+  return path.join(getRuntimeDir(e), "summarizer.log");
+}

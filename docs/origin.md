@@ -110,11 +110,33 @@ hook 方式への転換で、`textFilter.ts` が**上流と要件で食い違う
 |---|---|
 | `text/unstableTail.ts` | chatter-agent で新規に書いた（読み上げたくない末尾の切り落とし。未閉じの ``` と書きかけの表の行） |
 | `prompt/promptEventFormatter.ts` + `.test.ts` | 自分が cc-mascot の作業ブランチ上で書いたものを持ち込んだ |
+| `summarizer/` 配下すべて | 自分が cc-mascot の作業ブランチ上で書いたものを持ち込んだ（`9b23434` で新規作成） |
 | `core/` `cli/` `server/` 配下すべて | chatter-agent 独自 |
 
 `prompt/promptEventFormatter.ts` は移送時に `SpeakMessage` の import 元を `../adapters/harnessAdapter`（kazakago の `adapters/` は移植しない）から `../core/types` に張り替えてある。
 
-`summarizer/`（AI要約、既定 OFF）も同じ扱いで、まだ持ち込んでいない。入れるときは `summaryPipeline.ts` の `../../filters/textFilter` を `../text/textFilter` に張り替えること。
+### `summarizer/`（AI要約）の移植で落としたもの・変えたもの
+
+`summarizer/` は上の表のとおり kazakago の帰属もライセンスヘッダも `NOTICE` への追記も不要（→冒頭の「⚠」節の判定）。ただし移送時に `services/summarizer/` の一部を落とし、設計をいくつか変えている。
+
+**落としたもの**（バックエンド抽象化が claude 専用化で不要になったため。→ `core/src/summarizer/types.ts` のヘッダ）:
+
+| ファイル | 何を落としたか |
+|---|---|
+| `backends.ts` | codex / gemini のバックエンド分岐 |
+| `detect.ts` | CLI 自動検出（ログインシェル PATH の解決 `zsh -ilc` + `--version` の疎通確認） |
+| `isolation.ts` | ログファイルパスをエンコードして除外する方式 |
+| `semaphore.ts` | 同時実行数の制限 |
+
+**変えたもの**:
+
+| | 移植元 | chatter-agent |
+|---|---|---|
+| 実行方式 | 非同期 spawn + セマフォ | `execFileSync` の同期実行。呼び出し元 `drainSpool` が完全に同期で、単一ワーカーのロックが直列化を担うため、同時実行の制御自体が不要になった |
+| 滞留ガード | 待ち行列が閾値を超えたらスキップ | 1回のドレインで要約してよい回数の上限（`aiSummaryMaxPerDrain`）。同期実行では待ち行列の概念が無いための読み替え |
+| 無限ループ防止（要約 CLI 自身の出力の除外） | ログファイルパスのエンコード（`isolation.ts`） | 要約 CLI に渡した `session_id` のレジストリ（`workerState.ts` の `summarizerSessionIds`）。`session_id` が hook payload に直接入っているので、パス突き合わせより正確に塞げる |
+
+移送先は `core/src/summarizer/`（`types.ts` / `prompt.ts` / `claudeCli.ts` / `summaryPipeline.ts`）。`summaryPipeline.ts` の import は移植元の `../../filters/textFilter` から `../text/textFilter` に張り替えてある。
 
 ## 持ち込まないファイル
 

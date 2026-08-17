@@ -7,9 +7,6 @@
  * - `mtime`+`size` のスタンプが変わったときだけ読み直す（参照時に stat するだけ。watch はしない）
  * - 壊れた JSON では直前の値を維持する（書き込み途中を読んだ瞬間に挙動が飛ばないように）
  * - 不正値・未知キーは警告して既定値で動き続ける（**throw しない**）
- *
- * 上流にあった要約関連のキー（aiSummary*）は summarizer を移植していないので落としてある。
- * summarizer を入れるときに戻す。
  */
 
 import * as fs from "fs";
@@ -86,6 +83,51 @@ export interface ChatterAgentConfig {
    * 既定は無効。実機で遅れを測ってから決める。
    */
   speechMaxAgeMs: number;
+
+  // ── 以下は AI要約（summarizer）だけが読む ─────────────────────────
+  // ★ ここに置くこと。理由は player のキーと同じ（→上の註記）だが、**警告を吐く側が逆になる**。
+  //   これは chatter-agent-speak だけが読むキーなので、別ファイルに分けると
+  //   server と player が起動のたびに未知キー警告を吐く。
+
+  /**
+   * 長いメッセージを CLI エージェントで要約してから読み上げるか。
+   *
+   * ★ 既定 OFF。有効にすると `aiSummaryThreshold` を超えたメッセージのたびに `claude -p` が
+   *   走るので、ユーザーの課金を消費する。
+   * ★ **代償は遅延の方が大きい。** 実測（同一マシン・`--model haiku`・227文字の入力）で
+   *   要約1回に **10〜17秒**かかった（うち約5秒は CLI の起動オーバーヘッド）。`final` の待ちが
+   *   中央値0秒（→ `CLAUDE.md`）なのに対し、これは丸ごと発話の遅れとして乗る。
+   *   秒数は環境で変わるので**仕様として扱わないこと**。
+   */
+  aiSummaryEnabled: boolean;
+  /**
+   * この文字数を超えたメッセージだけ要約する。
+   * 実測で1メッセージ平均 184.5 文字（`speech.jsonl` 229件）なので、200 だと「長い方だけ」が対象になる。
+   */
+  aiSummaryThreshold: number;
+  /**
+   * 要約に使う CLI。絶対パスも可。
+   * 差し替えられることが、そのまま検証の自動化になっている（`playerCommand` / `playerArgs` と同じ論法。
+   * → `docs/core.md`）。
+   */
+  aiSummaryCommand: string;
+  /**
+   * `--model` に渡す値。**空文字なら `--model` を渡さず CLI の既定に従う。**
+   * 既定が `haiku` なのは、2〜3文120文字の要約に上位モデルは過剰で、コストと遅延の両方が乗るため。
+   */
+  aiSummaryModel: string;
+  /**
+   * 要約1回の上限。超えたら要約を諦めて原文をそのまま読み上げる（発話は止めない）。
+   * 既定 30 秒は、実測 10〜17秒（→ `aiSummaryEnabled`）の2倍強を見た値。
+   */
+  aiSummaryTimeoutMs: number;
+  /**
+   * 1回のドレインで要約してよいメッセージ数の上限。
+   *
+   * ★ 上限が要る理由: CLI が長時間動かなかった後のドレインでは長文が複数溜まっていることがあり、
+   *   全部要約すると `aiSummaryTimeoutMs × N` だけ発話が遅れる。超えた分は要約せず原文で出す。
+   */
+  aiSummaryMaxPerDrain: number;
 }
 
 export function createDefaultConfig(): ChatterAgentConfig {
@@ -106,6 +148,13 @@ export function createDefaultConfig(): ChatterAgentConfig {
     playerArgs: ["{file}"],
     playerServerUrl: "",
     speechMaxAgeMs: 0,
+
+    aiSummaryEnabled: false,
+    aiSummaryThreshold: 200,
+    aiSummaryCommand: "claude",
+    aiSummaryModel: "haiku",
+    aiSummaryTimeoutMs: 30_000,
+    aiSummaryMaxPerDrain: 3,
   };
 }
 
@@ -259,6 +308,19 @@ function makeUrlParser(protocols: string[]): Parser<string> {
 }
 
 /**
+ * `aiSummaryModel` 専用。**空文字を「指定なし」として通す唯一のパーサ。**
+ *
+ * ★ `parseNonEmptyString` に統一したくなるが、ここだけは空に意味がある
+ *   （`--model` を渡さず要約 CLI 自身の既定モデルに従う、という指定）。`parsePlayerArgs` が
+ *   空入力を弾いているのは逆に「空だと `afplay` が引数なしで起動し全文が無音になる」事故を
+ *   防ぐためで、両者は「空を落とし穴として扱う」点で対称なだけで、結論（空を通すか弾くか）は
+ *   キーごとの意味に従って逆になる。
+ *   trim だけはする（`CHATTER_AGENT_AI_SUMMARY_MODEL=" haiku "` のような値がそのまま
+ *   `--model` の引数に渡らないように。`parseNonEmptyString` と同じ理由）。
+ */
+const parseAiSummaryModel: Parser<string> = (raw) => (typeof raw === "string" ? raw.trim() : undefined);
+
+/**
  * キーの定義。satisfies で ChatterAgentConfig の全キーを網羅していることを型で担保する
  * （satisfies は型のみなので erasableSyntaxOnly に抵触しない）。
  * キーを増やすときは ChatterAgentConfig と SPECS の両方を直さないとコンパイルが通らない。
@@ -280,6 +342,13 @@ const SPECS = {
   playerArgs: { env: "CHATTER_AGENT_PLAYER_ARGS", parse: parsePlayerArgs },
   playerServerUrl: { env: "CHATTER_AGENT_PLAYER_SERVER_URL", parse: makeUrlParser(["ws:", "wss:"]) },
   speechMaxAgeMs: { env: "CHATTER_AGENT_SPEECH_MAX_AGE_MS", parse: parseNonNegativeInt },
+
+  aiSummaryEnabled: { env: "CHATTER_AGENT_AI_SUMMARY_ENABLED", parse: parseBoolean },
+  aiSummaryThreshold: { env: "CHATTER_AGENT_AI_SUMMARY_THRESHOLD", parse: parsePositiveInt },
+  aiSummaryCommand: { env: "CHATTER_AGENT_AI_SUMMARY_COMMAND", parse: parseNonEmptyString },
+  aiSummaryModel: { env: "CHATTER_AGENT_AI_SUMMARY_MODEL", parse: parseAiSummaryModel },
+  aiSummaryTimeoutMs: { env: "CHATTER_AGENT_AI_SUMMARY_TIMEOUT_MS", parse: parseTimeoutMs },
+  aiSummaryMaxPerDrain: { env: "CHATTER_AGENT_AI_SUMMARY_MAX_PER_DRAIN", parse: parsePositiveInt },
 } as const satisfies { [K in ConfigKey]: { env: string; parse: Parser<ChatterAgentConfig[K]> } };
 
 const CONFIG_KEYS = Object.keys(SPECS) as ConfigKey[];

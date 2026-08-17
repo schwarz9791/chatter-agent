@@ -21,11 +21,14 @@ import {
   getSpeechQueueDir,
   getSpeechStatePath,
   getSpoolDir,
+  getSummarizerHomeDir,
+  getSummarizerLogPath,
   getWorkerStatePath,
 } from "../core/paths";
 import { createSpeechLog } from "../core/speechLog";
 import { createSpeechQueue } from "../core/speechQueue";
 import { RuleBasedEmotionClassifier } from "../emotion/ruleBasedEmotionClassifier";
+import { createSummaryPipeline } from "../summarizer/summaryPipeline";
 import { createPublisher } from "./publish";
 import { acquireLockWithRetry, drainSpool } from "./worker";
 
@@ -53,6 +56,22 @@ function main(): void {
 
     const classifier = new RuleBasedEmotionClassifier();
 
+    // 要約 CLI 自身が起動したときは isSpeakDisabled() の早期 return で既にここへ到達しない
+    // （無限ループ防止の第1層）。ここに来ることそのものが、その1層目が効いていることの証拠
+    const summarize = createSummaryPipeline({
+      // ★ config は mtime スタンプで再読込する作り。上の6つを値で渡すと起動時の1回きりの値が
+      //   固定されてしまい設定変更が効かなくなるので、下の publish の maxEntries と同じ理由で
+      //   getter で渡す
+      isEnabled: () => config.get("aiSummaryEnabled"),
+      getThreshold: () => config.get("aiSummaryThreshold"),
+      getTimeoutMs: () => config.get("aiSummaryTimeoutMs"),
+      getMaxPerDrain: () => config.get("aiSummaryMaxPerDrain"),
+      getCommand: () => config.get("aiSummaryCommand"),
+      getModel: () => config.get("aiSummaryModel"),
+      homeDir: getSummarizerHomeDir(),
+      logPath: getSummarizerLogPath(),
+    });
+
     drainSpool({
       spoolDir: getSpoolDir(),
       // 記録と配信を同じロック下で書く。順序はここで確定する。
@@ -67,6 +86,7 @@ function main(): void {
       speakPrompts: config.get("speakPrompts"),
       spoolMaxAgeMs: config.get("spoolMaxAgeHours") * 60 * 60 * 1000,
       classify: (text) => classifier.classify(text),
+      summarize,
     });
   } finally {
     lock.release();

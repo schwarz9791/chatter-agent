@@ -30,7 +30,7 @@ const DEFAULTS: ChatterAgentConfig = {
   aiSummaryThreshold: 200,
   aiSummaryCommand: "claude",
   aiSummaryModel: "haiku",
-  aiSummaryTimeoutMs: 30_000,
+  aiSummaryTimeoutMs: 60_000,
   aiSummaryMaxPerDrain: 3,
 };
 
@@ -283,13 +283,13 @@ describe("isSpeakDisabled（#4）", () => {
 });
 
 describe("aiSummary*（#31）", () => {
-  it("既定はOFF・閾値200・claude/haiku・タイムアウト30秒・1ドレイン3件まで", () => {
+  it("既定はOFF・閾値200・claude/haiku・タイムアウト60秒・1ドレイン3件まで", () => {
     const c = createDefaultConfig();
     expect(c.aiSummaryEnabled).toBe(false);
     expect(c.aiSummaryThreshold).toBe(200);
     expect(c.aiSummaryCommand).toBe("claude");
     expect(c.aiSummaryModel).toBe("haiku");
-    expect(c.aiSummaryTimeoutMs).toBe(30_000);
+    expect(c.aiSummaryTimeoutMs).toBe(60_000);
     expect(c.aiSummaryMaxPerDrain).toBe(3);
   });
 
@@ -355,10 +355,23 @@ describe("aiSummary*（#31）", () => {
     expect(store().get("aiSummaryMaxPerDrain")).toBe(3);
   });
 
+  // ★ issue #38 レビュー G1-b。上限が無いと aiSummaryMaxPerDrain: 1000000 が素通りし、
+  //   aiSummaryTimeoutMs（既定60秒）× N でロック保持時間が際限なく伸びる。
+  //   上限8は workerState.ts の SUMMARIZER_SESSION_LIMIT（64）とも連動している値なので、
+  //   ここが緑である限り両者の対応が崩れていないことも見ている
+  it("aiSummaryMaxPerDrain の上限は8。超えたら既定値に倒れ、8はそのまま通る", () => {
+    write({ aiSummaryMaxPerDrain: 9 });
+    expect(store().get("aiSummaryMaxPerDrain")).toBe(3);
+    write({ aiSummaryMaxPerDrain: 1_000_000 });
+    expect(store().get("aiSummaryMaxPerDrain")).toBe(3);
+    write({ aiSummaryMaxPerDrain: 8 });
+    expect(store().get("aiSummaryMaxPerDrain")).toBe(8);
+  });
+
   it("aiSummaryTimeoutMs が MAX_TIMER_MS（2^31-1）を超えると既定値に倒れる", () => {
     // setTimeout / AbortSignal.timeout の上限を超えると静かに壊れる（→ parseTimeoutMs のコメント）
     write({ aiSummaryTimeoutMs: 2_147_483_648 });
-    expect(store().get("aiSummaryTimeoutMs")).toBe(30_000);
+    expect(store().get("aiSummaryTimeoutMs")).toBe(60_000);
   });
 
   it("aiSummaryEnabled は既存の真偽値パーサと同じトークンを受ける", () => {

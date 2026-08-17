@@ -542,6 +542,11 @@ node -e '
 
 # 実測ログ（summarizer.log。core/src/core/paths.ts の getSummarizerLogPath）に
 # `<ISO時刻>\tok\t...` の1行が残っているはず（summaryPipeline.ts の log()）
+#
+# ★ ここだけは絶対行数（1）で判定している。$ROOT は使い捨ての mktemp で、要約は既定 OFF
+#   なので、AI要約が OFF のまま進む①〜⑬の間に summarizer.log へ書くシナリオは無い＝
+#   ⑭がこの検証内で summarizer.log に最初に書き込む行、という前提が壊れない限り安全
+#   （F1-b で下の⑯側は絶対行数から相対判定に変えた。ここは変えていない）。
 node -e '
   const fs = require("fs");
   let lines = [];
@@ -589,6 +594,17 @@ show "⑯ ★ AI要約: 要約 CLI が exit 1 で失敗しても、原文がそ�
 # ★ ここが要約機能の生命線。summaryPipeline.ts の「5. 実行 → 失敗/タイムアウト → 原文」の
 #   フォールバックが、ユニットテストだけでなく実際の hook → CLI の経路でも効くことを見る。
 #   要約が失敗した「せいで」発話まで欠落したら、機能の存在自体が発話の信頼性を損なうことになる
+#
+# ★ F1-b（issue #38 レビュー）: 下の summarizer.log チェックは元は `lines.length === 2`
+#   という絶対行数判定だった。⑭と⑯の間に summarizer.log へ書くシナリオを1つでも足すと
+#   確定的に赤くなる脆さがあったので、この呼び出しの**直前の行数を基準にした相対判定**に変える。
+SUMMARIZER_LOG_LINES_BEFORE_16=$(node -e '
+  const fs = require("fs");
+  let n = 0;
+  try { n = fs.readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean).length; } catch {}
+  console.log(n);
+' "$RUNTIME/summarizer.log")
+
 SUMMARIZER_RECORD_3="$ROOT/summarizer-record-3.jsonl"
 LONG_TEXT_FAIL=$(node -e '
   const parts = [];
@@ -622,13 +638,17 @@ node -e '
 
 node -e '
   const fs = require("fs");
+  const [logPath, beforeStr] = process.argv.slice(1);
+  const before = Number(beforeStr);
   let lines = [];
-  try { lines = fs.readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean); } catch {}
+  try { lines = fs.readFileSync(logPath, "utf8").split("\n").filter(Boolean); } catch {}
   const last = lines[lines.length - 1] ?? "";
-  const ok = lines.length === 2 && last.split("\t")[1] === "error";
-  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  実測ログ（summarizer.log）に error の判定が追記されている${ok ? "" : ` (${JSON.stringify(lines)})`}`);
+  // ★ F1-b: 絶対行数（旧: lines.length === 2）ではなく、この⑯のシナリオ直前からの
+  //   増分（+1）と最終行の outcome を見る相対判定にした
+  const ok = lines.length === before + 1 && last.split("\t")[1] === "error";
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  実測ログ（summarizer.log）に error の判定が追記されている${ok ? "" : ` (before=${before} ${JSON.stringify(lines)})`}`);
   process.exit(ok ? 0 : 1);
-' "$RUNTIME/summarizer.log"
+' "$RUNTIME/summarizer.log" "$SUMMARIZER_LOG_LINES_BEFORE_16"
 
 show "⑰ ★ AI要約 第2層: 要約 CLI 自身の session_id を持つ delta は発話されず spool からも消える"
 
@@ -643,6 +663,39 @@ show "⑰ ★ AI要約 第2層: 要約 CLI 自身の session_id を持つ delta 
 #   registerSessionId → addSummarizerSession → writeWorkerState で永続化している）を、
 #   そのまま次の delta の session_id として流し込む。これは「要約 CLI 自身の Claude Code が
 #   MessageDisplay hook を発火させてしまった」場合のふりをしている。
+
+# ★ F1（issue #38 レビュー）: 下の「発話されず spool からも消える」という判定は、
+#   ⑪/⑫（:343-384）と構造が同じ `!logged && !wroteToSpool` で、意図せず素通りしうる
+#   （on-message.sh がそもそもペイロードを spool に書けていない回帰でも同じ結果になり PASS してしまう）。
+#   ⑯が「偽要約は実際に起動された上で失敗している」という肯定側の証拠（record ファイルの存在）を
+#   自分に対して足しているのと同じ思想で、ここにも2段の前提チェックを足す:
+#
+#   1. ⑭で登録した session_id が、第2層のレジストリ（speak.state.json の summarizerSessionIds）に
+#      実際に載っていること（レジストリが機能する前提が整っている証拠）
+#   2. 無関係な session_id の対照 delta は、この直後でも普通に発話されること
+#      （hook → CLI → spool → publish の経路自体は生きている証拠。「何も起きなかった」と
+#      「第2層が効いて捨てられた」を区別する）
+node -e '
+  const fs = require("fs");
+  const [statePath, sessionId] = process.argv.slice(1);
+  let ids = [];
+  try { ids = JSON.parse(fs.readFileSync(statePath, "utf8")).summarizerSessionIds ?? []; } catch {}
+  const ok = Array.isArray(ids) && ids.includes(sessionId);
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  前提: 要約 CLI に渡した session_id が第2層のレジストリ（speak.state.json の summarizerSessionIds）に実際に載っている${ok ? "" : ` (ids=${JSON.stringify(ids)})`}`);
+  process.exit(ok ? 0 : 1);
+' "$RUNTIME/speak.state.json" "$SUMMARIZER_SESSION_ID"
+
+SUMMARIZER_LOOP_CONTROL_TEXT="第2層の対照: 無関係な session_id なので、この発言は普通に発話されるはずです。"
+delta m-summarizer-loop-control 0 true "$SUMMARIZER_LOOP_CONTROL_TEXT"
+node -e '
+  const fs = require("fs");
+  const [logPath, text] = process.argv.slice(1);
+  let logged = false;
+  try { logged = fs.readFileSync(logPath, "utf8").includes(text); } catch {}
+  console.log(`${logged ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  対照: 無関係な session_id の delta は普通に発話される（hook→CLI→spool→publish の経路自体は生きている）${logged ? "" : " (発話されていない)"}`);
+  process.exit(logged ? 0 : 1);
+' "$LOG" "$SUMMARIZER_LOOP_CONTROL_TEXT"
+
 SUMMARIZER_SESSION_JSON=$(node -e 'console.log(JSON.stringify({ session_id: process.argv[1] }))' "$SUMMARIZER_SESSION_ID")
 SUMMARIZER_LOOP_TEXT="要約 CLI 自身が発火させた発言のふりです。"
 
@@ -696,9 +749,11 @@ node -e '
   check("孤児カスケード: ストリーミング中だった m-orphan-b は打ち切られずに発話されていない",
     !texts.some((t) => t.includes("孤児カスケード検証Bの一文目です")));
 
+  // ★ F1-c（issue #38 レビュー）: "m-summary-"（⑭⑮⑯）/ "m-summarizer-"（⑰）が抜けていて、
+  //   AI要約シナリオの spool が片付いているかは検査対象外になっていた
   check("spool は片付いている（処理済みのファイルが残っていない）",
     !fs.readdirSync(process.argv[2]).some((f) =>
-      ["m-aaa", "m-bbb", "m-ccc", "m-ddd", "m-eee", "m-zero", "m-cli-zero", "m-orphan", "prompt-"].some((p) =>
+      ["m-aaa", "m-bbb", "m-ccc", "m-ddd", "m-eee", "m-zero", "m-cli-zero", "m-orphan", "m-summary-", "m-summarizer-", "prompt-"].some((p) =>
         f.startsWith(p))));
 
   // ★ #30 で保証が付いた契約（docs/protocol.md「発話の粒度」）。

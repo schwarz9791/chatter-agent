@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { createSummaryPipeline, type SummaryPipelineDeps } from "./summaryPipeline";
+import { SUMMARY_MAX_CHARS } from "./prompt";
 
 let dir: string;
 let homeDir: string;
@@ -187,6 +188,21 @@ describe("createSummaryPipeline", () => {
     delete process.env.RECORDER_MODE;
   });
 
+  it("★ D1(b)（issue #38 レビュー）: 実測ログの6列目に stderr の抜粋（detail）が残る", () => {
+    process.env.RECORDER_MODE = "fail";
+    const summarize = createSummaryPipeline(makeDeps());
+    summarize(LONG_TEXT, () => {});
+
+    const lines = readLogLines();
+    expect(lines[0]![1]).toBe("error");
+    // recorder.mjs の fail モードが書く stderr の文言がそのまま残っていること。
+    // ここが空のままだと、本物の CLI 失敗（OAuth トークン切れ、フラグ拒否）の原因が
+    // 「1行のログ」から追えなくなる
+    expect(lines[0]![5]).toContain("summarizer cli failed intentionally");
+
+    delete process.env.RECORDER_MODE;
+  });
+
   it("タイムアウトは例外を投げずに原文へフォールバックする（タイムアウト値は短くしてある）", () => {
     process.env.RECORDER_MODE = "hang";
     const summarize = createSummaryPipeline(makeDeps({ getTimeoutMs: () => 200 }));
@@ -215,18 +231,41 @@ describe("createSummaryPipeline", () => {
     expect(lines[0]![1]).toBe("no-command");
   });
 
-  it("成功時は cleanTextForSpeech で再クリーニングした要約を返す", () => {
+  // ★ A2（issue #38 レビュー）で契約が変わった。旧実装はここで cleanTextForSpeech を通した
+  //   要約を返していたが、cleanTextForSpeech は冪等ではない（バッククォートで囲まれた見出しが
+  //   1パス目で露出し、worker.ts 側でもう一度整形されると2パス目で消える）。整形は
+  //   worker.ts の toSpeechSentences（通常の発話経路と同じ1箇所）に集約したので、
+  //   summaryPipeline は素の stdout をそのまま返す。妥当性の判定だけは「実際に読み上げる
+  //   長さ」で行う（下のテストの spoken 相当。invalid 判定のテストは他のケースを参照）
+  it("成功時は素の stdout（未整形）を返す。整形は worker.ts 側に一本化してある（A2）", () => {
     process.env.RECORDER_MODE = "short";
     process.env.RECORDER_REPLY = "## 見出し\n要約です。`code` を直しました。";
     const summarize = createSummaryPipeline(makeDeps());
 
     const result = summarize(LONG_TEXT, () => {});
-    expect(result).not.toContain("##");
-    expect(result).not.toContain("`");
-    expect(result).toContain("要約です。");
+    // ★ 整形しない契約: Markdown 記法がそのまま残って返る
+    expect(result).toBe("## 見出し\n要約です。`code` を直しました。");
 
     const lines = readLogLines();
     expect(lines[0]![1]).toBe("ok");
+
+    delete process.env.RECORDER_MODE;
+    delete process.env.RECORDER_REPLY;
+  });
+
+  it("★ A1（issue #38 レビュー）: 要約後の長さが SUMMARY_MAX_CHARS の2倍を超えたら不採用にする", () => {
+    // claude -p が exit 0 のままレート制限の通知や拒否文を stdout に出すケースの再現。
+    // 原文より短くても、読み上げる長さとして長すぎるものは要約として採用しない
+    process.env.RECORDER_MODE = "short";
+    process.env.RECORDER_REPLY = "あ".repeat(SUMMARY_MAX_CHARS * 2 + 1);
+    const veryLongText = "あ".repeat(SUMMARY_MAX_CHARS * 2 + 100);
+    const summarize = createSummaryPipeline(makeDeps());
+
+    const result = summarize(veryLongText, () => {});
+    expect(result).toBe(veryLongText);
+
+    const lines = readLogLines();
+    expect(lines[0]![1]).toBe("invalid");
 
     delete process.env.RECORDER_MODE;
     delete process.env.RECORDER_REPLY;
@@ -355,10 +394,16 @@ describe("createSummaryPipeline", () => {
         result = summarize(LONG_TEXT, () => {});
       }).not.toThrow();
       expect(result).toBe(LONG_TEXT);
+
+      // ★ D1(a)（issue #38 レビュー）: ここで拾う例外は execFileSync に到達すらしていない
+      //   （getter の実装ミス）。"error"（CLI 起動後の失敗）と混同すると、運用者が
+      //   「claude CLI が壊れている」と誤診断する
+      const lines = readLogLines();
+      expect(lines.at(-1)?.[1]).toBe("internal");
     }
   });
 
-  it("★ registerSessionId が throw しても、例外を漏らさず原文を返す", () => {
+  it("★ registerSessionId が throw しても、例外を漏らさず原文を返す（outcome は internal）", () => {
     process.env.RECORDER_MODE = "short";
     const summarize = createSummaryPipeline(makeDeps());
 
@@ -371,6 +416,10 @@ describe("createSummaryPipeline", () => {
       });
     }).not.toThrow();
     expect(result).toBe(LONG_TEXT);
+
+    // ★ D1(a): registerSessionId の失敗は execFileSync の前で起きるので "internal"
+    const lines = readLogLines();
+    expect(lines[0]![1]).toBe("internal");
 
     delete process.env.RECORDER_MODE;
   });

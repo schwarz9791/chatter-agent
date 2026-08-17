@@ -23,10 +23,40 @@ const TOMBSTONE_LIMIT = 64;
 /**
  * 要約セッションIDの保持件数（有界リング）。
  *
- * 要約は1回のドレインで既定3回まで（`aiSummaryMaxPerDrain`）しか起動しない。数ドレイン分を
- * 覚えていれば、要約 CLI 自身の出力が spool に混ざって届いたときに拾い切れる
+ * ★ 16 → 64 に引き上げた（issue #38 レビュー D2）。旧 docstring は「要約は1回のドレインで
+ *   既定3回まで（`aiSummaryMaxPerDrain`）」を前提にしていたが、この値には現状上限が無い
+ *   （`config.ts` の `parseAiSummaryMaxPerDrain` で上限8を入れた。この 64 ÷ 8 = 8ドレイン分、
+ *   という関係で両者は連動している）。上限が無いまま大きな値を設定すると、1ドレイン内で自分のセッションIDが
+ *   このリングから押し出され、無限ループ防止の第2層（`isSummarizerSession`）が素通しになる。
+ *   UUID 36バイト前後 × 64 で2〜3KB なのでコストは実質ゼロ
  */
-const SUMMARIZER_SESSION_LIMIT = 16;
+const SUMMARIZER_SESSION_LIMIT = 64;
+
+/**
+ * 要約を試みた `message_id` の保持件数（有界リング。issue #38 レビュー A4）。
+ *
+ * tombstone（`TOMBSTONE_LIMIT`）と同じ性質の値なので同じ上限にしてある。
+ */
+const SUMMARY_ATTEMPT_LIMIT = 64;
+
+/**
+ * 有界リングへの追加。上限を超えた分は古いものから捨てる。
+ * `addTombstone` / `addSummarizerSession` / `addSummaryAttempt` の共通実装（issue #38 レビュー D2）。
+ */
+function pushBounded(list: string[], value: string, limit: number): void {
+  list.push(value);
+  if (list.length > limit) {
+    list.splice(0, list.length - limit);
+  }
+}
+
+/**
+ * `readWorkerState` での復元用。壊れている・無い値は空配列に落とし、末尾 `limit` 件だけ残す。
+ * `publishedMessageIds` / `summarizerSessionIds` / `summaryAttemptedMessageIds` の共通実装。
+ */
+function readStringRing(value: unknown, limit: number): string[] {
+  return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string").slice(-limit) : [];
+}
 
 export interface WorkerState {
   /** 直前に読み上げた PreToolUse の prompt_id。付随する Notification を1回だけ捨てるために使う */
@@ -61,6 +91,19 @@ export interface WorkerState {
    * 迂遠なパス突き合わせを介さず正確に塞げる。
    */
   summarizerSessionIds: string[];
+  /**
+   * 要約を試みた `message_id` の有界リング（issue #38 レビュー A4）。
+   *
+   * 要約中（数十秒）に親プロセス（`chatter-agent-speak`）が死ぬと（OOM、`maxBuffer` 到達、
+   * Claude Code の終了、スリープ）、tombstone も spool 削除もされていないので、次のドレインが
+   * 同じメッセージを再 assemble して `claude -p` をもう一度呼んでしまう。要約 CLI が親を
+   * 落とすタイプの障害だと、これがドレインのたびに繰り返され、数十秒を無限に燃やし続ける。
+   * ここに記録しておけば `summarizeSentences`（`worker.ts`）の冒頭でスキップできる。
+   *
+   * ★ 発話は絶対に落とさない: スキップするのは要約だけで、`sentences`（要約前の文）は
+   *   そのまま返して読み上げる。
+   */
+  summaryAttemptedMessageIds: string[];
 }
 
 export function emptyWorkerState(): WorkerState {
@@ -71,6 +114,7 @@ export function emptyWorkerState(): WorkerState {
     lastTextAt: 0,
     publishedMessageIds: [],
     summarizerSessionIds: [],
+    summaryAttemptedMessageIds: [],
   };
 }
 
@@ -84,16 +128,11 @@ export function readWorkerState(statePath: string): WorkerState {
         pairedPromptAt: typeof record.pairedPromptAt === "number" ? record.pairedPromptAt : 0,
         lastText: typeof record.lastText === "string" ? record.lastText : "",
         lastTextAt: typeof record.lastTextAt === "number" ? record.lastTextAt : 0,
-        publishedMessageIds: Array.isArray(record.publishedMessageIds)
-          ? record.publishedMessageIds.filter((id): id is string => typeof id === "string").slice(-TOMBSTONE_LIMIT)
-          : [],
+        publishedMessageIds: readStringRing(record.publishedMessageIds, TOMBSTONE_LIMIT),
         // ★ 足し忘れると永続化した意味が消える（readWorkerState を通らず emptyWorkerState() の
         //   空配列に戻ってしまい、プロセスを跨いだ第2層の抑制が効かない）
-        summarizerSessionIds: Array.isArray(record.summarizerSessionIds)
-          ? record.summarizerSessionIds
-              .filter((id): id is string => typeof id === "string")
-              .slice(-SUMMARIZER_SESSION_LIMIT)
-          : [],
+        summarizerSessionIds: readStringRing(record.summarizerSessionIds, SUMMARIZER_SESSION_LIMIT),
+        summaryAttemptedMessageIds: readStringRing(record.summaryAttemptedMessageIds, SUMMARY_ATTEMPT_LIMIT),
       };
     }
   } catch {
@@ -116,10 +155,7 @@ export function isTombstoned(state: WorkerState, messageId: string): boolean {
  * 古いものから捨てる（呼び出し元で `writeWorkerState` して永続化すること）。
  */
 export function addTombstone(state: WorkerState, messageId: string): void {
-  state.publishedMessageIds.push(messageId);
-  if (state.publishedMessageIds.length > TOMBSTONE_LIMIT) {
-    state.publishedMessageIds.splice(0, state.publishedMessageIds.length - TOMBSTONE_LIMIT);
-  }
+  pushBounded(state.publishedMessageIds, messageId, TOMBSTONE_LIMIT);
 }
 
 /** `sessionId` が要約 CLI に渡した session_id として記録されているか（無限ループ防止の第2層） */
@@ -132,8 +168,18 @@ export function isSummarizerSession(state: WorkerState, sessionId: string): bool
  * 古いものから捨てる（呼び出し元で `writeWorkerState` して永続化すること）。
  */
 export function addSummarizerSession(state: WorkerState, sessionId: string): void {
-  state.summarizerSessionIds.push(sessionId);
-  if (state.summarizerSessionIds.length > SUMMARIZER_SESSION_LIMIT) {
-    state.summarizerSessionIds.splice(0, state.summarizerSessionIds.length - SUMMARIZER_SESSION_LIMIT);
-  }
+  pushBounded(state.summarizerSessionIds, sessionId, SUMMARIZER_SESSION_LIMIT);
+}
+
+/** `messageId` が要約を試みた（＝ `summarizeSentences` を通って `deps.summarize` を呼んだ）記録があるか */
+export function isSummaryAttempted(state: WorkerState, messageId: string): boolean {
+  return state.summaryAttemptedMessageIds.includes(messageId);
+}
+
+/**
+ * `messageId` を要約を試みたとして記録する。有界リングなので、上限を超えた分は
+ * 古いものから捨てる（呼び出し元で `writeWorkerState` して永続化すること）。
+ */
+export function addSummaryAttempt(state: WorkerState, messageId: string): void {
+  pushBounded(state.summaryAttemptedMessageIds, messageId, SUMMARY_ATTEMPT_LIMIT);
 }

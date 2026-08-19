@@ -290,7 +290,7 @@ player だけが読むキー。**別ファイルに分けないこと。** `SPEC
 - `aiSummaryMaxPerDrain` は移植元の「滞留ガード」（同時実行数の待ち行列が閾値を超えたらスキップ）の読み替え。
   同期実行では待ち行列の概念が無いので、「1回のドレインで要約してよい回数の上限」に置き換えてある。
   上限8が入った（`parseAiSummaryMaxPerDrain`）。1回のドレインは最悪 `aiSummaryMaxPerDrain × aiSummaryTimeoutMs`
-  の間ロックを保持しうるため（既定なら 8 × 60秒 = 最悪480秒）、また `workerState.ts` の
+  の間ロックを保持しうるため（**既定なら 3 × 60秒 = 180秒。上限まで上げると 8 × 60秒 = 480秒**）、また `workerState.ts` の
   `SUMMARIZER_SESSION_LIMIT`（64）は「64 ÷ 8 = 8ドレイン分の要約セッションIDを覚えられる」計算になっている
   ため、上限だけを単独で動かさないこと
 

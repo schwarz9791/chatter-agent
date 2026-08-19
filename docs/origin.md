@@ -136,7 +136,7 @@ hook 方式への転換で、`textFilter.ts` が**上流と要件で食い違う
 | 滞留ガード | 待ち行列が閾値を超えたらスキップ | 1回のドレインで要約してよい回数の上限（`aiSummaryMaxPerDrain`）。同期実行では待ち行列の概念が無いための読み替え |
 | 無限ループ防止（要約 CLI 自身の出力の除外） | ログファイルパスのエンコード（`isolation.ts`） | 要約 CLI に渡した `session_id` のレジストリ（`workerState.ts` の `summarizerSessionIds`）。`session_id` が hook payload に直接入っているので、パス突き合わせより正確に塞げる |
 
-移送先は `core/src/summarizer/`（`types.ts` / `prompt.ts` / `claudeCli.ts` / `summaryPipeline.ts`）。`summaryPipeline.ts` の import は移植元の `../../filters/textFilter` から `../text/textFilter` に張り替えてある。
+移送先は `core/src/summarizer/`（`types.ts` / `prompt.ts` / `claudeCli.ts` / `summaryPipeline.ts`）。`summaryPipeline.ts` の import は移植元の `../../filters/textFilter` から `../text/speechText`（`toSpeechSentences`）に張り替えてある（`cleanTextForSpeech` / `splitIntoSentences` の直呼びはしない。理由は下の冪等性の項）。
 
 ## 持ち込まないファイル
 

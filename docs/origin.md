@@ -84,7 +84,15 @@ hook 方式への転換で、`textFilter.ts` が**上流と要件で食い違う
 
 ### それぞれの役割
 
-- **`textFilter.ts`** — `cleanTextForSpeech`（Markdown / コードブロック / URL / git ハッシュ除去、10段の正規表現）と `splitIntoSentences`。純粋関数なので何度適用しても同じ結果になる
+- **`textFilter.ts`** — `cleanTextForSpeech`（Markdown / コードブロック / URL / git ハッシュ除去、10段の正規表現）と `splitIntoSentences`。副作用は持たないが、★ **冪等ではない。2回適用すると結果が変わる**
+
+  ```
+  "`# 見出し`"    → 1回目 "# 見出し"    → 2回目 "見出し"
+  "`- リスト`"    → 1回目 "- リスト"    → 2回目 "リスト"
+  "`| a | b |`"   → 1回目 "| a | b |"   → 2回目 ""      ← 行が丸ごと消える
+  ```
+
+  1回目でバッククォートが外れた結果が、2回目には見出し・リスト・表として解釈されて除去されるため。**同じテキストに二度通さないこと**（要約結果の再整形で実際に踏んだ。→ `core/src/cli/worker.ts` の `summarizeSentences`）
 - **`ruleBasedEmotionClassifier.ts`** — キーワード辞書 + 文末パターン + ヒューリスティック。LLM 不使用でオフライン・即時
 
 ### 実際に加えた改変（2026-08-15 の初回コピー）

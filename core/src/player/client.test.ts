@@ -202,7 +202,12 @@ describe("再接続", () => {
     await until(() => s.sockets.length === 1);
 
     s.sockets[0].close(1013, "too slow");
-    await until(() => s.sockets.length === 2, 5000);
+    // ★ ここで `s.sockets.length === 2` を待たないこと。サーバーの connection ハンドラは
+    //   ハンドシェイクを**受理した**時点で走るが、クライアントの "connected" はその応答が
+    //   クライアントに届いてから出る。サーバーが2本目を数えた時点ではまだ出ていないことが
+    //   あり、直後の toHaveLength(2) が 1 で落ちる（ローカル実測で8回中2回、CI でも再現）。
+    //   アサートする当のイベントそのものを待つのが正しい
+    await until(() => events.filter((e) => e === "connected").length === 2, 5000);
     expect(events.filter((e) => e === "disconnected")).toHaveLength(1);
     expect(events.filter((e) => e === "connected")).toHaveLength(2);
   });

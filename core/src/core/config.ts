@@ -138,8 +138,13 @@ export interface ChatterAgentConfig {
    *   掛けると上限8でも最悪480秒。
    * ★ **上限8は `workerState.ts` の `SUMMARIZER_SESSION_LIMIT`（64）とも連動している。**
    *   64 ÷ 8 = 8ドレイン分の要約セッションIDを覚えられる計算になっている。上限をこれより
-   *   大きくすると、1ドレイン内で自分のセッションIDがリング（`summarizerSessionIds`）から
-   *   押し出されうるようになり、無限ループ防止の第2層（`isSummarizerSession`）が素通しになる。
+   *   大きくすると、リング（`summarizerSessionIds`）が覚えていられるドレイン数が減り、
+   *   要約 CLI の出力が遅れて spool に着いたときに、無限ループ防止の第2層
+   *   （`isSummarizerSession`）が既に忘れている確率が上がる。
+   * ★ **「1ドレイン内で自分のセッションIDが押し出される」わけではない**（かつてここにそう
+   *   書いてあったが誤り）。1ドレインで追加される ID は高々 `aiSummaryMaxPerDrain` 個なので、
+   *   自分を押し出すには 64 を超える必要がある。上限8の実効的な根拠はロック保持時間
+   *   （8 × `aiSummaryTimeoutMs` = 既定60秒なら480秒）の方。
    */
   aiSummaryMaxPerDrain: number;
 }

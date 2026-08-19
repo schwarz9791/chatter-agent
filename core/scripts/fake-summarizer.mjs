@@ -59,5 +59,11 @@ if (mode === "fail") {
 // summaryPipeline.ts の「7. 空 or 原文以上の長さ → 不採用」に引っかからないよう、
 // 既定値は十分短くしてある（原文は aiSummaryThreshold=200 文字超が前提のため）
 const reply = process.env.FAKE_SUMMARIZER_REPLY ?? "（要約）短くなりました。";
-process.stdout.write(reply);
+// ★ `process.stdout.write` + `process.exit(0)` にしないこと。macOS では stdout がパイプのとき
+//   非同期になるので、カーネルのパイプバッファ（約64KB）に収まらない分が flush 前に捨てられる
+//   （実測: 20000 文字は届くが 200000 文字は 21846 文字で切れる）。FAKE_SUMMARIZER_REPLY は
+//   summaryPipeline.ts の長さ依存の分岐（invalid の240文字上限、overflow の maxBuffer 超過）を
+//   狙って動かすための摘みなので、ここで黙って切り詰められるとテストが「通ったつもり」になる。
+//   `fs.writeSync(1, ...)` は同期なので全量が出る。
+fs.writeSync(1, reply);
 process.exit(0);

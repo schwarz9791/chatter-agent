@@ -610,4 +610,12 @@ try {
   cleanup();
 }
 
-process.exit(failures.length === 0 ? 0 : 1);
+// ★ ここで `process.exitCode` に倒さないこと。この下でイベントループが空にならない
+//   （catch 経路では createStubServer() で立てた WebSocketServer が閉じられずに残る）ので、
+//   自然終了に任せるとプロセスがハングする。exit は保ったまま、書き込みの排出だけ待つ
+const exitCode = failures.length === 0 ? 0 : 1;
+// 上の診断ダンプ（プロセスのログ）は数百KBになりうる。macOS ではパイプへの書き込みが
+// 非同期なので、排出を待たずに exit すると64KiBで切れる（Linux と TTY は同期なので CI では起きない）
+await new Promise((resolve) => process.stdout.write("", resolve));
+await new Promise((resolve) => process.stderr.write("", resolve));
+process.exit(exitCode);

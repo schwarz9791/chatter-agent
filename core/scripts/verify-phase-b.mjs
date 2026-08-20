@@ -312,4 +312,13 @@ try {
   cleanup();
 }
 
-process.exit(failures.length === 0 ? 0 : 1);
+// ★ ここで `process.exitCode` に倒さないこと。この下でイベントループが空にならない
+//   （catch 経路では server 子プロセスが起動したまま残り、finally の cleanup() は
+//   SIGKILL するだけで exit を待たない）ので、自然終了に任せるとプロセスがハングする。
+//   exit は保ったまま、書き込みの排出だけ待つ
+const exitCode = failures.length === 0 ? 0 : 1;
+// 上の診断ダンプ（server のログ）は数百KBになりうる。macOS ではパイプへの書き込みが
+// 非同期なので、排出を待たずに exit すると64KiBで切れる（Linux と TTY は同期なので CI では起きない）
+await new Promise((resolve) => process.stdout.write("", resolve));
+await new Promise((resolve) => process.stderr.write("", resolve));
+process.exit(exitCode);

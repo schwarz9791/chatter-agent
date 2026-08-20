@@ -204,14 +204,18 @@ const parsePort = (raw) => {
 * `parsePort`（1〜65535）と同じ「上限付きパーサ」の形。
 *
 * ★ 上限 8 の根拠は2つ、いずれも `aiSummaryTimeoutMs` / `workerState.ts` の
-*   `SUMMARIZER_SESSION_LIMIT` と連動しているので、上限だけを単独で動かさないこと:
+*   `SUMMARIZER_SESSION_LIMIT` と連動しているので、上限だけを単独で動かさないこと。
+*   実効的な根拠は1のロック保持時間の方（2はドレインをまたぐ履歴の深さの話であり、
+*   1ドレイン内で押し出しが起きるわけではない）:
 *
 * 1. 1回のドレインで要約する件数 × `aiSummaryTimeoutMs` の間ロックを保持する。
-*    既定60秒 × 上限8 で最悪480秒（→ `aiSummaryTimeoutMs` の docstring）。
+*    `aiSummaryTimeoutMs` 自体には実質的な上限が無い（`parseTimeoutMs` は `MAX_TIMER_MS`
+*    ≒ 24.8日でしか縛らない）ので、480秒（既定60秒 × 上限8）はタイムアウトが既定値のときの
+*    数字であって、強制された天井ではない（→ `aiSummaryTimeoutMs` の docstring）。
 * 2. `workerState.ts` の `SUMMARIZER_SESSION_LIMIT`（64）は「64 ÷ 8 = 8ドレイン分の
 *    要約セッションIDを覚えられる」という計算で決めてある。上限をこれより緩めると、
-*    1ドレイン内で自分のセッションIDがリングから押し出され、無限ループ防止の第2層
-*    （`isSummarizerSession`）が素通しになる。
+*    ドレインをまたいで覚えていられる履歴が浅くなり、要約 CLI の出力が遅れて spool に
+*    着いたときに無限ループ防止の第2層（`isSummarizerSession`）が既に忘れている確率が上がる。
 */
 const parseAiSummaryMaxPerDrain = (raw) => {
 	const n = toInt(raw);
@@ -1412,8 +1416,8 @@ function toSpeechSentences(text, options = {}) {
 *   立ち上げるコストが見合わないため。**（★ かつてここには「hook の10秒制約に乗せられない」と
 *   書いてあったが誤り。この関数が走るのは hook からデタッチ起動された `chatter-agent-speak`
 *   の中で、hook 自身は spool に1ファイル置いて即 `exit 0` する（`_lib.sh` の
-*   `chatter_spawn_cli` は `nohup ... &`）。同じ経路で既に `execFileSync` を最大60秒
-*   ブロックしているので、10秒制約はここには掛かっていない。）代わりに、PATH に
+*   `chatter_spawn_cli` は `nohup ... &`）。同じ経路で既に `execFileSync` を既定で60秒
+*   ブロックしうるので、10秒制約はここには掛かっていない。）代わりに、PATH に
 *   見つからなかったときの保険として mise/asdf/nvm/volta 等の**既知のインストール先**を
 *   `fs.existsSync` だけで（spawn せずに）順に見る軽量な同期探索に絞る。
 */
@@ -2337,11 +2341,11 @@ const TOMBSTONE_LIMIT = 64;
 * 要約セッションIDの保持件数（有界リング）。
 *
 * ★ 16 → 64 に引き上げた（issue #38 レビュー D2）。旧 docstring は「要約は1回のドレインで
-*   既定3回まで（`aiSummaryMaxPerDrain`）」を前提にしていたが、この値には現状上限が無い
-*   （`config.ts` の `parseAiSummaryMaxPerDrain` で上限8を入れた。この 64 ÷ 8 = 8ドレイン分、
-*   という関係で両者は連動している）。上限が無いまま大きな値を設定すると、1ドレイン内で自分のセッションIDが
-*   このリングから押し出され、無限ループ防止の第2層（`isSummarizerSession`）が素通しになる。
-*   UUID 36バイト前後 × 64 で2〜3KB なのでコストは実質ゼロ
+*   既定3回まで（`aiSummaryMaxPerDrain`）」を前提にしていたが、当時この値には上限が無かった。
+*   その後 `config.ts` の `parseAiSummaryMaxPerDrain` で上限8を入れた（この 64 ÷ 8 = 8ドレイン分、
+*   という関係で両者は連動している）。上限を緩めると、ドレインをまたいで覚えていられる履歴が浅くなり、
+*   要約 CLI の出力が遅れて spool に着いたときに、無限ループ防止の第2層（`isSummarizerSession`）が
+*   既に忘れている確率が上がる。UUID 36バイト前後 × 64 で2〜3KB なのでコストは実質ゼロ
 */
 const SUMMARIZER_SESSION_LIMIT = 64;
 /**

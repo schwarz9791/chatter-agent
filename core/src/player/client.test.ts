@@ -126,10 +126,21 @@ describe("接続", () => {
 });
 
 describe("ack", () => {
+  // ★ このブロックは s.sockets.length ではなく events（"connected"）を待つ。
+  //   client.ts の flushAck は `if (socket?.readyState !== WebSocket.OPEN) return;` より
+  //   **前**に `if (ackTimer) clearTimeout(ackTimer); ackTimer = null;` を実行する。
+  //   つまりソケットがまだ OPEN でないタイミングで ACK_FLUSH_MS（20ms）のタイマーが
+  //   発火すると、再スケジュールされないまま捨てられ、次に ack() が呼ばれるまで
+  //   pendingAck が止まる。ack() は `if (ackTimer) return;` で早期 return するので、
+  //   2度目の ack() が呼ばれれば自己回復するが、このブロックのテストはいずれも
+  //   2度目の ack() を呼ばないため自己回復しない（dfbdabf で直した再接続の flaky と
+  //   違って決定的に失敗する）。サーバーの connection ハンドラはハンドシェイクを
+  //   受理した時点で走るが、クライアントの "connected" はその応答が届いてから出るので、
+  //   クライアント側のイベントを待てばこの窓は構造的に閉じる
   it("累積 ack を送る", async () => {
     const s = await stub();
-    const { client } = connect(s.url);
-    await until(() => s.sockets.length === 1);
+    const { client, events } = connect(s.url);
+    await until(() => events.includes("connected"));
 
     client.ack(3);
     await until(() => s.received.length === 1);
@@ -138,8 +149,9 @@ describe("ack", () => {
 
   it("★ 短時間に何度呼んでも最大値が1回だけ飛ぶ（追いつきのバーストを畳む）", async () => {
     const s = await stub();
-    const { client } = connect(s.url);
-    await until(() => s.sockets.length === 1);
+    const { client, events } = connect(s.url);
+    // ★ サーバー側ではなくクライアント側の connected を待つ（理由は describe 直下のコメント）
+    await until(() => events.includes("connected"));
 
     for (let seq = 1; seq <= 100; seq++) client.ack(seq);
     await sleep(150);
@@ -151,8 +163,9 @@ describe("ack", () => {
     // 採番のやり直しは切断を伴わない。20ms のバッファに旧エポックの ack が残っていると、
     // 同じソケット上でそれが飛び、まだ喋っていない entry が消える
     const s = await stub();
-    const { client } = connect(s.url);
-    await until(() => s.sockets.length === 1);
+    const { client, events } = connect(s.url);
+    // ★ サーバー側ではなくクライアント側の connected を待つ（理由は describe 直下のコメント）
+    await until(() => events.includes("connected"));
 
     client.ack(500);
     client.dropPendingAck();
@@ -173,8 +186,9 @@ describe("ack", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const s = await stub();
     // 再接続を遅らせて、切断中に ack が溜まる窓を確実に作る
-    const { client } = connect(s.url, { backoffMinMs: 2000 });
-    await until(() => s.sockets.length === 1);
+    const { client, events } = connect(s.url, { backoffMinMs: 2000 });
+    // ★ サーバー側ではなくクライアント側の connected を待つ（理由は describe 直下のコメント）
+    await until(() => events.includes("connected"));
 
     s.sockets[0].terminate();
     await sleep(50);
@@ -199,15 +213,29 @@ describe("再接続", () => {
   it("切断されたら繋ぎ直す", async () => {
     const s = await stub();
     const { events } = connect(s.url);
-    await until(() => s.sockets.length === 1);
+    // ★ ここも `s.sockets.length === 1` ではなくクライアント側の "connected" を待つこと。
+    //   onDisconnected は client.ts の close ハンドラから**無条件に**（open を経ていなくても）
+    //   発火する。サーバーの connection ハンドラはハンドシェイクを**受理した**時点で走るが、
+    //   クライアントの "connected" はその応答がクライアントに届いてから出るので、サーバーが
+    //   close(1013) を送るのがクライアントの open より先になり得る。そうなると1本目は
+    //   "connected" を出さないまま "disconnected" だけを出し、最終的な "connected" は
+    //   1本で止まって下の until がタイムアウトする（ローカル実測で8回中2回、CI でも再現）。
+    //   アサートする当のイベントそのものを待つのが正しい
+    await until(() => events.includes("connected"));
 
     s.sockets[0].close(1013, "too slow");
-    // ★ ここで `s.sockets.length === 2` を待たないこと。サーバーの connection ハンドラは
-    //   ハンドシェイクを**受理した**時点で走るが、クライアントの "connected" はその応答が
-    //   クライアントに届いてから出る。サーバーが2本目を数えた時点ではまだ出ていないことが
-    //   あり、直後の toHaveLength(2) が 1 で落ちる（ローカル実測で8回中2回、CI でも再現）。
-    //   アサートする当のイベントそのものを待つのが正しい
-    await until(() => events.filter((e) => e === "connected").length === 2, 5000);
+    // ★ ここも同じ理由でサーバー側カウンタではなくイベントを待つ。
+    //   `=== 2` ではなく `>= 2` にしているのは、until が10msポーリングのため
+    //   単調増加するカウンタに `===` を使うと値を飛び越えたときに永久に成立しないから。
+    //   ここでは connect() が pingWatchdogMs: 0 を渡しており、このテストにも2本目を
+    //   閉じる操作が無いので3本目が生まれる経路は無く、到達不能な保険にすぎないが、
+    //   万一起きたときは下の toHaveLength(2) まで到達させて「条件が満たされませんでした」
+    //   ではなく実際の件数が見える差分で落とす。第2引数の 5000 も外している。
+    //   core/vitest.config.ts は testTimeout を設定していないため、テストあたりの予算は
+    //   vitest 既定の 5000ms で、ここまでの await が既にその一部を使っている。5000 を
+    //   渡しても必ず vitest の予算に負けるので嘘の期限になる。既定の 3000 に戻せば
+    //   backoffMinMs: 40 で再接続には十分間に合う
+    await until(() => events.filter((e) => e === "connected").length >= 2);
     expect(events.filter((e) => e === "disconnected")).toHaveLength(1);
     expect(events.filter((e) => e === "connected")).toHaveLength(2);
   });

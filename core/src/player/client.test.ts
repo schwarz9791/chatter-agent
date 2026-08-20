@@ -178,6 +178,12 @@ describe("ack", () => {
     expect(JSON.parse(s.received[0])).toEqual({ type: "spoken", seq: 1 });
   });
 
+  // ★ このテストだけ it() の第3引数に自前の予算（12_000）を持たせている。until に渡す期限は、
+  //   テスト全体の予算に収まって初めて意味を持つ。core/vitest.config.ts は testTimeout を
+  //   設定していないため既定は 5000ms だが、このテストは下の connect() に backoffMinMs: 2000 を
+  //   渡していて、再接続の遅延（base/2 + jitter で 1000〜2000ms）だけで既定予算の半分近くを
+  //   使ってしまい、そもそも収まらない。数字を大きくするときは、この第3引数と下の until の
+  //   期限を両方動かすこと。片方だけでは守られない
   it("★ 送れなかった ack を捨てず、かつ再接続の open で勝手に送らない", async () => {
     // 捨てると reducer 側からも消えていて復旧手段が無くなる。かといって open で流すと、
     // ランタイムルートが作り直された先の**新しいサーバー**へ旧エポックの ack が飛び、
@@ -197,16 +203,19 @@ describe("ack", () => {
     await sleep(100);
     expect(s.received).toEqual([]);
 
-    // 繋ぎ直しても、フレームを1つも受けていないうちは送らない
-    await until(() => s.sockets.length === 2, 8000);
+    // 繋ぎ直しても、フレームを1つも受けていないうちは送らない。
+    // 待っているのは1回目の再接続で、遅延の上限は backoffMinMs: 2000 から来る
+    // 1000〜2000ms（ジッタ込み）＋ハンドシェイクなので、5000 あれば最大遅延の 2.5倍の余裕がある
+    await until(() => s.sockets.length === 2, 5000);
     await sleep(200);
     expect(s.received).toEqual([]);
 
-    // 次に ack が出た時点で、溜めていた最大値ごと送られる（累積 ack なので取りこぼさない）
+    // 次に ack が出た時点で、溜めていた最大値ごと送られる（累積 ack なので取りこぼさない）。
+    // ここで待っているのは ack() 直後の間引きタイマー（ACK_FLUSH_MS = 20ms）の発火だけなので、2000 で足りる
     client.ack(501);
-    await until(() => s.received.length === 1, 5000);
+    await until(() => s.received.length === 1, 2000);
     expect(JSON.parse(s.received[0])).toEqual({ type: "spoken", seq: 501 });
-  });
+  }, 12_000);
 });
 
 describe("再接続", () => {

@@ -53,17 +53,26 @@ const mode = process.env.FAKE_SUMMARIZER_MODE ?? "short";
 
 if (mode === "fail") {
   console.error("FAKE_SUMMARIZER_MODE=fail で意図的に失敗しました");
-  process.exit(1);
+  process.exitCode = 1;
+} else {
+  // summaryPipeline.ts の「7. 空 or 原文以上の長さ → 不採用」に引っかからないよう、
+  // 既定値は十分短くしてある（原文は aiSummaryThreshold=200 文字超が前提のため）。
+  // ★ この摘みで狙えるのは invalid（240文字上限）まで。overflow（maxBuffer 超過）は
+  //   狙えない —— MAX_BUFFER_BYTES がちょうど1MiBで macOS の ARG_MAX と同値なため、
+  //   環境変数でそれを超える文字列を渡そうとすると exec 自体が E2BIG で失敗する
+  //  （Linux では MAX_ARG_STRLEN により環境変数1本が131072バイトに制限され、もっと手前で落ちる）
+  const reply = process.env.FAKE_SUMMARIZER_REPLY ?? "（要約）短くなりました。";
+  // ★ ここに `process.exit` を足さないこと。真因は `process.stdout.write` ではなく
+  //   `process.exit` の側（実測: exit ありだと65536バイトで切れるが、exit を消すと全量届く）。
+  //   macOS では stdout がパイプのときだけ書き込みが非同期になるため、write 直後に exit すると
+  //   カーネルのパイプバッファ（64KiB）に収まらない分が flush 前に捨てられる。CI
+  //  （.github/workflows/validate.yml は全ジョブ ubuntu-latest）はパイプでも同期書き込みなので、
+  //   この切り詰めはそこでは検出できない。`fs.writeSync(1, ...)` で回避しようともしないこと
+  //   —— `process.stdout` に一度でも触れる（console.log 等）と fd 1 に O_NONBLOCK が立ち、
+  //   以後 `fs.writeSync` は書けた分を返すだけで例外を投げないため、かえって静かに切れる
+  //  （実測で確認済み）。overflow.mjs（claudeCli.test.ts:376）と recorder.mjs
+  //  （summaryPipeline.test.ts:66-68）も同じ流儀 —— 素の `process.stdout.write` を
+  //   `process.exit` なしで使っている。stdin は読み切り済みで、他にイベントループを
+  //   生かすハンドルは無いので、このまま自然終了する。
+  process.stdout.write(reply);
 }
-
-// summaryPipeline.ts の「7. 空 or 原文以上の長さ → 不採用」に引っかからないよう、
-// 既定値は十分短くしてある（原文は aiSummaryThreshold=200 文字超が前提のため）
-const reply = process.env.FAKE_SUMMARIZER_REPLY ?? "（要約）短くなりました。";
-// ★ `process.stdout.write` + `process.exit(0)` にしないこと。macOS では stdout がパイプのとき
-//   非同期になるので、カーネルのパイプバッファ（約64KB）に収まらない分が flush 前に捨てられる
-//   （実測: 20000 文字は届くが 200000 文字は 21846 文字で切れる）。FAKE_SUMMARIZER_REPLY は
-//   summaryPipeline.ts の長さ依存の分岐（invalid の240文字上限、overflow の maxBuffer 超過）を
-//   狙って動かすための摘みなので、ここで黙って切り詰められるとテストが「通ったつもり」になる。
-//   `fs.writeSync(1, ...)` は同期なので全量が出る。
-fs.writeSync(1, reply);
-process.exit(0);

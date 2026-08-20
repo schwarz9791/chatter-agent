@@ -12,8 +12,8 @@
  *   立ち上げるコストが見合わないため。**（★ かつてここには「hook の10秒制約に乗せられない」と
  *   書いてあったが誤り。この関数が走るのは hook からデタッチ起動された `chatter-agent-speak`
  *   の中で、hook 自身は spool に1ファイル置いて即 `exit 0` する（`_lib.sh` の
- *   `chatter_spawn_cli` は `nohup ... &`）。同じ経路で既に `execFileSync` を最大60秒
- *   ブロックしているので、10秒制約はここには掛かっていない。）代わりに、PATH に
+ *   `chatter_spawn_cli` は `nohup ... &`）。同じ経路で既に `execFileSync` を既定で60秒
+ *   ブロックしうるので、10秒制約はここには掛かっていない。）代わりに、PATH に
  *   見つからなかったときの保険として mise/asdf/nvm/volta 等の**既知のインストール先**を
  *   `fs.existsSync` だけで（spawn せずに）順に見る軽量な同期探索に絞る。
  */

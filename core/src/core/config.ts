@@ -226,14 +226,18 @@ const parsePort: Parser<number> = (raw) => {
  * `parsePort`（1〜65535）と同じ「上限付きパーサ」の形。
  *
  * ★ 上限 8 の根拠は2つ、いずれも `aiSummaryTimeoutMs` / `workerState.ts` の
- *   `SUMMARIZER_SESSION_LIMIT` と連動しているので、上限だけを単独で動かさないこと:
+ *   `SUMMARIZER_SESSION_LIMIT` と連動しているので、上限だけを単独で動かさないこと。
+ *   実効的な根拠は1のロック保持時間の方（2はドレインをまたぐ履歴の深さの話であり、
+ *   1ドレイン内で押し出しが起きるわけではない）:
  *
  * 1. 1回のドレインで要約する件数 × `aiSummaryTimeoutMs` の間ロックを保持する。
- *    既定60秒 × 上限8 で最悪480秒（→ `aiSummaryTimeoutMs` の docstring）。
+ *    `aiSummaryTimeoutMs` 自体には実質的な上限が無い（`parseTimeoutMs` は `MAX_TIMER_MS`
+ *    ≒ 24.8日でしか縛らない）ので、480秒（既定60秒 × 上限8）はタイムアウトが既定値のときの
+ *    数字であって、強制された天井ではない（→ `aiSummaryTimeoutMs` の docstring）。
  * 2. `workerState.ts` の `SUMMARIZER_SESSION_LIMIT`（64）は「64 ÷ 8 = 8ドレイン分の
  *    要約セッションIDを覚えられる」という計算で決めてある。上限をこれより緩めると、
- *    1ドレイン内で自分のセッションIDがリングから押し出され、無限ループ防止の第2層
- *    （`isSummarizerSession`）が素通しになる。
+ *    ドレインをまたいで覚えていられる履歴が浅くなり、要約 CLI の出力が遅れて spool に
+ *    着いたときに無限ループ防止の第2層（`isSummarizerSession`）が既に忘れている確率が上がる。
  */
 const parseAiSummaryMaxPerDrain: Parser<number> = (raw) => {
   const n = toInt(raw);

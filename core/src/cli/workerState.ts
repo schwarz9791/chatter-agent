@@ -24,11 +24,11 @@ const TOMBSTONE_LIMIT = 64;
  * 要約セッションIDの保持件数（有界リング）。
  *
  * ★ 16 → 64 に引き上げた（issue #38 レビュー D2）。旧 docstring は「要約は1回のドレインで
- *   既定3回まで（`aiSummaryMaxPerDrain`）」を前提にしていたが、この値には現状上限が無い
- *   （`config.ts` の `parseAiSummaryMaxPerDrain` で上限8を入れた。この 64 ÷ 8 = 8ドレイン分、
- *   という関係で両者は連動している）。上限が無いまま大きな値を設定すると、1ドレイン内で自分のセッションIDが
- *   このリングから押し出され、無限ループ防止の第2層（`isSummarizerSession`）が素通しになる。
- *   UUID 36バイト前後 × 64 で2〜3KB なのでコストは実質ゼロ
+ *   既定3回まで（`aiSummaryMaxPerDrain`）」を前提にしていたが、当時この値には上限が無かった。
+ *   その後 `config.ts` の `parseAiSummaryMaxPerDrain` で上限8を入れた（この 64 ÷ 8 = 8ドレイン分、
+ *   という関係で両者は連動している）。上限を緩めると、ドレインをまたいで覚えていられる履歴が浅くなり、
+ *   要約 CLI の出力が遅れて spool に着いたときに、無限ループ防止の第2層（`isSummarizerSession`）が
+ *   既に忘れている確率が上がる。UUID 36バイト前後 × 64 で2〜3KB なのでコストは実質ゼロ
  */
 const SUMMARIZER_SESSION_LIMIT = 64;
 

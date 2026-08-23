@@ -216,17 +216,42 @@ describe("epoch — 採番のやり直しと一対一", () => {
     expect(log().epoch).toBe("ok-1");
   });
 
-  it("★ seq と epoch は同じ行から採る（世代を跨いでペアにしない）", () => {
-    // 新しい CLI が書いた行の後ろに、epoch を持たない行が足された状態
+  it("★ 末尾行に epoch が無ければ、同じファイルの中で遡って探す", () => {
+    // 新しい CLI が書いた行の後ろに、古い CLI（epoch を書かない）の行が足された状態。
+    // ロールバックや bisect で起こる。ここで legacy に降格させると、接続中の
+    // クライアントが「採番のやり直し」と読んで**既に喋った発話をもう一度喋る**
     fs.writeFileSync(
       logPath,
       `${JSON.stringify({ epoch: "gen-a", seq: 1, ts: "t" })}\n${JSON.stringify({ seq: 2, ts: "t" })}\n`,
     );
 
-    // 末尾行に epoch が無いので gen-a は採らない（seq だけ採って epoch は legacy に落とす）
+    const l = log();
+    expect(l.epoch).toBe("gen-a");
+    expect(l.epochIsNew).toBe(false);
+    // seq は**最後の有効行**から採る（epoch を見つけた行の seq ではない）
+    expect(l.peekNextSeq()).toBe(3);
+  });
+
+  it("★ ファイルを跨いで seq と epoch のペアを作らない", () => {
+    // 退避側に旧世代、現世代は epoch を持たない行だけ、という組み合わせでも
+    // seq は現世代の末尾から採る
+    fs.writeFileSync(path.join(dir, "speech.1.jsonl"), `${JSON.stringify({ epoch: "gen-old", seq: 3, ts: "t" })}\n`);
+    fs.writeFileSync(logPath, `${JSON.stringify({ seq: 9, ts: "t" })}\n`);
+
+    const l = log();
+    expect(l.peekNextSeq()).toBe(10);
+    // 現世代から epoch が拾えないので退避側を見る。採番は続いているので世代も続く扱い
+    expect(l.epoch).toBe("gen-old");
+    expect(l.epochIsNew).toBe(false);
+  });
+
+  it("どこからも epoch が拾えず、採番だけ復旧できたら legacy", () => {
+    fs.writeFileSync(logPath, `${JSON.stringify({ seq: 4, ts: "t" })}\n`);
+
     const l = log();
     expect(l.epoch).toBe("legacy");
-    expect(l.peekNextSeq()).toBe(3);
+    expect(l.epochIsNew).toBe(false);
+    expect(l.peekNextSeq()).toBe(5);
   });
 
   it("ローテート直後（現世代が空）でも、退避したファイルの末尾から epoch を拾う", () => {

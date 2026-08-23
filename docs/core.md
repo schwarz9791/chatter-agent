@@ -19,7 +19,7 @@ core/src/
 │   └── workerState.ts       プロセスを跨いで持ち回る重複抑制の状態
 ├── server/       chatter-agent-server（配信キュー → WebSocket 配信）
 │   ├── index.ts             合成ルート。ロック → bind → 古いキューの掃除 → ポーリング
-│   ├── dispatcher.ts        配信済み seq の判断。何を配信済みとし、何を消してよいか（ユニットテストのため純粋な部品に切り出してある）
+│   ├── dispatcher.ts        配信済み seq と**採番の世代**の判断。何を配信済みとし、何を消してよいか（ユニットテストのため純粋な部品に切り出してある）
 │   └── wsServer.ts          配信と ack。Origin 検査もここ
 ├── player/       chatter-agent-player（WebSocket → 合成 → 再生 → ack）
 │   ├── index.ts             合成ルート。ロック → 一時dir → エンジン疎通 → 接続。コマンドを実行してイベントを戻すドライバ
@@ -29,13 +29,13 @@ core/src/
 │   ├── audioPlayer.ts       WAV を一時ファイルに置いて外部コマンドで鳴らす
 │   └── client.ts            ws 接続 / 再接続 / ping watchdog / ack の間引き
 ├── core/         契約と基盤
-│   ├── types.ts             SpeechRecord / Emotion / SpeechKind / SpeakMessage
+│   ├── types.ts             SpeechRecord / SpeechEpoch / LEGACY_EPOCH / Emotion / SpeechKind / SpeakMessage
 │   ├── paths.ts             ← cc-mascot-xr 流用
 │   ├── config.ts            ← cc-mascot-xr configStore 流用
 │   ├── lock.ts              mkdir の原子性を使った単一ワーカー / 単一サーバーのロック
 │   ├── atomicWrite.ts       tmp + rename の共通化。キュー entry / seq state / worker state の3箇所が使う
-│   ├── speechLog.ts         記録への追記 / seq 採番 / state 整合
-│   └── speechQueue.ts       配信キュー。list/read/enqueue/ackUpTo/dropOlderThan/trim/sweepTmp
+│   ├── speechLog.ts         記録への追記 / epoch と seq の採番 / state 整合
+│   └── speechQueue.ts       配信キュー。list/read/enqueue/ackUpTo/dropOlderThan/trim/clear/sweepTmp
 ├── text/         テキスト整形・文分割        ← textFilter.ts のみ cc-mascot 由来
 │   └── speechText.ts        ★中核。メッセージ全文の整形 → 文の切り出し（`toSpeechSentences`。純粋関数）。
 │                             `cli/` からも `summarizer/` からも参照するため、`summarizer/ → cli/` の
@@ -219,6 +219,7 @@ cc-mascot から移植したコードを oxfmt で整形すると、上流との
 | 発話の記録 | `{root}/speech.jsonl`（退避は `speech.1.jsonl` の1世代だけ） | CLI |
 | 配信キュー | `{root}/speech/<seq>.json` | CLI が書く。上限超過は CLI が切り、ack と起動時の掃除は server が行う |
 | seq の state | `{root}/speech.state.json`（`{nextSeq, epoch}`） | CLI |
+
 | 抑制の state | `{root}/speak.state.json` | CLI |
 | 要約 CLI の cwd | `{root}/summarizer-home/` | CLI（要約 CLI を隔離実行する作業ディレクトリ。プロジェクトの `CLAUDE.md` を読ませないため） |
 | 要約の実測ログ | `{root}/summarizer.log` | CLI（要約が有効なときだけ書く。既定 OFF なら1バイトも増えない） |
@@ -226,6 +227,20 @@ cc-mascot から移植したコードを oxfmt で整形すると、上流との
 | サーバーのロック | `{root}/server.lock/`（ディレクトリ） | **server**（bind の前に取る。2台目は起動に失敗する） |
 | player のロック | `{root}/player.lock/`（ディレクトリ） | **player**（接続の前に取る。2台目は起動に失敗する） |
 | player の一時 WAV | `{root}/player-tmp/<エポック>-<seq>.wav` | **player**（起動時にディレクトリごと作り直す。`seq` は採番の世代を跨いで一意でないので、ファイル名に世代を混ぜる） |
+
+### 採番の世代（`epoch`）
+
+`seq` は**この世代の中でしか一意でない**。`speech.state.json` と `speech.jsonl` の両方が
+消えると採番は 1 に戻り、そのとき `epoch` も新しくなる（[#29](https://github.com/schwarz9791/chatter-agent/issues/29)）。
+契約は [`protocol.md`](./protocol.md)。実装で守ること:
+
+| | |
+|---|---|
+| `LEGACY_EPOCH` | **`core/types.ts` に1箇所だけ置く。** 記録側（`speechLog.reconcile`）とキュー側（`speechQueue.read`）が別々の値を使うと、「ログ由来の legacy」と「キュー由来の legacy」が別世代として扱われる |
+| 生成 | `globalThis.crypto.randomUUID()` を**分岐の中で**触る。`crypto` を top-level import しないこと（[#43](https://github.com/schwarz9791/chatter-agent/issues/43): CLI の起動が毎 delta 約2.6ms 重くなる）。**推測しやすい値へフォールバックしない** — `epoch` は音声の URL に載り、`<audio src>` は Origin 検査を素通りする |
+| 掃除 | やり直しの後始末は**書き手（CLI）**が、最初の publish の `append` より**前**に行う。サーバーは配信しないだけで削除しない（→ `server/dispatcher.ts` の `resolveGeneration`） |
+| 検証 | `epoch` を通す入口は全部 `isValidEpoch` を通す（`parseAck` / `parseSpeechFrame` / `readState` / `readLastEntry` / `speechQueue.read`）。**欠落だけ**を `LEGACY_EPOCH` に倒すのは `speechQueue.read` の1箇所 |
+| `ts` | 世代の新しさの判定に使う。**字句比較にしないこと**（`ts: "z"` ひとつでその世代が永久に勝つ）。`speechQueue.read` が `Date.parse` で弾き、比較も数値で行う |
 
 ### 設定と環境変数
 

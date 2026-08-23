@@ -202,8 +202,9 @@ describe("メッセージの処理", () => {
 });
 
 /**
- * [#30] で保証が付いた契約。クライアントは `(seq, ts)` で重複排除し、`messageId` で
- * まとめてよくなる（docs/protocol.md「発話の粒度」）。
+ * [#30] で保証が付いた契約。1メッセージ分の `seq` が連続し、`messageId` と `ts` が
+ * その中で揃う（docs/protocol.md「発話の粒度」）。
+ * 重複排除のキーは `(epoch, seq)` で、`ts` はそこには使わない。
  *
  * [#30]: https://github.com/schwarz9791/chatter-agent/issues/30
  */

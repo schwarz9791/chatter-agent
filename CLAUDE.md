@@ -110,7 +110,7 @@ plugin/scripts/*.sh          bash。payload を spool/<message_id>.<index>.json 
   ▼
 chatter-agent-speak (CLI)    ロックを取れた1プロセスだけが spool を順に処理
   │                          **final:true を待つ**（非 final では何もせず終わる）
-  │                          delta 結合 → Markdown除去 → 文分割 → 要約（既定OFF） → 感情判定 → seq 採番
+  │                          delta 結合 → Markdown除去 → 文分割 → 要約（既定OFF） → 感情判定 → epoch/seq 採番
   ├──▶ speech.jsonl          記録。1文1行で残す。誰も読まない
   ▼
 speech/<seq>.json            配信キュー。1文1ファイル
@@ -209,6 +209,33 @@ spool にファイルが1つも置かれず（メッセージ全体が単一 del
 
 分ければ順序はファイル名で決まり、消費は削除で表せる。`?since=` も要らない（接続直後に未 ack 分が流れる）。
 → 経緯は [#8](https://github.com/schwarz9791/chatter-agent/issues/8)、契約は [`docs/protocol.md`](./docs/protocol.md)
+
+### 6. `seq` を単独のキーにしない — 世代は `epoch` が持つ
+
+ランタイムルート（または `speech.state.json` と `speech.jsonl` の両方）が消えると
+**CLI の採番は 1 に戻る**。`seq` だけを覚えている受信側は、そこで「もう喋った」と誤判定して
+**何百文でも一切喋らなくなる**（エラーも出ない）。
+
+`SpeechRecord.epoch` が**採番のやり直しと一対一**に対応する（[#29](https://github.com/schwarz9791/chatter-agent/issues/29)）。
+以前はこれをクライアント側の推論（「seq が戻ったのに ts は進んだ」）に任せていて、
+PR #28 のレビューが**クライアント側5件のバグの根本原因**と名指しした。
+
+- **採番のやり直しの後始末は、ロックを持っている書き手（CLI）が行う。** `epochIsNew` なら
+  最初の publish で、**`append` より前に**キューを空にする（`cli/publish.ts`）。
+  `append` の後ろに置くと、その隙間で kill されたときに state だけが新しい epoch で
+  永続化され、**以後どのプロセスも掃除しなくなる**
+- **サーバー側では「どちらの世代が新しいか」を決められない。** やり直し直後のキューは
+  `1(新) 2(新) … 400(旧)` になり、ファイル名の昇順では**新しい世代が先頭に来る**。
+  判定できるのは `ts` だけで、そこも時計の巻き戻しで逆転しうる。だから
+  **サーバーは配信しないだけで、世代違いの entry を削除しない**
+- ★ **配信済みの記憶は `seq` で持つ。** `clear()` の直後に同じ `seq` が別世代の内容で
+  書き直されると、ファイル名の集合からは何も変わって見えない。サーバーは毎 poll
+  **キューの先頭を1件だけ読んで**世代を確かめる（`server/dispatcher.ts`）
+- **ack にも `epoch` を載せる。** 旧世代の ack は `ackUpTo` の範囲削除で、まだ喋っていない
+  新しい entry を消す。**ただし `epoch: null` は「省略」と同じ扱いにすること** —
+  未設定の optional を `null` にするのは Unity / C# / Go / Python の既定
+- **アップグレードで epoch を変えない。** 採番が復旧できて epoch だけ読めないときは
+  `"legacy"` を採る。ここで生成すると、アップグレードした瞬間に in-flight のキューが消える
 
 ## ドキュメント索引
 

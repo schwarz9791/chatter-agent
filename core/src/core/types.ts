@@ -52,6 +52,21 @@ export function isValidEpoch(value: unknown): value is SpeechEpoch {
   return typeof value === "string" && EPOCH_PATTERN.test(value);
 }
 
+/**
+ * `epoch` がまだ無かった頃に書かれた記録・配信キュー entry に与える値。
+ *
+ * ★ **`epoch` が読めないからといってランダムな値を生成しないこと。** 生成すると
+ *   **アップグレードした瞬間に「採番がやり直された」と読まれる**。サーバーは旧 epoch の
+ *   entry を配信しなくなり、CLI は次の publish でキューを空にするので、in-flight の発話が
+ *   丸ごと消える。採番が続いている以上、epoch も続いていると見なすのが正しい。
+ *
+ * ★ **1箇所で定義すること。** 記録側（`core/speechLog.ts` の `reconcile`）と
+ *   キュー側（`core/speechQueue.ts` の `read`）が別々の値を使うと、
+ *   「ログ由来の legacy」と「キュー由来の legacy」が別世代として扱われ、
+ *   ここで防ごうとしているバグをそのまま再生産する。
+ */
+export const LEGACY_EPOCH: SpeechEpoch = "legacy";
+
 /** `speech.jsonl` の1行。1文1行。 */
 export interface SpeechRecord {
   /** 採番の世代。→ `SpeechEpoch` */

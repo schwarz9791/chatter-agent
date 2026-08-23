@@ -147,9 +147,16 @@ describe("採番のやり直し（epochIsNew）", () => {
     expect(speechQueue.clear).toHaveBeenCalledTimes(1);
   });
 
-  it("★ clear は enqueue より前に呼ぶ（後だと自分が今書いた entry を消す）", () => {
+  it("★ clear は append より前に呼ぶ（間で kill されると掃除が永久に走らなくなる）", () => {
+    // append は新しい epoch を speech.state.json に永続化する。その後ろで clear すると、
+    // 隙間で kill されたときに次のプロセスが epochIsNew === false になり、
+    // **以後どのプロセスも掃除しない**。CLI は hook から毎 delta デタッチ起動される
     const calls: string[] = [];
     const speechLog = fakeSpeechLog(true);
+    vi.mocked(speechLog.append).mockImplementation((entries: SpeechEntry[]) => {
+      calls.push("append");
+      return entries.map((e, i) => record(i + 1, e.text));
+    });
     const speechQueue = fakeSpeechQueue({
       clear: vi.fn(() => {
         calls.push("clear");
@@ -164,7 +171,7 @@ describe("採番のやり直し（epochIsNew）", () => {
 
     publish([entry()]);
 
-    expect(calls).toEqual(["clear", "enqueue"]);
+    expect(calls).toEqual(["clear", "append", "enqueue"]);
   });
 
   it("2回目以降の publish では clear しない", () => {
@@ -189,7 +196,7 @@ describe("採番のやり直し（epochIsNew）", () => {
     expect(speechQueue.clear).not.toHaveBeenCalled();
   });
 
-  it("clear が throw しても発話は止めない（append の後は throw しない）", () => {
+  it("clear が throw しても発話は止めない", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const speechLog = fakeSpeechLog(true);
     const speechQueue = fakeSpeechQueue({
@@ -204,5 +211,29 @@ describe("採番のやり直し（epochIsNew）", () => {
     expect(result).toEqual([record(1, "あ。")]);
     expect(speechQueue.enqueue).toHaveBeenCalledWith(result);
     expect(consoleError).toHaveBeenCalled();
+  });
+
+  it("★ clear が throw したら、次の publish で再試行する", () => {
+    // フラグを try の外で立てると、そのプロセスでも次のプロセスでも
+    // （append が state を書いてしまうので epochIsNew が false になる）再試行されない。
+    // 旧世代が残ったままだと trim が seq 昇順で「今書いた新しい entry から」捨て始める
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const speechLog = fakeSpeechLog(true);
+    let attempts = 0;
+    const speechQueue = fakeSpeechQueue({
+      clear: vi.fn(() => {
+        attempts++;
+        if (attempts === 1) throw new Error("EACCES");
+        return 3;
+      }),
+    });
+    const publish = createPublisher({ speechLog, speechQueue, maxEntries: () => 500 });
+
+    publish([entry()]);
+    publish([entry()]);
+    publish([entry()]);
+
+    // 1回目が失敗 → 2回目で成功 → 3回目はもう呼ばない
+    expect(attempts).toBe(2);
   });
 });

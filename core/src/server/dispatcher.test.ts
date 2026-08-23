@@ -230,18 +230,25 @@ describe("epoch（採番の世代。#29）", () => {
     warnSpy.mockRestore();
   });
 
-  it("見送った entry を毎 poll で読み直さない（20回/秒で同じファイルを開かない）", () => {
+  it("★ 定常状態で毎 poll 読むのは先頭1件だけ（世代プローブ）", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     queue.enqueue([record(1, "新1。", { epoch: E2, ts: "2026-08-16T00:00:00.000Z" })]);
     queue.enqueue([record(400, "旧400。")]);
     const dispatcher = createDispatcher({ queue, broadcast: vi.fn() });
+    // 落ち着くまで回す（初回の世代解決と、旧世代を見送るための解決の空振り）
+    dispatcher.poll();
+    dispatcher.poll();
     dispatcher.poll();
 
+    // ★ 先頭は毎回読む。`delivered` は seq 単独キーなので、同じ seq が別世代の内容に
+    //   入れ替わったことをファイル名の集合からは検出できない（→ 下の A-1 のテスト）。
+    //   逆に言えば、落ち着いた後に読むのはその1件だけで、見送った 400 は読み直さない
     const read = vi.spyOn(queue, "read");
     dispatcher.poll();
     dispatcher.poll();
 
-    expect(read).not.toHaveBeenCalled();
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(read).toHaveBeenCalledWith(1);
   });
 
   it("★ ts が進んでいれば新しい世代へ乗り換える（CLI を経由しない復元に対する安全網）", () => {
@@ -252,9 +259,15 @@ describe("epoch（採番の世代。#29）", () => {
     dispatcher.poll();
     expect(seqsBroadcast(broadcast)).toEqual([1]);
 
+    // ★ 先頭（seq 1）は現世代のままで、高い seq に別世代が現れた形（`clear()` の失敗）。
+    //   プローブは先頭しか見ないので、ここはループ側の検出に頼る
     queue.enqueue([record(2, "新2。", { epoch: E2, ts: "2026-08-16T00:00:00.000Z" })]);
+    dispatcher.poll(); // ループが seq 2 の世代違いに気づき、次回の解決を予約する
+    expect(seqsBroadcast(broadcast)).toEqual([1]);
+
     dispatcher.poll();
 
+    // 世代が乗り換わったので、今度は旧世代の seq 1 が見送られ、新世代の seq 2 が出る
     expect(seqsBroadcast(broadcast)).toEqual([1, 2]);
     expect(warnSpy).toHaveBeenCalled();
     warnSpy.mockRestore();
@@ -283,6 +296,84 @@ describe("epoch（採番の世代。#29）", () => {
     expect(queue.list()).toEqual([]);
   });
 
+  it("★ [A-1] clear + 再採番で同じ seq が別世代に入れ替わっても配信される", () => {
+    // ★ この PR で潰した回帰。`delivered` は seq 単独キーなので、
+    //   「seq の集合が変わらないまま中身だけ入れ替わった」ことをファイル名からは
+    //   検出できない。クライアントが一度も ack していない（＝マスコット未接続、
+    //   #29 が想定する主要な運用状態）ときだけ成立する。
+    //
+    //   踏むと、新世代の**最初のメッセージが丸ごと**落ちるうえ、後から繋いだ
+    //   クライアントが catchUp で受け取って新 epoch で ack しても `ack()` が
+    //   旧世代扱いで拒否するので、**キューが二度と減らない**
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    queue.enqueue([record(1, "旧1。"), record(2, "旧2。"), record(3, "旧3。")]);
+    const broadcast = vi.fn();
+    const dispatcher = createDispatcher({ queue, broadcast });
+
+    dispatcher.poll(); // 誰も繋いでいないので ack は来ない。3件とも delivered に入る
+    expect(seqsBroadcast(broadcast)).toEqual([1, 2, 3]);
+
+    // CLI が採番をやり直す。clear → enqueue は同一プロセス内で同期的に走るので、
+    // 50ms のポーリングが空のディレクトリを観測することはまず無い
+    queue.clear();
+    queue.enqueue([
+      record(1, "新1。", { epoch: E2, ts: "2026-08-16T00:00:00.000Z" }),
+      record(2, "新2。", { epoch: E2, ts: "2026-08-16T00:00:00.000Z" }),
+    ]);
+
+    dispatcher.poll();
+
+    expect(seqsBroadcast(broadcast)).toEqual([1, 2, 3, 1, 2]);
+    // 新世代の ack が通り、キューが空になる（ここが拒否されると詰まる）
+    dispatcher.ack(2, E2);
+    expect(queue.list()).toEqual([]);
+    warnSpy.mockRestore();
+  });
+
+  it("★ [A-1] 先頭が読めない entry でも、世代の入れ替わりを取りこぼさない", () => {
+    // 先頭だけを見るプローブが「読めなかったら諦める」実装だと、
+    // 壊れた entry が1つ先頭にあるだけで上の事故がそのまま再現する
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    fs.writeFileSync(path.join(dir, "speech", "000000000001.json"), "not json");
+    queue.enqueue([record(2, "旧2。")]);
+    const broadcast = vi.fn();
+    const dispatcher = createDispatcher({ queue, broadcast });
+
+    dispatcher.poll();
+    expect(seqsBroadcast(broadcast)).toEqual([2]);
+
+    queue.enqueue([record(2, "新2。", { epoch: E2, ts: "2026-08-16T00:00:00.000Z" })]);
+    dispatcher.poll();
+
+    expect(seqsBroadcast(broadcast)).toEqual([2, 2]);
+    warnSpy.mockRestore();
+  });
+
+  it("★ [D-2] 世代が A → B → A と戻ったら、2回目の警告も出る", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dispatcher = createDispatcher({ queue, broadcast: vi.fn() });
+
+    queue.enqueue([record(1, "A1。")]);
+    dispatcher.poll();
+
+    const detected = () => warnSpy.mock.calls.filter((c) => String(c[0]).includes("採番のやり直し")).length;
+    expect(detected()).toBe(0); // 初回の採用は「やり直し」ではない
+
+    queue.clear();
+    queue.enqueue([record(1, "B1。", { epoch: E2, ts: "2026-08-16T00:00:00.000Z" })]);
+    dispatcher.poll();
+    expect(detected()).toBe(1);
+
+    // 元の世代に戻る（バックアップ復元、2つの root の入れ替え）
+    queue.clear();
+    queue.enqueue([record(1, "A1'。", { ts: "2026-08-17T00:00:00.000Z" })]);
+    dispatcher.poll();
+
+    // warnedEpochs を捨てていないと、ここが無言になる
+    expect(detected()).toBe(2);
+    warnSpy.mockRestore();
+  });
+
   it("世代を乗り換えたら、旧世代について配信済みだった記憶を捨てる", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     queue.enqueue([record(1, "旧1。")]);
@@ -292,7 +383,13 @@ describe("epoch（採番の世代。#29）", () => {
     queue.enqueue([record(9, "新9。", { epoch: E2, ts: "2026-08-16T00:00:00.000Z" })]);
     dispatcher.poll();
 
-    // 旧世代の seq 1 は「配信済み」から外れているので、この ack では消えない
+    // 旧世代の seq 1 は「配信済み」から外れているので、この ack では消えない。
+    //
+    // ★ この詰まった状態は**許容している**。解消するのは CLI の `clear()`
+    //   （`epochIsNew` なら毎 publish 再試行する）と、サーバー起動時の
+    //   `dropOlderThan`。サーバーが自分で消す案は、時計の巻き戻しで新世代を
+    //   消し続けるループになるのと、CLI の rename と競合して書いたばかりの
+    //   entry を消すので採らなかった（→ dispatcher.ts の resolveGeneration）
     dispatcher.ack(1, E2);
     expect(queue.list()).toEqual([1, 9]);
   });

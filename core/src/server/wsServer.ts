@@ -81,6 +81,13 @@ const MAX_PAYLOAD_BYTES = 4 * 1024;
  *   （契約に無かった頃のクライアントを黙って無音にしないため）。ただし**載っているのに
  *   形が違うものは通さない** — 世代の判定に使う値なので、緩めると旧世代の ack が
  *   すり抜けて、まだ喋っていない entry がキューから消える。
+ *
+ * ★ **JSON の `null` は「省略」と同じ扱いにすること。** 未設定の optional を明示的な
+ *   `null` にするのは Unity の `JsonUtility`、多くの C# シリアライザ、Go の
+ *   `encoding/json`（ポインタ）、Python の `json.dumps(None)` の既定で、
+ *   **この契約が想定している Unity クライアント（#12）そのもの**が踏む。
+ *   ここで弾くと ack ごと捨てられ、症状は「キューが上限に張り付いて、
+ *   どちらの側にもエラーが出ない」になる。
  */
 export function parseAck(raw: string): { seq: number; epoch: SpeechEpoch | null } | null {
   let parsed: unknown;
@@ -95,9 +102,12 @@ export function parseAck(raw: string): { seq: number; epoch: SpeechEpoch | null 
 
   if (type !== "spoken") return null;
   if (typeof seq !== "number" || !Number.isSafeInteger(seq) || seq < 0) return null;
-  if (epoch !== undefined && !isValidEpoch(epoch)) return null;
 
-  return { seq, epoch: epoch === undefined ? null : epoch };
+  // `undefined`（省略）と `null`（明示的に「無い」）を同じに扱う
+  if (epoch === undefined || epoch === null) return { seq, epoch: null };
+  if (!isValidEpoch(epoch)) return null;
+
+  return { seq, epoch };
 }
 
 /**
@@ -177,10 +187,22 @@ export function createWsServer(options: WsServerOptions): Promise<WsServer> {
       socket.on("close", (code) => console.log(`[WS] Disconnected: ${peer} code=${code}`));
 
       if (options.onAck) {
+        // ★ 読めない ack を**無言で捨てないこと。** 捨てられた ack はキューを減らさないので、
+        //   症状は「上限まで溜まって古い方から捨てられ続ける」になり、
+        //   契約どおりのつもりのクライアントが弾かれても原因に辿り着く手がかりが残らない。
+        //   ただし1接続につき1回で足りる（壊れたクライアントは同じ形を送り続ける）
+        let warnedBadAck = false;
+
         socket.on("message", (data) => {
           const ack = parseAck(String(data));
-          // 知らない形は黙って捨てる。maxPayload 超過はそもそもここに来ない（MAX_PAYLOAD_BYTES 参照）
-          if (ack === null) return;
+          // 知らない形は捨てる。maxPayload 超過はそもそもここに来ない（MAX_PAYLOAD_BYTES 参照）
+          if (ack === null) {
+            if (!warnedBadAck) {
+              warnedBadAck = true;
+              console.warn(`[WS] 読めない ack を捨てました (${peer}): ${String(data).slice(0, 120)}`);
+            }
+            return;
+          }
           // 隣の onConnect と同じ理由。ここで投げると message イベント経由の uncaught になり
           // サーバーごと落ちる
           try {

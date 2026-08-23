@@ -126,3 +126,19 @@ describe("hasSpeakableText", () => {
     expect(hasSpeakableText("<=")).toBe(false);
   });
 });
+
+describe("epoch の検証（#29）", () => {
+  it("★ 形が違う epoch は通さない（一時ファイル名と音声 URL の材料になる）", () => {
+    for (const epoch of ["", 123, null, {}, "../../etc/passwd", "-leading-hyphen", "a".repeat(65)]) {
+      expect(parseSpeechFrame(frame({ epoch })), JSON.stringify(epoch)).toBeNull();
+    }
+    // 欠落も通さない（サーバー側の speechQueue.read が legacy に正規化して送ってくる）
+    expect(parseSpeechFrame(JSON.stringify({ seq: 1, ts: "t", text: "あ。" }))).toBeNull();
+  });
+
+  it("charset に収まる epoch は通す", () => {
+    for (const epoch of ["legacy", "1f0a9c3e-5b62-4f1d-9a77-0e2c8d4b6a31", "a", "A.b_c-1", "a".repeat(64)]) {
+      expect(parseSpeechFrame(frame({ epoch }))?.epoch, epoch).toBe(epoch);
+    }
+  });
+});

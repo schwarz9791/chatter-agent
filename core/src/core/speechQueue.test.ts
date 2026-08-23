@@ -3,7 +3,6 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { createSpeechQueue } from "./speechQueue";
-import type { SpeechQueueEntry } from "./speechQueue";
 import type { SpeechRecord } from "./types";
 
 // ★ fs は Node の組み込みモジュールで、ESM では名前空間が configurable でないため
@@ -111,7 +110,7 @@ describe("enqueue", () => {
     // writeFileSync（tmp への書き込み）が終わった直後・renameSync の前というタイミングで
     // read() を呼び、まだ最終ファイルとしては見えないことを確認する。素の writeFileSync で
     // 直接最終ファイルへ書く実装だと、この時点で既に読めてしまい fail する
-    let seenDuringWrite: SpeechQueueEntry | null | undefined;
+    let seenDuringWrite: SpeechRecord | null | undefined;
     const q = queue();
 
     vi.mocked(fs.writeFileSync).mockImplementation((...args: Parameters<typeof fs.writeFileSync>) => {
@@ -191,13 +190,11 @@ describe("list", () => {
 });
 
 describe("read", () => {
-  it("そのまま配信できる1行と、パース済みのレコードを返す", () => {
+  it("パース済みのレコードを返す", () => {
     const q = queue();
     q.enqueue([record(1, "あ。")]);
-    const entry = q.read(1)!;
-    expect(JSON.parse(entry.line)).toMatchObject({ seq: 1, text: "あ。" });
-    // ★ epoch の判定に使うので、行だけでなくレコードも返す（1回の読み取りで両方）
-    expect(entry.record).toMatchObject({ epoch: "test-epoch", seq: 1, text: "あ。" });
+    // ★ 配信側は epoch を見て世代を判定し、正規化した内容を組み直して流すので、中身が要る
+    expect(q.read(1)).toMatchObject({ epoch: "test-epoch", seq: 1, text: "あ。" });
   });
 
   it("無ければ null", () => {
@@ -221,6 +218,37 @@ describe("read", () => {
     // ファイル名は seq=1 だが、中身は seq=2 のレコード（壊れた・手で置かれたファイルを想定）
     fs.writeFileSync(path.join(queueDir, "000000000001.json"), `${JSON.stringify(record(2))}\n`);
     expect(q.read(1)).toBeNull();
+  });
+
+  it("★ [B-1] epoch が無い entry は legacy として読む（epoch 導入前の in-flight）", () => {
+    // 未 ack の entry を残したままアップグレードすると起こる。ここで弾くと、
+    // ワイヤ上で epoch 無しのフレームになり**クライアントが全部捨てて何も喋らない**
+    const q = queue();
+    const { epoch: _dropped, ...withoutEpoch } = record(1, "あ。");
+    fs.writeFileSync(path.join(queueDir, "000000000001.json"), `${JSON.stringify(withoutEpoch)}\n`);
+
+    expect(q.read(1)).toMatchObject({ epoch: "legacy", seq: 1, text: "あ。" });
+  });
+
+  it("★ [C-3] epoch が載っているのに形が違うなら null（世代の判定に食わせる値なので）", () => {
+    const q = queue();
+    for (const [i, epoch] of [{}, 123, "", "../../etc/passwd", "a".repeat(65)].entries()) {
+      const seq = i + 1;
+      const name = `${String(seq).padStart(12, "0")}.json`;
+      fs.writeFileSync(path.join(queueDir, name), `${JSON.stringify({ ...record(seq), epoch })}\n`);
+      expect(q.read(seq), JSON.stringify(epoch)).toBeNull();
+    }
+  });
+
+  it("★ [C-3] ts が日付として読めないなら null（字句比較で世代が永久に勝つのを防ぐ）", () => {
+    // `ts: "z"` ひとつで `"z" > "2026-…"` になり、その世代が永久に勝つ
+    const q = queue();
+    for (const [i, ts] of ["z", "", 7, null, "not a date"].entries()) {
+      const seq = i + 1;
+      const name = `${String(seq).padStart(12, "0")}.json`;
+      fs.writeFileSync(path.join(queueDir, name), `${JSON.stringify({ ...record(seq), ts })}\n`);
+      expect(q.read(seq), JSON.stringify(ts)).toBeNull();
+    }
   });
 
   it("壊れたファイルを消したりはしない（判断は呼び出し側に残す）", () => {

@@ -158,7 +158,16 @@ async function main(): Promise<void> {
   const wiped = queue.dropOlderThan(STARTUP_KEEP_MS);
   if (wiped > 0) console.log(`[Server] 起動前に溜まっていた ${wiped} 件を捨てました`);
 
-  const poll = setInterval(() => dispatcher.poll(), POLL_INTERVAL_MS);
+  // ★ poll を握ること。1接続の送信で throw すると、そのポールの残り entry が
+  //   `delivered` に入らないまま抜け、**次のポールで他のクライアントへ二重送信される**。
+  //   常駐プロセスの `uncaughtException` ガードはプロセスを守るだけで、ここは守らない
+  const poll = setInterval(() => {
+    try {
+      dispatcher.poll();
+    } catch (err) {
+      console.error("[Server] ポーリングに失敗しました:", err);
+    }
+  }, POLL_INTERVAL_MS);
   poll.unref();
 
   console.log("[Server] Ready");

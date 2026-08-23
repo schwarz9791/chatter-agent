@@ -132,12 +132,18 @@ describe("parseAck", () => {
     for (const raw of [
       '{"type":"spoken","seq":1,"epoch":""}',
       '{"type":"spoken","seq":1,"epoch":123}',
-      '{"type":"spoken","seq":1,"epoch":null}',
+      '{"type":"spoken","seq":1,"epoch":{}}',
       '{"type":"spoken","seq":1,"epoch":"../../etc/passwd"}',
       `{"type":"spoken","seq":1,"epoch":"${"a".repeat(65)}"}`,
     ]) {
       expect(parseAck(raw), raw).toBeNull();
     }
+  });
+
+  it("★ epoch: null は省略と同じ（Unity の JsonUtility などが未設定をこう出す）", () => {
+    // ここで弾くと ack ごと捨てられ、症状は「キューが上限に張り付いて、
+    // どちらの側にもエラーが出ない」になる。#12 の Unity クライアントが踏む形
+    expect(parseAck('{"type":"spoken","seq":5,"epoch":null}')).toEqual({ seq: 5, epoch: null });
   });
 
   it("★ 知らない形は捨てる（ここはクライアント由来の入力）", () => {

@@ -38,7 +38,14 @@ export function createPublisher(deps: PublisherDeps): (entries: SpeechEntry[]) =
    *   — やり直し直後のキューは `1(新) 2(新) … 400(旧)` になり、`list()` は seq 昇順なので
    *   新しい世代が**先頭**に来る。ファイル名からもディレクトリの走査順からも判定できない。
    *
-   * ★ **`enqueue` より前に呼ぶこと。** 後だと自分が今書いた entry を消す。
+   * ★ **`append` より前に呼ぶこと。** `append` はキューに触れないので順序の制約は
+   *   「`enqueue` より前」だけだが、`append` の後ろに置くと**その隙間で kill された
+   *   ときに掃除が永久に走らなくなる** — `append` は新しい epoch を
+   *   `speech.state.json` に永続化するので、次のプロセスは `epochIsNew === false` に
+   *   なる。CLI は hook から毎 delta デタッチ起動されるので、kill は日常的に起きる。
+   *
+   * ★ **フラグは成功したときだけ立てること。** `clear()` が throw したのに立てると、
+   *   そのプロセスでも次のプロセスでも（state は既に書かれている）再試行されない。
    *
    * ★ 消さずに放置すると `speechQueue.trim` が壊れる。`trim` は seq 昇順で捨てるので、
    *   旧世代の大きい seq が残っている限り**新しい entry から先に消され続け、
@@ -46,22 +53,28 @@ export function createPublisher(deps: PublisherDeps): (entries: SpeechEntry[]) =
    */
   let staleQueueCleared = !speechLog.epochIsNew;
 
+  function clearStaleQueue(): void {
+    if (staleQueueCleared) return;
+    try {
+      const stale = speechQueue.clear();
+      // ★ 成功してから立てる。失敗したら次の publish でもう一度試す
+      staleQueueCleared = true;
+      if (stale > 0) {
+        console.error(`[chatter-agent-speak] 採番がやり直されたため、旧世代の配信キュー ${stale} 件を捨てました`);
+      }
+    } catch (err) {
+      // 掃除に失敗しても発話は止めない（append の後で throw しないのと同じ理由）
+      console.error("[chatter-agent-speak] 旧世代の配信キューの掃除に失敗しました:", err);
+    }
+  }
+
   return (entries) => {
+    // ★ append より前。ここで消えるのは**採番がやり直された死んだ世代**の entry だけで、
+    //   クライアントはもうその seq を ack できない（epoch が違う）
+    clearStaleQueue();
+
     // ここで throw したら記録も配信も無い。呼び出し側（drainSpool）に throw させて構わない
     const records = speechLog.append(entries);
-
-    if (!staleQueueCleared) {
-      // append の後だが enqueue の前。ここで throw させないのは下と同じ理由
-      staleQueueCleared = true;
-      try {
-        const stale = speechQueue.clear();
-        if (stale > 0) {
-          console.error(`[chatter-agent-speak] 採番がやり直されたため、旧世代の配信キュー ${stale} 件を捨てました`);
-        }
-      } catch (err) {
-        console.error("[chatter-agent-speak] 旧世代の配信キューの掃除に失敗しました:", err);
-      }
-    }
 
     try {
       const written = speechQueue.enqueue(records);

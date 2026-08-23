@@ -73,6 +73,18 @@ const POLL_INTERVAL_MS = 50;
 const STARTUP_KEEP_MS = 10_000;
 
 /**
+ * 合成が失敗したときに、エンジンの診断（話者一覧）を出し直す間隔。
+ *
+ * ★ 合成の失敗ごとに `listSpeakers` を叩くと、エンジンが落ちている間 1 req/s で
+ *   繋ぎに行き続けることになる。診断は「設定が変わった / エンジンが起きた」を
+ *   拾えれば十分なので、分単位で足りる。
+ */
+const ENGINE_RECHECK_INTERVAL_MS = 60_000;
+
+/** 話者が見つからないときに案内する候補の数 */
+const SPEAKER_HINT_LIMIT = 20;
+
+/**
  * 終了処理の1ステップを制限時間つきで実行する。
  * まとめて1つの watchdog に任せると「諦めた」ことしか分からず、
  * どのリソースが閉じられなかったのか追えなくなるため、名指しで報告して先へ進む。
@@ -144,13 +156,33 @@ async function main(): Promise<void> {
   //   サーバーを再起動するまで効かない。無音の原因として真っ先に疑ってほしい値なので、
   //   直したらすぐ効く方がよい（クライアント側の警告もそこを名指しする）。
   //   クライアントの生成は object literal と closure だけなので、GET のたびに作って問題ない
-  const currentTts = () =>
-    createVoicevoxClient({
-      baseUrl: config.get("ttsBaseUrl"),
-      speakerId: config.get("ttsSpeakerId"),
-      timeoutMs: config.get("synthesisTimeoutMs"),
-    });
-  const audioStore = createAudioStore({ synthesize: (text) => currentTts().synthesize(text) });
+  const currentVoice = () => ({ baseUrl: config.get("ttsBaseUrl"), speakerId: config.get("ttsSpeakerId") });
+  const ttsFor = (voice: { baseUrl: string; speakerId: number }) =>
+    createVoicevoxClient({ ...voice, timeoutMs: config.get("synthesisTimeoutMs") });
+
+  /**
+   * 合成が失敗したときの診断。`ENGINE_RECHECK_INTERVAL_MS` に1回だけ実際に走る。
+   *
+   * ★ これが「無音の原因が分からない」への本命の答え。`ttsSpeakerId` を間違えていると、
+   *   ここが候補一覧を出す。エンジンが落ちているなら、繋がらない旨と `baseUrl` を出す。
+   */
+  let lastEngineCheckAt = Number.NEGATIVE_INFINITY;
+  const recheckEngine = async (): Promise<void> => {
+    if (!config.get("ttsEnabled")) return;
+    const now = Date.now();
+    if (now - lastEngineCheckAt < ENGINE_RECHECK_INTERVAL_MS) return;
+    lastEngineCheckAt = now;
+
+    const voice = currentVoice();
+    await checkEngine(ttsFor(voice), voice.speakerId);
+  };
+
+  const audioStore = createAudioStore({
+    currentVoice,
+    // ★ 声は `audioStore` が1回だけ解決したものを受け取る。ここで config を読み直すと、
+    //   キャッシュキーを決めた後・合成する前の書き換えで**別の声の WAV が入る**
+    synthesize: (text, voice) => ttsFor(voice).synthesize(text),
+  });
 
   const httpServer = createAudioHttpServer({
     store: audioStore,
@@ -158,6 +190,10 @@ async function main(): Promise<void> {
     lookup: (seq) => queue.read(seq),
     allowedOrigins: config.get("allowedOrigins"),
     disabled: () => !config.get("ttsEnabled"),
+    // GET を保留する上限。合成そのものの上限（`synthesisTimeoutMs`）とは別で、
+    // ここで打ち切っても合成は続き、終わればキャッシュに入る（→ httpServer.ts）
+    responseTimeoutMs: config.get("synthesisTimeoutMs"),
+    onSynthesisFailed: () => void recheckEngine(),
   });
 
   // wsServer の onConnect / onAck から参照するが、生成は wsServer の後（下記）。
@@ -220,7 +256,7 @@ async function main(): Promise<void> {
   //
   // ★ 話者 ID の不一致は `/audio_query` の 4xx になり、全文が 503 になって**無音**になる。
   //   症状から設定ミスに辿り着けないので、起動時に候補を並べておく。
-  if (config.get("ttsEnabled")) void checkEngine(currentTts(), config.get("ttsSpeakerId"));
+  void recheckEngine();
 
   installShutdown(async () => {
     clearInterval(poll);
@@ -236,8 +272,14 @@ async function main(): Promise<void> {
 }
 
 /**
- * エンジンに繋がるか、話者 ID が実在するかを1回だけ見る。**待たないし、止めない。**
- * 結果はログに残すだけで、判断は `GET /audio/…` のたびに行われる。
+ * エンジンに繋がるか、話者 ID が実在するかを見る。**待たないし、止めない。**
+ * 結果はログに残すだけで、配信の判断は `GET /audio/…` のたびに行われる。
+ *
+ * ★ **起動時の1回だけにしないこと。** 起動時に `listSpeakers` が落ちると、そこで
+ *   early return するので**話者 ID の検査そのものが行われない**。
+ *   「player を先に立ち上げ、後から AivisSpeech を起動する」という最も普通の順序で
+ *   `ttsSpeakerId` の診断が永久に出なくなる — これが「無音なのにログが数行しかない」の真因。
+ *   合成が失敗するたびに呼び直す（間隔は `ENGINE_RECHECK_INTERVAL_MS` で間引く）。
  */
 async function checkEngine(tts: ReturnType<typeof createVoicevoxClient>, speakerId: number): Promise<void> {
   let speakers;
@@ -249,10 +291,13 @@ async function checkEngine(tts: ReturnType<typeof createVoicevoxClient>, speaker
     return;
   }
 
-  if (hasStyle(speakers, speakerId)) return;
+  if (hasStyle(speakers, speakerId)) {
+    console.log(`[Server] 音声合成エンジンに繋がりました (${tts.baseUrl}, speaker=${speakerId})`);
+    return;
+  }
 
   console.warn(`[Server] ttsSpeakerId=${speakerId} はこのエンジンに存在しません。音声は 503 になります`);
-  for (const style of flattenStyles(speakers).slice(0, 20)) {
+  for (const style of flattenStyles(speakers).slice(0, SPEAKER_HINT_LIMIT)) {
     console.warn(`[Server]   ${style.id}  ${style.label}`);
   }
 }

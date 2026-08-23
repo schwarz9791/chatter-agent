@@ -15,13 +15,24 @@
  * 127.0.0.1 に bind するので macOS のローカルネットワーク許可ダイアログも出ない。
  */
 
-import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as http from "node:http";
-import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocket } from "ws";
+import {
+  check,
+  disposableRoot,
+  fail,
+  makeWav,
+  requireBundles,
+  show,
+  sleep,
+  killAll,
+  spawnLogged,
+  summarize,
+  until,
+} from "./lib/harness.mjs";
 
 const CORE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SERVER = path.join(CORE, "dist", "chatter-agent-server.mjs");
@@ -29,34 +40,11 @@ const PORT = 18572;
 const SPEAKER_ID = 888753760;
 const EPOCH = "verify-tts-1";
 
-if (!fs.existsSync(SERVER)) {
-  console.error(`server のバンドルがありません: ${SERVER}\n先に core/ で npm run build を実行してください。`);
-  process.exit(1);
-}
-
-const failures = [];
-function check(label, ok, detail) {
-  if (!ok) failures.push(label);
-  const mark = ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m";
-  console.log(`${mark}  ${label}${detail && !ok ? `\n      ${detail}` : ""}`);
-}
-function show(title) {
-  console.log(`\n\x1b[1m--- ${title} ---\x1b[0m`);
-}
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-async function until(predicate, timeoutMs = 10_000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (predicate()) return true;
-    await sleep(20);
-  }
-  return false;
-}
+requireBundles([["server", SERVER]]);
 
 // ── 使い捨てのランタイムルート ─────────────────────────────────────────────
 
-const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatter-agent-tts-"));
-const runtime = path.join(root, "chatter-agent");
+const { root, runtime } = disposableRoot("tts");
 const queueDir = path.join(runtime, "speech");
 fs.mkdirSync(queueDir, { recursive: true });
 
@@ -87,26 +75,6 @@ function audioPath(record) {
 
 // ── スタブの合成エンジン ───────────────────────────────────────────────────
 
-/** 長さだけ正しい RIFF/PCM */
-function makeWav(seconds) {
-  const sampleRate = 24000;
-  const dataBytes = Math.round(sampleRate * 2 * seconds);
-  const buf = Buffer.alloc(44 + dataBytes);
-  buf.write("RIFF", 0);
-  buf.writeUInt32LE(36 + dataBytes, 4);
-  buf.write("WAVE", 8);
-  buf.write("fmt ", 12);
-  buf.writeUInt32LE(16, 16);
-  buf.writeUInt16LE(1, 20);
-  buf.writeUInt16LE(1, 22);
-  buf.writeUInt32LE(sampleRate, 24);
-  buf.writeUInt32LE(sampleRate * 2, 28);
-  buf.writeUInt16LE(2, 32);
-  buf.writeUInt16LE(16, 34);
-  buf.write("data", 36);
-  buf.writeUInt32LE(dataBytes, 40);
-  return buf;
-}
 const WAV = makeWav(0.2);
 
 /** 合成に来たテキスト。「いつ・何回」合成したかを見る唯一の窓 */
@@ -126,6 +94,12 @@ const engine = http.createServer((req, res) => {
     return;
   }
   if (url.pathname === "/audio_query") {
+    // 本物のエンジンと同じで、存在しない話者 ID は 422 + detail
+    if (url.searchParams.get("speaker") !== String(SPEAKER_ID)) {
+      res.writeHead(422, { "content-type": "application/json" });
+      res.end(JSON.stringify({ detail: `speaker not found: ${url.searchParams.get("speaker")}` }));
+      return;
+    }
     synthesized.push(url.searchParams.get("text") ?? "");
     setTimeout(() => {
       if (res.writableEnded) return;
@@ -148,8 +122,11 @@ const engine = http.createServer((req, res) => {
 // ── server の起動 ──────────────────────────────────────────────────────────
 
 const base = `http://127.0.0.1:${PORT}`;
-let server;
-let serverLog = "";
+/** 走っている server。止めたら null に戻す */
+let server = null;
+/** **止めた**分のログ。⑪ で再起動するので、生きているぶんは `server.log` にある */
+let stoppedLog = "";
+const serverLogs = () => stoppedLog + (server?.log ?? "");
 
 function serverEnv(overrides = {}) {
   return {
@@ -165,20 +142,16 @@ function serverEnv(overrides = {}) {
 }
 
 async function startServer(env) {
-  serverLog = "";
-  server = spawn(process.execPath, [SERVER], { env, stdio: ["ignore", "pipe", "pipe"] });
-  server.stdout.on("data", (d) => (serverLog += d));
-  server.stderr.on("data", (d) => (serverLog += d));
-  const up = await until(() => serverLog.includes("[Server] Ready"), 15_000);
-  if (!up) throw new Error(`server が起動しませんでした:\n${serverLog}`);
+  server = spawnLogged([SERVER], { env, label: "server" });
+  await server.waitFor("[Server] Ready");
 }
 
 async function stopServer() {
-  if (!server || server.exitCode !== null) return;
-  const dead = new Promise((done) => server.once("exit", done));
-  server.kill("SIGTERM");
-  await Promise.race([dead, sleep(4000)]);
-  if (server.exitCode === null) server.kill("SIGKILL");
+  if (server === null) return;
+  await server.stop();
+  stoppedLog += server.log;
+  server = null;
+  // ⑫ は「誰も listen していない」を見る。exit の後、実際に解放されるまでを少しだけ待つ
   await sleep(200);
 }
 
@@ -204,7 +177,7 @@ function connect() {
 }
 
 function cleanup() {
-  server?.kill("SIGKILL");
+  killAll();
   engine.close();
   fs.rmSync(root, { recursive: true, force: true });
 }
@@ -336,13 +309,41 @@ try {
       JSON.stringify(client.frames.find((f) => f.seq === record.seq)),
     );
     check("GET は 404", (await fetch(`${base}${audioPath(record)}`)).status === 404);
-    check("起動ログに理由が出る", serverLog.includes("ttsEnabled=false"), serverLog);
+    check("起動ログに理由が出る", serverLogs().includes("ttsEnabled=false"), serverLogs());
 
     await client.close();
   }
 
   {
-    show("⑫ 終了処理でポートが解放される（ws は外部 http server を閉じない）");
+    show("⑫ ★ ttsSpeakerId が存在しないとき、無音の原因がログに出る");
+    // 「音が出ない」以外の症状が無い設定ミス。起動時の診断が候補を並べないと、
+    // ユーザーからは「壊れている」としか見えない
+    await stopServer();
+    await startServer(serverEnv({ CHATTER_AGENT_TTS_SPEAKER_ID: "999999" }));
+
+    const client = await connect();
+    const record = enqueue("話者 ID を間違えたときの発言です。");
+    await until(() => client.frames.some((f) => f.seq === record.seq), 5000);
+
+    check("★ 起動時の診断が値を名指しする", serverLogs().includes("ttsSpeakerId=999999"), serverLogs());
+    check(
+      "★ 実在する話者 ID を候補として並べる（直せる形で出す）",
+      serverLogs().includes(String(SPEAKER_ID)),
+      serverLogs(),
+    );
+
+    const res = await fetch(`${base}${audioPath(record)}`);
+    const body = await res.text();
+    // ★ 4xx を 404 に落とさないこと。404 はクライアント側で ack まで通り、
+    //   本文が物理削除される（設定を直しても復元できない）
+    check("★ エンジンの 422 でも 503（404 にすると本文が物理削除される）", res.status === 503, `status=${res.status}`);
+    check("応答本文にもエンジンの理由が載る", body.includes("speaker not found"), body);
+
+    await client.close();
+  }
+
+  {
+    show("⑬ 終了処理でポートが解放される（ws は外部 http server を閉じない）");
     await stopServer();
     let reachable = true;
     try {
@@ -355,16 +356,7 @@ try {
 } catch (err) {
   console.error("\n\x1b[31m検証中に例外が発生しました\x1b[0m");
   console.error(err);
-  if (serverLog) console.error(`\nserver のログ:\n${serverLog}`);
-  failures.push("例外");
+  fail("例外");
 }
 
-show("結果");
-if (failures.length === 0) {
-  console.log("\x1b[32mすべて PASS\x1b[0m");
-  process.exit(0);
-}
-console.log(`\x1b[31m${failures.length} 件 FAIL\x1b[0m`);
-for (const label of failures) console.log(`  - ${label}`);
-if (serverLog) console.log(`\nserver のログ:\n${serverLog}`);
-process.exit(1);
+await summarize(() => (serverLogs() ? `server のログ:\n${serverLogs()}` : ""));

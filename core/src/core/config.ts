@@ -67,7 +67,17 @@ export interface ChatterAgentConfig {
   ttsBaseUrl: string;
   /** 話者のスタイル ID。既定は AivisSpeech 標準同梱の Anneli（ノーマル）。VOICEVOX は 0 始まりの小さい整数 */
   ttsSpeakerId: number;
-  /** `/audio_query` と `/synthesis` の1リクエストあたりの上限。Node の fetch に既定タイムアウトは無い */
+  /**
+   * エンジンへの**1リクエストあたり**の上限（`/audio_query` と `/synthesis` にそれぞれ効く）。
+   * Node の fetch に既定タイムアウトは無い。
+   *
+   * ★ **2往復で1つの予算にしない。** モデルロードで `/audio_query` が食い切ると、
+   *   CPU 律速の `/synthesis` に残り0が渡る（→ `tts/voicevoxClient.ts`）。
+   *
+   * `GET /audio/…` を保留する上限としても使うが、そちらは**応答を打ち切るだけで
+   *   合成は続ける**ので、クライアントの取り直しがキャッシュに当たる
+   *   （→ `server/httpServer.ts` の `responseTimeoutMs`）。
+   */
   synthesisTimeoutMs: number;
 
   // ── 以下は発話クライアント（player）だけが読む ─────────────────────────
@@ -86,9 +96,12 @@ export interface ChatterAgentConfig {
   /**
    * `GET /audio/…` の1リクエストあたりの上限。
    *
-   * ★ **サーバー側の `synthesisTimeoutMs` より長くすること。** この GET は
-   *   「合成が終わるまで待つ」ので、短いとクライアント側のタイムアウトが先に効いて
-   *   503（あとで取りに来い）ではなく転送エラーとして扱われ、試行回数を消費する。
+   * ★ **サーバー側の設定との順序を気にしなくてよい。** 以前は「`synthesisTimeoutMs` より
+   *   長くすること」という暗黙の制約があり、破ると 503（あとで取りに来い）で来るはずの
+   *   状態が転送エラー（試行回数を消費する＝発話が捨てられる）に化けた。しかも
+   *   `synthesize` は2往復なので**最悪は `synthesisTimeoutMs` の2倍**で、45秒でも足りなかった。
+   *   いまはサーバーが `GET` の**応答**を自分で打ち切って 503 を返すので、この制約は無い
+   *   （→ `server/httpServer.ts`）。
    * ★ 省略できない。Node の fetch に既定のタイムアウトは無く、返らない相手を掴むと
    *   head-of-line blocking で**以後すべてが無音になり、エラーも出ない**。
    */

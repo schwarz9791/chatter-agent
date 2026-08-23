@@ -17,6 +17,7 @@ import type * as http from "http";
 import { WebSocketServer } from "ws";
 import type { WebSocket } from "ws";
 import { isValidEpoch, type SpeechEpoch } from "../core/types";
+import { createThrottledWarn } from "./throttledWarn";
 
 export interface WsServer {
   /** 接続中の全クライアントへ送る */
@@ -143,13 +144,18 @@ function createVerifyClient(
   allowedOrigins: string[],
 ): (info: { origin?: string; req: { headers: Record<string, unknown> } }) => boolean {
   const allowed = new Set(allowedOrigins);
+  // ★ 間引くこと。`origin` はクライアント任意の文字列なので、ポートを叩き続ける
+  //   ページがあればログを埋められる。キーの数にも上限が要る（`origin` ごとに
+  //   状態を持つと無制限に増える Map になる）
+  const warn = createThrottledWarn();
+
   return (info) => {
     const origin = info.origin ?? info.req.headers.origin;
     if (typeof origin !== "string" || origin.length === 0) return true;
     if (allowed.has(origin)) return true;
 
     // 拒否理由を分けて出す。空リストなら「そもそも許可リストが無い」、そうでなければ「リストに無い」
-    console.warn(
+    warn(
       allowed.size === 0
         ? `[WS] Rejected origin (allowedOrigins is empty): ${origin}`
         : `[WS] Rejected origin (not in allowedOrigins): ${origin}`,

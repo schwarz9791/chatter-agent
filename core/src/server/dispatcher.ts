@@ -206,6 +206,11 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
 
       if (seqs.length === 0) return;
 
+      // ★ ループの外で1回だけ読む。`config.get()` は毎回 `statSync` する。
+      //   1回の poll / 1回の追いつきの中で値が揺れないので、同じバッチの中で
+      //   `audio` の有無が混ざることも無くなる（「実行中に読み直す」性質は保たれる）
+      const audioEnabled = deps.audioEnabled();
+
       // ★ 世代プローブ。**先頭を毎 poll 1件だけ読む**（実測 ≒ 0.014ms、`list()` の 5%）。
       //   `delivered` は seq 単独キーなので、CLI が `clear()` してから同じ seq を
       //   別世代で書き直すと、ファイル名の集合からは何も変わって見えない。
@@ -255,7 +260,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
           continue;
         }
 
-        deps.broadcast(buildFrame(record, deps.audioEnabled()));
+        deps.broadcast(buildFrame(record, audioEnabled));
         delivered.add(seq);
       }
     },
@@ -263,6 +268,9 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
     catchUp(send) {
       let sent = 0;
       let truncated = false;
+      // ★ ここが本題。`delivered` は最大 `speechQueueMaxEntries`（既定500）件あり、
+      //   このループは**同期の WS `connection` ハンドラの中**で回る
+      const audioEnabled = deps.audioEnabled();
 
       // 配信済みのものだけを seq 昇順に送る。queue.list() が昇順を返すので、
       // delivered（Set）側を別途ソートする必要はない。
@@ -275,7 +283,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
         const record = deps.queue.read(seq);
         if (record === null) continue; // 追いつきの走査中に ack 等で消えた
 
-        if (!send(buildFrame(record, deps.audioEnabled()))) {
+        if (!send(buildFrame(record, audioEnabled))) {
           truncated = true;
           break;
         }

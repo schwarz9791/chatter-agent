@@ -57,6 +57,15 @@ export function deriveAudioBaseUrl(serverUrl: string): string {
   return url.toString().replace(/\/$/, "");
 }
 
+/** サーバーが本文に載せた理由。読めなければ既定の文言のまま */
+const REASON_MAX_CHARS = 300;
+
+async function reason(res: Response, fallback: string): Promise<string> {
+  const body = await res.text().catch(() => "");
+  const trimmed = body.trim().slice(0, REASON_MAX_CHARS);
+  return trimmed.length > 0 ? trimmed : fallback;
+}
+
 export function createAudioFetcher(options: AudioFetcherOptions): AudioFetcher {
   const { baseUrl, timeoutMs } = options;
 
@@ -72,19 +81,22 @@ export function createAudioFetcher(options: AudioFetcherOptions): AudioFetcher {
         return { kind: "failed", reason: timedOut ? `${timeoutMs}ms で返りませんでした` : String(err) };
       }
 
+      // ★ **ボディを読むこと。** 目的は接続の再利用ではなく**診断**。
+      //   サーバーは 503 / 404 の本文に理由（`ECONNREFUSED …` / `speaker not found …`）を
+      //   載せてくるので、ここで捨てると無音の原因がクライアント側のログから消える。
+      //
+      //   ★ 以前は `cancel()` で「undici が接続を再利用できないから」と書いていたが、
+      //     Node 24.19.0 で測ると**短いボディでは `cancel()` でも未読でも 30 リクエストで
+      //     2 接続**だった（58〜59 本になるのは 2MB のボディに `cancel()` したとき）。
+      //     接続数を理由にしない。
       if (res.status === 503) {
-        // ★ ボディを読み切ってから戻ること。読まないと undici が接続を再利用できず、
-        //   エンジンが落ちている間ずっと新しい TCP 接続が開き続ける
-        await res.body?.cancel().catch(() => {});
-        return { kind: "unavailable", reason: "サーバーが音声を用意できていません (503)" };
+        return { kind: "unavailable", reason: await reason(res, "サーバーが音声を用意できていません (503)") };
       }
       if (res.status === 404) {
-        await res.body?.cancel().catch(() => {});
-        return { kind: "gone", reason: "音声がありません (404)" };
+        return { kind: "gone", reason: await reason(res, "音声がありません (404)") };
       }
       if (!res.ok) {
-        await res.body?.cancel().catch(() => {});
-        return { kind: "failed", reason: `想定外のステータス ${res.status}` };
+        return { kind: "failed", reason: await reason(res, `想定外のステータス ${res.status}`) };
       }
 
       try {

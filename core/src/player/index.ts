@@ -44,10 +44,12 @@ const SHUTDOWN_TIMEOUT_MS = 6_000;
  * 古さの判定・stall watchdog・**503 のバックオフ**を進めるための間隔。
  * キューは見に行かない（配信は push）。
  *
- * ★ `playbackQueue` の `audioRetryMs`（既定1秒）より短くないこと自体は問題ないが、
- *   ここが長すぎると 503 からの復帰がその分だけ遅れる。
+ * ★ **`playbackQueue` の `audioRetryMs`（既定1秒）と揃えること。** 503 からの取り直しは
+ *   「バックオフが明けた後の最初の tick」で起きるので、ここが長いとその分だけ復帰が遅れる。
+ *   以前 5 秒だったのは、進める判断が古さの判定と stall watchdog しか無かったため。
+ *   1回の tick は小さな reducer を1周するだけなので、頻度を上げても誤差。
  */
-const TICK_INTERVAL_MS = 5_000;
+const TICK_INTERVAL_MS = 1_000;
 
 async function step(label: string, work: () => Promise<unknown>): Promise<void> {
   const deadline = new Promise<void>((resolve) => setTimeout(resolve, SHUTDOWN_STEP_TIMEOUT_MS).unref());

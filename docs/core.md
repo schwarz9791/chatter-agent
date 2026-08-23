@@ -17,19 +17,25 @@ core/src/
 │   ├── publish.ts           記録と配信キューの両方に書く合成。append できた時点で「出した」が確定する
 │   ├── worker.ts            ドレインループ。応答待ち通知の整形もここ
 │   └── workerState.ts       プロセスを跨いで持ち回る重複抑制の状態
-├── server/       chatter-agent-server（配信キュー → WebSocket 配信）
+├── server/       chatter-agent-server（配信キュー → WebSocket 配信 + 音声の HTTP 配布）
 │   ├── index.ts             合成ルート。ロック → bind → 古いキューの掃除 → ポーリング
-│   ├── dispatcher.ts        配信済み seq と**採番の世代**の判断。何を配信済みとし、何を消してよいか（ユニットテストのため純粋な部品に切り出してある）
-│   └── wsServer.ts          配信と ack。Origin 検査もここ
-├── player/       chatter-agent-player（WebSocket → 合成 → 再生 → ack）
-│   ├── index.ts             合成ルート。ロック → 一時dir → エンジン疎通 → 接続。コマンドを実行してイベントを戻すドライバ
-│   ├── playbackQueue.ts     ★中核。合成/再生/ack の判断だけを持つ reducer（副作用ゼロ）
+│   ├── dispatcher.ts        配信済み seq と**採番の世代**の判断。フレームの組み立てもここ（ユニットテストのため純粋な部品に切り出してある）
+│   ├── audioStore.ts        ★合成のキャッシュと single-flight。ディスクを持たない（issue #29）
+│   ├── httpServer.ts        `GET /audio/<epoch>-<seq>.wav`。200 / 503 / 404 / 403 の切り分け
+│   ├── wsServer.ts          配信と ack。Origin 検査、外部 http.Server への相乗りもここ
+│   └── throttledWarn.ts     同じ警告を間引く（503 の連発と Origin 拒否。黙らせずに件数を出す）
+├── tts/          音声合成エンジンのクライアント（issue #29 で player/ から移設）
+│   └── voicevoxClient.ts    AivisSpeech / VOICEVOX 互換 API（fetch + AbortSignal.timeout）
+├── player/       chatter-agent-player（WebSocket → 音声取得 → 再生 → ack）
+│   ├── index.ts             合成ルート。ロック → 一時dir → 接続。コマンドを実行してイベントを戻すドライバ
+│   ├── playbackQueue.ts     ★中核。取得/再生/ack の判断だけを持つ reducer（副作用ゼロ）
 │   ├── speechFrame.ts       受信フレームの検証。`wsServer.parseAck` と対称
-│   ├── voicevoxClient.ts    AivisSpeech / VOICEVOX 互換 API（fetch + AbortSignal.timeout）
+│   ├── audioFetcher.ts      `GET /audio/…`。結果を ready / unavailable / gone / failed の4値に分ける
 │   ├── audioPlayer.ts       WAV を一時ファイルに置いて外部コマンドで鳴らす
 │   └── client.ts            ws 接続 / 再接続 / ping watchdog / ack の間引き
 ├── core/         契約と基盤
-│   ├── types.ts             SpeechRecord / SpeechEpoch / LEGACY_EPOCH / Emotion / SpeechKind / SpeakMessage
+│   ├── types.ts             SpeechRecord / SpeechFrame / SpeechEpoch / LEGACY_EPOCH / Emotion / SpeechKind / SpeakMessage
+│   ├── audioPath.ts         `/audio/<epoch>-<seq>.wav` の組み立てと検証。server と player が共有する
 │   ├── paths.ts             ← cc-mascot-xr 流用
 │   ├── config.ts            ← cc-mascot-xr configStore 流用
 │   ├── lock.ts              mkdir の原子性を使った単一ワーカー / 単一サーバーのロック
@@ -37,9 +43,10 @@ core/src/
 │   ├── speechLog.ts         記録への追記 / epoch と seq の採番 / state 整合
 │   └── speechQueue.ts       配信キュー。list/read/enqueue/ackUpTo/dropOlderThan/trim/clear/sweepTmp
 ├── text/         テキスト整形・文分割        ← textFilter.ts のみ cc-mascot 由来
-│   └── speechText.ts        ★中核。メッセージ全文の整形 → 文の切り出し（`toSpeechSentences`。純粋関数）。
-│                             `cli/` からも `summarizer/` からも参照するため、`summarizer/ → cli/` の
-│                             逆依存を作らないよう `cli/messageAssembler.ts` から移設した（issue #38）
+│   ├── speechText.ts        ★中核。メッセージ全文の整形 → 文の切り出し（`toSpeechSentences`。純粋関数）。
+│   │                         `cli/` からも `summarizer/` からも参照するため、`summarizer/ → cli/` の
+│   │                         逆依存を作らないよう `cli/messageAssembler.ts` から移設した（issue #38）
+│   └── speakable.ts         合成に出す意味のあるテキストか。**合成する側が持つ判定**（issue #29 で player/ から移設）
 ├── emotion/      ルールベース感情判定        ← cc-mascot 由来
 ├── prompt/       応答待ち通知の整形
 └── summarizer/   AI要約（既定OFF。issue #31）
@@ -49,7 +56,20 @@ core/src/
     └── summaryPipeline.ts   判定とフォールバック（createSummaryPipeline）。cli/worker.ts から呼ばれる
 ```
 
-判断ロジックは基本的に `cli/` と `core/` に置く。**`server/index.ts` と `wsServer.ts` は判断ロジックを持たない** — キューを読んで全クライアントへ流すだけの配線に留める。唯一の例外が `server/dispatcher.ts`（何を配信済みとし、何を消してよいか）で、`index.ts` に埋めるとユニットテストから触れないため純粋な部品として切り出してある。
+判断ロジックは基本的に `cli/` と `core/` に置く。**`server/index.ts` と `wsServer.ts` は判断ロジックを持たない** — 配線に留める。
+
+判断は**2つの部品に切り出してある**。`index.ts` に埋めるとユニットテストから触れないため。
+
+| | |
+|---|---|
+| `server/dispatcher.ts` | 何を配信済みとし、何を消してよいか。どの世代の entry を配信し、どの ack を弾くか |
+| `server/audioStore.ts` | 何を合成し、何を覚えておくか（issue #29） |
+
+> ★ **`audioStore.ts` は #29 で増えた2つ目の例外。** 「サーバーは判断ロジックを持たない」という
+> 方針そのものは変えていない。合成を GET が来たときに走らせる形にしたので、
+> **サーバーが持つ判断は「同じキーの同時要求をまとめる」ことと「上限で捨てる」ことだけ**に
+> なっている。いつ合成するか・どこまで先読みするかはクライアント側（`playbackQueue.ts` の
+> 先読み窓）が決めていて、サーバーには投機的な合成が無い。
 
 `player/` も同じ形だが、切り出し方を一段厳しくしてある。**`playbackQueue.ts` はイベントを入れるとコマンドの配列が返る reducer で、合成も再生も ack も自分では行わない。** dispatcher の副作用は同期の `broadcast` 1本なので注入で足りるが、player の副作用は非同期で、しかも完了コールバックが状態機械に**再入する**（cc-mascot の `useSpeech.ts` が promise の中から `processQueue()` を呼ぶ形）。注入した関数を機械の内側から呼ぶと、「ループの途中で状態が変わる」再入バグをテストで捕まえられない。
 
@@ -150,16 +170,29 @@ CI（`setup-node`）は `node-version: "24"` で、常に最新の 24 系が入�
 npm run build
 npm run verify:phase-a   # spool → speech.jsonl（scripts/verify-phase-a.sh。実際の bash hook に食わせる）
 npm run verify:phase-b   # 配信キュー → WebSocket（scripts/verify-phase-b.mjs）
-npm run verify:player    # WebSocket → 合成 → 再生 → ack（scripts/verify-player.mjs）
+npm run verify:tts       # server の合成と GET /audio/（scripts/verify-tts.mjs）
+npm run verify:player    # WebSocket → 音声取得 → 再生 → ack（scripts/verify-player.mjs）
 npm run start:server     # 手で動かすとき
 npm run start:player     # 耳で聞くとき（AivisSpeech を起動しておく）
 ```
 
-**`verify:player` は AivisSpeech もオーディオデバイスも要らない。** 合成エンジンはスタブ HTTP に、
-再生コマンドは `scripts/fake-player.mjs` に差し替わる。**プレイヤーコマンドを config で
-差し替えられるようにした決定が、そのまま CI 可能性になっている**（`playerCommand` / `playerArgs`）。
-偽プレイヤーが受け取ったファイル名を追記するので、**実際に何がどの順で鳴ったか**まで検証できる。
-最後のシナリオでは本物の server と CLI を通して、hook → CLI → server → player の全経路を1本で見る。
+**`verify:tts` も `verify:player` も AivisSpeech もオーディオデバイスも要らない。** 合成エンジンは
+スタブ HTTP に、再生コマンドは `scripts/fake-player.mjs` に差し替わる。**プレイヤーコマンドを
+config で差し替えられるようにした決定が、そのまま CI 可能性になっている**（`playerCommand` /
+`playerArgs`）。偽プレイヤーが受け取ったファイル名を追記するので、**実際に何がどの順で鳴ったか**まで
+検証できる。`verify:player` の最後のシナリオでは本物の server と CLI を通して、
+hook → CLI → server → player の全経路を1本で見る。
+
+**2つを分けてあるのは、落ちたときに原因を切り分けるため。** `verify:tts` は player を挟まず、
+本物の server に直接 `GET /audio/…` を投げる。合わせて見ると「合成が1回だったのはサーバーが
+まとめたからか、クライアントの先読み窓が小さかっただけか」が分かる。
+`verify:player` 側は逆に、スタブのサーバーが返す 200 / 503 / 404 に対してクライアントが
+どう振る舞うかだけを見る。
+
+3本（`phase-b` / `tts` / `player`）は `scripts/lib/harness.mjs` を共有する。入っているのは
+`check` / `show` / `until`・使い捨てルート・スタブ用の WAV・「子プロセスを起動してこの行が
+出るまで待つ」まで。**判定とスタブはここに置かないこと** — 落ちたときに「スタブの挙動」と
+「本物の挙動」のどちらを疑うかが増える。
 
 **実機での確認（ターミナル表示と体感で同時か）は耳で行う。** 自動の検証が見ているのは形と順序だけ。
 
@@ -257,28 +290,57 @@ cc-mascot から移植したコードを oxfmt で整形すると、上流との
 | `spoolMaxAgeHours` | `6` | `CHATTER_AGENT_SPOOL_MAX_AGE_HOURS` |
 | `allowedOrigins` | `[]` | `CHATTER_AGENT_ALLOWED_ORIGINS`（カンマ区切り） |
 
-player だけが読むキー。**別ファイルに分けないこと。** `SPECS` は全バイナリで共有していて、
+server（音声合成）だけが読むキー。**別ファイルに分けないこと。** `SPECS` は全バイナリで共有していて、
 載っていないキーは未知キーとして警告されるので、分けると `chatter-agent-speak` が
 毎 delta の起動ごとに警告を吐く。
 
 | キー | 既定値 | 環境変数 |
 |---|---|---|
+| `ttsEnabled` | `true` | `CHATTER_AGENT_TTS_ENABLED` |
 | `ttsBaseUrl` | `"http://127.0.0.1:10101"` | `CHATTER_AGENT_TTS_URL` |
 | `ttsSpeakerId` | `888753760` | `CHATTER_AGENT_TTS_SPEAKER_ID` |
-| `synthesisLookahead` | `3`（0 で直列） | `CHATTER_AGENT_SYNTHESIS_LOOKAHEAD` |
 | `synthesisTimeoutMs` | `30000` | `CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS` |
+
+★ **#29 で読み手が player → server に移ったが、キー名も意味も変えていない。** 改名すると、
+既存の `config.json` に残った旧キーが**全バイナリで**未知キー警告を出す（#11 で
+`speechLogGenerations` を廃止したときに実際に踏んだ）。
+
+- 既定の `ttsBaseUrl` は **AivisSpeech.app を単体起動したときの標準ポート**。cc-mascot は
+  エンジンを自分で `--port 8564` で spawn するので、そちらに繋ぐなら明示的に指定する
+- `ttsSpeakerId` の既定は AivisSpeech 標準同梱の Anneli（ノーマル）。起動時に `/speakers` で
+  存在を検査し、無ければ候補を並べて警告する（**設定ミスの症状が「無音」なので、これが無いと切り分けできない**）。
+  ★ **ここで起動を止めないこと。** 止めるとテキストの配信まで巻き添えになり、クライアントからは
+  「数十秒の無音は正常」と区別できなくなる。音声だけを 503 に落として、原因を症状に出す
+- `ttsEnabled: false` にすると配信フレームの `audio` が常に `null` になり、`GET /audio/…` も 404 を返す。
+  **テキストの配信は止まらない**ので、自前で合成するクライアントや字幕だけのクライアントの逃げ道になる
+- ★ **`synthesisTimeoutMs` は2つの場所に効く。** エンジンへの**1リクエストあたり**の上限
+  （`audio_query` と `synthesis` に別々に。2往復で1つの予算にすると、モデルロードで
+  `/audio_query` が食い切ったとき CPU 律速の `/synthesis` に残り0が渡る）と、
+  `GET /audio/…` の**応答**を保留する上限。後者は応答を打ち切るだけで**合成は続ける**ので、
+  クライアントの取り直しがキャッシュに当たって即 200 になる
+- モジュール名は API ファミリ（`voicevoxClient`）、config キーはエンジン中立（`tts*`）で割り切ってある
+
+player だけが読むキー。**これも別ファイルに分けない**（理由は上と同じ）。
+
+| キー | 既定値 | 環境変数 |
+|---|---|---|
+| `synthesisLookahead` | `3`（0 で直列） | `CHATTER_AGENT_SYNTHESIS_LOOKAHEAD` |
+| `audioFetchTimeoutMs` | `45000` | `CHATTER_AGENT_AUDIO_FETCH_TIMEOUT_MS` |
 | `playerCommand` | `"afplay"` | `CHATTER_AGENT_PLAYER_COMMAND` |
 | `playerArgs` | `["{file}"]` | `CHATTER_AGENT_PLAYER_ARGS`（カンマ区切り） |
 | `playerServerUrl` | `""`（空なら `host`/`port` から導出） | `CHATTER_AGENT_PLAYER_SERVER_URL` |
 | `speechMaxAgeMs` | `0`（無効） | `CHATTER_AGENT_SPEECH_MAX_AGE_MS` |
 
-- 既定の `ttsBaseUrl` は **AivisSpeech.app を単体起動したときの標準ポート**。cc-mascot は
-  エンジンを自分で `--port 8564` で spawn するので、そちらに繋ぐなら明示的に指定する
-- `ttsSpeakerId` の既定は AivisSpeech 標準同梱の Anneli（ノーマル）。起動時に `/speakers` で
-  存在を検査し、無ければ候補を並べて警告する（**設定ミスの症状が「無音」なので、これが無いと切り分けできない**）
+- ★ **`synthesisLookahead` の意味は #29 でも変わっていない。** サーバーは投機的な先読みを
+  持たず、GET が来たときに合成するので、**この窓がそのまま合成の需要信号になる**
+- ★ **`audioFetchTimeoutMs` とサーバー側の `synthesisTimeoutMs` の順序は気にしなくてよい。**
+  以前は「長くすること」という暗黙の制約があり、破ると 503（待てば直る）で来るはずの状態が
+  転送エラー（試行回数を消費する＝発話が捨てられる）に化けた。しかも `synthesize` は2往復なので
+  **最悪は `synthesisTimeoutMs` の2倍**で、既定の45秒でも足りなかった。いまはサーバーが
+  `GET` の応答を自分で打ち切って 503 を返すので、この制約そのものが無い
 - ★ **`playerServerUrl` が `host` と別なのは、既定の `0.0.0.0` が bind アドレスであって接続先ではないから。**
-  空のときは `0.0.0.0` / `::` を `127.0.0.1` に読み替えて組み立てる
-- モジュール名は API ファミリ（`voicevoxClient`）、config キーはエンジン中立（`tts*`）で割り切ってある
+  空のときは `0.0.0.0` / `::` を `127.0.0.1` に読み替えて組み立てる。音声の取得元も
+  この URL の authority から導く（サーバーは自分の到達アドレスを知らない → `core/audioPath.ts`）
 
 `chatter-agent-speak`（`summarizer/` の AI要約）だけが読むキー。**これも別ファイルに分けないこと。**
 理由は player のキーと同じだが、**警告を吐く側が逆になる**: これは `chatter-agent-speak` だけが読むキーなので、

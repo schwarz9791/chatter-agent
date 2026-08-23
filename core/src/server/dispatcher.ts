@@ -7,13 +7,25 @@
  * 純粋な部品として切り出す。
  */
 
+import { buildAudioPath } from "../core/audioPath";
 import type { SpeechQueue } from "../core/speechQueue";
-import type { SpeechEpoch, SpeechRecord } from "../core/types";
+import type { SpeechEpoch, SpeechFrame, SpeechRecord } from "../core/types";
+import { hasSpeakableText } from "../text/speakable";
 
 export interface DispatcherDeps {
   queue: SpeechQueue;
   /** 接続中の全クライアントへ流す */
   broadcast: (line: string) => void;
+  /**
+   * 音声の参照をフレームに載せるか。`ttsEnabled: false` なら false。
+   *
+   * ★ **合成の可否は見ない。** パスは `(epoch, seq)` から決まるので、エンジンが
+   *   落ちていても載せられる。取りに行った先が 503 を返すだけで、テキストの配信は
+   *   止まらない（→ `server/httpServer.ts`）。
+   * ★ 関数で受けるのは、config が参照のたびに mtime スタンプを見て読み直す作りだから
+   *   （`cli/publish.ts` の `maxEntries` と同じ理由）。起動時の1回きりの値で固定しない。
+   */
+  audioEnabled: () => boolean;
   /** テストから時刻を固定するため（世代解決の間引きに使う） */
   now?: () => number;
 }
@@ -47,6 +59,21 @@ const RESOLVE_BACKOFF_MS = 1_000;
 
 /** 警告済み epoch の保持上限。クライアントが名乗る値なので、無制限に溜めない */
 const WARNED_EPOCH_LIMIT = 64;
+
+/**
+ * 配信キューの1件から、ワイヤに流す1行を組み立てる。
+ *
+ * ★ 記録とキューには音声の参照を書かない（CLI が書く時点では音声が無い）ので、
+ *   ここが `docs/protocol.md` の「1文1行 / 1文1ファイル / 1文1フレームで3箇所同じ形」が
+ *   崩れる唯一の場所になる。
+ */
+export function buildFrame(record: SpeechRecord, audioEnabled: boolean): string {
+  const audio: SpeechFrame["audio"] =
+    audioEnabled && hasSpeakableText(record.text)
+      ? { path: buildAudioPath(record.epoch, record.seq), format: "wav" }
+      : null;
+  return `${JSON.stringify({ ...record, audio } satisfies SpeechFrame)}\n`;
+}
 
 export function createDispatcher(deps: DispatcherDeps): Dispatcher {
   const now = deps.now ?? (() => Date.now());
@@ -179,6 +206,11 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
 
       if (seqs.length === 0) return;
 
+      // ★ ループの外で1回だけ読む。`config.get()` は毎回 `statSync` する。
+      //   1回の poll / 1回の追いつきの中で値が揺れないので、同じバッチの中で
+      //   `audio` の有無が混ざることも無くなる（「実行中に読み直す」性質は保たれる）
+      const audioEnabled = deps.audioEnabled();
+
       // ★ 世代プローブ。**先頭を毎 poll 1件だけ読む**（実測 ≒ 0.014ms、`list()` の 5%）。
       //   `delivered` は seq 単独キーなので、CLI が `clear()` してから同じ seq を
       //   別世代で書き直すと、ファイル名の集合からは何も変わって見えない。
@@ -228,7 +260,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
           continue;
         }
 
-        deps.broadcast(`${JSON.stringify(record)}\n`);
+        deps.broadcast(buildFrame(record, audioEnabled));
         delivered.add(seq);
       }
     },
@@ -236,6 +268,9 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
     catchUp(send) {
       let sent = 0;
       let truncated = false;
+      // ★ ここが本題。`delivered` は最大 `speechQueueMaxEntries`（既定500）件あり、
+      //   このループは**同期の WS `connection` ハンドラの中**で回る
+      const audioEnabled = deps.audioEnabled();
 
       // 配信済みのものだけを seq 昇順に送る。queue.list() が昇順を返すので、
       // delivered（Set）側を別途ソートする必要はない。
@@ -248,7 +283,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
         const record = deps.queue.read(seq);
         if (record === null) continue; // 追いつきの走査中に ack 等で消えた
 
-        if (!send(`${JSON.stringify(record)}\n`)) {
+        if (!send(buildFrame(record, audioEnabled))) {
           truncated = true;
           break;
         }

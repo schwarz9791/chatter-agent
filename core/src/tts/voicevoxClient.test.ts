@@ -7,7 +7,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as http from "http";
 import type { AddressInfo } from "net";
-import { createVoicevoxClient, flattenStyles, hasStyle } from "./voicevoxClient";
+import { createVoicevoxClient, flattenStyles, hasStyle, TtsHttpError, TtsTransportError } from "./voicevoxClient";
 import type { Speaker } from "./voicevoxClient";
 
 type Handler = (req: http.IncomingMessage, res: http.ServerResponse) => void;
@@ -32,6 +32,18 @@ function client(baseUrl: string, timeoutMs = 2000) {
   return createVoicevoxClient({ baseUrl, speakerId: 888753760, timeoutMs });
 }
 
+/** 一度 listen して即閉じ、確実に誰もいないポートを得る */
+async function closedPort(): Promise<number> {
+  const server = http.createServer();
+  await new Promise<void>((done) => server.listen(0, "127.0.0.1", () => done()));
+  const { port } = server.address() as AddressInfo;
+  await new Promise<void>((done) => server.close(() => done()));
+  return port;
+}
+
+/** RIFF/WAVE の最小ヘッダ。`synthesize` が中身を検証するので4バイトでは足りない */
+const WAV_HEAD = Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WAVE")]);
+
 const SPEAKERS: Speaker[] = [
   { name: "Anneli", speaker_uuid: "u1", styles: [{ id: 888753760, name: "ノーマル" }] },
   { name: "つくよみちゃん", speaker_uuid: "u2", styles: [{ id: 1, name: "れいせい" }] },
@@ -51,12 +63,12 @@ describe("synthesize", () => {
           return;
         }
         res.writeHead(200, { "Content-Type": "audio/wav" });
-        res.end(Buffer.from([0x52, 0x49, 0x46, 0x46]));
+        res.end(WAV_HEAD);
       });
     });
 
     const wav = await client(baseUrl).synthesize("こんにちは。");
-    expect(Buffer.from(wav).toString("latin1")).toBe("RIFF");
+    expect(Buffer.from(wav).subarray(0, 4).toString("latin1")).toBe("RIFF");
 
     // text はクエリ文字列、speaker も両方に載る
     expect(seen[0].url).toBe(`/audio_query?text=${encodeURIComponent("こんにちは。")}&speaker=888753760`);
@@ -106,6 +118,106 @@ describe("synthesize", () => {
       res.end("not json");
     });
     await expect(client(baseUrl).synthesize("こわれた。")).rejects.toThrow("audio_query の読み取り");
+  });
+});
+
+describe("失敗の診断（#49 のレビュー）", () => {
+  it("★ 接続できないとき、どこへ繋ごうとして何が起きたかを出す（cause を辿る）", async () => {
+    // undici は `TypeError: fetch failed` としか名乗らず、ECONNREFUSED / アドレス / ポートは
+    // `err.cause` にしか入っていない。ここを潰すとログから原因に辿り着けない
+    const closed = await closedPort();
+    const result = await client(`http://127.0.0.1:${closed}`)
+      .synthesize("あ。")
+      .catch((err: unknown) => err);
+
+    expect(result).toBeInstanceOf(TtsTransportError);
+    const message = (result as Error).message;
+    expect(message).toContain("ECONNREFUSED");
+    expect(message).toContain(`127.0.0.1:${closed}`);
+  });
+
+  it("★ AggregateError（複数アドレスに解決されるホスト）でもアドレスを出す", async () => {
+    // `localhost` は ::1 と 127.0.0.1 の両方に解決されるので、undici は
+    // **メッセージが空の** AggregateError を cause に置く。errors[] を開かないと何も出ない
+    const closed = await closedPort();
+    const result = await client(`http://localhost:${closed}`)
+      .synthesize("あ。")
+      .catch((err: unknown) => err);
+
+    expect((result as Error).message).toContain("ECONNREFUSED");
+    expect((result as Error).message).toContain(String(closed));
+  });
+
+  it("★ エンジンが 4xx を返したら、status と応答本文を持つ（ttsSpeakerId の診断はここにある）", async () => {
+    const baseUrl = await serve((_req, res) => {
+      res.writeHead(422, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ detail: "speaker not found: 888753761" }));
+    });
+
+    const result = await client(baseUrl)
+      .synthesize("あ。")
+      .catch((err: unknown) => err);
+
+    expect(result).toBeInstanceOf(TtsHttpError);
+    expect((result as TtsHttpError).status).toBe(422);
+    expect((result as TtsHttpError).detail).toContain("speaker not found");
+    expect((result as Error).message).toContain("422");
+  });
+
+  it("本文が長くても切り詰める", async () => {
+    const baseUrl = await serve((_req, res) => {
+      res.writeHead(500);
+      res.end("x".repeat(5000));
+    });
+
+    const result = (await client(baseUrl)
+      .synthesize("あ。")
+      .catch((err: unknown) => err)) as TtsHttpError;
+
+    expect(result.detail.length).toBeLessThanOrEqual(512);
+  });
+
+  it("★ 200 でも WAV でなければ弾く（別サービスを指していると HTML が再生に回る）", async () => {
+    const baseUrl = await serve((req, res) => {
+      req.resume();
+      if (req.url?.startsWith("/audio_query")) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end("{}");
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "text/html" });
+      res.end("<!doctype html><title>dev server</title>");
+    });
+
+    const result = await client(baseUrl)
+      .synthesize("あ。")
+      .catch((err: unknown) => err);
+
+    expect(result).toBeInstanceOf(TtsHttpError);
+    expect((result as Error).message).toContain("WAV ではない");
+  });
+
+  it("★ タイムアウトは往復ごとに効く（2往復で1つの予算にしない）", async () => {
+    // 予算を共有すると、モデルロードで /audio_query が食い切ったとき
+    // CPU 律速の /synthesis に残り0が渡って落ちる
+    const baseUrl = await serve((req, res) => {
+      req.resume();
+      if (req.url?.startsWith("/audio_query")) {
+        setTimeout(() => {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end("{}");
+        }, 250);
+        return;
+      }
+      setTimeout(() => {
+        res.writeHead(200, { "Content-Type": "audio/wav" });
+        res.end(WAV_HEAD);
+      }, 250);
+    });
+
+    // 1往復あたり 400ms。共有予算なら合計 500ms で溢れるが、往復ごとなら通る
+    const wav = await client(baseUrl, 400).synthesize("あ。");
+    expect(wav.byteLength).toBe(WAV_HEAD.byteLength);
   });
 });
 

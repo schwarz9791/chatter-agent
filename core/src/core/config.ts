@@ -42,11 +42,23 @@ export interface ChatterAgentConfig {
    */
   allowedOrigins: string[];
 
-  // ── 以下は発話クライアント（player）だけが読む ─────────────────────────
+  // ── 以下は server（音声合成）だけが読む ─────────────────────────────
   // ★ ここに置くこと。config.ts は全バイナリが同じ SPECS を共有していて、
   //   載っていないキーは「未知のキー」として警告される。別ファイルに分けると
   //   chatter-agent-speak が毎 delta の起動ごとに警告を吐く。
+  //
+  // ★ #29 で読み手が player → server に移った。**キー名も意味も変えていない**
+  //   （改名すると、既存の config.json に残った旧キーが全バイナリで未知キー警告を出す。
+  //   #11 で `speechLogGenerations` を廃止したときに実際に踏んだ）。
 
+  /**
+   * 音声を合成してクライアントへ配るか。
+   *
+   * `false` にすると配信フレームの `audio` が常に `null` になり、`GET /audio/…` も
+   * 404 を返す。クライアントは何も鳴らさずに ack する。**テキストの配信は止まらない**ので、
+   * 自前で合成するクライアントや、字幕・表情だけを使うクライアントの逃げ道になる。
+   */
+  ttsEnabled: boolean;
   /**
    * 音声合成エンジンの baseUrl。AivisSpeech / VOICEVOX の互換 API を叩く。
    * 既定は AivisSpeech.app を単体起動したときの標準ポート。
@@ -56,14 +68,44 @@ export interface ChatterAgentConfig {
   /** 話者のスタイル ID。既定は AivisSpeech 標準同梱の Anneli（ノーマル）。VOICEVOX は 0 始まりの小さい整数 */
   ttsSpeakerId: number;
   /**
-   * 再生中の1件を含めて、いくつ先まで合成を走らせるか。0 なら完全直列。
+   * エンジンへの**1リクエストあたり**の上限（`/audio_query` と `/synthesis` にそれぞれ効く）。
+   * Node の fetch に既定タイムアウトは無い。
+   *
+   * ★ **2往復で1つの予算にしない。** モデルロードで `/audio_query` が食い切ると、
+   *   CPU 律速の `/synthesis` に残り0が渡る（→ `tts/voicevoxClient.ts`）。
+   *
+   * `GET /audio/…` を保留する上限としても使うが、そちらは**応答を打ち切るだけで
+   *   合成は続ける**ので、クライアントの取り直しがキャッシュに当たる
+   *   （→ `server/httpServer.ts` の `responseTimeoutMs`）。
+   */
+  synthesisTimeoutMs: number;
+
+  // ── 以下は発話クライアント（player）だけが読む ─────────────────────────
+
+  /**
+   * 再生中の1件を含めて、いくつ先まで**音声を取りに行く**か。0 なら完全直列。
+   *
+   * ★ #29 で合成がサーバーへ移ったが、**このキーの意味は変わっていない**。
+   *   サーバーは投機的な先読みを持たず、GET が来たときに合成するので、
+   *   この窓がそのまま合成の需要信号になる。
    *
    * 大きくすると合成待ちは減るが、`/synthesis` は CPU 律速なので
    * 同時に投げすぎると**先頭の合成が遅くなる**＝1文目の発話開始が遅れる。
    */
   synthesisLookahead: number;
-  /** `/audio_query` と `/synthesis` の1リクエストあたりの上限。Node の fetch に既定タイムアウトは無い */
-  synthesisTimeoutMs: number;
+  /**
+   * `GET /audio/…` の1リクエストあたりの上限。
+   *
+   * ★ **サーバー側の設定との順序を気にしなくてよい。** 以前は「`synthesisTimeoutMs` より
+   *   長くすること」という暗黙の制約があり、破ると 503（あとで取りに来い）で来るはずの
+   *   状態が転送エラー（試行回数を消費する＝発話が捨てられる）に化けた。しかも
+   *   `synthesize` は2往復なので**最悪は `synthesisTimeoutMs` の2倍**で、45秒でも足りなかった。
+   *   いまはサーバーが `GET` の**応答**を自分で打ち切って 503 を返すので、この制約は無い
+   *   （→ `server/httpServer.ts`）。
+   * ★ 省略できない。Node の fetch に既定のタイムアウトは無く、返らない相手を掴むと
+   *   head-of-line blocking で**以後すべてが無音になり、エラーも出ない**。
+   */
+  audioFetchTimeoutMs: number;
   /** WAV を再生するコマンド。macOS の afplay 以外にも差し替えられる（検証では /usr/bin/true 等を使う） */
   playerCommand: string;
   /** `playerCommand` に渡す引数。`{file}` が WAV のパスに置換される。シェルは噛ませない */
@@ -159,10 +201,12 @@ export function createDefaultConfig(): ChatterAgentConfig {
     spoolMaxAgeHours: 6,
     allowedOrigins: [],
 
+    ttsEnabled: true,
     ttsBaseUrl: "http://127.0.0.1:10101",
     ttsSpeakerId: 888753760,
-    synthesisLookahead: 3,
     synthesisTimeoutMs: 30_000,
+    synthesisLookahead: 3,
+    audioFetchTimeoutMs: 45_000,
     playerCommand: "afplay",
     playerArgs: ["{file}"],
     playerServerUrl: "",
@@ -377,10 +421,12 @@ const SPECS = {
   spoolMaxAgeHours: { env: "CHATTER_AGENT_SPOOL_MAX_AGE_HOURS", parse: parsePositiveInt },
   allowedOrigins: { env: "CHATTER_AGENT_ALLOWED_ORIGINS", parse: parseStringList },
 
+  ttsEnabled: { env: "CHATTER_AGENT_TTS_ENABLED", parse: parseBoolean },
   ttsBaseUrl: { env: "CHATTER_AGENT_TTS_URL", parse: makeUrlParser(["http:", "https:"]) },
   ttsSpeakerId: { env: "CHATTER_AGENT_TTS_SPEAKER_ID", parse: parseNonNegativeInt },
-  synthesisLookahead: { env: "CHATTER_AGENT_SYNTHESIS_LOOKAHEAD", parse: parseNonNegativeInt },
   synthesisTimeoutMs: { env: "CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS", parse: parseTimeoutMs },
+  synthesisLookahead: { env: "CHATTER_AGENT_SYNTHESIS_LOOKAHEAD", parse: parseNonNegativeInt },
+  audioFetchTimeoutMs: { env: "CHATTER_AGENT_AUDIO_FETCH_TIMEOUT_MS", parse: parseTimeoutMs },
   playerCommand: { env: "CHATTER_AGENT_PLAYER_COMMAND", parse: parseNonEmptyString },
   playerArgs: { env: "CHATTER_AGENT_PLAYER_ARGS", parse: parsePlayerArgs },
   playerServerUrl: { env: "CHATTER_AGENT_PLAYER_SERVER_URL", parse: makeUrlParser(["ws:", "wss:"]) },

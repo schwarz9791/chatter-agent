@@ -193,7 +193,7 @@ describe("read", () => {
   it("パース済みのレコードを返す", () => {
     const q = queue();
     q.enqueue([record(1, "あ。")]);
-    // ★ 配信側は epoch を見て世代を判定し、正規化した内容を組み直して流すので、中身が要る
+    // ★ 配信側は epoch を見て世代を判定し、正規化と音声の参照を足して組み直すので、中身が要る
     expect(q.read(1)).toMatchObject({ epoch: "test-epoch", seq: 1, text: "あ。" });
   });
 

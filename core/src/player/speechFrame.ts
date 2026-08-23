@@ -10,7 +10,8 @@
  *   捨てるのと同じ扱い）。1フレームの不整合でストリーム全体を落とす理由が無い。
  */
 
-import { isValidEpoch, type Emotion, type SpeechKind, type SpeechRecord } from "../core/types";
+import { isAudioPath } from "../core/audioPath";
+import { isValidEpoch, type AudioRef, type Emotion, type SpeechFrame, type SpeechKind } from "../core/types";
 
 /** `docs/protocol.md`: 未知の `kind` は `assistant` として扱う */
 const KNOWN_KINDS = new Set<string>(["assistant", "prompt"] satisfies SpeechKind[]);
@@ -31,13 +32,16 @@ function optionalString(raw: unknown): string | null {
 }
 
 /**
- * 読めたら `SpeechRecord`、読めなければ null。
+ * 読めたら `SpeechFrame`、読めなければ null。
  *
  * 必須なのは `epoch` / `seq`（非負の安全整数）/ `text`（文字列）/ `ts`（文字列）の4つ。
  * `epoch` を必須にしているのは、重複排除のキーが `seq` 単独では足りないため
  * （採番はランタイムルートの作り直しで 1 に戻る → `core/types.ts` の `SpeechEpoch`）。
+ *
+ * `audio` は**読めなければ null に倒す**。音声が無いフレームは「鳴らさずに ack する」
+ * という正常な経路があるので、フレームごと捨てる理由が無い。
  */
-export function parseSpeechFrame(raw: string): SpeechRecord | null {
+export function parseSpeechFrame(raw: string): SpeechFrame | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -73,6 +77,7 @@ export function parseSpeechFrame(raw: string): SpeechRecord | null {
     epoch,
     seq,
     ts,
+    audio: parseAudio(r.audio),
     // 将来 別のプロデューサーが増えても、player は誰が書いたかで挙動を変えない
     source: "claude-code",
     sessionId: optionalString(r.sessionId),
@@ -85,19 +90,41 @@ export function parseSpeechFrame(raw: string): SpeechRecord | null {
 }
 
 /**
- * 合成に出す意味のあるテキストか。
+ * フレームに `audio` キーが**載っていない**（＝ #29 より前のサーバー）。
  *
- * `docs/core.md`「既知の欠落」にあるとおり、文分割は約物だけの発話（`すごい！！` →
- * `["すごい！", "！"]` の後半）を作ることがある。これを `/audio_query` に投げると
- * 空の WAV か 4xx が返るので、合成を試みる前にここで落とす。
+ * ★ **`"audio": null` と別物として扱うこと。** `parseAudio` はどちらも null に潰すが、
+ *   ワイヤ上では区別できる:
  *
- * 判定は「音になる文字が1つでもあるか」。約物・空白・制御文字しか無ければ false。
+ *   - `ttsEnabled: false` / 読み上げる中身が無い文 → サーバーは `"audio": null` を**明示的に載せる**
+ *     （`server/dispatcher.ts` の `buildFrame` は `{ ...record, audio }` を stringify する）
+ *   - #29 より前のサーバー → `audio` キーが**存在しない**
+ *
+ *   潰したままだと、後者は前者と区別なく**全文が無言で ack され、どちらの側にも1行も出ない**。
+ *   キーの欠落だけを見るので、**`ttsEnabled: false` では原理的に発火しない**
+ *   （そこで発火すると、正常な設定に対して消す手段の無い警告が出続ける）。
+ *
+ * 読めない JSON は false。フレームごと捨てる経路が別に警告するので、ここで二重に出さない。
  */
-export function hasSpeakableText(text: string): boolean {
-  // \p{L} 文字 / \p{N} 数字。
-  //
-  // ★ `\p{S}` を丸ごと通さないこと。あれは数学記号と ASCII の演算子まで含むので、
-  //   `=>` / `^^` / `` ` `` / `+` / `~` / `$` だけの断片が「読める」と判定されて
-  //   `/audio_query` に届く。読まれうる記号（通貨・単位）は個別に許す
-  return /[\p{L}\p{N}\p{Sc}]/u.test(text) || /[℃℉°%‰]/u.test(text);
+export function isAudioUndeclared(raw: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+  return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) && !("audio" in parsed);
+}
+
+/**
+ * 音声の参照。読めなければ null（＝鳴らさずに ack する）。
+ *
+ * ★ **絶対 URL を通さないこと。** 任意の URL を受け入れると、サーバーが
+ *   クライアントを任意の外部ホストへ向かわせられる。`/audio/<epoch>-<seq>.wav` の形だけを通す。
+ */
+function parseAudio(raw: unknown): AudioRef | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const { path, format } = raw as { path?: unknown; format?: unknown };
+  if (!isAudioPath(path)) return null;
+  if (format !== "wav") return null;
+  return { path, format };
 }

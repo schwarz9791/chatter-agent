@@ -140,10 +140,12 @@ function createDefaultConfig() {
 		speechQueueMaxEntries: 500,
 		spoolMaxAgeHours: 6,
 		allowedOrigins: [],
+		ttsEnabled: true,
 		ttsBaseUrl: "http://127.0.0.1:10101",
 		ttsSpeakerId: 888753760,
-		synthesisLookahead: 3,
 		synthesisTimeoutMs: 3e4,
+		synthesisLookahead: 3,
+		audioFetchTimeoutMs: 45e3,
 		playerCommand: "afplay",
 		playerArgs: ["{file}"],
 		playerServerUrl: "",
@@ -348,6 +350,10 @@ const SPECS = {
 		env: "CHATTER_AGENT_ALLOWED_ORIGINS",
 		parse: parseStringList
 	},
+	ttsEnabled: {
+		env: "CHATTER_AGENT_TTS_ENABLED",
+		parse: parseBoolean
+	},
 	ttsBaseUrl: {
 		env: "CHATTER_AGENT_TTS_URL",
 		parse: makeUrlParser(["http:", "https:"])
@@ -356,12 +362,16 @@ const SPECS = {
 		env: "CHATTER_AGENT_TTS_SPEAKER_ID",
 		parse: parseNonNegativeInt
 	},
+	synthesisTimeoutMs: {
+		env: "CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS",
+		parse: parseTimeoutMs
+	},
 	synthesisLookahead: {
 		env: "CHATTER_AGENT_SYNTHESIS_LOOKAHEAD",
 		parse: parseNonNegativeInt
 	},
-	synthesisTimeoutMs: {
-		env: "CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS",
+	audioFetchTimeoutMs: {
+		env: "CHATTER_AGENT_AUDIO_FETCH_TIMEOUT_MS",
 		parse: parseTimeoutMs
 	},
 	playerCommand: {

@@ -7,17 +7,35 @@
  * 再生コマンドは `fake-player.mjs` に差し替える。プレイヤーコマンドを config で
  * 差し替えられるようにした決定が、そのまま CI 可能性になっている。
  *
+ * ★ #29 で合成がサーバーへ移った。player はエンジンを知らず、`GET /audio/<epoch>-<seq>.wav`
+ *   を叩くだけになったので、**シナリオのトリガも「エンジンの応答」から「音声 GET の応答」へ
+ *   移してある**（下の `AUDIO_BEHAVIOR`）。スタブのエンジンが要るのは、本物の server を
+ *   立てる ⑫ だけ。
+ *
  * 使い捨ての XDG_CONFIG_HOME を掘るので、実際の ~/.config/chatter-agent は汚さない。
  * 127.0.0.1 に bind するので macOS のローカルネットワーク許可ダイアログも出ない。
  */
 
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as http from "node:http";
-import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
+import {
+  check,
+  disposableRoot,
+  fail,
+  killAll,
+  makeWav,
+  requireBundles,
+  show,
+  sleep,
+  spawnLogged,
+  spawned,
+  summarize,
+  until,
+} from "./lib/harness.mjs";
 
 const CORE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = path.resolve(CORE, "..");
@@ -30,43 +48,15 @@ const SPEAKER_ID = 888753760;
 /** スタブが返す WAV の長さ。再生タイムアウトの導出に効く */
 const WAV_SECONDS = 0.2;
 
-for (const [label, file] of [
+requireBundles([
   ["player", PLAYER],
   ["server", SERVER],
   ["CLI", CLI],
-]) {
-  if (!fs.existsSync(file)) {
-    console.error(`${label} のバンドルがありません: ${file}\n先に core/ で npm run build を実行してください。`);
-    process.exit(1);
-  }
-}
-
-const failures = [];
-function check(label, ok, detail) {
-  if (!ok) failures.push(label);
-  const mark = ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m";
-  console.log(`${mark}  ${label}${detail && !ok ? `\n      ${detail}` : ""}`);
-}
-function show(title) {
-  console.log(`\n\x1b[1m--- ${title} ---\x1b[0m`);
-}
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-// 既定は広めに取る。CI（ubuntu）は手元より遅く、Node の初回起動と合成 2 往復が乗る
-async function until(predicate, timeoutMs = 10_000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (predicate()) return true;
-    await sleep(20);
-  }
-  return false;
-}
+]);
 
 // ── 使い捨てのランタイムルート ─────────────────────────────────────────────
 
-const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatter-agent-player-"));
-const runtime = path.join(root, "chatter-agent");
+const { root, runtime } = disposableRoot("player");
 const tmpDir = path.join(runtime, "player-tmp");
 const spoolDir = path.join(runtime, "spool");
 const queueDir = path.join(runtime, "speech");
@@ -74,35 +64,14 @@ fs.mkdirSync(spoolDir, { recursive: true });
 
 // ── スタブの合成エンジン ───────────────────────────────────────────────────
 
-/** 長さだけ正しい RIFF/PCM。player はここから再生タイムアウトを導く */
-function makeWav(seconds) {
-  const sampleRate = 24000;
-  const byteRate = sampleRate * 2;
-  const dataBytes = Math.round(byteRate * seconds);
-  const buf = Buffer.alloc(44 + dataBytes);
-  buf.write("RIFF", 0);
-  buf.writeUInt32LE(36 + dataBytes, 4);
-  buf.write("WAVE", 8);
-  buf.write("fmt ", 12);
-  buf.writeUInt32LE(16, 16);
-  buf.writeUInt16LE(1, 20);
-  buf.writeUInt16LE(1, 22);
-  buf.writeUInt32LE(sampleRate, 24);
-  buf.writeUInt32LE(byteRate, 28);
-  buf.writeUInt16LE(2, 32);
-  buf.writeUInt16LE(16, 34);
-  buf.write("data", 36);
-  buf.writeUInt32LE(dataBytes, 40);
-  return buf;
-}
-
 const WAV = makeWav(WAV_SECONDS);
 
 /**
- * text の中身で挙動を変える:
- *   FAIL を含む → 500（item 固有の失敗）
- *   HANG を含む → 応答を返さない（合成タイムアウト）
- *   SLOW を含む → 400ms 遅らせる（先読みの追い越しを作る）
+ * スタブの合成エンジン。**⑫（本物の server を通す end-to-end）でしか使わない。**
+ *
+ * ★ text の中身で挙動を変える分岐（`FAIL` / `HANG` / `SLOW`）は #29 で
+ *   スタブ**サーバー**の音声 HTTP 段（`createStubServer`）へ移した。ここに残しておくと
+ *   到達しないコードが2箇所に並ぶので置かない。
  */
 let engine;
 let engineUrl = "";
@@ -119,19 +88,9 @@ async function startEngine() {
     }
 
     if (url.pathname === "/audio_query") {
-      const text = url.searchParams.get("text") ?? "";
-      synthesized.push(text);
-      if (text.includes("FAIL")) {
-        res.writeHead(500);
-        res.end();
-        return;
-      }
-      if (text.includes("HANG")) return; // 応答しない
-      const delay = text.includes("SLOW") ? 400 : 0;
-      setTimeout(() => {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ accent_phrases: [] }));
-      }, delay);
+      synthesized.push(url.searchParams.get("text") ?? "");
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ accent_phrases: [] }));
       return;
     }
 
@@ -158,10 +117,52 @@ async function startEngine() {
 /**
  * 本物の `chatter-agent-server` の代わり。ack を直接観測でき、
  * 接続直後の同期送出や採番のやり直しを狙って作れる。
+ *
+ * ★ **WebSocket と音声の HTTP を同じポートに載せる。** 本物と同じ形にしておかないと、
+ *   クライアントが `ws://host:port` から `http://host:port` を導いている経路
+ *   （`player/audioFetcher.ts` の `deriveAudioBaseUrl`）が検証の外に出る。
+ *
+ * ★ 構築の順序も本物と同じ（http を作る → ws を載せる → listen）。逆順にすると
+ *   `listening` が既に発火済みで、ws がそれを転送できない。
  */
 function createStubServer() {
-  const wss = new WebSocketServer({ host: "127.0.0.1", port: 0 });
-  const state = { acks: [], connections: 0, sockets: [], onConnect: null };
+  const state = { acks: [], connections: 0, sockets: [], onConnect: null, audioRequests: [] };
+  /** `${epoch}:${seq}` → 送ったレコード。音声 GET の応答を text で決めるため */
+  const sent = new Map();
+
+  const httpServer = http.createServer((req, res) => {
+    const pathname = (req.url ?? "").split("?")[0];
+    const matched = /^\/audio\/(.+)-(\d{12})\.wav$/.exec(pathname);
+    if (!matched) {
+      res.writeHead(404).end();
+      return;
+    }
+
+    const key = `${matched[1]}:${Number(matched[2])}`;
+    state.audioRequests.push(key);
+    const record = sent.get(key);
+    if (!record) {
+      res.writeHead(404).end();
+      return;
+    }
+
+    // ★ トリガは text の中身。#29 より前は同じ規則をスタブ**エンジン**に置いていた
+    const text = record.text;
+    if (text.includes("FAIL")) return void res.writeHead(500).end();
+    if (text.includes("GONE")) return void res.writeHead(404).end();
+    if (text.includes("BUSY")) return void res.writeHead(503, { "retry-after": "1" }).end();
+    if (text.includes("HANG")) return; // 応答しない
+    setTimeout(
+      () => {
+        if (res.writableEnded) return;
+        res.writeHead(200, { "content-type": "audio/wav", "content-length": String(WAV.byteLength) });
+        res.end(WAV);
+      },
+      text.includes("SLOW") ? 400 : 0,
+    );
+  });
+
+  const wss = new WebSocketServer({ server: httpServer });
 
   wss.on("connection", (socket) => {
     state.connections++;
@@ -177,18 +178,25 @@ function createStubServer() {
     state.onConnect?.(socket, state.connections);
   });
 
+  const ready = new Promise((done) => httpServer.once("listening", done));
+  httpServer.listen(0, "127.0.0.1");
+
   return {
-    ready: new Promise((done) => wss.once("listening", done)),
-    url: () => `ws://127.0.0.1:${wss.address().port}`,
+    ready,
+    url: () => `ws://127.0.0.1:${httpServer.address().port}`,
     state,
     send: (record) => {
+      sent.set(`${record.epoch}:${record.seq}`, record);
       for (const socket of wss.clients) socket.send(JSON.stringify(record));
     },
     lastAck: () => (state.acks.length === 0 ? null : state.acks[state.acks.length - 1].seq),
     close: () =>
       new Promise((done) => {
         for (const socket of wss.clients) socket.terminate();
-        wss.close(done);
+        wss.close(() => {
+          httpServer.closeAllConnections();
+          httpServer.close(() => done());
+        });
       }),
   };
 }
@@ -201,7 +209,7 @@ let seqCounter = 0;
 let epoch = "stub-epoch-1";
 function record(text, overrides = {}) {
   seqCounter++;
-  return {
+  const merged = {
     epoch,
     seq: seqCounter,
     ts: new Date().toISOString(),
@@ -214,6 +222,15 @@ function record(text, overrides = {}) {
     emotion: "neutral",
     ...overrides,
   };
+  // ★ `overrides` を2度 spread しないこと。2度目は同じキーを上書きし直すだけで、
+  //   読み手は2つのオブジェクトを見比べないとそれに気づけない
+  return {
+    ...merged,
+    audio: overrides.audio ?? {
+      path: `/audio/${merged.epoch}-${String(merged.seq).padStart(12, "0")}.wav`,
+      format: "wav",
+    },
+  };
 }
 
 // ── player の起動 ──────────────────────────────────────────────────────────
@@ -224,26 +241,17 @@ function playerEnv(overrides = {}) {
   return {
     ...process.env,
     XDG_CONFIG_HOME: root,
-    CHATTER_AGENT_TTS_URL: engineUrl,
-    CHATTER_AGENT_TTS_SPEAKER_ID: String(SPEAKER_ID),
     CHATTER_AGENT_PLAYER_COMMAND: process.execPath,
     CHATTER_AGENT_PLAYER_ARGS: `${FAKE_PLAYER},{file}`,
-    CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS: "1000",
+    // ★ player はもうエンジンを知らない。音声は WebSocket と同じ authority から取る
+    CHATTER_AGENT_AUDIO_FETCH_TIMEOUT_MS: "1000",
     FAKE_PLAYER_LOG: playLog,
     ...overrides,
   };
 }
 
-const running = [];
-
 function startPlayer(env) {
-  const child = spawn(process.execPath, [PLAYER], { env, stdio: ["ignore", "pipe", "pipe"] });
-  const handle = { child, log: "", exited: null };
-  child.stdout.on("data", (d) => (handle.log += d));
-  child.stderr.on("data", (d) => (handle.log += d));
-  child.on("exit", (code) => (handle.exited = code ?? -1));
-  running.push(handle);
-  return handle;
+  return spawnLogged([PLAYER], { env, label: "player" });
 }
 
 /**
@@ -255,17 +263,12 @@ function startPlayer(env) {
 async function startReadyPlayer(env = playerEnv()) {
   fs.writeFileSync(playLog, "");
   const handle = startPlayer(env);
-  const ok = await until(() => handle.log.includes("[Player] 接続しました") || handle.exited !== null, 15_000);
-  if (!ok || handle.exited !== null) throw new Error(`player が接続しませんでした:\n${handle.log}`);
+  await handle.waitFor("[Player] 接続しました");
   return handle;
 }
 
 async function stopPlayer(handle) {
-  if (!handle || handle.exited !== null) return;
-  const dead = new Promise((done) => handle.child.once("exit", done));
-  handle.child.kill("SIGTERM");
-  await Promise.race([dead, sleep(4000)]);
-  if (handle.exited === null) handle.child.kill("SIGKILL");
+  await handle?.stop();
 }
 
 /** 鳴った順。ファイル名は `<epoch>-<ゼロ埋めした seq>.wav` */
@@ -280,7 +283,7 @@ function playedFiles() {
 }
 
 function cleanup() {
-  for (const handle of running) handle.child.kill("SIGKILL");
+  killAll();
   engine?.close();
   fs.rmSync(root, { recursive: true, force: true });
   // ★ 孫（fake-player）は `running` に居ない。player を SIGKILL すると
@@ -539,48 +542,112 @@ try {
   }
 
   {
-    show("⑪ エンジンが落ちていたら接続しない（バックログを消さない）");
+    show("⑪ ★ 503 が返り続けてもバックログを燃やさない（#29）");
+
+    // ★ #29 より前、ここは「エンジンが落ちていたら WebSocket に繋がない」だった。
+    //   合成の失敗が「1回リトライして捨てて ack」に流れるので、AivisSpeech を起動し
+    //   忘れたまま繋ぐと**溜まっていたキューが数百 ms で全部捨てられた**ためで、
+    //   接続そのものを止めるのが唯一の歯止めだった。
+    //
+    //   合成がサーバーへ移った今、player はエンジンの生死を知らない。歯止めは
+    //   **503（あとで取りに来い）を試行回数に数えない**ことへ移してある。
+    //   ここで ack が1つでも出たら、その entry はサーバー側のキューから消える。
     const stub = createStubServer();
     await stub.ready;
-    // 誰も listen していないポートをエンジンに指定する
-    const player = startPlayer(
-      playerEnv({ CHATTER_AGENT_PLAYER_SERVER_URL: stub.url(), CHATTER_AGENT_TTS_URL: "http://127.0.0.1:1" }),
-    );
+    const player = await startReadyPlayer(playerEnv({ CHATTER_AGENT_PLAYER_SERVER_URL: stub.url() }));
 
-    await sleep(1500);
-    check("★ Ready にならない", !player.log.includes("[Player] Ready"), player.log);
+    seqCounter = 0;
+    for (const text of ["BUSY いち。", "BUSY にい。", "BUSY さん。"]) stub.send(record(text));
+
+    // ★ **アサートする条件そのものを待つこと。** 以前は `audioRequests.length >= 4` で
+    //   待っていたが、`unavailableWarnAfter` は 5 で BUSY は3件なので、
+    //   その時点で警告が出ているとは限らなかった（ローカルでは 20ms のポーリング粒度の
+    //   おかげでたまたま通っていた）
+    const hinted = await until(() => player.log.includes("ttsSpeakerId"), 20_000);
     check(
-      "★ WebSocket に繋がない（繋げば発話が届いて捨てられる）",
-      stub.state.connections === 0,
-      `connections=${stub.state.connections}`,
+      "★ 503 の間も取り直し続け、設定を疑う手がかりを出す",
+      hinted,
+      `requests=${stub.state.audioRequests.length}\n${player.log}`,
     );
-    check("待っている理由を出す", player.log.includes("音声合成エンジンに繋がりません"), player.log);
+    check(
+      "★ ack を1つも出さない（出すとサーバー側のキューから消える）",
+      stub.state.acks.length === 0,
+      JSON.stringify(stub.state.acks),
+    );
+    check("何も鳴らない", played().length === 0, JSON.stringify(played()));
 
     await stopPlayer(player);
     await stub.close();
   }
 
   {
-    show("⑫ 本物の server と CLI を通したエンドツーエンド");
+    show("⑫ ★ audio を載せないサーバーに繋いだら、無音の理由を1行残す（#49 のレビュー B-1）");
+
+    // ★ **`ttsEnabled: false`（`"audio": null` が明示的に載る）と、#29 より前のサーバー
+    //   （`audio` キーが無い）を言い分ける。** 潰したままだと、後者は前者と区別なく
+    //   全文が無言で ack され、どちらの側にも1行も出ない。
+    //
+    // ★ **player は接続ごとに最初のフレームだけを見る**ので、2つのケースは
+    //   **別々の接続で**確かめること。1つの接続に並べると、2件目はラッチで
+    //   素通りするだけになり「警告しない」が何も証明しなくなる。
+    const stub = createStubServer();
+    await stub.ready;
+    seqCounter = 0;
+
+    // (1) 正常な設定（ttsEnabled: false）。**警告してはいけない** — 消す手段が無いため
+    const quiet = await startReadyPlayer(playerEnv({ CHATTER_AGENT_PLAYER_SERVER_URL: stub.url() }));
+    const silent = record("音声を用意しない設定の発言です。", { audio: null });
+    stub.send(silent);
+    check(
+      "音声を用意しない設定でも ack して進む",
+      await until(() => stub.lastAck() === silent.seq, 5000),
+      JSON.stringify(stub.state.acks),
+    );
+    check(
+      "★ 明示的な audio: null では警告しない（ttsEnabled: false は正常な設定）",
+      !quiet.log.includes("audio がありません"),
+      quiet.log,
+    );
+    await stopPlayer(quiet);
+
+    // (2) #29 より前のサーバー。同じ「無音」だが、こちらは理由を出す
+    const legacy = await startReadyPlayer(playerEnv({ CHATTER_AGENT_PLAYER_SERVER_URL: stub.url() }));
+    const undeclared = record("音声キーの無いフレームです。");
+    delete undeclared.audio; // JSON.stringify がキーごと落とす（＝ #29 より前のサーバーの形）
+    stub.send(undeclared);
+
+    check("★ 無音の理由がログに出る", await until(() => legacy.log.includes("audio がありません"), 10_000), legacy.log);
+    check(
+      "★ 挙動は変えない（それでも ack して次へ進む）",
+      await until(() => stub.lastAck() === undeclared.seq, 5000),
+      JSON.stringify(stub.state.acks),
+    );
+    check("どちらも音は鳴らない", played().length === 0, JSON.stringify(played()));
+
+    await stopPlayer(legacy);
+    await stub.close();
+  }
+
+  {
+    show("⑬ 本物の server と CLI を通したエンドツーエンド");
     const PORT = 18571;
     const chainEnv = {
       ...playerEnv(),
       CHATTER_AGENT_HOST: "127.0.0.1",
       CHATTER_AGENT_PORT: String(PORT),
+      // ★ #29 でエンジンを叩くのは **server**。ここだけスタブのエンジンが要る
+      CHATTER_AGENT_TTS_URL: engineUrl,
+      CHATTER_AGENT_TTS_SPEAKER_ID: String(SPEAKER_ID),
+      CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS: "2000",
     };
     // playerServerUrl は空のまま。host / port からの導出も一緒に確かめる
     delete chainEnv.CHATTER_AGENT_PLAYER_SERVER_URL;
 
-    const server = spawn(process.execPath, [SERVER], { env: chainEnv, stdio: ["ignore", "pipe", "pipe"] });
-    // ★ handle に繋ぐこと。別変数に溜めると、失敗時の一括出力（running を回る）に
-    //   出てこず、唯一の end-to-end シナリオが落ちたときに空のログしか読めない
-    const serverHandle = { child: server, log: "", exited: null };
-    running.push(serverHandle);
-    server.stdout.on("data", (d) => (serverHandle.log += d));
-    server.stderr.on("data", (d) => (serverHandle.log += d));
-    server.on("exit", (code) => (serverHandle.exited = code ?? -1));
-    const serverUp = await until(() => serverHandle.log.includes("[Server] Ready"));
-    if (!serverUp) throw new Error(`server が起動しませんでした:\n${serverHandle.log}`);
+    // ★ `spawnLogged` で起動すること。自前で spawn すると、失敗時の一括出力
+    //   （`spawned()` を回る）に出てこず、唯一の end-to-end シナリオが落ちたときに
+    //   空のログしか読めない
+    const server = spawnLogged([SERVER], { env: chainEnv, label: "server" });
+    await server.waitFor("[Server] Ready");
 
     const player = await startReadyPlayer(chainEnv);
 
@@ -603,37 +670,37 @@ try {
 
     const drained = await until(() => fs.readdirSync(queueDir).filter((f) => f.endsWith(".json")).length === 0, 5000);
     check("★ 喋り終えるたびに ack が飛び、配信キューが空になる", drained, JSON.stringify(fs.readdirSync(queueDir)));
+    // ★ **厳密一致にすること。** `>= 2` だと player が別に叩いていても通る。
+    //   ⑫ に入る時点で `synthesized` は空（①〜⑪ はスタブサーバーしか使わない）で、
+    //   期待は「1文につき1回」。player が独自に合成すれば 4 になる
+    check(
+      "★ 合成はサーバー側で1文につき1回だけ行われている",
+      synthesized.length === 2,
+      `synthesized=${JSON.stringify(synthesized)}`,
+    );
+    // ★ ログ（`[Player] engine: …`）を見るアサートは #49 で行ごと消えたので常に真だった。
+    //   バンドルの中身を見る。**`/audio_query` のような URL 断片は使えない** —
+    //   `config.ts` の docstring がその語を含み、`minify: false` なのでコメントごと載る
+    const playerBundle = fs.readFileSync(PLAYER, "utf-8");
+    check(
+      "★ player のバンドルに合成エンジンのクライアントが入っていない",
+      !playerBundle.includes("createVoicevoxClient"),
+      "createVoicevoxClient がバンドルに含まれています",
+    );
 
     await stopPlayer(player);
-    server.kill("SIGTERM");
-    await sleep(300);
-  }
-
-  show("結果");
-  if (failures.length > 0) {
-    console.log(`\x1b[31m${failures.length} 件失敗\x1b[0m`);
-    for (const handle of running) {
-      if (handle.log) console.log(`\nプロセスのログ:\n${handle.log}`);
-    }
-  } else {
-    console.log("\x1b[32mすべて PASS\x1b[0m");
+    await server.stop();
   }
 } catch (err) {
   console.error(err);
-  for (const handle of running) {
-    if (handle.log) console.error(`\nプロセスのログ:\n${handle.log}`);
-  }
-  failures.push("実行エラー");
+  fail("実行エラー");
 } finally {
   cleanup();
 }
 
-// ★ ここで `process.exitCode` に倒さないこと。この下でイベントループが空にならない
-//   （catch 経路では createStubServer() で立てた WebSocketServer が閉じられずに残る）ので、
-//   自然終了に任せるとプロセスがハングする。exit は保ったまま、書き込みの排出だけ待つ
-const exitCode = failures.length === 0 ? 0 : 1;
-// 上の診断ダンプ（プロセスのログ）は数百KBになりうる。macOS ではパイプへの書き込みが
-// 非同期なので、排出を待たずに exit すると64KiBで切れる（Linux と TTY は同期なので CI では起きない）
-await new Promise((resolve) => process.stdout.write("", resolve));
-await new Promise((resolve) => process.stderr.write("", resolve));
-process.exit(exitCode);
+await summarize(() =>
+  spawned()
+    .filter((handle) => handle.log)
+    .map((handle) => `${handle.label} のログ:\n${handle.log}`)
+    .join("\n\n"),
+);

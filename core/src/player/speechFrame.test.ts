@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hasSpeakableText, parseSpeechFrame } from "./speechFrame";
+import { isAudioUndeclared, parseSpeechFrame } from "./speechFrame";
 
 function frame(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
@@ -30,6 +30,7 @@ describe("parseSpeechFrame", () => {
       kind: "assistant",
       text: "こんにちは。",
       emotion: "happy",
+      audio: null,
     });
   });
 
@@ -91,39 +92,58 @@ describe("parseSpeechFrame", () => {
   });
 });
 
-describe("hasSpeakableText", () => {
-  it("文字があれば true", () => {
-    expect(hasSpeakableText("こんにちは。")).toBe(true);
-    expect(hasSpeakableText("OK")).toBe(true);
-    expect(hasSpeakableText("2026年")).toBe(true);
+describe("audio（#29）", () => {
+  it("音声の参照を読む", () => {
+    const audio = { path: "/audio/test-epoch-000000000001.wav", format: "wav" };
+    expect(parseSpeechFrame(frame({ audio }))?.audio).toEqual(audio);
   });
 
-  it("約物・空白だけなら false（文分割が作る「！」だけの断片）", () => {
-    // docs/core.md「既知の欠落」: すごい！！ → ["すごい！", "！"]
-    expect(hasSpeakableText("！")).toBe(false);
-    expect(hasSpeakableText("。。。")).toBe(false);
-    expect(hasSpeakableText("   ")).toBe(false);
-    expect(hasSpeakableText("")).toBe(false);
-    expect(hasSpeakableText("…")).toBe(false);
-    expect(hasSpeakableText("、")).toBe(false);
+  it("★ 絶対 URL を通さない（サーバーがクライアントを任意の外部ホストへ向かわせられる）", () => {
+    for (const path of [
+      "http://evil.example.com/audio/test-epoch-000000000001.wav",
+      "//evil.example.com/audio/test-epoch-000000000001.wav",
+      "/audio/../../etc/passwd",
+      "/etc/passwd",
+    ]) {
+      expect(parseSpeechFrame(frame({ audio: { path, format: "wav" } }))?.audio, path).toBeNull();
+    }
   });
 
-  it("読まれうる記号（単位・通貨）は true", () => {
-    expect(hasSpeakableText("℃")).toBe(true);
-    expect(hasSpeakableText("%")).toBe(true);
-    expect(hasSpeakableText("¥")).toBe(true);
-    expect(hasSpeakableText("$")).toBe(true);
+  it("読めない audio は null に倒す（フレームごと捨てない）", () => {
+    for (const audio of [null, "wav", 1, {}, { path: "/audio/test-epoch-000000000001.wav" }, { format: "wav" }]) {
+      expect(parseSpeechFrame(frame({ audio }))?.audio, JSON.stringify(audio)).toBeNull();
+    }
+    // フレームそのものは読めている
+    expect(parseSpeechFrame(frame({ audio: null }))?.seq).toBe(1);
   });
 
-  it("★ コードの断片だけの行は false（\\p{S} を丸ごと通すと届いてしまう）", () => {
-    // 文分割は `=>` や `^^` だけの断片を作ることがある。/audio_query は
-    // 空の WAV か 4xx を返すので、合成に出す前にここで落とす
-    expect(hasSpeakableText("=>")).toBe(false);
-    expect(hasSpeakableText("^^")).toBe(false);
-    expect(hasSpeakableText("```")).toBe(false);
-    expect(hasSpeakableText("+")).toBe(false);
-    expect(hasSpeakableText("~")).toBe(false);
-    expect(hasSpeakableText("<=")).toBe(false);
+  it("知らない format は通さない", () => {
+    const audio = { path: "/audio/test-epoch-000000000001.wav", format: "opus" };
+    expect(parseSpeechFrame(frame({ audio }))?.audio).toBeNull();
+  });
+});
+
+describe("isAudioUndeclared（#49 のレビュー B-1）", () => {
+  it("★ audio キーが無いフレームを見分ける（#29 より前のサーバー。全文が無言で ack される）", () => {
+    // `frame()` は audio を載せないので、そのままキー欠落のフレームになる
+    expect(isAudioUndeclared(frame())).toBe(true);
+  });
+
+  it("★ 明示的な audio: null では発火しない（ttsEnabled: false は正常な設定）", () => {
+    // ここが true になると、消す手段の無い警告が正常な設定に対して出続ける。
+    // サーバーは `{ ...record, audio }` を stringify するので、null でもキーは載る
+    expect(isAudioUndeclared(frame({ audio: null }))).toBe(false);
+  });
+
+  it("音声が載っているフレームでも発火しない", () => {
+    const audio = { path: "/audio/test-epoch-000000000001.wav", format: "wav" };
+    expect(isAudioUndeclared(frame({ audio }))).toBe(false);
+  });
+
+  it("読めないものは false（フレームごと捨てる経路が別に警告する）", () => {
+    for (const raw of ["not json", "", "[1,2,3]", "null", '"text"']) {
+      expect(isAudioUndeclared(raw), raw).toBe(false);
+    }
   });
 });
 

@@ -28,8 +28,8 @@ hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公�
 | ディレクトリ | 内容 | 状態 |
 |---|---|---|
 | `plugin/` | Claude Code プラグイン（bash hook） | **実装済み。** 実機で動作確認している |
-| `core/` | `chatter-agent-core`（CLI + WebSocket サーバー + 発話 CLI） | **実装済み。** `summarizer/`（AI要約、既定OFF）も含めて完了（[#31](https://github.com/schwarz9791/chatter-agent/issues/31)） |
-| `core/src/player/` | `chatter-agent-player`（WebSocket → AivisSpeech → 再生 → ack） | **実装済み**（[#11](https://github.com/schwarz9791/chatter-agent/issues/11)）。**プロトコルの参照実装。捨てない** |
+| `core/` | `chatter-agent-core`（CLI + WebSocket/HTTP サーバー + 発話 CLI） | **実装済み。** `summarizer/`（AI要約、既定OFF）と**サーバー合成**（[#29](https://github.com/schwarz9791/chatter-agent/issues/29)）も含めて完了 |
+| `core/src/player/` | `chatter-agent-player`（WebSocket → 音声を GET → 再生 → ack） | **実装済み**（[#11](https://github.com/schwarz9791/chatter-agent/issues/11)）。**プロトコルの参照実装。捨てない** |
 | `apps/chatter-mascot/` | 表示側アプリ（**Unity + UniVRM**。macOS 常駐 + Android XR を1プロジェクトで） | 未作成 |
 | `docs/` | 作業規約 | protocol / core / plugin / origin の4本 |
 | `.github/workflows/` | CI（typecheck / lint / format / bundle / test / verify） | 稼働中 |
@@ -60,6 +60,13 @@ hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公�
 **Phase B は完了している。** `npm run verify:phase-b` で実サーバーを起動した確認に加え、
 `npm run verify:player` が **hook → CLI → server → player** を通して音が鳴るところまで見ている。
 Unity 側（#12）は同じ契約を踏むので、player が「正しい挙動」の突き合わせ先になる。
+
+**音声合成はサーバー側に寄せた**（[#29](https://github.com/schwarz9791/chatter-agent/issues/29)）。
+クライアントは `GET /audio/<epoch>-<seq>.wav` を叩くだけで、エンジンを持たない。
+これで [#12](https://github.com/schwarz9791/chatter-agent/issues/12) の実装範囲から TTS と
+合成キューが落ち、[#25](https://github.com/schwarz9791/chatter-agent/issues/25) の
+実機確認項目6「音声経路の最終判断」も決まった。**#29 の実機確認（XR から、
+クライアント側にエンジンを置かずに音が出るか）は未実施。**
 
 **実機（AivisSpeech + afplay）でも音が出るところまで確認した。** 耳で聞いた限りの体感:
 
@@ -115,19 +122,22 @@ chatter-agent-speak (CLI)    ロックを取れた1プロセスだけが spool �
   ▼
 speech/<seq>.json            配信キュー。1文1ファイル
   ▼
-chatter-agent-server         キューを読んで WebSocket 配信。判断ロジックを持たない
-  ▲                          ack を受けたぶんを消す
+chatter-agent-server         キューを読んで WebSocket 配信（テキスト。即座に seq 順）
+  ▲  │                       ack を受けたぶんを消す
+  │  └──▶ GET /audio/<epoch>-<seq>.wav    **同じポート。** 取りに来られた時点で AivisSpeech に合成させる
   │ ack
-  ├──▶ chatter-agent-player  発話 CLI。AivisSpeech → afplay。**プロトコルの参照実装**
+  ├──▶ chatter-agent-player  発話 CLI。音声を GET → afplay。**プロトコルの参照実装**
   ▼
-chatter-mascot               表示側アプリ（Unity）。TTS → 再生 → VRM描画 / 表情 / モーション / リップシンク
+chatter-mascot               表示側アプリ（Unity）。再生 → VRM描画 / 表情 / モーション / リップシンク
 ```
 
-設計の芯は2つ。
+設計の芯は3つ。
 
 **「捕捉」と「加工」の分離。** hook は追記するだけで重い処理を一切しない。`MessageDisplay` の10秒タイムアウトと、UI をブロックしうるリスクの両方を、構造で回避している。
 
 **「記録」と「配信」の分離。** 1つのファイルに兼ねさせると、ローテートを跨ぐ差分読み取りが要り、読み手だけが際限なく複雑になる。分ければ順序はファイル名で決まり、消費は削除で表せる。契約は [`docs/protocol.md`](./docs/protocol.md)。
+
+**「テキストの配信」と「音声の受け渡し」の分離**（[#29](https://github.com/schwarz9791/chatter-agent/issues/29)）。テキストは今までどおり WebSocket で即座に流れ、音声はクライアントが必要になったときに HTTP で取りに行く。合成をサーバーへ寄せたのは **XR グラス（Android）に AivisSpeech を置けない**ため。**押し出す（サーバーが合成してから配る）のではなく引かせる**ことで、「誰も繋いでいない間は合成しない」「同じ文の合成は1回だけ」がサーバー側の判定コードなしに成立し、**エンジンが落ちてもテキストの配信が止まらない**（音声だけが 503 になるので、無音の原因がクライアント側に届く）。
 
 ## 絶対に守ること
 
@@ -237,6 +247,43 @@ PR #28 のレビューが**クライアント側5件のバグの根本原因**�
 - **アップグレードで epoch を変えない。** 採番が復旧できて epoch だけ読めないときは
   `"legacy"` を採る。ここで生成すると、アップグレードした瞬間に in-flight のキューが消える
 
+### 7. 音声はサーバーが押し出さず、クライアントが取りに行く
+
+合成は `GET /audio/<epoch>-<seq>.wav` が来たときに走る（[#29](https://github.com/schwarz9791/chatter-agent/issues/29)）。
+**テキストの配信は音声と独立していて、エンジンが落ちていても止まらない。**
+
+**逆にしないこと**（合成が終わってからフレームを配る形）。3つ同時に壊れる:
+
+1. **未配信のまま `trim` に食われる entry が出る。** head の合成が詰まっている間の発話が
+   一度も届かないまま、500件の上限で消える
+2. **無音の原因がクライアント側から診断できない。** エンジン停止＝フレームが1本も来ない、に
+   なり、「数十秒の無音は正常」（→ 1）と区別がつかない
+3. **テキストだけ使うクライアント**（字幕・表情）が、自分が使わない音声の完成を待たされる
+
+★ **`503`（あとで取りに来い）を「失敗」に数えないこと。** 数えると、エンジンを起動し忘れて
+いるだけで溜まっていた発話が数百 ms で全部 ack されて消える。
+→ [`docs/protocol.md`](./docs/protocol.md)「クライアント側の責務」8
+
+★ **合成のエラーを `404` に落とさないこと。** 「エンジンが 4xx を返したなら恒久的だから
+諦めさせる」は一見筋が通るが、`404` はクライアント側で ack まで通って**キューの本文を
+物理削除する**ので、設定を直しても復元できない（`503` のままなら直した瞬間に全部鳴る）。
+一番よくある恒久ミス（起動し忘れ / ポート違い / ホスト違い）はすべて transport なので
+1件も直らず、「恒久」の線引きも実質不可能（→ [PR #49](https://github.com/schwarz9791/chatter-agent/pull/49) のレビュー A-1）。
+**無音の原因は 404 ではなく診断で出す** — 合成が失敗するたびに話者一覧を取り直し、
+`ttsSpeakerId` の候補をログに並べる（`server/index.ts` の `recheckEngine`）。
+
+★ **応答の期限と合成の期限を混ぜないこと。** サーバーは `GET` の**応答**を
+`synthesisTimeoutMs` で打ち切って `503` を返すが、**合成は走らせたままにする**。
+single-flight なので終わればキャッシュに入り、取り直しが即 `200` になる。合成そのものを
+短く切ると、モデルロード中の1文目が永久に完成しない。この期限があるおかげで
+「クライアントの取得タイムアウトはサーバーの合成タイムアウトより長く」という
+**設定間の暗黙の順序制約が要らない**。
+
+★ **`prompt` を配信順で追い越させないこと。** #29 の Issue 本文にある
+「`prompt` は来た瞬間に単独で合成して割り込ませる」は**合成リクエストの優先度**の話で、
+Aivis Cloud のレート制限下でバッチングするとき（別 Issue）に効く要件。配信順を変えると
+[#33](https://github.com/schwarz9791/chatter-agent/issues/33) の逆転が再発する。
+
 ## ドキュメント索引
 
 | 文書 | 読むとき |
@@ -264,7 +311,8 @@ npm run build            # CLI → plugin/bin/、server と player → dist/
 
 npm run verify:phase-a   # spool → 記録 + 配信キュー（payload を実際の hook に食わせて確認）
 npm run verify:phase-b   # 配信キュー → WebSocket（実サーバーを起動して確認）
-npm run verify:player    # WebSocket → 合成 → 再生 → ack（エンジンも音も要らない。CI で回る）
+npm run verify:tts       # server の合成と GET /audio/（エンジンは要らない。CI で回る）
+npm run verify:player    # WebSocket → 音声取得 → 再生 → ack（エンジンも音も要らない。CI で回る）
 npm run start:server
 npm run start:player     # 耳で確認する。AivisSpeech を起動しておくこと
 ```
@@ -272,6 +320,8 @@ npm run start:player     # 耳で確認する。AivisSpeech を起動してお�
 **発話を耳で聞くには AivisSpeech.app を単体で起動する**（既定の接続先は `http://127.0.0.1:10101`）。
 cc-mascot が `--port 8564` で spawn するエンジンとは別物なので、そちらに繋ぐなら
 `CHATTER_AGENT_TTS_URL=http://127.0.0.1:8564` を渡す。
+★ **`tts*` を読むのは `chatter-agent-server` の方**（[#29](https://github.com/schwarz9791/chatter-agent/issues/29) で読み手が移った）。
+player 側には渡さなくてよい。
 
 **`plugin/bin/chatter-agent-speak.mjs` は git にコミットする成果物。** ソースを直したら
 `npm run build` してコミットすること（CI の `bundle` ジョブが一致を検証する）。

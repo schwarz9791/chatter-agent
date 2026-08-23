@@ -1,13 +1,17 @@
 #!/usr/bin/env node
 /**
- * `chatter-agent-server` — 配信キューを WebSocket で流す常駐プロセス。
+ * `chatter-agent-server` — 配信キューを WebSocket で流し、音声を HTTP で配る常駐プロセス。
  *
- * **判断ロジックを持たない**（docs/core.md）。何を配信済みとするか・ack をどう
- * クランプするかの判断は `dispatcher.ts` に出してある。ここには配線と終了処理しか置かない。
+ * **判断ロジックはここに置かない**（docs/core.md）。何を配信済みとするか・ack をどう
+ * クランプするかは `dispatcher.ts`、音声を作って持つかは `audioStore.ts` に出してある。
+ * ここには配線と終了処理しか置かない。
  *
  * 起動順は **ロック → bind → 古いキューの掃除 → poll**。ロックが最初なのは、
  * bind より後ろだと「2台目が別ポートで bind に成功し、1台目の未配信キューを
  * 巻き込む」窓が残るため（F 参照）。
+ *
+ * ★ **WebSocket と HTTP は同じポート。** `http.Server` を先に作り、`ws` を載せてから
+ *   listen する（順序の理由は `wsServer.ts`）。listen そのものは `createWsServer` が握る。
  */
 
 import * as fs from "fs";
@@ -16,7 +20,10 @@ import { createConfigStore } from "../core/config";
 import { acquireLock } from "../core/lock";
 import { getServerLockDir, getSpeechQueueDir } from "../core/paths";
 import { createSpeechQueue } from "../core/speechQueue";
+import { createVoicevoxClient, flattenStyles, hasStyle } from "../tts/voicevoxClient";
+import { createAudioStore } from "./audioStore";
 import { createDispatcher, type Dispatcher } from "./dispatcher";
+import { createAudioHttpServer } from "./httpServer";
 import { createWsServer } from "./wsServer";
 
 /**
@@ -64,6 +71,18 @@ const POLL_INTERVAL_MS = 50;
  * [#30]: https://github.com/schwarz9791/chatter-agent/issues/30
  */
 const STARTUP_KEEP_MS = 10_000;
+
+/**
+ * 合成が失敗したときに、エンジンの診断（話者一覧）を出し直す間隔。
+ *
+ * ★ 合成の失敗ごとに `listSpeakers` を叩くと、エンジンが落ちている間 1 req/s で
+ *   繋ぎに行き続けることになる。診断は「設定が変わった / エンジンが起きた」を
+ *   拾えれば十分なので、分単位で足りる。
+ */
+const ENGINE_RECHECK_INTERVAL_MS = 60_000;
+
+/** 話者が見つからないときに案内する候補の数 */
+const SPEAKER_HINT_LIMIT = 20;
 
 /**
  * 終了処理の1ステップを制限時間つきで実行する。
@@ -129,6 +148,54 @@ async function main(): Promise<void> {
   fs.mkdirSync(path.dirname(queueDir), { recursive: true });
   const queue = createSpeechQueue(queueDir);
 
+  // ★ 音声はプロセス内にしか持たない（`audioStore.ts`）。合成は GET が来たときに走るので、
+  //   誰も繋いでいない間はエンジンを一度も叩かない
+  //
+  // ★ **合成のたびに現在の config から組む。** config は参照のたびに mtime スタンプを見て
+  //   読み直す作りなので、起動時の1回きりで固定すると `ttsSpeakerId` を直しても
+  //   サーバーを再起動するまで効かない。無音の原因として真っ先に疑ってほしい値なので、
+  //   直したらすぐ効く方がよい（クライアント側の警告もそこを名指しする）。
+  //   クライアントの生成は object literal と closure だけなので、GET のたびに作って問題ない
+  const currentVoice = () => ({ baseUrl: config.get("ttsBaseUrl"), speakerId: config.get("ttsSpeakerId") });
+  const ttsFor = (voice: { baseUrl: string; speakerId: number }) =>
+    createVoicevoxClient({ ...voice, timeoutMs: config.get("synthesisTimeoutMs") });
+
+  /**
+   * 合成が失敗したときの診断。`ENGINE_RECHECK_INTERVAL_MS` に1回だけ実際に走る。
+   *
+   * ★ これが「無音の原因が分からない」への本命の答え。`ttsSpeakerId` を間違えていると、
+   *   ここが候補一覧を出す。エンジンが落ちているなら、繋がらない旨と `baseUrl` を出す。
+   */
+  let lastEngineCheckAt = Number.NEGATIVE_INFINITY;
+  const recheckEngine = async (): Promise<void> => {
+    if (!config.get("ttsEnabled")) return;
+    const now = Date.now();
+    if (now - lastEngineCheckAt < ENGINE_RECHECK_INTERVAL_MS) return;
+    lastEngineCheckAt = now;
+
+    const voice = currentVoice();
+    await checkEngine(ttsFor(voice), voice.speakerId);
+  };
+
+  const audioStore = createAudioStore({
+    currentVoice,
+    // ★ 声は `audioStore` が1回だけ解決したものを受け取る。ここで config を読み直すと、
+    //   キャッシュキーを決めた後・合成する前の書き換えで**別の声の WAV が入る**
+    synthesize: (text, voice) => ttsFor(voice).synthesize(text),
+  });
+
+  const httpServer = createAudioHttpServer({
+    store: audioStore,
+    // ★ 本文の権威はキュー。ack / trim で消えた entry の音声は作らない
+    lookup: (seq) => queue.read(seq),
+    allowedOrigins: config.get("allowedOrigins"),
+    disabled: () => !config.get("ttsEnabled"),
+    // GET を保留する上限。合成そのものの上限（`synthesisTimeoutMs`）とは別で、
+    // ここで打ち切っても合成は続き、終わればキャッシュに入る（→ httpServer.ts）
+    responseTimeoutMs: config.get("synthesisTimeoutMs"),
+    onSynthesisFailed: () => void recheckEngine(),
+  });
+
   // wsServer の onConnect / onAck から参照するが、生成は wsServer の後（下記）。
   // どちらのコールバックも実際の接続・メッセージが来るまで呼ばれないので、
   // bind が終わってから dispatcher を作っても間に合う
@@ -138,15 +205,25 @@ async function main(): Promise<void> {
   const wsServer = await createWsServer({
     host: config.get("host"),
     port: config.get("port"),
+    server: httpServer,
     allowedOrigins: config.get("allowedOrigins"),
     onConnect: (send) => dispatcher.catchUp(send),
     onAck: (seq, epoch) => dispatcher.ack(seq, epoch),
   });
 
-  dispatcher = createDispatcher({ queue, broadcast: (line) => wsServer.broadcast(line) });
+  dispatcher = createDispatcher({
+    queue,
+    broadcast: (line) => wsServer.broadcast(line),
+    audioEnabled: () => config.get("ttsEnabled"),
+  });
 
   const bound = wsServer.address();
   console.log(`[Server] listening on ws://${bound.host}:${bound.port}`);
+  if (config.get("ttsEnabled")) {
+    console.log(`[Server] audio: http://${bound.host}:${bound.port}/audio/ (engine: ${config.get("ttsBaseUrl")})`);
+  } else {
+    console.log("[Server] ttsEnabled=false: 音声は配りません（クライアントは無音で ack します）");
+  }
   if (bound.host === "0.0.0.0") {
     console.warn("[Server] 0.0.0.0 は無認証で LAN 全体に露出します。信頼できない網では host を 127.0.0.1 に");
   }
@@ -172,9 +249,19 @@ async function main(): Promise<void> {
 
   console.log("[Server] Ready");
 
+  // ★ **エンジンの疎通で起動を止めないこと。** テキストの配信は音声と独立している。
+  //   止めると、エンジンを起動し忘れているだけで発話そのものが1文も届かなくなり、
+  //   クライアント側からは「数十秒の無音は正常」と区別できない（docs/protocol.md）。
+  //   合成が要るタイミングで 503 を返す方が、原因が症状に出る。
+  //
+  // ★ 話者 ID の不一致は `/audio_query` の 4xx になり、全文が 503 になって**無音**になる。
+  //   症状から設定ミスに辿り着けないので、起動時に候補を並べておく。
+  void recheckEngine();
+
   installShutdown(async () => {
     clearInterval(poll);
-    await step("websocket server", () => wsServer.close());
+    // wsServer.close() は httpServer も閉じる（ws は options.server を閉じない → wsServer.ts）
+    await step("websocket / http server", () => wsServer.close());
     // ★ isStale() は所有印が読めるなら pid の生死だけで判定する（core/lock.ts）。
     //   このサーバーは常駐で staleMs（既定60秒）をとうに超えて動き続けるが、
     //   pid が生きている限り自分のロックを他プロセスに奪われることはない。
@@ -182,6 +269,37 @@ async function main(): Promise<void> {
     //   次回起動時の isStale() が即座に回収する
     serverLock.release();
   });
+}
+
+/**
+ * エンジンに繋がるか、話者 ID が実在するかを見る。**待たないし、止めない。**
+ * 結果はログに残すだけで、配信の判断は `GET /audio/…` のたびに行われる。
+ *
+ * ★ **起動時の1回だけにしないこと。** 起動時に `listSpeakers` が落ちると、そこで
+ *   early return するので**話者 ID の検査そのものが行われない**。
+ *   「player を先に立ち上げ、後から AivisSpeech を起動する」という最も普通の順序で
+ *   `ttsSpeakerId` の診断が永久に出なくなる — これが「無音なのにログが数行しかない」の真因。
+ *   合成が失敗するたびに呼び直す（間隔は `ENGINE_RECHECK_INTERVAL_MS` で間引く）。
+ */
+async function checkEngine(tts: ReturnType<typeof createVoicevoxClient>, speakerId: number): Promise<void> {
+  let speakers;
+  try {
+    speakers = await tts.listSpeakers();
+  } catch (err) {
+    console.warn(`[Server] 音声合成エンジンに繋がりません (${tts.baseUrl}): ${String(err)}`);
+    console.warn("[Server] 音声の GET は 503 を返します。テキストの配信は続きます");
+    return;
+  }
+
+  if (hasStyle(speakers, speakerId)) {
+    console.log(`[Server] 音声合成エンジンに繋がりました (${tts.baseUrl}, speaker=${speakerId})`);
+    return;
+  }
+
+  console.warn(`[Server] ttsSpeakerId=${speakerId} はこのエンジンに存在しません。音声は 503 になります`);
+  for (const style of flattenStyles(speakers).slice(0, SPEAKER_HINT_LIMIT)) {
+    console.warn(`[Server]   ${style.id}  ${style.label}`);
+  }
 }
 
 main().catch((err: unknown) => {

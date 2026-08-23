@@ -4,6 +4,8 @@
  * 以下はいずれも実際に踏んだ問題への対処なので、消さないこと:
  *
  * - `listening` するまで resolve しない（呼び出し側が監視を始める前に失敗を検知できる）
+ * - 外部の `http.Server` を渡されたら、**`listen()` はこちらで、`ws` を載せた後に呼ぶ**
+ *   （先に listen すると `listening` が既に発火済みで、Promise が永久に resolve しない）
  * - ping-pong で半開接続を落とす（Android が圏外に出ると TCP が半開のまま残る）
  * - タイマーは `unref()`（しないとイベントループが終了できない）
  * - `bufferedAmount` 超過はその接続を切る（フレームだけ捨てて繋ぎっぱなしにしない。詳細は sendTo 参照）
@@ -11,6 +13,7 @@
  * - socket に error ハンドラを必ず付ける（付けないと uncaught でプロセスごと落ちる）
  */
 
+import type * as http from "http";
 import { WebSocketServer } from "ws";
 import type { WebSocket } from "ws";
 import { isValidEpoch, type SpeechEpoch } from "../core/types";
@@ -26,6 +29,18 @@ export interface WsServer {
 export interface WsServerOptions {
   host: string;
   port: number;
+  /**
+   * 同じポートで HTTP も受けたいときに渡す（音声の `GET /audio/…`）。
+   *
+   * ★ **まだ `listen()` していないものを渡すこと。** `ws` は外部 server の
+   *   `listening` / `error` を転送するだけなので、先に listen されていると
+   *   この関数の Promise が**永久に resolve せず、エラーも出ずに起動が固まる**。
+   *
+   * ★ 渡した server の後始末も `close()` が行う。`ws` は `options.server` 指定時に
+   *   **http server を閉じない**（`_removeListeners()` するだけ）ので、
+   *   ここで閉じないとポートが解放されない。
+   */
+  server?: http.Server;
   /** 0 で無効化（テスト用） */
   heartbeatIntervalMs?: number;
   maxBufferedBytes?: number;
@@ -148,9 +163,11 @@ export function createWsServer(options: WsServerOptions): Promise<WsServer> {
   const maxBuffered = options.maxBufferedBytes ?? DEFAULT_MAX_BUFFERED_BYTES;
 
   return new Promise<WsServer>((resolve, reject) => {
+    const external = options.server;
     const wss = new WebSocketServer({
-      host: options.host,
-      port: options.port,
+      // 外部 server を渡すときは host/port を同時に渡せない（ws がバリデーションで弾く）。
+      // listen は下で、この構築が終わってから行う
+      ...(external ? { server: external } : { host: options.host, port: options.port }),
       maxPayload: MAX_PAYLOAD_BYTES,
       verifyClient: createVerifyClient(options.allowedOrigins ?? []),
     });
@@ -261,7 +278,11 @@ export function createWsServer(options: WsServerOptions): Promise<WsServer> {
             if (settled) return;
             settled = true;
             clearTimeout(hard);
-            done();
+            if (!external) return done();
+            // ★ `options.server` 指定時、ws は http server を閉じない。
+            //   音声を配っている最中の keep-alive 接続が残るので、明示的に切る
+            external.closeAllConnections();
+            external.close(() => done());
           };
 
           // close ハンドシェイクに応じないクライアントや、切断直後で OS がまだ掴んでいる
@@ -291,5 +312,9 @@ export function createWsServer(options: WsServerOptions): Promise<WsServer> {
     };
     wss.once("error", onStartupError);
     wss.once("listening", onListening);
+
+    // ★ 構築の**後**に listen する（このファイルのヘッダ参照）。内部 server のときは
+    //   WebSocketServer のコンストラクタが既に listen している
+    if (external) external.listen(options.port, options.host);
   });
 }

@@ -49,7 +49,7 @@ describe("poll", () => {
   it("未配信の entry を昇順に broadcast する", () => {
     queue.enqueue([record(2), record(1)]);
     const broadcast = vi.fn();
-    const dispatcher = createDispatcher({ queue, broadcast });
+    const dispatcher = createDispatcher({ queue, broadcast, audioEnabled: () => false });
 
     dispatcher.poll();
 
@@ -59,7 +59,7 @@ describe("poll", () => {
   it("同じ seq を二度 broadcast しない", () => {
     queue.enqueue([record(1)]);
     const broadcast = vi.fn();
-    const dispatcher = createDispatcher({ queue, broadcast });
+    const dispatcher = createDispatcher({ queue, broadcast, audioEnabled: () => false });
 
     dispatcher.poll();
     dispatcher.poll();
@@ -70,7 +70,7 @@ describe("poll", () => {
   it("★ 採番のやり直し: キューが空になった後、新しく振られた低い seq も配信する", () => {
     queue.enqueue([record(100), record(101)]);
     const broadcast = vi.fn();
-    const dispatcher = createDispatcher({ queue, broadcast });
+    const dispatcher = createDispatcher({ queue, broadcast, audioEnabled: () => false });
 
     dispatcher.poll();
     expect(seqsBroadcast(broadcast)).toEqual([100, 101]);
@@ -94,7 +94,7 @@ describe("poll", () => {
     queue.enqueue(records);
 
     const broadcast = vi.fn();
-    const dispatcher = createDispatcher({ queue, broadcast });
+    const dispatcher = createDispatcher({ queue, broadcast, audioEnabled: () => false });
     dispatcher.poll();
     expect(broadcast).toHaveBeenCalledTimes(101);
 
@@ -115,7 +115,7 @@ describe("poll", () => {
 
     const broadcast = vi.fn();
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const dispatcher = createDispatcher({ queue, broadcast });
+    const dispatcher = createDispatcher({ queue, broadcast, audioEnabled: () => false });
 
     dispatcher.poll();
     expect(seqsBroadcast(broadcast)).toEqual([1]); // seq=2 は飛ばされる
@@ -132,7 +132,7 @@ describe("poll", () => {
 describe("ack", () => {
   it("★ 配信済みの範囲に頭を押さえる: MAX_SAFE_INTEGER を投げても未配信は消えない", () => {
     queue.enqueue([record(1), record(2), record(3)]);
-    const dispatcher = createDispatcher({ queue, broadcast: vi.fn() });
+    const dispatcher = createDispatcher({ queue, broadcast: vi.fn(), audioEnabled: () => false });
     dispatcher.poll(); // 配信済みが seq 3 まで、という状態を作る
 
     // 4, 5 はまだ poll していない＝未配信
@@ -146,7 +146,7 @@ describe("ack", () => {
 
   it("配信済み分のみ消す", () => {
     queue.enqueue([record(1), record(2), record(3)]);
-    const dispatcher = createDispatcher({ queue, broadcast: vi.fn() });
+    const dispatcher = createDispatcher({ queue, broadcast: vi.fn(), audioEnabled: () => false });
     dispatcher.poll();
 
     dispatcher.ack(2);
@@ -156,7 +156,7 @@ describe("ack", () => {
 
   it("配信済みが無ければ何もしない", () => {
     queue.enqueue([record(1)]);
-    const dispatcher = createDispatcher({ queue, broadcast: vi.fn() });
+    const dispatcher = createDispatcher({ queue, broadcast: vi.fn(), audioEnabled: () => false });
     // poll していない＝まだ何も配信済みではない
 
     dispatcher.ack(1);
@@ -168,7 +168,7 @@ describe("ack", () => {
 describe("catchUp", () => {
   it("★ 配信済みのものだけを送る", () => {
     queue.enqueue([record(1), record(2), record(3)]);
-    const dispatcher = createDispatcher({ queue, broadcast: vi.fn() });
+    const dispatcher = createDispatcher({ queue, broadcast: vi.fn(), audioEnabled: () => false });
     dispatcher.poll(); // 1, 2, 3 を配信済みにする
 
     queue.enqueue([record(4)]); // まだ配信していない
@@ -184,7 +184,7 @@ describe("catchUp", () => {
 
   it("★ send が false を返したら打ち切り、その旨をログに出す", () => {
     queue.enqueue([record(1), record(2), record(3)]);
-    const dispatcher = createDispatcher({ queue, broadcast: vi.fn() });
+    const dispatcher = createDispatcher({ queue, broadcast: vi.fn(), audioEnabled: () => false });
     dispatcher.poll();
 
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -203,7 +203,7 @@ describe("catchUp", () => {
 
   it("完走したときは打ち切りの警告を出さない", () => {
     queue.enqueue([record(1), record(2)]);
-    const dispatcher = createDispatcher({ queue, broadcast: vi.fn() });
+    const dispatcher = createDispatcher({ queue, broadcast: vi.fn(), audioEnabled: () => false });
     dispatcher.poll();
 
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -221,7 +221,7 @@ describe("epoch（採番の世代。#29）", () => {
     queue.enqueue([record(1, "新1。", { epoch: E2, ts: "2026-08-16T00:00:00.000Z" })]);
     queue.enqueue([record(400, "旧400。")]);
     const broadcast = vi.fn();
-    const dispatcher = createDispatcher({ queue, broadcast });
+    const dispatcher = createDispatcher({ queue, broadcast, audioEnabled: () => false });
 
     dispatcher.poll();
 
@@ -234,7 +234,7 @@ describe("epoch（採番の世代。#29）", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     queue.enqueue([record(1, "新1。", { epoch: E2, ts: "2026-08-16T00:00:00.000Z" })]);
     queue.enqueue([record(400, "旧400。")]);
-    const dispatcher = createDispatcher({ queue, broadcast: vi.fn() });
+    const dispatcher = createDispatcher({ queue, broadcast: vi.fn(), audioEnabled: () => false });
     // 落ち着くまで回す（初回の世代解決と、旧世代を見送るための解決の空振り）
     dispatcher.poll();
     dispatcher.poll();
@@ -255,7 +255,7 @@ describe("epoch（採番の世代。#29）", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     queue.enqueue([record(1, "旧1。")]);
     const broadcast = vi.fn();
-    const dispatcher = createDispatcher({ queue, broadcast });
+    const dispatcher = createDispatcher({ queue, broadcast, audioEnabled: () => false });
     dispatcher.poll();
     expect(seqsBroadcast(broadcast)).toEqual([1]);
 
@@ -276,7 +276,7 @@ describe("epoch（採番の世代。#29）", () => {
   it("★ 旧世代の ack は無視する（まだ喋っていない新しい entry を消させない）", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     queue.enqueue([record(1), record(2)]);
-    const dispatcher = createDispatcher({ queue, broadcast: vi.fn() });
+    const dispatcher = createDispatcher({ queue, broadcast: vi.fn(), audioEnabled: () => false });
     dispatcher.poll();
 
     dispatcher.ack(2, E2);
@@ -288,7 +288,7 @@ describe("epoch（採番の世代。#29）", () => {
 
   it("世代を名乗らない ack は現世代のものとして扱う（契約上 epoch は任意）", () => {
     queue.enqueue([record(1), record(2)]);
-    const dispatcher = createDispatcher({ queue, broadcast: vi.fn() });
+    const dispatcher = createDispatcher({ queue, broadcast: vi.fn(), audioEnabled: () => false });
     dispatcher.poll();
 
     dispatcher.ack(2, null);
@@ -308,7 +308,7 @@ describe("epoch（採番の世代。#29）", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     queue.enqueue([record(1, "旧1。"), record(2, "旧2。"), record(3, "旧3。")]);
     const broadcast = vi.fn();
-    const dispatcher = createDispatcher({ queue, broadcast });
+    const dispatcher = createDispatcher({ queue, broadcast, audioEnabled: () => false });
 
     dispatcher.poll(); // 誰も繋いでいないので ack は来ない。3件とも delivered に入る
     expect(seqsBroadcast(broadcast)).toEqual([1, 2, 3]);
@@ -337,7 +337,7 @@ describe("epoch（採番の世代。#29）", () => {
     fs.writeFileSync(path.join(dir, "speech", "000000000001.json"), "not json");
     queue.enqueue([record(2, "旧2。")]);
     const broadcast = vi.fn();
-    const dispatcher = createDispatcher({ queue, broadcast });
+    const dispatcher = createDispatcher({ queue, broadcast, audioEnabled: () => false });
 
     dispatcher.poll();
     expect(seqsBroadcast(broadcast)).toEqual([2]);
@@ -351,7 +351,7 @@ describe("epoch（採番の世代。#29）", () => {
 
   it("★ [D-2] 世代が A → B → A と戻ったら、2回目の警告も出る", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const dispatcher = createDispatcher({ queue, broadcast: vi.fn() });
+    const dispatcher = createDispatcher({ queue, broadcast: vi.fn(), audioEnabled: () => false });
 
     queue.enqueue([record(1, "A1。")]);
     dispatcher.poll();
@@ -377,7 +377,7 @@ describe("epoch（採番の世代。#29）", () => {
   it("世代を乗り換えたら、旧世代について配信済みだった記憶を捨てる", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     queue.enqueue([record(1, "旧1。")]);
-    const dispatcher = createDispatcher({ queue, broadcast: vi.fn() });
+    const dispatcher = createDispatcher({ queue, broadcast: vi.fn(), audioEnabled: () => false });
     dispatcher.poll();
 
     queue.enqueue([record(9, "新9。", { epoch: E2, ts: "2026-08-16T00:00:00.000Z" })]);
@@ -392,5 +392,77 @@ describe("epoch（採番の世代。#29）", () => {
     //   entry を消すので採らなかった（→ dispatcher.ts の resolveGeneration）
     dispatcher.ack(1, E2);
     expect(queue.list()).toEqual([1, 9]);
+  });
+});
+
+describe("フレームの組み立て（audio。#29）", () => {
+  /** broadcast に渡された line をパースする */
+  function frames(broadcast: ReturnType<typeof vi.fn>): { seq: number; audio: unknown }[] {
+    return broadcast.mock.calls.map((call) => JSON.parse(call[0] as string) as { seq: number; audio: unknown });
+  }
+
+  it("audioEnabled なら音声の相対パスを載せる", () => {
+    queue.enqueue([record(42)]);
+    const broadcast = vi.fn();
+    createDispatcher({ queue, broadcast, audioEnabled: () => true }).poll();
+
+    expect(frames(broadcast)[0]?.audio).toEqual({ path: `/audio/${E1}-000000000042.wav`, format: "wav" });
+  });
+
+  it("★ 絶対 URL にしない（サーバーは自分がどのアドレスで到達されたか知らない）", () => {
+    queue.enqueue([record(1)]);
+    const broadcast = vi.fn();
+    createDispatcher({ queue, broadcast, audioEnabled: () => true }).poll();
+
+    const audio = frames(broadcast)[0]?.audio as { path: string };
+    expect(audio.path.startsWith("/audio/")).toBe(true);
+  });
+
+  it("ttsEnabled=false なら audio は null（テキストの配信は止めない）", () => {
+    queue.enqueue([record(1)]);
+    const broadcast = vi.fn();
+    createDispatcher({ queue, broadcast, audioEnabled: () => false }).poll();
+
+    expect(frames(broadcast)[0]?.audio).toBeNull();
+    expect(seqsBroadcast(broadcast)).toEqual([1]);
+  });
+
+  it("読み上げる中身が無い文には音声を載せない（約物だけの断片）", () => {
+    queue.enqueue([record(1, "！")]);
+    const broadcast = vi.fn();
+    createDispatcher({ queue, broadcast, audioEnabled: () => true }).poll();
+
+    expect(frames(broadcast)[0]?.audio).toBeNull();
+  });
+
+  it("config は実行中に読み直される（起動時の1回きりの値で固定しない）", () => {
+    queue.enqueue([record(1)]);
+    let enabled = false;
+    const broadcast = vi.fn();
+    const dispatcher = createDispatcher({ queue, broadcast, audioEnabled: () => enabled });
+    dispatcher.poll();
+    expect(frames(broadcast)[0]?.audio).toBeNull();
+
+    enabled = true;
+    queue.enqueue([record(2)]);
+    dispatcher.poll();
+    expect(frames(broadcast)[1]?.audio).not.toBeNull();
+  });
+
+  it("接続直後の追いつきも同じ組み立てを通る", () => {
+    queue.enqueue([record(1)]);
+    const dispatcher = createDispatcher({ queue, broadcast: vi.fn(), audioEnabled: () => true });
+    dispatcher.poll();
+
+    const sent: string[] = [];
+    dispatcher.catchUp((line) => {
+      sent.push(line);
+      return true;
+    });
+
+    expect((JSON.parse(sent[0]!) as { audio: unknown }).audio).toEqual({
+      path: `/audio/${E1}-000000000001.wav`,
+      format: "wav",
+    });
   });
 });

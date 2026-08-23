@@ -168,6 +168,13 @@ try {
     JSON.stringify(client.texts()),
   );
   check("seq が連続している", JSON.stringify(client.seqs()) === JSON.stringify([1, 2, 3]));
+  // ★ #29: 配信フレームには音声の**相対パス**が載る。絶対 URL にしないこと
+  //   （既定の bind 0.0.0.0 は接続先ではないので、LAN 越しのクライアントから繋がらない）
+  check(
+    "音声の相対パスが載っている",
+    client.frames().every((f) => typeof f.audio?.path === "string" && f.audio.path.startsWith(`/audio/${f.epoch}-`)),
+    JSON.stringify(client.frames().map((f) => f.audio)),
+  );
 
   show("② ack でキューが減る");
   console.log(`ack 前のキュー: ${queueSize()} 件`);

@@ -2,28 +2,32 @@
 /**
  * `chatter-agent-player` — 配信された発話を音にする常駐プロセス。
  *
- * **判断ロジックを持たない**（docs/core.md）。何をいつ合成し、いつ鳴らし、いつ ack するかは
+ * **判断ロジックを持たない**（docs/core.md）。何をいつ取りに行き、いつ鳴らし、いつ ack するかは
  * `playbackQueue.ts` に出してある。ここはコマンドを実行して結果をイベントとして戻すだけの
  * ドライバと、起動・終了の配線。
  *
- * 起動順は **ロック → 一時ディレクトリ → エンジン疎通 → 接続**。
+ * 起動順は **ロック → 一時ディレクトリ → 接続**。
  *
- * ★ エンジンに繋がるまで WebSocket を開かないこと。合成の失敗は「1回リトライして捨てて ack」
- *   なので、AivisSpeech を起動し忘れたまま player を先に立ち上げると、溜まっていたキューが
- *   数百 ms で全部捨てられる。繋いでいなければ発話は届かず、サーバー側のキューに残る。
+ * ★ #29 で**合成がサーバーへ移った**。`audio_query` → `synthesis` の2往復は
+ *   `GET /audio/<epoch>-<seq>.wav` の1往復になり、エンジンの場所を知る必要が無くなった。
+ *
+ * ★ 以前ここには「エンジンに繋がるまで WebSocket を開かない」という歯止めがあった。
+ *   起動し忘れたまま繋ぐと、失敗が「1回リトライして捨てて ack」に流れて**溜まっていた
+ *   キューが数百 ms で全部捨てられる**ためだった。その役目は
+ *   **503（あとで取りに来い）を試行回数に数えない**ことへ移してある
+ *   （→ `audioFetcher.ts` / `playbackQueue.ts` の `audioUnavailable`）。
  */
 
 import { createConfigStore } from "../core/config";
 import { acquireLock } from "../core/lock";
 import { getPlayerLockDir, getPlayerTmpDir } from "../core/paths";
+import { createAudioFetcher, deriveAudioBaseUrl } from "./audioFetcher";
 import { createAudioPlayer, playbackTimeoutMs } from "./audioPlayer";
 import { createSpeechClient, deriveServerUrl } from "./client";
 import type { SpeechClient } from "./client";
 import { createDefaultOptions, createPlaybackState, reduce } from "./playbackQueue";
 import type { PlaybackCommand, PlaybackEvent } from "./playbackQueue";
 import { parseSpeechFrame } from "./speechFrame";
-import { createVoicevoxClient, flattenStyles, hasStyle } from "./voicevoxClient";
-import type { Speaker } from "./voicevoxClient";
 
 /**
  * 終了処理の1ステップの制限時間。`server/index.ts` と同じ形で、どのリソースが閉じられなかったかを
@@ -36,17 +40,14 @@ import type { Speaker } from "./voicevoxClient";
 const SHUTDOWN_STEP_TIMEOUT_MS = 2_500;
 const SHUTDOWN_TIMEOUT_MS = 6_000;
 
-/** 古さの判定と stall watchdog を進めるためだけの間隔。キューは見に行かない（配信は push） */
+/**
+ * 古さの判定・stall watchdog・**503 のバックオフ**を進めるための間隔。
+ * キューは見に行かない（配信は push）。
+ *
+ * ★ `playbackQueue` の `audioRetryMs`（既定1秒）より短くないこと自体は問題ないが、
+ *   ここが長すぎると 503 からの復帰がその分だけ遅れる。
+ */
 const TICK_INTERVAL_MS = 5_000;
-
-/** エンジンの起動を待つ間隔。モデルのロードで数十秒かかることがある */
-const ENGINE_RETRY_MIN_MS = 1_000;
-const ENGINE_RETRY_MAX_MS = 15_000;
-
-/** 話者が見つからないときに案内する候補の数 */
-const SPEAKER_HINT_LIMIT = 5;
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function step(label: string, work: () => Promise<unknown>): Promise<void> {
   const deadline = new Promise<void>((resolve) => setTimeout(resolve, SHUTDOWN_STEP_TIMEOUT_MS).unref());
@@ -102,13 +103,14 @@ async function main(): Promise<void> {
 
   console.log(`[Player] config: ${config.filePath}`);
   console.log(`[Player] server: ${url}`);
-  console.log(`[Player] engine: ${config.get("ttsBaseUrl")} (speaker=${config.get("ttsSpeakerId")})`);
 
-  const tts = createVoicevoxClient({
-    baseUrl: config.get("ttsBaseUrl"),
-    speakerId: config.get("ttsSpeakerId"),
-    timeoutMs: config.get("synthesisTimeoutMs"),
+  // 音声は WebSocket と同じ authority から取る。サーバーは自分の到達アドレスを
+  // 知らないので、フレームには相対パスしか載らない（→ core/audioPath.ts）
+  const audioFetcher = createAudioFetcher({
+    baseUrl: deriveAudioBaseUrl(url),
+    timeoutMs: config.get("audioFetchTimeoutMs"),
   });
+  console.log(`[Player] audio: ${audioFetcher.baseUrl}/audio/`);
 
   const audio = createAudioPlayer({
     tmpDir,
@@ -126,18 +128,12 @@ async function main(): Promise<void> {
     seenCapacity: Math.max(config.get("speechQueueMaxEntries"), 512),
   });
 
-  let stopping = false;
   let client: SpeechClient | undefined;
   let tick: NodeJS.Timeout | undefined;
 
-  // ★ 終了処理の登録は `waitForEngine` より**前**に置くこと。後ろに置くと、`stopping` に書き込む
-  //   唯一の場所がこのクロージャなので `while (!stopping())` が実質 `while(true)` になり、
-  //   下の `if (stopping) return` も決して発火しない。さらに、エンジンを起動し忘れて待っている間
-  //   （ドキュメントが案内している順序）に Ctrl-C すると、シグナルハンドラがまだ存在しないので
-  //   `lock.release()` も `audio.cleanup()` も走らず、`player.lock/` と `player-tmp/` が残る。
-  //   `unhandledRejection` / `uncaughtException` のガードもその間ずっと不在になる
+  // ★ 接続より前に登録すること。ロックと一時ディレクトリを取った後に落ちると、
+  //   `player.lock/` と `player-tmp/` が残る
   installShutdown(async () => {
-    stopping = true;
     if (tick) clearInterval(tick);
     const socket = client;
     if (socket) await step("websocket client", () => socket.close());
@@ -146,9 +142,6 @@ async function main(): Promise<void> {
     audio.cleanup();
     lock.release();
   });
-
-  await waitForEngine(tts, config.get("ttsSpeakerId"), () => stopping);
-  if (stopping) return;
 
   /**
    * 再生タイムアウト。合成した WAV の実長から決まる。
@@ -179,8 +172,8 @@ async function main(): Promise<void> {
 
   function execute(command: PlaybackCommand): void {
     switch (command.kind) {
-      case "synthesize":
-        void synthesize(command.epoch, command.seq, command.text);
+      case "fetchAudio":
+        void fetchAudio(command.epoch, command.seq, command.path);
         break;
       case "play":
         void play(command.epoch, command.seq, command.file);
@@ -206,19 +199,42 @@ async function main(): Promise<void> {
     }
   }
 
-  async function synthesize(epoch: number, seq: number, text: string): Promise<void> {
+  async function fetchAudio(epoch: number, seq: number, audioPath: string): Promise<void> {
+    let result;
     try {
-      const wav = await tts.synthesize(text);
+      result = await audioFetcher.fetchAudio(audioPath);
+    } catch (err) {
+      // fetchAudio は自分で握るので通常ここには来ない。来たら試行回数を消費する側に倒す
+      dispatch({ kind: "audioFailed", epoch, seq, reason: err instanceof Error ? err.message : String(err) });
+      return;
+    }
+
+    // ★ 503 と 404 を「失敗」に混ぜないこと。混ぜると `synthesisAttempts` が数 ms で
+    //   燃え尽き、エンジンが落ちているだけでバックログが全部捨てられる
+    if (result.kind === "unavailable") {
+      dispatch({ kind: "audioUnavailable", epoch, seq, reason: result.reason });
+      return;
+    }
+    if (result.kind === "gone") {
+      dispatch({ kind: "audioGone", epoch, seq, reason: result.reason });
+      return;
+    }
+    if (result.kind === "failed") {
+      dispatch({ kind: "audioFailed", epoch, seq, reason: result.reason });
+      return;
+    }
+
+    try {
       // ★ WAV を書き終えてから Map に入れること。`write` が投げる（ENOSPC、終了処理で
       //   一時dir が消える）と item は `file === null` で done に落ち、`discardFile` が
       //   出ないので、先に set していたエントリが**永久に残る**
-      const file = audio.write(epoch, seq, wav);
+      const file = audio.write(epoch, seq, result.wav);
       // ★ 再生のタイムアウトは WAV の実長から決める。固定値だと長文が切れるか、
       //   ハングを見逃すかのどちらかになる
-      playbackTimeouts.set(timeoutKey(epoch, seq), playbackTimeoutMs(wav));
-      dispatch({ kind: "synthesized", epoch, seq, file });
+      playbackTimeouts.set(timeoutKey(epoch, seq), playbackTimeoutMs(result.wav));
+      dispatch({ kind: "audioReady", epoch, seq, file });
     } catch (err) {
-      dispatch({ kind: "synthesisFailed", epoch, seq, reason: err instanceof Error ? err.message : String(err) });
+      dispatch({ kind: "audioFailed", epoch, seq, reason: err instanceof Error ? err.message : String(err) });
     }
   }
 
@@ -241,48 +257,6 @@ async function main(): Promise<void> {
   tick = setInterval(() => dispatch({ kind: "tick" }), TICK_INTERVAL_MS);
 
   console.log("[Player] Ready");
-}
-
-/**
- * エンジンに繋がるまで待ち、話者 ID の存在を確かめる。
- *
- * ★ ここで待つのが「起動し忘れでバックログを全部捨てる」事故への唯一の歯止め。
- * ★ 話者 ID の不一致は `/audio_query` の 4xx になり、全文が捨てられて**無音**になる。
- *   症状から設定ミスに辿り着けないので、起動時に候補を並べる。
- */
-async function waitForEngine(
-  tts: ReturnType<typeof createVoicevoxClient>,
-  speakerId: number,
-  stopping: () => boolean,
-): Promise<void> {
-  let delay = ENGINE_RETRY_MIN_MS;
-  let warned = false;
-  let speakers: Speaker[] | null = null;
-
-  while (!stopping()) {
-    try {
-      speakers = await tts.listSpeakers();
-      break;
-    } catch (err) {
-      if (!warned) {
-        warned = true;
-        console.warn(`[Player] 音声合成エンジンに繋がりません (${tts.baseUrl}): ${String(err)}`);
-        console.warn("[Player] 繋がるまで待ちます。AivisSpeech を起動してください");
-      }
-      await sleep(delay);
-      delay = Math.min(delay * 2, ENGINE_RETRY_MAX_MS);
-    }
-  }
-
-  if (!speakers) return;
-  if (warned) console.log("[Player] 音声合成エンジンに繋がりました");
-
-  if (hasStyle(speakers, speakerId)) return;
-
-  console.warn(`[Player] 話者 ID ${speakerId} がこのエンジンにありません。合成は失敗し、無音になります`);
-  const hints = flattenStyles(speakers).slice(0, SPEAKER_HINT_LIMIT);
-  for (const hint of hints) console.warn(`[Player]   ${hint.id}  ${hint.label}`);
-  console.warn("[Player] config.json の ttsSpeakerId か CHATTER_AGENT_TTS_SPEAKER_ID で指定してください");
 }
 
 main().catch((err: unknown) => {

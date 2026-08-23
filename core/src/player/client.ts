@@ -5,6 +5,7 @@
  */
 
 import { WebSocket } from "ws";
+import type { SpeechEpoch } from "../core/types";
 
 /** 初回の再接続待ち。ここから倍々に伸ばす */
 const BACKOFF_MIN_MS = 500;
@@ -45,8 +46,14 @@ export interface SpeechClientOptions {
 
 export interface SpeechClient {
   start(): void;
-  /** 累積 ack。短時間に何度呼んでも、最大値が1回だけ飛ぶ */
-  ack(seq: number): void;
+  /**
+   * 累積 ack。短時間に何度呼んでも、最大値が1回だけ飛ぶ。
+   *
+   * `epochId` はサーバーが名乗っている採番の世代。**間引きの間に世代が変わったら
+   * 溜めていたぶんは捨てる** — 旧世代の ack を新しいサーバーへ打つと、`ackUpTo` が
+   * まだ喋っていない entry を消す。
+   */
+  ack(seq: number, epochId: SpeechEpoch): void;
   /**
    * まだ送っていない ack を捨てる。
    *
@@ -82,7 +89,7 @@ export function createSpeechClient(options: SpeechClientOptions): SpeechClient {
   let reconnectTimer: NodeJS.Timeout | null = null;
   let watchdog: NodeJS.Timeout | null = null;
   let ackTimer: NodeJS.Timeout | null = null;
-  let pendingAck: number | null = null;
+  let pendingAck: { seq: number; epochId: SpeechEpoch } | null = null;
   let openedAt = 0;
 
   function backoffMs(): number {
@@ -116,9 +123,9 @@ export function createSpeechClient(options: SpeechClientOptions): SpeechClient {
     //   直後にソケットが CLOSING（`close` イベントがまだ届いていない）だったケースで、
     //   ack が client 側からも reducer 側からも消えて復旧手段が無くなる
     if (socket?.readyState !== WebSocket.OPEN) return;
-    const seq = pendingAck;
+    const { seq, epochId } = pendingAck;
     pendingAck = null;
-    socket.send(JSON.stringify({ type: "spoken", seq }));
+    socket.send(JSON.stringify({ type: "spoken", seq, epoch: epochId }));
   }
 
   function scheduleReconnect(): void {
@@ -209,8 +216,12 @@ export function createSpeechClient(options: SpeechClientOptions): SpeechClient {
       connect();
     },
 
-    ack(seq) {
-      pendingAck = pendingAck === null ? seq : Math.max(pendingAck, seq);
+    ack(seq, epochId) {
+      // 世代が変わったら、間引きバッファに残っている旧世代のぶんは捨てて置き換える
+      pendingAck =
+        pendingAck === null || pendingAck.epochId !== epochId
+          ? { seq, epochId }
+          : { seq: Math.max(pendingAck.seq, seq), epochId };
       if (ackTimer) return;
       // 接続直後の追いつきでは、消費済みの再送が最大 500 件まとめて届く。
       // 累積 ack なので、その塊に対して打つべき ack は最大値の1回だけ

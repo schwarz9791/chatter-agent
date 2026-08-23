@@ -45,6 +45,7 @@ afterEach(() => {
 
 function record(seq: number, text = `文${seq}。`): SpeechRecord {
   return {
+    epoch: "test-epoch",
     seq,
     ts: "2026-08-15T00:00:00.000Z",
     source: "claude-code",
@@ -109,7 +110,7 @@ describe("enqueue", () => {
     // writeFileSync（tmp への書き込み）が終わった直後・renameSync の前というタイミングで
     // read() を呼び、まだ最終ファイルとしては見えないことを確認する。素の writeFileSync で
     // 直接最終ファイルへ書く実装だと、この時点で既に読めてしまい fail する
-    let seenDuringWrite: string | null | undefined;
+    let seenDuringWrite: SpeechRecord | null | undefined;
     const q = queue();
 
     vi.mocked(fs.writeFileSync).mockImplementation((...args: Parameters<typeof fs.writeFileSync>) => {
@@ -189,10 +190,11 @@ describe("list", () => {
 });
 
 describe("read", () => {
-  it("そのまま配信できる1行を返す", () => {
+  it("パース済みのレコードを返す", () => {
     const q = queue();
     q.enqueue([record(1, "あ。")]);
-    expect(JSON.parse(q.read(1)!)).toMatchObject({ seq: 1, text: "あ。" });
+    // ★ 配信側は epoch を見て世代を判定し、正規化した内容を組み直して流すので、中身が要る
+    expect(q.read(1)).toMatchObject({ epoch: "test-epoch", seq: 1, text: "あ。" });
   });
 
   it("無ければ null", () => {
@@ -216,6 +218,37 @@ describe("read", () => {
     // ファイル名は seq=1 だが、中身は seq=2 のレコード（壊れた・手で置かれたファイルを想定）
     fs.writeFileSync(path.join(queueDir, "000000000001.json"), `${JSON.stringify(record(2))}\n`);
     expect(q.read(1)).toBeNull();
+  });
+
+  it("★ [B-1] epoch が無い entry は legacy として読む（epoch 導入前の in-flight）", () => {
+    // 未 ack の entry を残したままアップグレードすると起こる。ここで弾くと、
+    // ワイヤ上で epoch 無しのフレームになり**クライアントが全部捨てて何も喋らない**
+    const q = queue();
+    const { epoch: _dropped, ...withoutEpoch } = record(1, "あ。");
+    fs.writeFileSync(path.join(queueDir, "000000000001.json"), `${JSON.stringify(withoutEpoch)}\n`);
+
+    expect(q.read(1)).toMatchObject({ epoch: "legacy", seq: 1, text: "あ。" });
+  });
+
+  it("★ [C-3] epoch が載っているのに形が違うなら null（世代の判定に食わせる値なので）", () => {
+    const q = queue();
+    for (const [i, epoch] of [{}, 123, "", "../../etc/passwd", "a".repeat(65)].entries()) {
+      const seq = i + 1;
+      const name = `${String(seq).padStart(12, "0")}.json`;
+      fs.writeFileSync(path.join(queueDir, name), `${JSON.stringify({ ...record(seq), epoch })}\n`);
+      expect(q.read(seq), JSON.stringify(epoch)).toBeNull();
+    }
+  });
+
+  it("★ [C-3] ts が日付として読めないなら null（字句比較で世代が永久に勝つのを防ぐ）", () => {
+    // `ts: "z"` ひとつで `"z" > "2026-…"` になり、その世代が永久に勝つ
+    const q = queue();
+    for (const [i, ts] of ["z", "", 7, null, "not a date"].entries()) {
+      const seq = i + 1;
+      const name = `${String(seq).padStart(12, "0")}.json`;
+      fs.writeFileSync(path.join(queueDir, name), `${JSON.stringify({ ...record(seq), ts })}\n`);
+      expect(q.read(seq), JSON.stringify(ts)).toBeNull();
+    }
   });
 
   it("壊れたファイルを消したりはしない（判断は呼び出し側に残す）", () => {
@@ -338,6 +371,48 @@ describe("trim", () => {
     const q = queue();
     q.enqueue([record(1), record(2)]);
     expect(q.trim(0)).toBe(2);
+  });
+});
+
+describe("clear", () => {
+  it("全部消して件数を返す", () => {
+    const q = queue();
+    q.enqueue([record(1), record(2), record(3)]);
+
+    expect(q.clear()).toBe(3);
+    expect(q.list()).toEqual([]);
+  });
+
+  it("空のキューでは 0", () => {
+    expect(queue().clear()).toBe(0);
+  });
+
+  it("★ 採番のやり直しで trim が壊れる形を、clear が解く", () => {
+    const q = queue();
+    // 旧世代が未 ack で残っているところに、採番がやり直されて 1 から書き直された状態
+    q.enqueue([record(400), record(401)]);
+    q.enqueue([record(1), record(2)]);
+
+    // trim は seq 昇順で捨てるので、この状態では**今書いた新しい方から**消える
+    const stale = queue();
+    stale.trim(2);
+    expect(stale.list()).toEqual([400, 401]);
+
+    // clear してから書けば、その倒錯が起きない
+    const q2 = queue();
+    q2.clear();
+    q2.enqueue([record(1), record(2)]);
+    expect(q2.trim(2)).toBe(0);
+    expect(q2.list()).toEqual([1, 2]);
+  });
+
+  it("キュー以外のファイルは消さない", () => {
+    const q = queue();
+    q.enqueue([record(1)]);
+    fs.writeFileSync(path.join(dir, "notes.txt"), "x");
+
+    q.clear();
+    expect(fs.existsSync(path.join(dir, "notes.txt"))).toBe(true);
   });
 });
 

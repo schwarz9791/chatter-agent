@@ -523,6 +523,28 @@ function writeFileAtomic(filePath, data) {
 }
 
 //#endregion
+//#region src/core/types.ts
+/** `epoch` として通す形。**パスと URL に載るので、ここを緩めないこと** */
+const EPOCH_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+function isValidEpoch(value) {
+	return typeof value === "string" && EPOCH_PATTERN.test(value);
+}
+/**
+* `epoch` がまだ無かった頃に書かれた記録・配信キュー entry に与える値。
+*
+* ★ **`epoch` が読めないからといってランダムな値を生成しないこと。** 生成すると
+*   **アップグレードした瞬間に「採番がやり直された」と読まれる**。サーバーは旧 epoch の
+*   entry を配信しなくなり、CLI は次の publish でキューを空にするので、in-flight の発話が
+*   丸ごと消える。採番が続いている以上、epoch も続いていると見なすのが正しい。
+*
+* ★ **1箇所で定義すること。** 記録側（`core/speechLog.ts` の `reconcile`）と
+*   キュー側（`core/speechQueue.ts` の `read`）が別々の値を使うと、
+*   「ログ由来の legacy」と「キュー由来の legacy」が別世代として扱われ、
+*   ここで防ごうとしているバグをそのまま再生産する。
+*/
+const LEGACY_EPOCH = "legacy";
+
+//#endregion
 //#region src/core/speechLog.ts
 /**
 * `speech.jsonl` への追記・ローテート・`seq` 採番。
@@ -538,49 +560,105 @@ function writeFileAtomic(filePath, data) {
 */
 /** 末尾から seq を拾うために読むバイト数。1行はたかだか数KBなのでこれで足りる */
 const TAIL_READ_BYTES = 65536;
-/** ファイル末尾の有効な行から seq を拾う。読めなければ 0 */
-function readLastSeq(filePath) {
+/**
+* 新しい採番世代の識別子を作る。
+*
+* ★ **`crypto` を top-level import しないこと。** `import { randomUUID } from "crypto"` は
+*   静的 ESM import なので、`chatter-agent-speak` の起動を**毎 delta 約2.6ms** 重くする
+*   （issue #43 の実測。CLI は hook から毎 delta 起動される）。ここは `speech.state.json` が
+*   無いときの1回きりの経路なので、**分岐の中で `globalThis.crypto` を触る**なら
+*   その1回しか払わない。
+*
+* 要求は「採番がやり直されるたびに違う値になること」だけで、順序も暗号学的性質も要らない。
+* ただし **URL に載る**（`/audio/<epoch>-<seq>.wav`）ので、推測しにくい方が望ましい
+* — ブラウザの `<audio src>` は `Origin` を送らず、サーバーの Origin 検査を素通りする。
+*/
+function generateEpoch() {
+	const uuid = globalThis.crypto?.randomUUID?.();
+	if (isValidEpoch(uuid)) return uuid;
+	throw new Error("globalThis.crypto.randomUUID がありません（Node 24.11 以上が必要です）");
+}
+/**
+* ファイル末尾の有効な行から `seq` と `epoch` を拾う。読めなければ `{ seq: 0, epoch: null }`。
+*
+* `seq` は**最後の有効行**から採る。`epoch` はその行に無ければ**同じファイルの中でさらに
+* 遡って**探す。
+*
+* ★ **ファイルを跨いで組を作らないこと。** `speech.jsonl` と `speech.1.jsonl` から
+*   別々に拾うと、別の世代の `seq` と `epoch` がペアになる。
+*
+* ★ **同一ファイル内で遡るのは安全。** 1つの `speech.jsonl` に2つの世代は入らない
+*   （epoch が変わる条件は state とログの**両方**が消えることで、そのとき新しいログは
+*   空から始まる）。逆に、遡らないと**新しい CLI の後に古い CLI を一度走らせた**だけで
+*   （ロールバック / bisect）本物の epoch が `LEGACY_EPOCH` に降格し、接続中の
+*   クライアントが「採番のやり直し」と読んで**既に喋った発話をもう一度喋る**。
+*/
+function readLastEntry(filePath) {
+	const none = {
+		seq: 0,
+		epoch: null
+	};
 	let fd;
 	try {
 		fd = fs.openSync(filePath, "r");
 	} catch {
-		return 0;
+		return none;
 	}
 	try {
 		const size = fs.fstatSync(fd).size;
-		if (size === 0) return 0;
+		if (size === 0) return none;
 		const length = Math.min(size, TAIL_READ_BYTES);
 		const buffer = Buffer.allocUnsafe(length);
 		fs.readSync(fd, buffer, 0, length, size - length);
 		const lines = buffer.toString("utf-8").split("\n");
+		let lastSeq = null;
 		for (let i = lines.length - 1; i >= 0; i--) {
 			const line = lines[i]?.trim();
 			if (!line) continue;
+			let parsed;
 			try {
-				const parsed = JSON.parse(line);
-				if (typeof parsed === "object" && parsed !== null) {
-					const seq = parsed.seq;
-					if (typeof seq === "number" && Number.isSafeInteger(seq)) return seq;
-				}
-			} catch {}
+				parsed = JSON.parse(line);
+			} catch {
+				continue;
+			}
+			if (typeof parsed !== "object" || parsed === null) continue;
+			const { seq, epoch } = parsed;
+			if (lastSeq === null && typeof seq === "number" && Number.isSafeInteger(seq)) lastSeq = seq;
+			if (lastSeq === null) continue;
+			if (isValidEpoch(epoch)) return {
+				seq: lastSeq,
+				epoch
+			};
 		}
-		return 0;
+		return lastSeq === null ? none : {
+			seq: lastSeq,
+			epoch: null
+		};
 	} finally {
 		fs.closeSync(fd);
 	}
 }
-function readStateNextSeq(statePath) {
+function readState(statePath) {
 	try {
 		const parsed = JSON.parse(fs.readFileSync(statePath, "utf-8"));
 		if (typeof parsed === "object" && parsed !== null) {
-			const next = parsed.nextSeq;
-			if (typeof next === "number" && Number.isSafeInteger(next) && next >= 1) return next;
+			const { nextSeq, epoch } = parsed;
+			return {
+				nextSeq: typeof nextSeq === "number" && Number.isSafeInteger(nextSeq) && nextSeq >= 1 ? nextSeq : 1,
+				epoch: isValidEpoch(epoch) ? epoch : null
+			};
 		}
 	} catch {}
-	return 1;
+	return {
+		nextSeq: 1,
+		epoch: null
+	};
 }
-function writeStateNextSeq(statePath, nextSeq) {
-	writeFileAtomic(statePath, `${JSON.stringify({ nextSeq })}\n`);
+function writeState(statePath, nextSeq, epoch) {
+	writeFileAtomic(statePath, `${JSON.stringify({
+		nextSeq,
+		epoch
+	})}\n`);
 }
 function createSpeechLog(deps) {
 	const { logPath, statePath, maxBytes } = deps;
@@ -593,13 +671,44 @@ function createSpeechLog(deps) {
 	* クラッシュで両者がずれると、seq の重複（クライアントの欠落検出が壊れる）か
 	* 欠番（欠落の誤検知）になる。どちらに転んでも直せるよう、大きい方を採る。
 	* ローテート直後は現世代が空なので、その場合だけ1世代前も見る。
+	*
+	* epoch も同じ2つの情報源から拾う。**「採番がやり直された」と「epoch が変わった」を
+	* 一致させる**のがここの唯一の仕事:
+	*
+	* - どちらかから epoch が読めた → そのまま使う（採番は続いている）
+	* - epoch は読めないが seq は復旧できた → `LEGACY_EPOCH`（アップグレードの初回。
+	*   ここで生成すると in-flight の発話が消える。→ `LEGACY_EPOCH` のコメント）
+	* - どちらも復旧できなかった（`nextSeq === 1`）→ **やり直しなので新規生成**
 	*/
 	function reconcile() {
-		let lastSeq = readLastSeq(logPath);
-		if (lastSeq === 0) lastSeq = readLastSeq(backupPath);
-		return Math.max(readStateNextSeq(statePath), lastSeq + 1);
+		const state = readState(statePath);
+		const current = readLastEntry(logPath);
+		const backup = current.seq === 0 || current.epoch === null ? readLastEntry(backupPath) : {
+			seq: 0,
+			epoch: null
+		};
+		const last = current.seq === 0 ? backup : current;
+		const next = Math.max(state.nextSeq, last.seq + 1);
+		const known = state.epoch ?? current.epoch ?? backup.epoch;
+		if (known !== null) return {
+			nextSeq: next,
+			epoch: known,
+			epochIsNew: false
+		};
+		if (next > 1) return {
+			nextSeq: next,
+			epoch: LEGACY_EPOCH,
+			epochIsNew: false
+		};
+		return {
+			nextSeq: next,
+			epoch: generateEpoch(),
+			epochIsNew: true
+		};
 	}
-	let nextSeq = reconcile();
+	const initial = reconcile();
+	let nextSeq = initial.nextSeq;
+	const epoch = initial.epoch;
 	/** 退避は1世代だけ。前の退避は上書きされる */
 	function rotate() {
 		if (fs.existsSync(logPath)) fs.renameSync(logPath, backupPath);
@@ -635,11 +744,14 @@ function createSpeechLog(deps) {
 		}
 	}
 	return {
+		epoch,
+		epochIsNew: initial.epochIsNew,
 		peekNextSeq: () => nextSeq,
 		append(entries) {
 			if (entries.length === 0) return [];
 			const ts = now().toISOString();
 			const records = entries.map((entry) => ({
+				epoch,
 				seq: nextSeq++,
 				ts,
 				source: entry.source,
@@ -658,7 +770,7 @@ function createSpeechLog(deps) {
 			}
 			const payload = endsWithNewline(size) ? body : `\n${body}`;
 			fs.appendFileSync(logPath, payload);
-			writeStateNextSeq(statePath, nextSeq);
+			writeState(statePath, nextSeq, epoch);
 			return records;
 		}
 	};
@@ -741,6 +853,18 @@ function createSpeechQueue(queueDir) {
 			return false;
 		}
 	}
+	/**
+	* まとめて消して、消せた件数を返す。
+	*
+	* ★ `trim`（上限の頭打ち）と `clear`（世代交代の後始末）で**削除の意味づけは違う**が、
+	*   消し方は同じ。ここを1本にしておかないと、削除のしかたを変えるとき
+	*   （例: `.tmp` も一緒に掃除する）に同期すべき経路が2つになる。
+	*/
+	function removeAll(targets) {
+		let removed = 0;
+		for (const { fileName } of targets) if (remove(fileName)) removed++;
+		return removed;
+	}
 	return {
 		enqueue(records) {
 			let written = 0;
@@ -774,8 +898,15 @@ function createSpeechQueue(queueDir) {
 				return null;
 			}
 			if (typeof parsed !== "object" || parsed === null) return null;
-			if (parsed.seq !== seq) return null;
-			return line;
+			const record = parsed;
+			if (record.seq !== seq) return null;
+			if (typeof record.ts !== "string" || Number.isNaN(Date.parse(record.ts))) return null;
+			if (record.epoch === void 0 || record.epoch === null) return {
+				...record,
+				epoch: LEGACY_EPOCH
+			};
+			if (!isValidEpoch(record.epoch)) return null;
+			return record;
 		},
 		ackUpTo(upTo) {
 			if (!Number.isSafeInteger(upTo) || upTo < 0) return 0;
@@ -805,9 +936,10 @@ function createSpeechQueue(queueDir) {
 			const all = listSeqs();
 			const excess = all.length - maxEntries;
 			if (excess <= 0) return 0;
-			let removed = 0;
-			for (const { fileName } of all.slice(0, excess)) if (remove(fileName)) removed++;
-			return removed;
+			return removeAll(all.slice(0, excess));
+		},
+		clear() {
+			return removeAll(listSeqs());
 		},
 		sweepTmp() {
 			let fileNames;
@@ -1776,7 +1908,39 @@ function createSummaryPipeline(deps) {
 /** 記録と配信の両方に書く。記録できた時点で「出した」が確定する */
 function createPublisher(deps) {
 	const { speechLog, speechQueue, maxEntries } = deps;
+	/**
+	* 採番がやり直された（`speech.state.json` と `speech.jsonl` の両方が消えた）ときの後始末。
+	*
+	* ★ **消すのは書き手の責務。** サーバー側では「どちらの世代が新しいか」を決められない
+	*   — やり直し直後のキューは `1(新) 2(新) … 400(旧)` になり、`list()` は seq 昇順なので
+	*   新しい世代が**先頭**に来る。ファイル名からもディレクトリの走査順からも判定できない。
+	*
+	* ★ **`append` より前に呼ぶこと。** `append` はキューに触れないので順序の制約は
+	*   「`enqueue` より前」だけだが、`append` の後ろに置くと**その隙間で kill された
+	*   ときに掃除が永久に走らなくなる** — `append` は新しい epoch を
+	*   `speech.state.json` に永続化するので、次のプロセスは `epochIsNew === false` に
+	*   なる。CLI は hook から毎 delta デタッチ起動されるので、kill は日常的に起きる。
+	*
+	* ★ **フラグは成功したときだけ立てること。** `clear()` が throw したのに立てると、
+	*   そのプロセスでも次のプロセスでも（state は既に書かれている）再試行されない。
+	*
+	* ★ 消さずに放置すると `speechQueue.trim` が壊れる。`trim` は seq 昇順で捨てるので、
+	*   旧世代の大きい seq が残っている限り**新しい entry から先に消され続け、
+	*   その状態から自然に抜け出せない**（`server/dispatcher.ts` の `delivered` のコメント）。
+	*/
+	let staleQueueCleared = !speechLog.epochIsNew;
+	function clearStaleQueue() {
+		if (staleQueueCleared) return;
+		try {
+			const stale = speechQueue.clear();
+			staleQueueCleared = true;
+			if (stale > 0) console.error(`[chatter-agent-speak] 採番がやり直されたため、旧世代の配信キュー ${stale} 件を捨てました`);
+		} catch (err) {
+			console.error("[chatter-agent-speak] 旧世代の配信キューの掃除に失敗しました:", err);
+		}
+	}
 	return (entries) => {
+		clearStaleQueue();
 		const records = speechLog.append(entries);
 		try {
 			const written = speechQueue.enqueue(records);

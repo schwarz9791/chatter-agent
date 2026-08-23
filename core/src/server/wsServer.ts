@@ -13,6 +13,7 @@
 
 import { WebSocketServer } from "ws";
 import type { WebSocket } from "ws";
+import { isValidEpoch, type SpeechEpoch } from "../core/types";
 
 export interface WsServer {
   /** 接続中の全クライアントへ送る */
@@ -45,8 +46,11 @@ export interface WsServerOptions {
    * クライアントが「seq N まで喋った」と言ってきたときに呼ぶ。
    *
    * 累積 ack なので、1つ落ちても次で自己修復する。`seq` は**非負の安全整数**しか渡らない。
+   *
+   * `epoch` は**任意フィールド**。名乗らなければ `null` が渡る（→ docs/protocol.md）。
+   * どの世代の ack かを見るのは呼び出し側（`dispatcher.ack`）の仕事。
    */
-  onAck?: (seq: number) => void;
+  onAck?: (seq: number, epoch: SpeechEpoch | null) => void;
 }
 
 const DEFAULT_HEARTBEAT_MS = 30_000;
@@ -68,12 +72,24 @@ const CLOSE_GRACE_MS = 2_000;
 const MAX_PAYLOAD_BYTES = 4 * 1024;
 
 /**
- * `{"type":"spoken","seq":N}` から `seq` を読む。読めなければ null。
+ * `{"type":"spoken","seq":N,"epoch":"…"}` から `seq` と `epoch` を読む。読めなければ null。
  *
  * ★ ここはクライアント由来の入力。**通す値を絞ること。** 受け取った `seq` は
  *   ファイル名から読んだ値との比較にしか使わず、パスの組み立てには使わない。
+ *
+ * ★ `epoch` は**任意**。省略は「世代を名乗らない」で、`epoch: null` として通す
+ *   （契約に無かった頃のクライアントを黙って無音にしないため）。ただし**載っているのに
+ *   形が違うものは通さない** — 世代の判定に使う値なので、緩めると旧世代の ack が
+ *   すり抜けて、まだ喋っていない entry がキューから消える。
+ *
+ * ★ **JSON の `null` は「省略」と同じ扱いにすること。** 未設定の optional を明示的な
+ *   `null` にするのは Unity の `JsonUtility`、多くの C# シリアライザ、Go の
+ *   `encoding/json`（ポインタ）、Python の `json.dumps(None)` の既定で、
+ *   **この契約が想定している Unity クライアント（#12）そのもの**が踏む。
+ *   ここで弾くと ack ごと捨てられ、症状は「キューが上限に張り付いて、
+ *   どちらの側にもエラーが出ない」になる。
  */
-export function parseAck(raw: string): number | null {
+export function parseAck(raw: string): { seq: number; epoch: SpeechEpoch | null } | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -82,12 +98,16 @@ export function parseAck(raw: string): number | null {
   }
 
   if (typeof parsed !== "object" || parsed === null) return null;
-  const { type, seq } = parsed as { type?: unknown; seq?: unknown };
+  const { type, seq, epoch } = parsed as { type?: unknown; seq?: unknown; epoch?: unknown };
 
   if (type !== "spoken") return null;
   if (typeof seq !== "number" || !Number.isSafeInteger(seq) || seq < 0) return null;
 
-  return seq;
+  // `undefined`（省略）と `null`（明示的に「無い」）を同じに扱う
+  if (epoch === undefined || epoch === null) return { seq, epoch: null };
+  if (!isValidEpoch(epoch)) return null;
+
+  return { seq, epoch };
 }
 
 /**
@@ -167,14 +187,26 @@ export function createWsServer(options: WsServerOptions): Promise<WsServer> {
       socket.on("close", (code) => console.log(`[WS] Disconnected: ${peer} code=${code}`));
 
       if (options.onAck) {
+        // ★ 読めない ack を**無言で捨てないこと。** 捨てられた ack はキューを減らさないので、
+        //   症状は「上限まで溜まって古い方から捨てられ続ける」になり、
+        //   契約どおりのつもりのクライアントが弾かれても原因に辿り着く手がかりが残らない。
+        //   ただし1接続につき1回で足りる（壊れたクライアントは同じ形を送り続ける）
+        let warnedBadAck = false;
+
         socket.on("message", (data) => {
-          const seq = parseAck(String(data));
-          // 知らない形は黙って捨てる。maxPayload 超過はそもそもここに来ない（MAX_PAYLOAD_BYTES 参照）
-          if (seq === null) return;
+          const ack = parseAck(String(data));
+          // 知らない形は捨てる。maxPayload 超過はそもそもここに来ない（MAX_PAYLOAD_BYTES 参照）
+          if (ack === null) {
+            if (!warnedBadAck) {
+              warnedBadAck = true;
+              console.warn(`[WS] 読めない ack を捨てました (${peer}): ${String(data).slice(0, 120)}`);
+            }
+            return;
+          }
           // 隣の onConnect と同じ理由。ここで投げると message イベント経由の uncaught になり
           // サーバーごと落ちる
           try {
-            options.onAck?.(seq);
+            options.onAck?.(ack.seq, ack.epoch);
           } catch (err) {
             console.error("[WS] onAck failed:", err);
           }

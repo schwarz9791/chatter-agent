@@ -738,8 +738,9 @@ function processMessage(
   const sharedEmotion = summarized ? deps.classify(sentences.join("\n")) : null;
 
   // ★ メッセージ1つ分をまとめて1回だけ publish すること。分けて呼ぶと `ts` が割れる
-  //   （`speechLog.append` は呼び出しごとに1回だけ時刻を取る）。クライアントは
-  //   `(seq, ts)` で重複排除する契約なので、`ts` の同値性は契約の一部（docs/protocol.md）
+  //   （`speechLog.append` は呼び出しごとに1回だけ時刻を取る）。1メッセージ内で
+  //   `ts` が同値になることは「発話の粒度」の契約の一部（docs/protocol.md）。
+  //   重複排除のキーは `(epoch, seq)` で、`ts` はそこには使わない
   if (spoken.length > 0) {
     deps.publish(
       spoken.map((text): SpeechEntry => ({

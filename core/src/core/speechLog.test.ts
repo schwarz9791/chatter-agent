@@ -60,8 +60,10 @@ describe("append", () => {
   });
 
   it("契約どおりのフィールドを持つ", () => {
-    log().append([entry("確認します。")]);
+    const l = log();
+    l.append([entry("確認します。")]);
     expect(readLines()[0]).toEqual({
+      epoch: l.epoch,
       seq: 1,
       ts: "2026-08-15T00:00:00.000Z",
       source: "claude-code",
@@ -144,6 +146,127 @@ describe("seq の state 整合", () => {
     expect(lines).toHaveLength(4);
     expect(lines[2]).toBe('{"seq":3,"ts":"2026');
     expect((JSON.parse(lines[3]!) as SpeechRecord).seq).toBe(3);
+  });
+});
+
+describe("epoch — 採番のやり直しと一対一", () => {
+  it("state もログも残っていれば epoch は変わらない", () => {
+    const first = log();
+    first.append([entry("あ。")]);
+
+    const second = log();
+    expect(second.epoch).toBe(first.epoch);
+    expect(second.epochIsNew).toBe(false);
+  });
+
+  it("1回の append の中では全レコードが同じ epoch を持つ", () => {
+    const l = log();
+    const records = l.append([entry("あ。"), entry("い。"), entry("う。")]);
+    expect(records.map((r) => r.epoch)).toEqual([l.epoch, l.epoch, l.epoch]);
+  });
+
+  it("state を消してもログ末尾から epoch を拾う（採番が続くなら epoch も続く）", () => {
+    const first = log();
+    first.append([entry("あ。")]);
+    fs.rmSync(statePath);
+
+    const second = log();
+    expect(second.epoch).toBe(first.epoch);
+    expect(second.epochIsNew).toBe(false);
+  });
+
+  it("★ state もログも消えたら epoch が変わり、epochIsNew が立つ", () => {
+    const first = log();
+    first.append([entry("あ。")]);
+    fs.rmSync(statePath);
+    fs.rmSync(logPath);
+
+    const second = log();
+    expect(second.epoch).not.toBe(first.epoch);
+    expect(second.epochIsNew).toBe(true);
+    // 採番もやり直されている（epoch 変化と一対一）
+    expect(second.append([entry("い。")])[0]?.seq).toBe(1);
+  });
+
+  it("何も無いところから始めたら epochIsNew が立つ", () => {
+    expect(log().epochIsNew).toBe(true);
+  });
+
+  it("★ 採番が復旧できて epoch だけ無いなら legacy を採る（アップグレードで世代を変えない）", () => {
+    // この機能より前に書かれた state とログ（epoch フィールドが無い）
+    fs.writeFileSync(logPath, `${JSON.stringify({ seq: 4, ts: "2026-08-15T00:00:00.000Z", text: "あ。" })}\n`);
+    fs.writeFileSync(statePath, JSON.stringify({ nextSeq: 5 }));
+
+    const l = log();
+    expect(l.epoch).toBe("legacy");
+    // ★ ここが true になると、アップグレードした瞬間に in-flight のキューが捨てられる
+    expect(l.epochIsNew).toBe(false);
+    expect(l.append([entry("い。")])[0]?.seq).toBe(5);
+  });
+
+  it("state に epoch があればそちらを使う", () => {
+    fs.writeFileSync(logPath, `${JSON.stringify({ epoch: "from-log", seq: 1, ts: "t" })}\n`);
+    fs.writeFileSync(statePath, JSON.stringify({ nextSeq: 2, epoch: "from-state" }));
+    expect(log().epoch).toBe("from-state");
+  });
+
+  it("charset から外れた epoch は読まなかったことにする（パスと URL に載るため）", () => {
+    fs.writeFileSync(statePath, JSON.stringify({ nextSeq: 2, epoch: "../../etc/passwd" }));
+    fs.writeFileSync(logPath, `${JSON.stringify({ epoch: "ok-1", seq: 1, ts: "t" })}\n`);
+    expect(log().epoch).toBe("ok-1");
+  });
+
+  it("★ 末尾行に epoch が無ければ、同じファイルの中で遡って探す", () => {
+    // 新しい CLI が書いた行の後ろに、古い CLI（epoch を書かない）の行が足された状態。
+    // ロールバックや bisect で起こる。ここで legacy に降格させると、接続中の
+    // クライアントが「採番のやり直し」と読んで**既に喋った発話をもう一度喋る**
+    fs.writeFileSync(
+      logPath,
+      `${JSON.stringify({ epoch: "gen-a", seq: 1, ts: "t" })}\n${JSON.stringify({ seq: 2, ts: "t" })}\n`,
+    );
+
+    const l = log();
+    expect(l.epoch).toBe("gen-a");
+    expect(l.epochIsNew).toBe(false);
+    // seq は**最後の有効行**から採る（epoch を見つけた行の seq ではない）
+    expect(l.peekNextSeq()).toBe(3);
+  });
+
+  it("★ ファイルを跨いで seq と epoch のペアを作らない", () => {
+    // 退避側に旧世代、現世代は epoch を持たない行だけ、という組み合わせでも
+    // seq は現世代の末尾から採る
+    fs.writeFileSync(path.join(dir, "speech.1.jsonl"), `${JSON.stringify({ epoch: "gen-old", seq: 3, ts: "t" })}\n`);
+    fs.writeFileSync(logPath, `${JSON.stringify({ seq: 9, ts: "t" })}\n`);
+
+    const l = log();
+    expect(l.peekNextSeq()).toBe(10);
+    // 現世代から epoch が拾えないので退避側を見る。採番は続いているので世代も続く扱い
+    expect(l.epoch).toBe("gen-old");
+    expect(l.epochIsNew).toBe(false);
+  });
+
+  it("どこからも epoch が拾えず、採番だけ復旧できたら legacy", () => {
+    fs.writeFileSync(logPath, `${JSON.stringify({ seq: 4, ts: "t" })}\n`);
+
+    const l = log();
+    expect(l.epoch).toBe("legacy");
+    expect(l.epochIsNew).toBe(false);
+    expect(l.peekNextSeq()).toBe(5);
+  });
+
+  it("ローテート直後（現世代が空）でも、退避したファイルの末尾から epoch を拾う", () => {
+    const first = log({ maxBytes: 400 });
+    first.append([entry("あ".repeat(100))]);
+    first.append([entry("い。")]); // ここでローテートが起きる
+
+    // 現世代を空にして「ローテート直後」を作る。state も消して、退避側だけが情報源の状態にする
+    fs.writeFileSync(logPath, "");
+    fs.rmSync(statePath);
+    expect(fs.existsSync(path.join(dir, "speech.1.jsonl"))).toBe(true);
+
+    const second = log();
+    expect(second.epoch).toBe(first.epoch);
+    expect(second.epochIsNew).toBe(false);
   });
 });
 

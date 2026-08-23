@@ -29,7 +29,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { writeFileAtomic } from "./atomicWrite";
-import type { SpeechRecord } from "./types";
+import { isValidEpoch, LEGACY_EPOCH, type SpeechRecord } from "./types";
 
 /** ファイル名の桁数。`ls` で並べたときに順序が見えるよう固定幅にする */
 const SEQ_DIGITS = 12;
@@ -41,14 +41,41 @@ export interface SpeechQueue {
   enqueue(records: SpeechRecord[]): number;
   /** `seq` 昇順。中身は読まない */
   list(): number[];
-  /** その seq の1行。読めない・空・JSON でない・payload の seq がファイル名と食い違うなら null */
-  read(seq: number): string | null;
+  /**
+   * その seq のレコード。読めなければ null。
+   *
+   * 通す条件は4つ: JSON として読める / `seq` がファイル名と一致する /
+   * `epoch` が `isValidEpoch`（**欠落だけは `LEGACY_EPOCH` に正規化**）/
+   * `ts` が `Date.parse` できる。
+   *
+   * ★ **`epoch` と `ts` の検証を落とさないこと。** `server/dispatcher.ts` は
+   *   この2つで採番の世代を判断する。素通しにすると、手で置いた
+   *   `{"seq":5,"epoch":{},"ts":7}` ひとつで**毎 poll キュー全体を再 broadcast する
+   *   二重発話ループ**に入る（オブジェクトの同一性比較は常に不一致、
+   *   文字列と数値の比較は常に偽になるため）。
+   *
+   * ★ **行のままではなくパースして返す。** `epoch` の正規化を配信に乗せるには
+   *   組み直しが要る（行のまま流すと、正規化前の epoch 無しフレームがワイヤに出て
+   *   クライアントに全部弾かれる）。
+   */
+  read(seq: number): SpeechRecord | null;
   /** `seq <= upTo` を消す。消した件数を返す */
   ackUpTo(upTo: number): number;
   /** mtime が `maxAgeMs` より古い entry を消す。落ちている間に書かれた分だけを捨てるためのもの */
   dropOlderThan(maxAgeMs: number, now?: number): number;
   /** 件数が上限を超えていたら、古い方から捨てる。捨てた件数を返す */
   trim(maxEntries: number): number;
+  /**
+   * キューを空にする。消した件数を返す。
+   *
+   * ★ **採番がやり直されたときに、書き手（CLI）がロック下で呼ぶためのもの。**
+   *   旧世代の entry を残すと `trim` が壊れる — `trim` は seq 昇順で捨てるが、
+   *   やり直し直後は**新しく書かれた seq 1..N が最小**なので、**今書いたばかりの
+   *   新しい entry から先に消える**（`server/dispatcher.ts` の `delivered` のコメント参照）。
+   *   「どちらの世代が新しいか」はファイル名からもディレクトリの走査順からも決まらないので、
+   *   epoch を知っている書き手が消すしかない。
+   */
+  clear(): number;
   /** 落ちた enqueue が残した `.tmp` を消す。消した件数を返す */
   sweepTmp(): number;
 }
@@ -102,6 +129,21 @@ export function createSpeechQueue(queueDir: string): SpeechQueue {
     }
   }
 
+  /**
+   * まとめて消して、消せた件数を返す。
+   *
+   * ★ `trim`（上限の頭打ち）と `clear`（世代交代の後始末）で**削除の意味づけは違う**が、
+   *   消し方は同じ。ここを1本にしておかないと、削除のしかたを変えるとき
+   *   （例: `.tmp` も一緒に掃除する）に同期すべき経路が2つになる。
+   */
+  function removeAll(targets: { fileName: string }[]): number {
+    let removed = 0;
+    for (const { fileName } of targets) {
+      if (remove(fileName)) removed++;
+    }
+    return removed;
+  }
+
   return {
     enqueue(records) {
       let written = 0;
@@ -146,9 +188,23 @@ export function createSpeechQueue(queueDir: string): SpeechQueue {
         return null;
       }
       if (typeof parsed !== "object" || parsed === null) return null;
-      if ((parsed as { seq?: unknown }).seq !== seq) return null;
+      const record = parsed as SpeechRecord & { epoch?: unknown };
+      if (record.seq !== seq) return null;
 
-      return line;
+      // ★ `ts` は世代の新しさの判定に使う。文字列としてではなく**日付として**通ること。
+      //   字句比較のままだと `ts: "z"` ひとつでその世代が永久に勝つ
+      if (typeof record.ts !== "string" || Number.isNaN(Date.parse(record.ts))) return null;
+
+      // epoch はこの機能より前に書かれた entry には**無い**。欠落だけは legacy に倒す
+      // （そうしないと、アップグレード時に未 ack のまま残っていた entry が
+      //  ワイヤ上で epoch 無しになり、クライアントに全部弾かれる）。
+      // 載っているのに形が違うものは通さない — パスと URL の材料になる値なので
+      if (record.epoch === undefined || record.epoch === null) {
+        return { ...record, epoch: LEGACY_EPOCH };
+      }
+      if (!isValidEpoch(record.epoch)) return null;
+
+      return record as SpeechRecord;
     },
 
     ackUpTo(upTo) {
@@ -186,11 +242,11 @@ export function createSpeechQueue(queueDir: string): SpeechQueue {
 
       // 古い発話は無価値なので、溢れたら古い方から捨てる。
       // クライアントが繋がっていなければ ack は来ないので、これが唯一の歯止めになる
-      let removed = 0;
-      for (const { fileName } of all.slice(0, excess)) {
-        if (remove(fileName)) removed++;
-      }
-      return removed;
+      return removeAll(all.slice(0, excess));
+    },
+
+    clear() {
+      return removeAll(listSeqs());
     },
 
     sweepTmp() {

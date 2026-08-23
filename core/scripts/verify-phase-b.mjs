@@ -95,8 +95,18 @@ function connect(options = {}) {
         received,
         texts: () => received.map((r) => r.text),
         seqs: () => received.map((r) => r.seq),
-        /** 「seq N まで喋った」 */
-        ack: (seq) => socket.send(JSON.stringify({ type: "spoken", seq })),
+        frames: () => received,
+        /**
+         * 「seq N まで喋った」。
+         *
+         * ★ **直近に受け取ったフレームの `epoch` を名乗る**（#29）。名乗らないと
+         *   サーバーは「世代を名乗らない ack」として現世代のものに扱うので、
+         *   採番のやり直しを跨いだ ack が通ってしまい、⑧ の検査が空振りする
+         */
+        ack: (seq) => {
+          const epoch = received[received.length - 1]?.epoch;
+          socket.send(JSON.stringify({ type: "spoken", seq, ...(epoch === undefined ? {} : { epoch }) }));
+        },
         async settle(ms = 400) {
           await sleep(ms);
           return received;
@@ -296,6 +306,69 @@ try {
     afterRestart.texts().includes("落ちている間に書かれた新しい発話です。"),
     afterRestart.texts().join(" / "),
   );
+
+  show("⑧ ★ [#29/A-1] サーバー稼働中に採番がやり直されても、新世代が配信される");
+
+  // ★ この検証がユニットテストと別に要る理由。dispatcher の `delivered` は seq 単独キーで、
+  //   CLI の `clear()` → `enqueue()` は**同一プロセス内で同期的に**走るので、
+  //   50ms のポーリングが空のディレクトリを観測することはまず無い。
+  //   「seq の集合は変わっていないのに中身が別世代に入れ替わった」状態が、
+  //   実時間のポーリングの下で作られる。
+  //
+  // ★ **新世代の seq を旧世代より少なくすること。** 新しい seq が1つでも
+  //   `delivered` の外に現れると、ループ側がそれを読んで世代違いに気づいてしまい、
+  //   **先頭を読むプローブを消しても通ってしまう**（＝検査として成立しない）。
+  //   1メッセージを複数文にして、1回の enqueue で旧世代の seq に収まる形にする。
+  //
+  // ★ クライアントを繋がない状態で溜めるのも肝。ack が一度でも来ていると
+  //   prune で `delivered` が空になり、症状が出ない。
+  await stopServer();
+  fs.rmSync(queueDir, { recursive: true, force: true });
+  fs.rmSync(path.join(runtime, "speech.jsonl"), { force: true });
+  fs.rmSync(path.join(runtime, "speech.1.jsonl"), { force: true });
+  fs.rmSync(path.join(runtime, "speech.state.json"), { force: true });
+
+  speak("m-gen-a", "旧世代の一文目です。旧世代の二文目です。旧世代の三文目です。");
+  const oldEpoch = JSON.parse(fs.readFileSync(path.join(runtime, "speech.state.json"), "utf8")).epoch;
+  check("旧世代が3件積まれている", queueSize() === 3, `${queueSize()} 件`);
+
+  startServer();
+  await waitForReady();
+  // ★ 誰も繋がないまま poll させる。ここで全 entry が `delivered` に入る
+  await sleep(400);
+
+  // ランタイムルートを消したのと同じ状態にして、CLI に採番をやり直させる
+  fs.rmSync(path.join(runtime, "speech.jsonl"), { force: true });
+  fs.rmSync(path.join(runtime, "speech.state.json"), { force: true });
+  speak("m-gen-b", "新世代の一文目です。新世代の二文目です。");
+  const newEpoch = JSON.parse(fs.readFileSync(path.join(runtime, "speech.state.json"), "utf8")).epoch;
+  check("採番がやり直されている（epoch が変わる）", newEpoch !== oldEpoch, `${oldEpoch} → ${newEpoch}`);
+  check("新世代の seq は旧世代の範囲に収まっている", queueSize() === 2, `${queueSize()} 件`);
+
+  const afterRenumber = await connect();
+  await afterRenumber.settle(800);
+
+  check(
+    "★ 新世代の発話が届く（seq 単独キーで飛ばされていない）",
+    afterRenumber.texts().includes("新世代の一文目です。") && afterRenumber.texts().includes("新世代の二文目です。"),
+    afterRenumber.texts().join(" / "),
+  );
+  check(
+    "旧世代の発話は届かない",
+    !afterRenumber.texts().some((t) => t.startsWith("旧世代")),
+    afterRenumber.texts().join(" / "),
+  );
+
+  // ★ ここが本丸。世代が乗り換わっていないと、新 epoch の ack が拒否されてキューが減らない
+  afterRenumber.ack(Math.max(...afterRenumber.seqs()));
+  await sleep(400);
+  check(
+    "★ 新世代の ack が通り、キューが空になる（詰まっていない）",
+    queueSize() === 0,
+    `${queueSize()} 件 / ${JSON.stringify(fs.readdirSync(queueDir))}`,
+  );
+
+  await afterRenumber.close();
 
   show("結果");
   if (failures.length > 0) {

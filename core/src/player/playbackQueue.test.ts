@@ -5,8 +5,13 @@ import type { SpeechRecord } from "../core/types";
 
 const T0 = Date.parse("2026-08-15T00:00:00.000Z");
 
+/** サーバーが名乗る採番の世代（#29）。`E2` へ切り替えることが「採番のやり直し」の再現になる */
+const E1 = "gen-1";
+const E2 = "gen-2";
+
 function record(seq: number, overrides: Partial<SpeechRecord> = {}): SpeechRecord {
   return {
+    epoch: E1,
     seq,
     ts: new Date(T0 + seq * 1000).toISOString(),
     source: "claude-code",
@@ -149,7 +154,7 @@ describe("ack", () => {
     expect(only(synthesized, "ack")).toEqual([]);
 
     const played = run(state, [{ kind: "played", epoch: 0, seq: 1 }]);
-    expect(only(played, "ack")).toEqual([{ kind: "ack", seq: 1 }]);
+    expect(only(played, "ack")).toEqual([{ kind: "ack", seq: 1, epochId: E1 }]);
   });
 
   it("★ ack を出した時点で、それ以下の seq は1つも残っていない", () => {
@@ -187,13 +192,15 @@ describe("ack", () => {
     expect(only(failed, "ack")).toEqual([]);
 
     // 1 → 2 と順に片付いて初めて 3 まで ack が進む
-    expect(only(run(state, [{ kind: "played", epoch: 0, seq: 1 }]), "ack")).toEqual([{ kind: "ack", seq: 1 }]);
+    expect(only(run(state, [{ kind: "played", epoch: 0, seq: 1 }]), "ack")).toEqual([
+      { kind: "ack", seq: 1, epochId: E1 },
+    ]);
     const rest = run(state, [
       { kind: "synthesized", epoch: 0, seq: 2, file: "/tmp/2.wav" },
       { kind: "played", epoch: 0, seq: 2 },
     ]);
     // 2 の完了で 2 と（失敗済みの）3 がまとめて片付く。累積なので ack は1回
-    expect(only(rest, "ack")).toEqual([{ kind: "ack", seq: 3 }]);
+    expect(only(rest, "ack")).toEqual([{ kind: "ack", seq: 3, epochId: E1 }]);
   });
 
   it("連続した失敗はまとめて1回の ack にする", () => {
@@ -207,7 +214,7 @@ describe("ack", () => {
       { kind: "synthesisFailed", epoch: 0, seq: 3, reason: "500" },
       { kind: "synthesisFailed", epoch: 0, seq: 1, reason: "500" },
     ]);
-    expect(only(commands, "ack")).toEqual([{ kind: "ack", seq: 3 }]);
+    expect(only(commands, "ack")).toEqual([{ kind: "ack", seq: 3, epochId: E1 }]);
   });
 
   it("切断中の ack は溜めて、再接続後に最初のフレームで送る", () => {
@@ -225,7 +232,7 @@ describe("ack", () => {
 
     // 同じエポックのフレームが届いて初めて、溜めていた ack が出る
     const resumed = run(state, [{ kind: "received", record: record(2) }]);
-    expect(only(resumed, "ack")).toEqual([{ kind: "ack", seq: 1 }]);
+    expect(only(resumed, "ack")).toEqual([{ kind: "ack", seq: 1, epochId: E1 }]);
     expect(state.pendingAck).toBeNull();
   });
 
@@ -244,7 +251,7 @@ describe("ack", () => {
     expect(only(run(state, [{ kind: "connected" }]), "ack")).toEqual([]);
 
     // そのあとで「採番がやり直された」フレームが届く
-    const fresh = run(state, [{ kind: "received", record: record(1, { ts: "2026-08-16T00:00:00.000Z" }) }]);
+    const fresh = run(state, [{ kind: "received", record: record(1, { epoch: E2 }) }]);
     expect(only(fresh, "ack")).toEqual([]);
     expect(only(fresh, "dropPendingAck")).toHaveLength(1);
     expect(state.pendingAck).toBeNull();
@@ -252,7 +259,7 @@ describe("ack", () => {
 });
 
 describe("重複排除", () => {
-  it("再送された同じ (seq, ts) を二度読み上げない", () => {
+  it("再送された同じ (epoch, seq) を二度読み上げない", () => {
     const state = start();
     run(state, [{ kind: "received", record: record(1) }]);
     speak(state, 1);
@@ -270,7 +277,7 @@ describe("重複排除", () => {
     speak(state, 1);
 
     const again = run(state, [{ kind: "received", record: record(1) }]);
-    expect(only(again, "ack")).toEqual([{ kind: "ack", seq: 1 }]);
+    expect(only(again, "ack")).toEqual([{ kind: "ack", seq: 1, epochId: E1 }]);
   });
 
   it("処理中のものが再送されても合成をやり直さない", () => {
@@ -289,8 +296,8 @@ describe("重複排除", () => {
     }
     expect(state.seen.size).toBe(3);
     // 最初に消費した seq 1 は忘れている
-    expect([...state.seen].some((key) => key.startsWith("1:"))).toBe(false);
-    expect([...state.seen].some((key) => key.startsWith("4:"))).toBe(true);
+    expect(state.seen.has(`${E1}:1`)).toBe(false);
+    expect(state.seen.has(`${E1}:4`)).toBe(true);
   });
 
   it("★ seen から溢れた消費済みの再送を、採番のやり直しと取り違えない", () => {
@@ -302,13 +309,13 @@ describe("重複排除", () => {
       speak(state, seq);
     }
     // seq 1 は seen から溢れている
-    expect([...state.seen].some((key) => key.startsWith("1:"))).toBe(false);
+    expect(state.seen.has(`${E1}:1`)).toBe(false);
 
     // その seq 1 が **元の ts のまま** 再送される
     const resent = run(state, [{ kind: "received", record: record(1) }]);
     expect(only(resent, "synthesize")).toEqual([]);
     expect(only(resent, "warn")).toEqual([]);
-    expect(only(resent, "ack")).toEqual([{ kind: "ack", seq: 1 }]);
+    expect(only(resent, "ack")).toEqual([{ kind: "ack", seq: 1, epochId: E1 }]);
     expect(state.epoch).toBe(0);
   });
 
@@ -330,7 +337,7 @@ describe("重複排除", () => {
 });
 
 describe("採番のやり直し（エポック変化）", () => {
-  it("★ 旧エポックで消費済みの seq でも、ts が違えば喋る", () => {
+  it("★ 旧エポックで消費済みの seq でも、epoch が違えば喋る", () => {
     // seq だけで覚えていると、~/.config/chatter-agent を消した後に
     // 何百文でも一切喋らず、エラーも出ないという最悪の症状になる
     const state = start();
@@ -339,7 +346,7 @@ describe("採番のやり直し（エポック変化）", () => {
       speak(state, seq);
     }
 
-    const fresh = record(1, { ts: "2026-08-16T00:00:00.000Z", text: "新しい1。" });
+    const fresh = record(1, { epoch: E2, text: "新しい1。" });
     const commands = run(state, [{ kind: "received", record: fresh }]);
     // エポックが1つ進んでいるので、合成も新しいエポックで走る
     expect(only(commands, "synthesize")).toEqual([{ kind: "synthesize", epoch: 1, seq: 1, text: "新しい1。" }]);
@@ -355,7 +362,7 @@ describe("採番のやり直し（エポック変化）", () => {
     run(state, [{ kind: "disconnected" }, { kind: "played", epoch: 0, seq: 5 }]);
     expect(state.pendingAck).toEqual({ epoch: 0, seq: 5 });
 
-    run(state, [{ kind: "received", record: record(1, { ts: "2026-08-16T00:00:00.000Z" }) }]);
+    run(state, [{ kind: "received", record: record(1, { epoch: E2 }) }]);
     expect(state.pendingAck).toBeNull();
 
     const online = run(state, [{ kind: "connected" }]);
@@ -370,7 +377,7 @@ describe("採番のやり直し（エポック変化）", () => {
     );
     run(state, [{ kind: "synthesized", epoch: 0, seq: 3, file: "/tmp/3.wav" }]);
 
-    const commands = run(state, [{ kind: "received", record: record(1, { ts: "2026-08-16T00:00:00.000Z" }) }]);
+    const commands = run(state, [{ kind: "received", record: record(1, { epoch: E2 }) }]);
     expect(only(commands, "discardFile")).toEqual([{ kind: "discardFile", epoch: 0, seq: 3, file: "/tmp/3.wav" }]);
     expect(only(commands, "warn")).toHaveLength(1);
     expect(state.items.has(2)).toBe(false);
@@ -381,7 +388,7 @@ describe("採番のやり直し（エポック変化）", () => {
     const state = start();
     run(state, [{ kind: "received", record: record(5) }]);
     run(state, [{ kind: "synthesized", epoch: 0, seq: 5, file: "/tmp/5.wav" }]);
-    run(state, [{ kind: "received", record: record(1, { ts: "2026-08-16T00:00:00.000Z" }) }]);
+    run(state, [{ kind: "received", record: record(1, { epoch: E2 }) }]);
 
     const finished = run(state, [{ kind: "played", epoch: 0, seq: 5 }]);
     expect(only(finished, "ack")).toEqual([]);
@@ -393,7 +400,7 @@ describe("採番のやり直し（エポック変化）", () => {
     // seq だけで突き合わせると、「こんにちは」を鳴らしながら「さようなら」を ack する
     const state = start();
     run(state, [{ kind: "received", record: record(1, { text: "こんにちは。" }) }]);
-    run(state, [{ kind: "received", record: record(1, { ts: "2026-08-16T00:00:00.000Z", text: "さようなら。" }) }]);
+    run(state, [{ kind: "received", record: record(1, { epoch: E2, text: "さようなら。" }) }]);
     expect(state.epoch).toBe(1);
 
     // 旧エポックで投げた合成が今ごろ返ってくる
@@ -414,7 +421,7 @@ describe("採番のやり直し（エポック変化）", () => {
     expect(only(first, "play")).toEqual([{ kind: "play", epoch: 0, seq: 1, file: "/tmp/e0-1.wav" }]);
 
     // 再生中に採番がやり直される → 旧 item は orphan
-    run(state, [{ kind: "received", record: record(1, { ts: "2026-08-16T00:00:00.000Z" }) }]);
+    run(state, [{ kind: "received", record: record(1, { epoch: E2 }) }]);
     const second = run(state, [{ kind: "synthesized", epoch: 1, seq: 1, file: "/tmp/e1-1.wav" }]);
     // 新しい方は鳴らない（head が orphan ではなく新 item で、まだ古い方が再生中でもない）
     expect(only(second, "play")).toEqual([{ kind: "play", epoch: 1, seq: 1, file: "/tmp/e1-1.wav" }]);
@@ -426,12 +433,35 @@ describe("採番のやり直し（エポック変化）", () => {
     expect(state.items.get(1)?.status).toBe("playing");
   });
 
-  it("同じ seq が別の ts で来たらエポック変化として扱う", () => {
+  it("★ 世代の判定は epoch 一本。ts が動いてもエポック変化にしない", () => {
+    // 以前は「同じ seq が別の ts」を推論の根拠にしていた。#30 で1メッセージ内の `ts` が
+    // 同値になったこともあり、`ts` は世代の指標として当てにならない。契約が epoch を
+    // 運ぶようになったので、推論そのものを持たない
     const state = start();
     run(state, [{ kind: "received", record: record(1) }]);
+
     const commands = run(state, [{ kind: "received", record: record(1, { ts: "2026-08-16T00:00:00.000Z" }) }]);
+
+    expect(only(commands, "warn")).toEqual([]);
+    expect(state.epoch).toBe(0);
+    // 同じ世代の同じ seq は同じ文。合成をやり直さず、最初に受けたレコードのまま
+    expect(only(commands, "synthesize")).toEqual([]);
+    expect(state.items.get(1)?.record.ts).toBe(record(1).ts);
+  });
+
+  it("★ epoch が変われば、ts が戻っていてもエポック変化として扱う", () => {
+    const state = start();
+    run(state, [{ kind: "received", record: record(5) }]);
+
+    // 新しい世代の seq 1。ts は前の世代より**古い**（バックアップ復元などで起こりうる）
+    const commands = run(state, [
+      { kind: "received", record: record(1, { epoch: E2, ts: "2020-01-01T00:00:00.000Z" }) },
+    ]);
+
     expect(only(commands, "warn")).toHaveLength(1);
-    expect(state.items.get(1)?.record.ts).toBe("2026-08-16T00:00:00.000Z");
+    expect(state.epoch).toBe(1);
+    expect(state.epochId).toBe(E2);
+    expect(state.items.has(5)).toBe(false);
   });
 });
 
@@ -446,7 +476,7 @@ describe("失敗の扱い", () => {
 
     const given = run(state, [{ kind: "synthesisFailed", epoch: 0, seq: 1, reason: "500" }]);
     expect(only(given, "synthesize")).toEqual([]);
-    expect(only(given, "ack")).toEqual([{ kind: "ack", seq: 1 }]);
+    expect(only(given, "ack")).toEqual([{ kind: "ack", seq: 1, epochId: E1 }]);
     expect(only(given, "warn")).toHaveLength(1);
   });
 
@@ -457,7 +487,7 @@ describe("失敗の扱い", () => {
 
     const commands = run(state, [{ kind: "playbackFailed", epoch: 0, seq: 1, reason: "exit 1" }]);
     expect(only(commands, "play")).toEqual([]);
-    expect(only(commands, "ack")).toEqual([{ kind: "ack", seq: 1 }]);
+    expect(only(commands, "ack")).toEqual([{ kind: "ack", seq: 1, epochId: E1 }]);
   });
 
   it("失敗した文の WAV も消す", () => {
@@ -473,7 +503,7 @@ describe("失敗の扱い", () => {
     const state = start();
     const commands = run(state, [{ kind: "received", record: record(1, { text: "！" }) }]);
     expect(only(commands, "synthesize")).toEqual([]);
-    expect(only(commands, "ack")).toEqual([{ kind: "ack", seq: 1 }]);
+    expect(only(commands, "ack")).toEqual([{ kind: "ack", seq: 1, epochId: E1 }]);
   });
 
   it("捨てた後に合成が返ってきたら WAV だけ消す", () => {
@@ -498,7 +528,7 @@ describe("古い発話", () => {
     const state = start({ maxAgeMs: 60_000 });
     const commands = run(state, [{ kind: "received", record: record(1) }], T0 + 120_000);
     expect(only(commands, "synthesize")).toEqual([]);
-    expect(only(commands, "ack")).toEqual([{ kind: "ack", seq: 1 }]);
+    expect(only(commands, "ack")).toEqual([{ kind: "ack", seq: 1, epochId: E1 }]);
   });
 
   it("ts が読めないものは古さで捨てない", () => {

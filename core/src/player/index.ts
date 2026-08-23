@@ -27,7 +27,7 @@ import { createSpeechClient, deriveServerUrl } from "./client";
 import type { SpeechClient } from "./client";
 import { createDefaultOptions, createPlaybackState, reduce } from "./playbackQueue";
 import type { PlaybackCommand, PlaybackEvent } from "./playbackQueue";
-import { parseSpeechFrame } from "./speechFrame";
+import { isAudioUndeclared, parseSpeechFrame } from "./speechFrame";
 
 /**
  * 終了処理の1ステップの制限時間。`server/index.ts` と同じ形で、どのリソースが閉じられなかったかを
@@ -152,18 +152,45 @@ async function main(): Promise<void> {
   const playbackTimeouts = new Map<string, number>();
   const timeoutKey = (epoch: number, seq: number) => `${epoch}:${seq}`;
 
+  /**
+   * 接続ごとに1回で足りる警告のラッチ。`onConnected` で戻す。
+   *
+   * ★ 読めないフレームは**壊れたプロデューサーが同じ形を送り続ける**ので、毎フレーム出すと
+   *   ログが洪水になる（`server/wsServer.ts` の `warnedBadAck` と対称）。
+   * ★ `audio` キーの有無は**接続ごとに最初のフレームだけ**見れば足りる。サーバーが接続の
+   *   途中でフレームの形を変えることは無く、`onConnected` は `open` ハンドラから呼ばれるので
+   *   必ずフレームより先に来る（`client.ts`）。
+   */
+  let warnedBadFrame = false;
+  let audioDeclarationChecked = false;
+
   client = createSpeechClient({
     url,
     onFrame: (raw) => {
       const record = parseSpeechFrame(raw);
       if (!record) {
         // 知らない形は捨てる。接続は切らない（server の parseAck と対称）
-        console.warn("[Player] 読めないフレームを捨てました");
+        if (!warnedBadFrame) {
+          warnedBadFrame = true;
+          console.warn("[Player] 読めないフレームを捨てました");
+        }
         return;
+      }
+      // ★ 読めたフレームで判定すること。最初のフレームが読めなかったら次で見る
+      if (!audioDeclarationChecked) {
+        audioDeclarationChecked = true;
+        if (isAudioUndeclared(raw)) {
+          console.warn("[Player] サーバーのフレームに audio がありません（#29 より前のサーバー？）");
+          console.warn("[Player] 音声は鳴らず、すべての発話が無音のまま ack されます");
+        }
       }
       dispatch({ kind: "received", record });
     },
-    onConnected: () => dispatch({ kind: "connected" }),
+    onConnected: () => {
+      warnedBadFrame = false;
+      audioDeclarationChecked = false;
+      dispatch({ kind: "connected" });
+    },
     onDisconnected: () => dispatch({ kind: "disconnected" }),
   });
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseSpeechFrame } from "./speechFrame";
+import { isAudioUndeclared, parseSpeechFrame } from "./speechFrame";
 
 function frame(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
@@ -120,6 +120,30 @@ describe("audio（#29）", () => {
   it("知らない format は通さない", () => {
     const audio = { path: "/audio/test-epoch-000000000001.wav", format: "opus" };
     expect(parseSpeechFrame(frame({ audio }))?.audio).toBeNull();
+  });
+});
+
+describe("isAudioUndeclared（#49 のレビュー B-1）", () => {
+  it("★ audio キーが無いフレームを見分ける（#29 より前のサーバー。全文が無言で ack される）", () => {
+    // `frame()` は audio を載せないので、そのままキー欠落のフレームになる
+    expect(isAudioUndeclared(frame())).toBe(true);
+  });
+
+  it("★ 明示的な audio: null では発火しない（ttsEnabled: false は正常な設定）", () => {
+    // ここが true になると、消す手段の無い警告が正常な設定に対して出続ける。
+    // サーバーは `{ ...record, audio }` を stringify するので、null でもキーは載る
+    expect(isAudioUndeclared(frame({ audio: null }))).toBe(false);
+  });
+
+  it("音声が載っているフレームでも発火しない", () => {
+    const audio = { path: "/audio/test-epoch-000000000001.wav", format: "wav" };
+    expect(isAudioUndeclared(frame({ audio }))).toBe(false);
+  });
+
+  it("読めないものは false（フレームごと捨てる経路が別に警告する）", () => {
+    for (const raw of ["not json", "", "[1,2,3]", "null", '"text"']) {
+      expect(isAudioUndeclared(raw), raw).toBe(false);
+    }
   });
 });
 

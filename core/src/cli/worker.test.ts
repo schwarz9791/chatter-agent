@@ -7,7 +7,7 @@ import { createSpeechLog } from "../core/speechLog";
 import { createSpeechQueue } from "../core/speechQueue";
 import type { SpeechRecord } from "../core/types";
 import { removeEntry, scanSpool } from "./spool";
-import { acquireLockWithRetry, drainSpool, PROMPT_BODY_WAIT_POLLS } from "./worker";
+import { acquireLockWithRetry, drainSpool, PROMPT_BODY_WAIT_POLL_MS, PROMPT_BODY_WAIT_POLLS } from "./worker";
 import type { DrainDeps } from "./worker";
 import { addSummarizerSession, emptyWorkerState, readWorkerState, writeWorkerState } from "./workerState";
 
@@ -94,14 +94,15 @@ function appendDelta(
   final = false,
   sessionId = "sess-1",
   // ★ [#33] 実機では MessageDisplay と PreToolUse が同じ prompt_id を持つ。既定を
-  //   `writePrompt` 側と揃えておかないと、引き上げのテストだけが特殊な payload になる
-  promptId = "p1",
+  //   `writePrompt` 側と揃えておかないと、引き上げのテストだけが特殊な payload になる。
+  //   null を渡すと payload から prompt_id を落とす（on-message.sh の契約が壊れたときの再現）
+  promptId: string | null = "p1",
 ): void {
   fs.writeFileSync(
     path.join(spoolDir, `${messageId}.${index}.json`),
     JSON.stringify({
       session_id: sessionId,
-      prompt_id: promptId,
+      ...(promptId === null ? {} : { prompt_id: promptId }),
       hook_event_name: "MessageDisplay",
       turn_id: "turn-1",
       message_id: messageId,
@@ -692,15 +693,15 @@ describe("★ [#33] prompt が本文を追い越して spool へ着いたとき"
       expect(texts()).toEqual(["監視を開始しました。", "次は何をしますか？", "選択肢は、進める。"]);
     });
 
-    it("★ session_id が違う本文が着いても、待ち直さずに prompt を出す（待ちは1回）", () => {
+    it("★ 無関係な delta で待ちが明けても、残りの予算で待ち直す", () => {
+      // 待ちの脱出条件は「delta ファイルが増えたか」だけなので、別セッションや要約 CLI 自身の
+      // 出力でも明ける。予算を boolean で持つと**そこで待ちが終わり、逆転が戻る**
       writePrompt("q", question);
 
       let slept = 0;
       drain({
         sleep: () => {
           slept++;
-          // 別セッションの delta が着地して待ちループは早く抜けるが、
-          // やり直したパスでは prompt_id / session_id が合わないので引き上げは起きない。
           // ★ tick() を省かないこと（上と同じ理由）
           if (slept === 1) {
             tick();
@@ -711,8 +712,156 @@ describe("★ [#33] prompt が本文を追い越して spool へ着いたとき"
 
       // 別セッションの本文は引き上げの対象外なので、prompt の後ろのまま
       expect(texts()).toEqual(["次は何をしますか？", "選択肢は、進める。", "別セッションです。"]);
-      expect(slept).toBeLessThan(PROMPT_BODY_WAIT_POLLS);
+      // ★ 1回明けても残りを使い切って待つ（boolean 予算に戻すとここが 1 になる）
+      expect(slept).toBe(PROMPT_BODY_WAIT_POLLS);
     });
+
+    it("★ 無関係な delta で明けた後に本命の本文が着いても、本文 → 質問の順を守る", () => {
+      // 上のテストの本題。待ち直せないと、質問が本文を追い越したまま publish される
+      writePrompt("q", question);
+
+      let slept = 0;
+      drain({
+        sleep: () => {
+          slept++;
+          if (slept === 1) {
+            tick();
+            appendDelta("other", 0, "無関係です。", true, "sess-2");
+          }
+          // 1回目で待ちが明けた後、遅れて本命が着く
+          if (slept === 3) {
+            tick();
+            appendDelta("m1", 0, "監視を開始しました。", true);
+          }
+        },
+      });
+
+      // 本命（m1）は引き上げられて prompt の前へ。無関係な delta は別セッションなので
+      // 引き上げの対象外で、prompt の後ろに回る
+      expect(texts()).toEqual(["監視を開始しました。", "次は何をしますか？", "選択肢は、進める。", "無関係です。"]);
+    });
+
+    it("★ 待ちの上限は合計3秒（POLL_MS を勝手に動かすと赤くなる）", () => {
+      // ポール回数だけを見ていると、POLL_MS を 50 → 500 に変えても緑のまま通り、
+      // 実際には prompt ごとに 30 秒ロックを握ることになる
+      writePrompt("q", question);
+
+      let totalMs = 0;
+      drain({ sleep: (ms) => void (totalMs += ms) });
+
+      expect(totalMs).toBe(3_000);
+      expect(PROMPT_BODY_WAIT_POLLS * PROMPT_BODY_WAIT_POLL_MS).toBe(3_000);
+    });
+  });
+
+  /**
+   * ★ [PR #47 レビュー P1] 待ちは `processPrompt` の直前にある。パスの先頭で待つと、
+   * 発話しない prompt にも 3 秒払い、同じパスの完成済みメッセージまで巻き添えで遅れる。
+   */
+  describe("待ちの範囲", () => {
+    it("★ speakPrompts: false のときは待たない（待った末に捨てるだけになる）", () => {
+      writePrompt("q", question);
+
+      let slept = 0;
+      drain({ speakPrompts: false, sleep: () => void slept++ });
+
+      expect(slept).toBe(0);
+      expect(texts()).toEqual([]);
+    });
+
+    it("★ 読み上げ文が組み立たない prompt では待たない", () => {
+      // formatPromptEvent が [] を返す payload（AskUserQuestion / ExitPlanMode 以外の PreToolUse）
+      writePrompt("q", {
+        session_id: "sess-1",
+        prompt_id: "p1",
+        hook_event_name: "PreToolUse",
+        tool_name: "Bash",
+        tool_input: { command: "ls" },
+      });
+
+      let slept = 0;
+      drain({ sleep: () => void slept++ });
+
+      expect(slept).toBe(0);
+      expect(texts()).toEqual([]);
+    });
+
+    it("★ 完成済みメッセージは、後ろの prompt の待ちに巻き込まれない", () => {
+      // spool はグローバルに1ディレクトリなので、これはセッションを跨ぐ。パスの先頭で待つと
+      // Claude Code 2枚のとき、片方の許可プロンプトがもう片方の完成済み発話を止める
+      appendDelta("mReady", 0, "完成済みの本文です。", true, "sess-1", "pOLD");
+      tick();
+      writePrompt("q", { ...question, prompt_id: "pNEW" });
+
+      const spoken: string[] = [];
+      drain({
+        sleep: () => {
+          // 待ちに入った時点で、完成済みの本文は既に publish されていること
+          spoken.push(...texts());
+        },
+      });
+
+      expect(spoken[0]).toBe("完成済みの本文です。");
+    });
+  });
+
+  /**
+   * ★ [PR #47 レビュー P2] 引き上げの範囲。1ターンに prompt が2つ出る形
+   * （許可プロンプト → 本文 → AskUserQuestion）で、後から始まった本文が手前の prompt を
+   * 追い越さないよう、到着時刻の窓で絞っている。
+   */
+  describe("引き上げの時間窓", () => {
+    /** scanSpool が返す order（birthtime, ns）を差し替える。実時間で数秒待てないため */
+    function shiftMessageOrder(deltaNs: bigint): void {
+      const actual = actualSpoolRef.current!;
+      vi.mocked(scanSpool).mockImplementation((dir: string) => {
+        const entries = actual.scanSpool(dir);
+        const promptEntry = entries.find((e) => e.kind === "prompt");
+        if (!promptEntry) return entries;
+        return entries.map((e) => (e.kind === "message" ? { ...e, order: promptEntry.order + deltaNs } : e));
+      });
+    }
+
+    it("★ 窓を超えて後に着いた本文は引き上げない（その prompt より後に始まったとみなす）", () => {
+      writePrompt("q", question);
+      tick();
+      appendDelta("mLate", 0, "後から始まった本文です。", true);
+      shiftMessageOrder(4_000_000_000n); // prompt の 4 秒後に着いたことにする
+
+      drain();
+
+      // 引き上げられないので、到着順のまま質問が先
+      expect(texts()).toEqual(["次は何をしますか？", "選択肢は、進める。", "後から始まった本文です。"]);
+    });
+
+    it("窓の内側なら引き上げる（追い越しは数百 ms のオーダー）", () => {
+      writePrompt("q", question);
+      tick();
+      appendDelta("mNear", 0, "追い越された本文です。", true);
+      shiftMessageOrder(500_000_000n); // 500ms 後
+
+      drain();
+
+      expect(texts()).toEqual(["追い越された本文です。", "次は何をしますか？", "選択肢は、進める。"]);
+    });
+  });
+
+  /**
+   * ★ [PR #47 レビュー P3] `on-message.sh` が payload の `prompt_id` を落とすと、
+   * 引き上げも待ちも判断材料を失う。壊れ方が静か（例外もログも出ない）なので、
+   * 退化の形をテストで固定しておく。
+   */
+  it("★ 本文の prompt_id が取れないと、引き上げが効かず待ちだけが走る", () => {
+    writePrompt("q", question);
+    tick();
+    appendDelta("m1", 0, "本文です。", true, "sess-1", null); // ← prompt_id なし
+
+    let slept = 0;
+    drain({ sleep: () => void slept++ });
+
+    // 並べ替えないまま、毎回 3 秒待つ状態に退化する
+    expect(texts()).toEqual(["次は何をしますか？", "選択肢は、進める。", "本文です。"]);
+    expect(slept).toBe(PROMPT_BODY_WAIT_POLLS);
   });
 
   it("prompt が本文より後に着いた通常のケースは、並びを変えない", () => {

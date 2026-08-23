@@ -193,7 +193,8 @@ jsonl の `timestamp` は**メッセージの生成時刻であって書き込�
 `worker.ts` の手当ては**2段**:
 
 1. **引き上げ**（`hoistMessagesBeforePrompt`）— 同一セッション・同一 `prompt_id` の本文を prompt の前へ移す
-2. **本文待ち**（`PROMPT_BODY_WAIT_POLLS`）— prompt に本文が伴っていなければ最大 **3秒**待ってパスをやり直す
+2. **本文待ち**（`PROMPT_BODY_WAIT_POLLS`）— 発話される prompt に本文が伴っていなければ、
+   **`processPrompt` の直前で**最大 **3秒**待ってパスをやり直す（予算はドレイン全体の残ポール数）
 
 ★ **1 だけでは足りない。** 短い本文（1〜2文）は改行で終わらないので `final` flush まで
 spool にファイルが1つも置かれず（メッセージ全体が単一 delta で届く）、**引き上げる対象が

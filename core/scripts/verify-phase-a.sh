@@ -746,10 +746,15 @@ show "⑲ ★ [#33] 本文がまだ spool に無くても、待っている間�
 #   worker.ts は prompt に本文が伴っていなければ最大3秒待ってからパスをやり直す。
 #
 # ★ 本文をバックグラウンドで遅らせて置く。CLI が待っている間に着地させるのが狙い。
-#   0.1 秒は CLI の3秒の猶予に対して十分に短く、逆に CLI の起動より早く置かれてしまっても
-#   ⑱ と同じ「両方見えている」状態になるだけなので、どちらに転んでも順序は正しくなる。
+#
+# ★★ **遅延は node の起動より明確に大きくすること。** ここが 0.1 秒だった頃は、node の起動 +
+#   バンドルの parse（50-150ms のオーダー）と同じ桁だったので、本文が CLI の最初の scanSpool
+#   より先に着けば待ちは一度も走らず、⑱ と同じ「引き上げだけ」で assertion が通っていた。
+#   つまり **waitForBodyArrival を丸ごと消しても ⑲ が緑のまま通りうる**状態で、検査として
+#   成立していなかった（PR #47 レビュー P2）。0.5 秒なら node の起動より確実に後、かつ
+#   CLI の3秒の猶予には十分収まる。
 feed_prompt '{"session_id":"sess-1","prompt_id":"p19","hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"遅着検証の質問です？","options":[{"label":"了解"}]}]}}'
-( sleep 0.1; feed_message m-late 0 true "遅着検証の本文です。" '{"prompt_id":"p19"}' ) &
+( sleep 0.5; feed_message m-late 0 true "遅着検証の本文です。" '{"prompt_id":"p19"}' ) &
 late_pid=$!
 node "$CLI"
 wait "$late_pid"

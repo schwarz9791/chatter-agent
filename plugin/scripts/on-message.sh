@@ -8,8 +8,19 @@
 # ★ 何があっても exit 0 で終える。hook の失敗が Claude Code の表示を止めてはいけない。
 #
 # payload はそのまま1ファイルの中身として置く。core/src/cli/spool.ts が要求する
-# index / delta / final / session_id / turn_id / message_id は元から全部入っているので、
-# bash 側で組み直す必要はない（組み直すと `final` を文字列にする等の事故が起きる）。
+# index / delta / final / session_id / turn_id / message_id / prompt_id は元から全部
+# 入っているので、bash 側で組み直す必要はない（組み直すと `final` を文字列にする等の事故が起きる）。
+#
+# ★ **`prompt_id` を落とさないこと**（[#33]）。core は発話順の是正にこれを使う
+#   （worker.ts の hoistMessagesBeforePrompt / needsBodyWait）。on-prompt.sh 側の payload とも
+#   突き合わせるので、片方だけ欠けても成立しない。
+#
+#   ★★ **壊れ方が静かなのが厄介。** 落ちても例外もログも出ず、次の2つに無言で退化する:
+#     - 引き上げがどの本文とも一致しない → 質問が本文より先に発話される（#33 が戻る）
+#     - 本文が伴っていないと判定され続ける → **prompt のたびに毎回 3 秒待つ**
+#   → 退化の形は core/src/cli/worker.test.ts「本文の prompt_id が取れないと…」で固定してある。
+#
+# [#33]: https://github.com/schwarz9791/chatter-agent/issues/33
 #
 # ★ delta ごとに別ファイルにして tmp + rename で置く（追記はしない）。**bash から任意長の
 #   追記を原子的にする移植可能な方法は無い**ため（`_lib.sh` の `chatter_write_atomic` 参照）。

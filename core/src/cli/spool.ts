@@ -106,8 +106,12 @@ type ClassifiedFile =
  *   「掃除を孤児掃除の6時間まで遅らせているだけ」だったので外した（回収経路は
  *   `worker.test.ts` の該当テストを参照）。
  */
+function isPromptFileName(fileName: string): boolean {
+  return fileName.startsWith(PROMPT_PREFIX) && fileName.endsWith(PROMPT_SUFFIX);
+}
+
 function classify(fileName: string, filePath: string, order: bigint): ClassifiedFile | null {
-  if (fileName.startsWith(PROMPT_PREFIX) && fileName.endsWith(PROMPT_SUFFIX)) {
+  if (isPromptFileName(fileName)) {
     return { kind: "prompt", filePath, order };
   }
 
@@ -119,6 +123,31 @@ function classify(fileName: string, filePath: string, order: bigint): Classified
   }
 
   return null;
+}
+
+/**
+ * spool にある delta ファイルの数を数えるだけの軽量版。
+ *
+ * ★ [#33] `worker.ts` の `waitForBodyArrival` が「本文が着いたか」をポーリングするのに使う。
+ *   `scanSpool` を使わない理由はコスト: あちらは `readdir` に加えて**全ファイルに bigint の
+ *   `statSync`** を打つ。孤児は `spoolMaxAgeHours`（既定6時間）生き、長いメッセージは
+ *   delta 1本 = 1ファイルなので、3秒の窓で 60 × N 回の同期 stat を、**唯一前に進める
+ *   プロセスの上で**回すことになる。件数だけなら `readdirSync` 1回で足りる。
+ *
+ * ★ 数えるのは**エントリ数ではなくファイル数**。同じメッセージの delta が増えただけでも
+ *   数が動くが、待ちの脱出条件としてはその方が鋭敏で都合がよい（「何か着いた」ら呼び出し側に
+ *   パスをやり直させ、正確な判定はそちらに任せる設計のため）。
+ *
+ * ★ 判定は `classify` と同じ順（prompt- → message）を共有すること。片方だけ直すと、
+ *   待ちの脱出条件と実際に処理されるエントリがずれる。
+ */
+export function countSpoolMessageFiles(spoolDir: string): number {
+  try {
+    return fs.readdirSync(spoolDir).filter((fileName) => !isPromptFileName(fileName) && MESSAGE_DELTA_RE.test(fileName))
+      .length;
+  } catch {
+    return 0; // ディレクトリが無いのは正常（まだ hook が動いていない）
+  }
 }
 
 /**

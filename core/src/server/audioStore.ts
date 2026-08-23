@@ -16,21 +16,54 @@
  *   保持すると「キューから消えたのに古い本文で合成する」経路ができる。
  */
 
-/** 合成の失敗。`httpServer` が 503 に落とすために型で区別する */
+import { TtsHttpError } from "../tts/voicevoxClient";
+
+/**
+ * 合成できなかった。`httpServer` が 503 に落とすために型で区別する。
+ *
+ * ★ **エンジンの応答で「恒久的」を判定して 404 に落とさないこと。** 一度そう設計したが、
+ *   404 はクライアント側で `audioGone → finish → ack → ackUpTo` まで通り、
+ *   **キューのファイルが物理削除される**。`ttsSpeakerId` を30秒後に直しても復元できない
+ *   （503 のままなら直した瞬間に全部鳴る）。しかも「恒久」の線引きは実質不可能で、
+ *   モデルロード中の 4xx・`ttsBaseUrl` のパス違いで別サービスが返す 404/405・
+ *   プロキシの 407 まで巻き込む。「溜まった発話を今さら鳴らすか」は
+ *   `speechMaxAgeMs`（既定0＝無効）で既にユーザーの選択として表現してある。
+ *
+ * ★ 代わりに**理由を持ち回る**。無音の原因はログにしか出ないので、ここで捨てない。
+ */
 export class SynthesisUnavailableError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
+  /** エンジンが応答したなら、その HTTP ステータス */
+  readonly status: number | null;
+  constructor(message: string, options?: { cause?: unknown; status?: number | null }) {
     super(message, options);
     this.name = "SynthesisUnavailableError";
+    this.status = options?.status ?? null;
   }
 }
 
 export interface AudioStoreDeps {
-  /** 1文ぶんの WAV。`tts/voicevoxClient.ts` の `synthesize` をそのまま渡す */
-  synthesize: (text: string) => Promise<ArrayBuffer>;
+  /**
+   * いま設定されている声。**キャッシュキーの一部**になる。
+   *
+   * ★ `synthesize` の中で config を読み直すのではなく、ここで**1回だけ解決して渡す**こと。
+   *   別々に読むと、キーを決めた後・合成する前に `config.json` が書き換わったときに
+   *   **声 B の WAV が声 A のキーで入る**。
+   */
+  currentVoice: () => Voice;
+  /** 1文ぶんの WAV。`tts/voicevoxClient.ts` の `synthesize` を、解決済みの声で呼ぶ */
+  synthesize: (text: string, voice: Voice) => Promise<ArrayBuffer>;
   /** 保持する件数の上限 */
   maxEntries?: number;
   /** 保持する合計バイト数の上限 */
   maxBytes?: number;
+  /** 同時に走らせる合成の上限 */
+  maxInFlight?: number;
+}
+
+/** キャッシュキーに混ぜる、声を決める設定 */
+export interface Voice {
+  baseUrl: string;
+  speakerId: number;
 }
 
 export interface AudioStore {
@@ -56,13 +89,28 @@ export interface AudioStore {
 const DEFAULT_MAX_ENTRIES = 16;
 const DEFAULT_MAX_BYTES = 32 * 1024 * 1024;
 
-function keyFor(epoch: string, seq: number): string {
-  return `${epoch}:${seq}`;
+/**
+ * 同時に走らせる合成の上限。
+ *
+ * ★ **無制限にしないこと。** `/synthesis` は CPU 律速で、この口は既定で `0.0.0.0` に
+ *   **無認証**で開いている（`server/index.ts` が自分でそう警告している）。`epoch` は
+ *   正規クライアントに1フレーム届けば分かるので、キューにある seq（最大500）を並べて
+ *   GET すれば **500本の合成が同時にエンジンへ飛ぶ**。実質 DoS になる。
+ *
+ * ★ クライアント1台の先読み窓は既定4件なので、8 あれば複数クライアントでも詰まらない。
+ *   超えた分は 503（あとで取りに来い）にすればよく、クライアントは待つだけ。
+ */
+const DEFAULT_MAX_IN_FLIGHT = 8;
+
+function keyFor(voice: Voice, epoch: string, seq: number): string {
+  // ★ 声をキーに混ぜること。`ttsSpeakerId` を直しても、LRU にいる分は古い声のまま返る
+  return `${voice.baseUrl}|${voice.speakerId}|${epoch}:${seq}`;
 }
 
 export function createAudioStore(deps: AudioStoreDeps): AudioStore {
   const maxEntries = deps.maxEntries ?? DEFAULT_MAX_ENTRIES;
   const maxBytes = deps.maxBytes ?? DEFAULT_MAX_BYTES;
+  const maxInFlight = deps.maxInFlight ?? DEFAULT_MAX_IN_FLIGHT;
 
   /** Map の挿入順を LRU に使う（触ったら delete → set で末尾へ回す） */
   const cache = new Map<string, ArrayBuffer>();
@@ -92,7 +140,9 @@ export function createAudioStore(deps: AudioStoreDeps): AudioStore {
 
   return {
     async get(epoch, seq, text) {
-      const key = keyFor(epoch, seq);
+      // ★ 声は**ここで1回だけ**解決する（→ `AudioStoreDeps.currentVoice`）
+      const voice = deps.currentVoice();
+      const key = keyFor(voice, epoch, seq);
 
       const cached = cache.get(key);
       if (cached !== undefined) {
@@ -105,16 +155,24 @@ export function createAudioStore(deps: AudioStoreDeps): AudioStore {
       const pending = inFlight.get(key);
       if (pending !== undefined) return pending;
 
+      if (inFlight.size >= maxInFlight) {
+        throw new SynthesisUnavailableError(
+          `合成が同時に ${inFlight.size} 件走っているので受け付けません（上限 ${maxInFlight}）`,
+        );
+      }
+
       const promise = deps
-        .synthesize(text)
+        .synthesize(text, voice)
         .then((wav) => {
           remember(key, wav);
           return wav;
         })
         .catch((err: unknown) => {
           // ★ 「あとで取りに来い」に落とす。クライアントは 503 を受けても
-          //    試行回数を減らさないので、エンジンが戻れば追いつける
-          throw new SynthesisUnavailableError(err instanceof Error ? err.message : String(err), { cause: err });
+          //    試行回数を減らさないので、エンジンが戻れば追いつける。
+          //    理由は握り潰さずに持ち回る（無音の原因はログにしか出ない）
+          const status = err instanceof TtsHttpError ? err.status : null;
+          throw new SynthesisUnavailableError(err instanceof Error ? err.message : String(err), { cause: err, status });
         })
         .finally(() => {
           inFlight.delete(key);

@@ -9,12 +9,22 @@
  * 127.0.0.1 に bind するので macOS のローカルネットワーク許可ダイアログも出ない。
  */
 
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocket } from "ws";
+import {
+  check,
+  disposableRoot,
+  fail,
+  killAll,
+  requireBundles,
+  show,
+  sleep,
+  spawnLogged,
+  summarize,
+} from "./lib/harness.mjs";
 
 const CORE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = path.resolve(CORE, "..");
@@ -25,18 +35,12 @@ const PORT = 18570;
 /** 上限で古い方から捨てるのを見たいので、わざと小さくする */
 const QUEUE_MAX = 6;
 
-for (const [label, file] of [
+requireBundles([
   ["CLI", CLI],
   ["server", SERVER],
-]) {
-  if (!fs.existsSync(file)) {
-    console.error(`${label} のバンドルがありません: ${file}\n先に core/ で npm run build を実行してください。`);
-    process.exit(1);
-  }
-}
+]);
 
-const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatter-agent-phase-b-"));
-const runtime = path.join(root, "chatter-agent");
+const { root, runtime } = disposableRoot("phase-b");
 const spoolDir = path.join(runtime, "spool");
 const queueDir = path.join(runtime, "speech");
 fs.mkdirSync(spoolDir, { recursive: true });
@@ -49,17 +53,6 @@ const env = {
   CHATTER_AGENT_SPEECH_QUEUE_MAX_ENTRIES: String(QUEUE_MAX),
 };
 
-const failures = [];
-function check(label, ok, detail) {
-  if (!ok) failures.push(label);
-  const mark = ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m";
-  console.log(`${mark}  ${label}${detail && !ok ? `\n      ${detail}` : ""}`);
-}
-function show(title) {
-  console.log(`\n\x1b[1m--- ${title} ---\x1b[0m`);
-}
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const queueSize = () => fs.readdirSync(queueDir).filter((f) => f.endsWith(".json")).length;
 
 /**
@@ -122,40 +115,35 @@ function connect(options = {}) {
   });
 }
 
-let server;
-let serverLog = "";
+/** 走っている server。止めたら null に戻す */
+let server = null;
+/** **止めた**分のログ。この検証は途中で2回 server を入れ替える */
+let stoppedLog = "";
+const serverLogs = () => stoppedLog + (server?.log ?? "");
 
-function startServer() {
-  server = spawn(process.execPath, [SERVER], { env, stdio: ["ignore", "pipe", "pipe"] });
-  server.stdout.on("data", (d) => (serverLog += d));
-  server.stderr.on("data", (d) => (serverLog += d));
-}
-
-async function waitForReady() {
-  const mark = "[Server] Ready";
-  const seen = serverLog.lastIndexOf(mark);
-  for (let i = 0; i < 100; i++) {
-    if (serverLog.lastIndexOf(mark) > seen || (seen === -1 && serverLog.includes(mark))) return;
-    await sleep(50);
-  }
-  throw new Error(`server が起動しませんでした:\n${serverLog}`);
+/**
+ * ★ 起動ごとにログを分けること。1本に溜めると「今回の起動で Ready が出たか」を
+ *   `lastIndexOf` の比較で判定する羽目になる（`spawnLogged` はハンドルごとに持つ）。
+ */
+async function startServer() {
+  server = spawnLogged([SERVER], { env, label: "server" });
+  await server.waitFor("[Server] Ready");
 }
 
 async function stopServer() {
-  if (!server) return;
-  const dead = new Promise((done) => server.once("exit", done));
-  server.kill("SIGTERM");
-  await Promise.race([dead, sleep(3000)]);
+  if (server === null) return;
+  await server.stop(3000);
+  stoppedLog += server.log;
+  server = null;
 }
 
 function cleanup() {
-  server?.kill("SIGKILL");
+  killAll();
   fs.rmSync(root, { recursive: true, force: true });
 }
 
 try {
-  startServer();
-  await waitForReady();
+  await startServer();
 
   show("① 接続したクライアントに1文ずつ流れる");
   const client = await connect();
@@ -296,8 +284,7 @@ try {
     .sort()
     .at(-1);
 
-  startServer();
-  await waitForReady();
+  await startServer();
   const afterRestart = await connect();
   await afterRestart.settle(600);
 
@@ -339,8 +326,7 @@ try {
   const oldEpoch = JSON.parse(fs.readFileSync(path.join(runtime, "speech.state.json"), "utf8")).epoch;
   check("旧世代が3件積まれている", queueSize() === 3, `${queueSize()} 件`);
 
-  startServer();
-  await waitForReady();
+  await startServer();
   // ★ 誰も繋がないまま poll させる。ここで全 entry が `delivered` に入る
   await sleep(400);
 
@@ -376,29 +362,11 @@ try {
   );
 
   await afterRenumber.close();
-
-  show("結果");
-  if (failures.length > 0) {
-    console.log(`\x1b[31m${failures.length} 件失敗\x1b[0m`);
-    console.log(`\nserver のログ:\n${serverLog}`);
-  } else {
-    console.log("\x1b[32mすべて PASS\x1b[0m");
-  }
 } catch (err) {
   console.error(err);
-  console.error(`\nserver のログ:\n${serverLog}`);
-  failures.push("実行エラー");
+  fail("実行エラー");
 } finally {
   cleanup();
 }
 
-// ★ ここで `process.exitCode` に倒さないこと。この下でイベントループが空にならない
-//   （catch 経路では server 子プロセスが起動したまま残り、finally の cleanup() は
-//   SIGKILL するだけで exit を待たない）ので、自然終了に任せるとプロセスがハングする。
-//   exit は保ったまま、書き込みの排出だけ待つ
-const exitCode = failures.length === 0 ? 0 : 1;
-// 上の診断ダンプ（server のログ）は数百KBになりうる。macOS ではパイプへの書き込みが
-// 非同期なので、排出を待たずに exit すると64KiBで切れる（Linux と TTY は同期なので CI では起きない）
-await new Promise((resolve) => process.stdout.write("", resolve));
-await new Promise((resolve) => process.stderr.write("", resolve));
-process.exit(exitCode);
+await summarize(() => `server のログ:\n${serverLogs()}`);

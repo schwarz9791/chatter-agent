@@ -22,7 +22,8 @@ core/src/
 │   ├── dispatcher.ts        配信済み seq と**採番の世代**の判断。フレームの組み立てもここ（ユニットテストのため純粋な部品に切り出してある）
 │   ├── audioStore.ts        ★合成のキャッシュと single-flight。ディスクを持たない（issue #29）
 │   ├── httpServer.ts        `GET /audio/<epoch>-<seq>.wav`。200 / 503 / 404 / 403 の切り分け
-│   └── wsServer.ts          配信と ack。Origin 検査、外部 http.Server への相乗りもここ
+│   ├── wsServer.ts          配信と ack。Origin 検査、外部 http.Server への相乗りもここ
+│   └── throttledWarn.ts     同じ警告を間引く（503 の連発と Origin 拒否。黙らせずに件数を出す）
 ├── tts/          音声合成エンジンのクライアント（issue #29 で player/ から移設）
 │   └── voicevoxClient.ts    AivisSpeech / VOICEVOX 互換 API（fetch + AbortSignal.timeout）
 ├── player/       chatter-agent-player（WebSocket → 音声取得 → 再生 → ack）
@@ -188,6 +189,11 @@ hook → CLI → server → player の全経路を1本で見る。
 `verify:player` 側は逆に、スタブのサーバーが返す 200 / 503 / 404 に対してクライアントが
 どう振る舞うかだけを見る。
 
+3本（`phase-b` / `tts` / `player`）は `scripts/lib/harness.mjs` を共有する。入っているのは
+`check` / `show` / `until`・使い捨てルート・スタブ用の WAV・「子プロセスを起動してこの行が
+出るまで待つ」まで。**判定とスタブはここに置かないこと** — 落ちたときに「スタブの挙動」と
+「本物の挙動」のどちらを疑うかが増える。
+
 **実機での確認（ターミナル表示と体感で同時か）は耳で行う。** 自動の検証が見ているのは形と順序だけ。
 
 **CI の `verify` ジョブでも回している**（`.github/workflows/validate.yml`）。いずれも
@@ -307,6 +313,11 @@ server（音声合成）だけが読むキー。**別ファイルに分けない
   「数十秒の無音は正常」と区別できなくなる。音声だけを 503 に落として、原因を症状に出す
 - `ttsEnabled: false` にすると配信フレームの `audio` が常に `null` になり、`GET /audio/…` も 404 を返す。
   **テキストの配信は止まらない**ので、自前で合成するクライアントや字幕だけのクライアントの逃げ道になる
+- ★ **`synthesisTimeoutMs` は2つの場所に効く。** エンジンへの**1リクエストあたり**の上限
+  （`audio_query` と `synthesis` に別々に。2往復で1つの予算にすると、モデルロードで
+  `/audio_query` が食い切ったとき CPU 律速の `/synthesis` に残り0が渡る）と、
+  `GET /audio/…` の**応答**を保留する上限。後者は応答を打ち切るだけで**合成は続ける**ので、
+  クライアントの取り直しがキャッシュに当たって即 200 になる
 - モジュール名は API ファミリ（`voicevoxClient`）、config キーはエンジン中立（`tts*`）で割り切ってある
 
 player だけが読むキー。**これも別ファイルに分けない**（理由は上と同じ）。
@@ -322,9 +333,11 @@ player だけが読むキー。**これも別ファイルに分けない**（理
 
 - ★ **`synthesisLookahead` の意味は #29 でも変わっていない。** サーバーは投機的な先読みを
   持たず、GET が来たときに合成するので、**この窓がそのまま合成の需要信号になる**
-- ★ **`audioFetchTimeoutMs` はサーバー側の `synthesisTimeoutMs` より長くすること。**
-  音声の GET は「合成が終わるまで待つ」ので、短いと 503（待てば直る）で来るはずの状態が
-  転送エラー（試行回数を消費する）に化ける
+- ★ **`audioFetchTimeoutMs` とサーバー側の `synthesisTimeoutMs` の順序は気にしなくてよい。**
+  以前は「長くすること」という暗黙の制約があり、破ると 503（待てば直る）で来るはずの状態が
+  転送エラー（試行回数を消費する＝発話が捨てられる）に化けた。しかも `synthesize` は2往復なので
+  **最悪は `synthesisTimeoutMs` の2倍**で、既定の45秒でも足りなかった。いまはサーバーが
+  `GET` の応答を自分で打ち切って 503 を返すので、この制約そのものが無い
 - ★ **`playerServerUrl` が `host` と別なのは、既定の `0.0.0.0` が bind アドレスであって接続先ではないから。**
   空のときは `0.0.0.0` / `::` を `127.0.0.1` に読み替えて組み立てる。音声の取得元も
   この URL の authority から導く（サーバーは自分の到達アドレスを知らない → `core/audioPath.ts`）

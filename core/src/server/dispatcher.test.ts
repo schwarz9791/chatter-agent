@@ -435,6 +435,23 @@ describe("フレームの組み立て（audio。#29）", () => {
     expect(frames(broadcast)[0]?.audio).toBeNull();
   });
 
+  it("★ audioEnabled はループの外で1回だけ読む（config.get は毎回 statSync する）", () => {
+    // catchUp は最大 speechQueueMaxEntries（既定500）件を、同期の WS connection ハンドラの
+    // 中で回る。entry ごとに読むと、そのぶん syscall が積み上がる
+    const records = [];
+    for (let seq = 1; seq <= 20; seq++) records.push(record(seq));
+    queue.enqueue(records);
+
+    const audioEnabled = vi.fn(() => true);
+    const dispatcher = createDispatcher({ queue, broadcast: vi.fn(), audioEnabled });
+    dispatcher.poll();
+    expect(audioEnabled).toHaveBeenCalledTimes(1);
+
+    audioEnabled.mockClear();
+    dispatcher.catchUp(() => true);
+    expect(audioEnabled).toHaveBeenCalledTimes(1);
+  });
+
   it("config は実行中に読み直される（起動時の1回きりの値で固定しない）", () => {
     queue.enqueue([record(1)]);
     let enabled = false;

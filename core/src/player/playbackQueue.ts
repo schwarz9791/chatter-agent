@@ -89,8 +89,19 @@ export interface PlaybackOptions {
   maxAgeMs: number;
   /** 取得を試みる上限回数。2 = 初回 + 1リトライ。**503 はこれを消費しない** */
   synthesisAttempts: number;
-  /** 503（あとで取りに来い）を受けてから取り直すまでの間隔 */
+  /**
+   * 503（あとで取りに来い）を受けてから取り直すまでの**最初の**間隔。
+   * 連続して 503 が返る間は上限（`audioRetryMaxMs`）まで倍々にする。
+   */
   audioRetryMs: number;
+  /**
+   * 503 が続いたときの取り直し間隔の上限。
+   *
+   * ★ 固定1秒のままだと、エンジンが落ちている間ずっと**先読み窓ぶん（既定4件）× 1秒**の
+   *   リクエストがサーバーへ飛び続ける。503 では試行回数を消費しない（＝諦めない）設計なので、
+   *   止めるのは「捨てること」ではなく**バックオフ**の役目。
+   */
+  audioRetryMaxMs: number;
   /**
    * 音声を用意できない状態がこの件数続いたら警告する。0 なら無効。
    *
@@ -100,6 +111,14 @@ export interface PlaybackOptions {
    *   サーバーが起動時に一度確かめただけでは足りない。
    */
   unavailableWarnAfter: number;
+  /**
+   * 用意できない状態が続くとき、警告を出し直す間隔。0 なら1回きり。
+   *
+   * ★ **boolean のラッチにしないこと。** プロセス寿命で1回だけにすると、数日走る player が
+   *   「エンジン停止 → 復旧 → 再停止」を見ても最初の1回しか出さない。`checkStall` の
+   *   `stallWarned` も同じ形だったので併せて直してある。
+   */
+  unavailableWarnRepeatMs: number;
   /** 消費済みキーの保持数 */
   seenCapacity: number;
   /** head が動かないまま この時間 が過ぎたら警告する。0 なら無効 */
@@ -112,7 +131,9 @@ export function createDefaultOptions(): PlaybackOptions {
     maxAgeMs: 0,
     synthesisAttempts: 2,
     audioRetryMs: 1_000,
+    audioRetryMaxMs: 30_000,
     unavailableWarnAfter: 5,
+    unavailableWarnRepeatMs: 60_000,
     seenCapacity: 512,
     stallWarnMs: 120_000,
   };
@@ -180,10 +201,14 @@ export interface PlaybackState {
   /** stall watchdog: 現在の head と、それが head になった時刻 */
   headSeq: number | null;
   headSince: number;
-  stallWarned: boolean;
+  /** 最後に停滞を警告した時刻。0 なら未出力 */
+  stallWarnedAt: number;
   /** 音声を用意できなかった回数の連続。`audioReady` で 0 に戻る */
   unavailableStreak: number;
-  unavailableWarned: boolean;
+  /** 最後に「用意できない」警告を出した時刻。0 なら未出力 */
+  unavailableWarnedAt: number;
+  /** 503 の連続回数。取り直し間隔のバックオフに使う。`audioReady` で 0 に戻る */
+  unavailableBackoffStep: number;
 }
 
 export function createPlaybackState(options: PlaybackOptions = createDefaultOptions()): PlaybackState {
@@ -200,9 +225,10 @@ export function createPlaybackState(options: PlaybackOptions = createDefaultOpti
     headCache: null,
     headSeq: null,
     headSince: 0,
-    stallWarned: false,
+    stallWarnedAt: 0,
     unavailableStreak: 0,
-    unavailableWarned: false,
+    unavailableWarnedAt: 0,
+    unavailableBackoffStep: 0,
   };
 }
 
@@ -301,13 +327,20 @@ function finish(item: QueueItem): void {
  * クライアント側では区別できない。`stallWarnMs`（既定120秒）の停滞警告より早く、
  * 「どこを見ればいいか」を残す。
  */
-function noteUnavailable(state: PlaybackState, reason: string, commands: PlaybackCommand[]): void {
+function noteUnavailable(state: PlaybackState, now: number, reason: string, commands: PlaybackCommand[]): void {
   state.unavailableStreak++;
-  const { unavailableWarnAfter } = state.options;
-  if (unavailableWarnAfter <= 0 || state.unavailableWarned) return;
+
+  const { unavailableWarnAfter, unavailableWarnRepeatMs } = state.options;
+  if (unavailableWarnAfter <= 0) return;
   if (state.unavailableStreak < unavailableWarnAfter) return;
 
-  state.unavailableWarned = true;
+  // ★ 時間で再武装する。件数のラッチだと、復旧して再び壊れたときに無言になる
+  if (state.unavailableWarnedAt !== 0) {
+    if (unavailableWarnRepeatMs <= 0) return;
+    if (now - state.unavailableWarnedAt < unavailableWarnRepeatMs) return;
+  }
+
+  state.unavailableWarnedAt = now;
   commands.push({
     kind: "warn",
     message:
@@ -416,8 +449,13 @@ function fillWindow(state: PlaybackState, now: number, commands: PlaybackCommand
     // 503 のバックオフ中。`tick` で now が進めば次のパスで拾われる
     if (now < item.retryAfter) continue;
 
+    // ★ ここで `attempts++` しないこと。503（＝試行回数を消費しない結果）のたびに
+    //   打ち消す `--` が要る形になり、「一度数えてから引く」を読み解かないと
+    //   上限がいつ来るのか分からなくなる。**消費する場所（`audioFailed`）で数える**。
+    //   これが成り立つのは `index.ts` の `fetchAudio` が全経路を握っていて、
+    //   必ず4種のイベントのどれか1つを返すから（`audioFetcher` の
+    //   `timeoutMs` が省略不可なのはそのため）
     item.status = "fetching";
-    item.attempts++;
     commands.push({ kind: "fetchAudio", epoch: state.epoch, seq, path: audio.path });
     changed = true;
   }
@@ -432,16 +470,19 @@ function checkStall(state: PlaybackState, now: number, commands: PlaybackCommand
   if (seq !== state.headSeq) {
     state.headSeq = seq;
     state.headSince = now;
-    state.stallWarned = false;
+    state.stallWarnedAt = 0;
     return;
   }
 
   const { stallWarnMs } = state.options;
-  if (stallWarnMs <= 0 || seq === null || state.stallWarned) return;
+  if (stallWarnMs <= 0 || seq === null) return;
   if (now - state.headSince < stallWarnMs) return;
+  // ★ **`headSeq` が変わるまで再武装しない形にしないこと。** 恒久的に詰まると
+  //   head が永遠に変わらないので、生涯1行しか出なくなる。`stallWarnMs` ごとに出し直す
+  if (state.stallWarnedAt !== 0 && now - state.stallWarnedAt < stallWarnMs) return;
 
   // 無音は症状として何も語らない。最後の保険として、どこで止まったかだけは残す
-  state.stallWarned = true;
+  state.stallWarnedAt = now;
   const status = head ? head.status : "?";
   commands.push({
     kind: "warn",
@@ -495,7 +536,7 @@ function resetEpoch(state: PlaybackState, commands: PlaybackCommand[]): void {
   state.maxSeqConsumed = 0;
   state.pendingAck = null;
   state.headSeq = null;
-  state.stallWarned = false;
+  state.stallWarnedAt = 0;
   // ドライバ側の間引きバッファに残っている旧エポックの ack も落とす
   commands.push({ kind: "dropPendingAck" });
 }
@@ -583,7 +624,10 @@ export function reduce(state: PlaybackState, event: PlaybackEvent, now: number):
       }
       item.status = "ready";
       item.file = event.file;
+      // 取れたので、バックオフも警告のラッチも解く
       state.unavailableStreak = 0;
+      state.unavailableBackoffStep = 0;
+      state.unavailableWarnedAt = 0;
       break;
     }
 
@@ -591,10 +635,13 @@ export function reduce(state: PlaybackState, event: PlaybackEvent, now: number):
       // 503。サーバーはいるが用意できていない。**試行回数を消費しない**
       const item = event.epoch === state.epoch ? state.items.get(event.seq) : undefined;
       if (!item || item.status !== "fetching") break;
-      item.attempts--;
       item.status = "pending";
-      item.retryAfter = now + state.options.audioRetryMs;
-      noteUnavailable(state, event.reason, commands);
+      // ★ 諦めない以上、止めるのはバックオフの役目。固定間隔だと
+      //   エンジンが落ちている間ずっと窓ぶんのリクエストが飛び続ける
+      const { audioRetryMs, audioRetryMaxMs } = state.options;
+      item.retryAfter = now + Math.min(audioRetryMs * 2 ** state.unavailableBackoffStep, audioRetryMaxMs);
+      state.unavailableBackoffStep++;
+      noteUnavailable(state, now, event.reason, commands);
       break;
     }
 
@@ -603,7 +650,7 @@ export function reduce(state: PlaybackState, event: PlaybackEvent, now: number):
       const item = event.epoch === state.epoch ? state.items.get(event.seq) : undefined;
       if (!item || item.status !== "fetching") break;
       commands.push({ kind: "warn", message: `seq=${event.seq} の音声がありません: ${event.reason}` });
-      noteUnavailable(state, event.reason, commands);
+      noteUnavailable(state, now, event.reason, commands);
       finish(item);
       break;
     }
@@ -611,6 +658,8 @@ export function reduce(state: PlaybackState, event: PlaybackEvent, now: number):
     case "audioFailed": {
       const item = event.epoch === state.epoch ? state.items.get(event.seq) : undefined;
       if (!item || item.status !== "fetching") break;
+      // ★ 数えるのはここ。`fillWindow` ではない（→ `fillWindow` のコメント）
+      item.attempts++;
       if (item.attempts < state.options.synthesisAttempts) {
         // pending へ戻せば、次の step で窓が拾い直す
         item.status = "pending";

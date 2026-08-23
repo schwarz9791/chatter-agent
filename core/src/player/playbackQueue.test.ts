@@ -570,21 +570,99 @@ describe("音声が用意できないとき（503 / 404。#29）", () => {
     expect(only(given, "ack")).toEqual([{ kind: "ack", seq: 1, epochId: E1 }]);
   });
 
-  it("★ 用意できない状態が続いたら、設定を疑う手がかりを1回だけ出す", () => {
-    const state = start({ unavailableWarnAfter: 3, audioRetryMs: 0 });
+  it("★ 用意できない状態が続いたら、設定を疑う手がかりを出す", () => {
+    const state = start({ unavailableWarnAfter: 3, audioRetryMs: 0, audioRetryMaxMs: 0 });
     run(
       state,
       [1, 2, 3, 4, 5].map((seq) => ({ kind: "received", record: record(seq) })),
     );
 
-    const warns: string[] = [];
+    const hints = (commands: PlaybackCommand[]) =>
+      only(commands, "warn").filter((c) => c.message.includes("ttsSpeakerId"));
+
+    let warned = 0;
     for (const seq of [1, 2, 3, 4, 5]) {
-      for (const c of run(state, [{ kind: "audioGone", epoch: 0, seq, reason: "404" }])) {
-        if (c.kind === "warn" && c.message.includes("ttsSpeakerId")) warns.push(c.message);
-      }
+      warned += hints(run(state, [{ kind: "audioGone", epoch: 0, seq, reason: "404" }])).length;
     }
 
-    expect(warns).toHaveLength(1);
+    expect(warned).toBe(1);
+  });
+
+  it("★ 用意できない状態が続くなら、unavailableWarnRepeatMs ごとに出し直す", () => {
+    // boolean のラッチだと、数日走る player が「停止 → 復旧 → 再停止」を見ても
+    // 最初の1回しか出さない
+    const state = start({ unavailableWarnAfter: 1, unavailableWarnRepeatMs: 60_000, audioRetryMaxMs: 0 });
+    run(
+      state,
+      [1, 2].map((seq) => ({ kind: "received", record: record(seq) })),
+    );
+
+    const hints = (commands: PlaybackCommand[]) =>
+      only(commands, "warn").filter((c) => c.message.includes("ttsSpeakerId"));
+
+    expect(hints(run(state, [{ kind: "audioUnavailable", epoch: 0, seq: 1, reason: "503" }], T0))).toHaveLength(1);
+    // 間隔の中では出さない
+    expect(hints(run(state, [{ kind: "audioUnavailable", epoch: 0, seq: 1, reason: "503" }], T0 + 10_000))).toEqual([]);
+    // 過ぎたら出し直す
+    expect(
+      hints(run(state, [{ kind: "audioUnavailable", epoch: 0, seq: 1, reason: "503" }], T0 + 70_000)),
+    ).toHaveLength(1);
+  });
+
+  it("★ 503 が続く間は取り直しの間隔を倍にする（窓ぶんのリクエストが飛び続けない）", () => {
+    const state = start({ audioRetryMs: 1_000, audioRetryMaxMs: 8_000 });
+    run(state, [{ kind: "received", record: record(1) }]);
+
+    const retryAfter = () => state.items.get(1)?.retryAfter ?? 0;
+    const waits: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      run(state, [{ kind: "audioUnavailable", epoch: 0, seq: 1, reason: "503" }], T0);
+      waits.push(retryAfter() - T0);
+      // 次の取得を走らせる（バックオフが明けた体で）
+      run(state, [{ kind: "tick" }], retryAfter() + 1);
+    }
+
+    expect(waits).toEqual([1_000, 2_000, 4_000, 8_000, 8_000]);
+  });
+
+  it("★ 音声が取れたらバックオフも警告のラッチも解ける", () => {
+    const state = start({ audioRetryMs: 1_000, audioRetryMaxMs: 8_000, unavailableWarnAfter: 1 });
+    run(
+      state,
+      [1, 2].map((seq) => ({ kind: "received", record: record(seq) })),
+    );
+
+    run(state, [{ kind: "audioUnavailable", epoch: 0, seq: 1, reason: "503" }], T0);
+    run(state, [{ kind: "tick" }], T0 + 2_000);
+    run(state, [{ kind: "audioUnavailable", epoch: 0, seq: 1, reason: "503" }], T0 + 2_000);
+    expect(state.unavailableBackoffStep).toBe(2);
+
+    // バックオフが明けてから取り直させる（`audioReady` は `fetching` の item にしか効かない）
+    run(state, [{ kind: "tick" }], T0 + 5_000);
+    expect(state.items.get(1)?.status).toBe("fetching");
+    run(state, [{ kind: "audioReady", epoch: 0, seq: 1, file: "/tmp/1.wav" }], T0 + 5_000);
+
+    expect(state.unavailableBackoffStep).toBe(0);
+    expect(state.unavailableWarnedAt).toBe(0);
+    expect(state.unavailableStreak).toBe(0);
+  });
+
+  it("★ 503 は何度来ても試行回数を消費しない（数えるのは audioFailed だけ）", () => {
+    const state = start({ synthesisAttempts: 2, audioRetryMs: 0, audioRetryMaxMs: 0 });
+    run(state, [{ kind: "received", record: record(1) }]);
+
+    for (let i = 0; i < 20; i++) {
+      run(state, [{ kind: "audioUnavailable", epoch: 0, seq: 1, reason: "503" }]);
+      run(state, [{ kind: "tick" }]);
+    }
+    expect(state.items.get(1)?.attempts).toBe(0);
+    expect(state.items.get(1)?.status).not.toBe("done");
+
+    // 転送失敗だけが数えられ、2回で諦める
+    run(state, [{ kind: "audioFailed", epoch: 0, seq: 1, reason: "ECONNRESET" }]);
+    expect(state.items.get(1)?.attempts).toBe(1);
+    const given = run(state, [{ kind: "audioFailed", epoch: 0, seq: 1, reason: "ECONNRESET" }]);
+    expect(only(given, "ack")).toEqual([{ kind: "ack", seq: 1, epochId: E1 }]);
   });
 
   it("音声が取れたら連続の数え直し", () => {
@@ -634,7 +712,7 @@ describe("古い発話", () => {
 });
 
 describe("stall watchdog", () => {
-  it("head が動かないまま時間が経つと1回だけ警告する", () => {
+  it("head が動かないまま時間が経つと警告し、★ stallWarnMs ごとに出し直す", () => {
     const state = start({ stallWarnMs: 60_000 });
     run(state, [{ kind: "received", record: record(1) }]);
 
@@ -644,8 +722,12 @@ describe("stall watchdog", () => {
     expect(warned).toHaveLength(1);
     expect(warned[0].message).toContain("seq=1");
 
-    // 繰り返さない
-    expect(only(run(state, [{ kind: "tick" }], T0 + 200_000), "warn")).toEqual([]);
+    // 間隔の中では繰り返さない
+    expect(only(run(state, [{ kind: "tick" }], T0 + 90_000), "warn")).toEqual([]);
+
+    // ★ 恒久的に詰まると head は永遠に変わらない。`headSeq` の変化でしか再武装しない形だと
+    //   生涯1行しか出ず、「無音なのにログが2行だけ」になる
+    expect(only(run(state, [{ kind: "tick" }], T0 + 130_000), "warn")).toHaveLength(1);
   });
 
   it("head が進めば警告しない", () => {

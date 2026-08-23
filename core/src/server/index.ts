@@ -138,12 +138,19 @@ async function main(): Promise<void> {
 
   // ★ 音声はプロセス内にしか持たない（`audioStore.ts`）。合成は GET が来たときに走るので、
   //   誰も繋いでいない間はエンジンを一度も叩かない
-  const tts = createVoicevoxClient({
-    baseUrl: config.get("ttsBaseUrl"),
-    speakerId: config.get("ttsSpeakerId"),
-    timeoutMs: config.get("synthesisTimeoutMs"),
-  });
-  const audioStore = createAudioStore({ synthesize: (text) => tts.synthesize(text) });
+  //
+  // ★ **合成のたびに現在の config から組む。** config は参照のたびに mtime スタンプを見て
+  //   読み直す作りなので、起動時の1回きりで固定すると `ttsSpeakerId` を直しても
+  //   サーバーを再起動するまで効かない。無音の原因として真っ先に疑ってほしい値なので、
+  //   直したらすぐ効く方がよい（クライアント側の警告もそこを名指しする）。
+  //   クライアントの生成は object literal と closure だけなので、GET のたびに作って問題ない
+  const currentTts = () =>
+    createVoicevoxClient({
+      baseUrl: config.get("ttsBaseUrl"),
+      speakerId: config.get("ttsSpeakerId"),
+      timeoutMs: config.get("synthesisTimeoutMs"),
+    });
+  const audioStore = createAudioStore({ synthesize: (text) => currentTts().synthesize(text) });
 
   const httpServer = createAudioHttpServer({
     store: audioStore,
@@ -177,7 +184,7 @@ async function main(): Promise<void> {
   const bound = wsServer.address();
   console.log(`[Server] listening on ws://${bound.host}:${bound.port}`);
   if (config.get("ttsEnabled")) {
-    console.log(`[Server] audio: http://${bound.host}:${bound.port}/audio/ (engine: ${tts.baseUrl})`);
+    console.log(`[Server] audio: http://${bound.host}:${bound.port}/audio/ (engine: ${config.get("ttsBaseUrl")})`);
   } else {
     console.log("[Server] ttsEnabled=false: 音声は配りません（クライアントは無音で ack します）");
   }
@@ -213,7 +220,7 @@ async function main(): Promise<void> {
   //
   // ★ 話者 ID の不一致は `/audio_query` の 4xx になり、全文が 503 になって**無音**になる。
   //   症状から設定ミスに辿り着けないので、起動時に候補を並べておく。
-  if (config.get("ttsEnabled")) void checkEngine(tts, config.get("ttsSpeakerId"));
+  if (config.get("ttsEnabled")) void checkEngine(currentTts(), config.get("ttsSpeakerId"));
 
   installShutdown(async () => {
     clearInterval(poll);

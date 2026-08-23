@@ -654,8 +654,13 @@ describe("★ [#33] prompt が本文を追い越して spool へ着いたとき"
       drain({
         sleep: () => {
           slept++;
-          // 1回目のポーリングの後に本文が着地する
-          if (slept === 1) appendDelta("m1", 0, "監視を開始しました。", true);
+          // 1回目のポーリングの後に本文が着地する。
+          // ★ tick() を省かないこと。ナノ秒が prompt と同値になると scanSpool の
+          //   タイブレーク（パス順）に落ち、到着順が実行環境で変わる（CI の Linux で露見した）
+          if (slept === 1) {
+            tick();
+            appendDelta("m1", 0, "監視を開始しました。", true);
+          }
         },
       });
 
@@ -695,8 +700,12 @@ describe("★ [#33] prompt が本文を追い越して spool へ着いたとき"
         sleep: () => {
           slept++;
           // 別セッションの delta が着地して待ちループは早く抜けるが、
-          // やり直したパスでは prompt_id / session_id が合わないので引き上げは起きない
-          if (slept === 1) appendDelta("other", 0, "別セッションです。", true, "sess-2");
+          // やり直したパスでは prompt_id / session_id が合わないので引き上げは起きない。
+          // ★ tick() を省かないこと（上と同じ理由）
+          if (slept === 1) {
+            tick();
+            appendDelta("other", 0, "別セッションです。", true, "sess-2");
+          }
         },
       });
 

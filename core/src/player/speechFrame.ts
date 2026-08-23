@@ -10,7 +10,7 @@
  *   捨てるのと同じ扱い）。1フレームの不整合でストリーム全体を落とす理由が無い。
  */
 
-import type { Emotion, SpeechKind, SpeechRecord } from "../core/types";
+import { isValidEpoch, type Emotion, type SpeechKind, type SpeechRecord } from "../core/types";
 
 /** `docs/protocol.md`: 未知の `kind` は `assistant` として扱う */
 const KNOWN_KINDS = new Set<string>(["assistant", "prompt"] satisfies SpeechKind[]);
@@ -33,9 +33,9 @@ function optionalString(raw: unknown): string | null {
 /**
  * 読めたら `SpeechRecord`、読めなければ null。
  *
- * 必須なのは `seq`（非負の安全整数）/ `text`（文字列）/ `ts`（文字列）の3つだけ。
- * `ts` を必須にしているのは、重複排除のキーが `seq` 単独では足りないため
- * （→ `playbackQueue.ts` の「エポック」の項）。
+ * 必須なのは `epoch` / `seq`（非負の安全整数）/ `text`（文字列）/ `ts`（文字列）の4つ。
+ * `epoch` を必須にしているのは、重複排除のキーが `seq` 単独では足りないため
+ * （採番はランタイムルートの作り直しで 1 に戻る → `core/types.ts` の `SpeechEpoch`）。
  */
 export function parseSpeechFrame(raw: string): SpeechRecord | null {
   let parsed: unknown;
@@ -47,6 +47,11 @@ export function parseSpeechFrame(raw: string): SpeechRecord | null {
 
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
   const r = parsed as Record<string, unknown>;
+
+  // ★ `isValidEpoch` の charset から外れる値を通さないこと。この値は
+  //   一時ファイル名と音声の URL の材料になる（→ core/types.ts の SpeechEpoch）
+  const epoch = r.epoch;
+  if (!isValidEpoch(epoch)) return null;
 
   // ★ 1 始まり。0 を通さないこと。`speechLog` の採番は 1 からで、0 は
   //   `playbackQueue` の水位の初期値（未受信）と衝突する。seq 0 のフレームは
@@ -65,6 +70,7 @@ export function parseSpeechFrame(raw: string): SpeechRecord | null {
   const emotion = typeof r.emotion === "string" && KNOWN_EMOTIONS.has(r.emotion) ? (r.emotion as Emotion) : "neutral";
 
   return {
+    epoch,
     seq,
     ts,
     // 将来 別のプロデューサーが増えても、player は誰が書いたかで挙動を変えない

@@ -45,6 +45,7 @@ afterEach(() => {
 
 function record(seq: number, text = `文${seq}。`): SpeechRecord {
   return {
+    epoch: "test-epoch",
     seq,
     ts: "2026-08-15T00:00:00.000Z",
     source: "claude-code",
@@ -338,6 +339,48 @@ describe("trim", () => {
     const q = queue();
     q.enqueue([record(1), record(2)]);
     expect(q.trim(0)).toBe(2);
+  });
+});
+
+describe("clear", () => {
+  it("全部消して件数を返す", () => {
+    const q = queue();
+    q.enqueue([record(1), record(2), record(3)]);
+
+    expect(q.clear()).toBe(3);
+    expect(q.list()).toEqual([]);
+  });
+
+  it("空のキューでは 0", () => {
+    expect(queue().clear()).toBe(0);
+  });
+
+  it("★ 採番のやり直しで trim が壊れる形を、clear が解く", () => {
+    const q = queue();
+    // 旧世代が未 ack で残っているところに、採番がやり直されて 1 から書き直された状態
+    q.enqueue([record(400), record(401)]);
+    q.enqueue([record(1), record(2)]);
+
+    // trim は seq 昇順で捨てるので、この状態では**今書いた新しい方から**消える
+    const stale = queue();
+    stale.trim(2);
+    expect(stale.list()).toEqual([400, 401]);
+
+    // clear してから書けば、その倒錯が起きない
+    const q2 = queue();
+    q2.clear();
+    q2.enqueue([record(1), record(2)]);
+    expect(q2.trim(2)).toBe(0);
+    expect(q2.list()).toEqual([1, 2]);
+  });
+
+  it("キュー以外のファイルは消さない", () => {
+    const q = queue();
+    q.enqueue([record(1)]);
+    fs.writeFileSync(path.join(dir, "notes.txt"), "x");
+
+    q.clear();
+    expect(fs.existsSync(path.join(dir, "notes.txt"))).toBe(true);
   });
 });
 

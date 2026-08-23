@@ -194,9 +194,15 @@ function createStubServer() {
 }
 
 let seqCounter = 0;
+/**
+ * 採番の世代（#29）。**サーバー由来**なので、ここを変えることが「ランタイムルートが
+ * 作り直されて採番が 1 に戻った」の再現になる（→ ⑤）。
+ */
+let epoch = "stub-epoch-1";
 function record(text, overrides = {}) {
   seqCounter++;
   return {
+    epoch,
     seq: seqCounter,
     ts: new Date().toISOString(),
     source: "claude-code",
@@ -264,12 +270,13 @@ async function stopPlayer(handle) {
 
 /** 鳴った順。ファイル名は `<epoch>-<ゼロ埋めした seq>.wav` */
 function played() {
+  return playedFiles().map((name) => Number(name.replace(".wav", "").split("-").pop()));
+}
+
+/** 鳴ったファイル名そのもの。一時ファイル名の衝突を見るときに使う */
+function playedFiles() {
   if (!fs.existsSync(playLog)) return [];
-  return fs
-    .readFileSync(playLog, "utf-8")
-    .split("\n")
-    .filter(Boolean)
-    .map((name) => Number(name.replace(".wav", "").split("-").pop()));
+  return fs.readFileSync(playLog, "utf-8").split("\n").filter(Boolean);
 }
 
 function cleanup() {
@@ -394,15 +401,26 @@ try {
     const player = await startReadyPlayer(playerEnv({ CHATTER_AGENT_PLAYER_SERVER_URL: stub.url() }));
 
     seqCounter = 0;
+    epoch = "stub-epoch-1";
     for (const text of ["ふるい1。", "ふるい2。", "ふるい3。"]) stub.send(record(text));
     await until(() => played().length === 3);
 
-    // ~/.config/chatter-agent を消したのと同じ状態。seq が 1 に戻り、ts も新しくなる
+    // ~/.config/chatter-agent を消したのと同じ状態。seq が 1 に戻り、**epoch も変わる**（#29）
     seqCounter = 0;
+    epoch = "stub-epoch-2";
     stub.send(record("あたらしい1。"));
 
     const ok = await until(() => played().length === 4, 6000);
     check("★ 採番のやり直し後も喋る（seq だけで覚えていると永久に黙る）", ok, JSON.stringify(played()));
+
+    // ★ 旧世代の音声を消し忘れると、孤児の afplay が読んでいる最中のファイルを truncate する。
+    //   一時ファイル名は `<内部エポック>-<seq>.wav` なので、やり直しを跨いだ 2 つの seq=1 は
+    //   別のファイル名で鳴っていなければならない
+    check(
+      "★ やり直しを跨いだ同じ seq が、別の一時ファイルとして鳴っている",
+      new Set(playedFiles()).size === playedFiles().length,
+      JSON.stringify(playedFiles()),
+    );
 
     await stopPlayer(player);
     await stub.close();

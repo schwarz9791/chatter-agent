@@ -3,6 +3,7 @@ import { hasSpeakableText, parseSpeechFrame } from "./speechFrame";
 
 function frame(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
+    epoch: "test-epoch",
     seq: 1,
     ts: "2026-08-15T00:00:00.000Z",
     source: "claude-code",
@@ -19,6 +20,7 @@ function frame(overrides: Record<string, unknown> = {}): string {
 describe("parseSpeechFrame", () => {
   it("正常なフレームをそのまま読む", () => {
     expect(parseSpeechFrame(frame())).toEqual({
+      epoch: "test-epoch",
       seq: 1,
       ts: "2026-08-15T00:00:00.000Z",
       source: "claude-code",

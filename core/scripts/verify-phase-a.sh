@@ -46,6 +46,7 @@ RUNTIME="$ROOT/chatter-agent"
 SPOOL="$RUNTIME/spool"
 LOG="$RUNTIME/speech.jsonl"
 QUEUE="$RUNTIME/speech"
+STATE="$RUNTIME/speech.state.json"
 mkdir -p "$SPOOL"
 
 # ★ hook にデタッチ起動をさせない。`nohup node … &` のままだと CLI がいつ走ったか分からず、
@@ -761,6 +762,72 @@ wait "$late_pid"
 node "$CLI"   # 待ちが尽きた後に着地していた場合の取りこぼしを拾う
 spoken
 
+show "⑳ ★ [#29] 採番のやり直しで epoch が変わり、旧世代の配信キューが捨てられる"
+
+# ★ 使い捨てのルートを**もう1つ**掘る。ここでは speech.jsonl と speech.state.json を消して
+#   「採番がやり直された」状態を作るので、①〜⑲ が積んだ記録の上でやると最後の結果検証が
+#   読むものを壊す。
+#
+# ★ 見たいのは2つ。
+#   1. **state だけ消しても epoch は変わらない**（採番はログ末尾から続くので、世代も続く）
+#   2. **両方消したら epoch が変わり、旧世代の配信キューが CLI に捨てられる**
+#      — 消さずに残すと `speechQueue.trim` が seq 昇順で捨てるせいで、**今書いた新しい
+#      entry から先に消える**（server/dispatcher.ts の delivered のコメントが名指しする罠）。
+#      「どちらの世代が新しいか」はファイル名からもディレクトリの走査順からも決まらないので、
+#      epoch を知っている書き手（CLI）が消すしかない。
+(
+  ROOT2=$(mktemp -d)
+  trap 'rm -rf "$ROOT2"' EXIT
+  export XDG_CONFIG_HOME="$ROOT2"
+  R2="$ROOT2/chatter-agent"
+  mkdir -p "$R2/spool"
+
+  feed_message m-gen1 0 true "世代検証の一文目です。"
+  node "$CLI"
+  cp "$R2/speech.state.json" "$ROOT2/state-1.json"
+
+  # (1) state だけ消す。ログが残っているので採番も世代も続くはず
+  rm -f "$R2/speech.state.json"
+  feed_message m-gen2 0 true "世代検証の二文目です。"
+  node "$CLI"
+  cp "$R2/speech.state.json" "$ROOT2/state-2.json"
+
+  # (2) state とログの両方を消す。ここで採番がやり直される。
+  #     配信キューは ack されていないので、旧世代の entry が残ったままになる
+  rm -f "$R2/speech.state.json" "$R2/speech.jsonl"
+  ls "$R2/speech" > "$ROOT2/queue-before.txt"
+  feed_message m-gen3 0 true "世代検証の三文目です。"
+  node "$CLI"
+
+  node -e '
+    const fs = require("fs");
+    const [s1p, s2p, s3p, beforePath, queueDir, logPath] = process.argv.slice(1);
+    const read = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
+    const s1 = read(s1p), s2 = read(s2p), s3 = read(s3p);
+    const before = fs.readFileSync(beforePath, "utf8").split("\n").filter(Boolean);
+    const now = fs.readdirSync(queueDir).filter((f) => f.endsWith(".json")).sort();
+    const rows = fs.readFileSync(logPath, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+
+    const checks = [
+      ["state だけ消しても epoch は変わらない（採番が続くなら世代も続く）", s2.epoch === s1.epoch],
+      ["state とログを両方消すと epoch が変わる", s3.epoch !== s1.epoch],
+      ["採番も 1 からやり直されている（epoch の変化と一対一）", rows.length === 1 && rows[0].seq === 1],
+      ["旧世代の配信キューが捨てられている", before.length >= 2 && now.length === 1],
+      ["残っているのは新しい世代の entry だけ", now.every((f) => read(queueDir + "/" + f).epoch === s3.epoch)],
+    ];
+    let failed = 0;
+    for (const [label, ok] of checks) {
+      if (!ok) failed++;
+      console.log((ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m") + "  " + label);
+    }
+    if (failed) {
+      console.log("      before=" + JSON.stringify(before) + " now=" + JSON.stringify(now) +
+        " epochs=" + s1.epoch + "/" + s2.epoch + "/" + s3.epoch);
+    }
+    process.exit(failed === 0 ? 0 : 1);
+  ' "$ROOT2/state-1.json" "$ROOT2/state-2.json" "$R2/speech.state.json" "$ROOT2/queue-before.txt" "$R2/speech" "$R2/speech.jsonl"
+)
+
 show "結果の検証"
 node -e '
   const fs = require("fs");
@@ -885,5 +952,23 @@ node -e '
   check(".json.tmp が残っていない（tmp + rename が途中で終わっていない）",
     !queueFiles.some((f) => f.endsWith(".json.tmp")));
 
+  // ── epoch（採番の世代。#29）──────────────────────────────────────────────
+  //
+  // ★ このランでは一度も採番がやり直されていないので、記録・キュー・state の
+  //   すべてが同じ epoch を持っていなければならない。ここが割れるのは
+  //   「1回の append で epoch を計算し直している」「state に書き戻していない」のどちらか
+  const epochs = new Set(rows.map((r) => r.epoch));
+  check("speech.jsonl の全レコードが同じ epoch を持つ",
+    epochs.size === 1 && [...epochs].every((e) => typeof e === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(e)),
+    [...epochs].join(","));
+
+  const state = JSON.parse(fs.readFileSync(process.argv[4], "utf8"));
+  check("speech.state.json に epoch が入っている（次の起動で採番のやり直しと誤判定されない）",
+    state.epoch === [...epochs][0], JSON.stringify(state));
+
+  const queueEpochs = new Set(queueJson.map((f) => JSON.parse(fs.readFileSync(`${queueDir}/${f}`, "utf8")).epoch));
+  check("配信キューの epoch が記録と一致する",
+    queueEpochs.size === 1 && [...queueEpochs][0] === [...epochs][0]);
+
   process.exit(failed === 0 ? 0 : 1);
-' "$LOG" "$SPOOL" "$QUEUE"
+' "$LOG" "$SPOOL" "$QUEUE" "$STATE"

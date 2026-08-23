@@ -23,6 +23,7 @@ afterEach(() => {
 
 function record(seq: number, text = `文${seq}。`): SpeechRecord {
   return {
+    epoch: "test-epoch",
     seq,
     ts: "2026-08-15T00:00:00.000Z",
     source: "claude-code",

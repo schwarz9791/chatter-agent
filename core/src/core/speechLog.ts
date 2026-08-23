@@ -15,10 +15,21 @@ import * as fs from "fs";
 import * as path from "path";
 import { writeFileAtomic } from "./atomicWrite";
 import { getSpeechLogBackupPath } from "./paths";
-import type { SpeechRecord } from "./types";
+import { isValidEpoch, type SpeechEpoch, type SpeechRecord } from "./types";
 
-/** `seq` と `ts` はこのモジュールが決めるので、呼び出し側は残りを渡す */
-export type SpeechEntry = Omit<SpeechRecord, "seq" | "ts">;
+/** `epoch` / `seq` / `ts` はこのモジュールが決めるので、呼び出し側は残りを渡す */
+export type SpeechEntry = Omit<SpeechRecord, "epoch" | "seq" | "ts">;
+
+/**
+ * 採番は続いているのに `epoch` だけが読めないとき（＝この機能より前に書かれた state / ログ）に
+ * 使う値。
+ *
+ * ★ ここでランダムな値を生成しないこと。生成してしまうと、**アップグレードした瞬間に
+ *   「採番がやり直された」と読まれる**。サーバーは旧 epoch の entry を配信しなくなり、
+ *   CLI は次の publish でキューを空にするので、in-flight の発話が丸ごと消える。
+ *   採番が続いている以上、epoch も続いていると見なすのが正しい。
+ */
+const LEGACY_EPOCH = "legacy";
 
 export interface SpeechLogDeps {
   logPath: string;
@@ -34,23 +45,61 @@ export interface SpeechLog {
   append(entries: SpeechEntry[]): SpeechRecord[];
   /** 次に採番される seq（追記はしない） */
   peekNextSeq(): number;
+  /** この採番の世代。→ `SpeechEpoch` */
+  readonly epoch: SpeechEpoch;
+  /**
+   * このプロセスが epoch を新規生成した ＝ **採番がやり直された**。
+   *
+   * 呼び出し側（`cli/publish.ts`）は、これが true なら最初の `enqueue` の前に配信キューを
+   * 空にすること。旧世代の entry を残すと、`speechQueue.trim` が seq 昇順で捨てるせいで
+   * **今書いたばかりの新しい entry から先に消える**（`server/dispatcher.ts` の `delivered` の
+   * コメントが名指ししている罠）。
+   */
+  readonly epochIsNew: boolean;
 }
 
 /** 末尾から seq を拾うために読むバイト数。1行はたかだか数KBなのでこれで足りる */
 const TAIL_READ_BYTES = 64 * 1024;
 
-/** ファイル末尾の有効な行から seq を拾う。読めなければ 0 */
-function readLastSeq(filePath: string): number {
+/**
+ * 新しい採番世代の識別子を作る。
+ *
+ * ★ **`crypto` を top-level import しないこと。** `import { randomUUID } from "crypto"` は
+ *   静的 ESM import なので、`chatter-agent-speak` の起動を**毎 delta 約2.6ms** 重くする
+ *   （issue #43 の実測。CLI は hook から毎 delta 起動される）。ここは `speech.state.json` が
+ *   無いときの1回きりの経路なので、**分岐の中で `globalThis.crypto` を触る**なら
+ *   その1回しか払わない。
+ *
+ * 要求は「採番がやり直されるたびに違う値になること」だけで、順序も暗号学的性質も要らない。
+ * ただし **URL に載る**（`/audio/<epoch>-<seq>.wav`）ので、推測しにくい方が望ましい
+ * — ブラウザの `<audio src>` は `Origin` を送らず、サーバーの Origin 検査を素通りする。
+ */
+function generateEpoch(): SpeechEpoch {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  if (isValidEpoch(uuid)) return uuid;
+  // WebCrypto が無い環境向けの保険。衝突しなければよい
+  return `${Date.now().toString(36)}-${Math.floor(Math.random() * 0xffff_ffff).toString(36)}`;
+}
+
+/**
+ * ファイル末尾の有効な行から `seq` と `epoch` を拾う。読めなければ `{ seq: 0, epoch: null }`。
+ *
+ * ★ **両方を同じ行から採ること。** 別々に探すと、`speech.jsonl` と `speech.1.jsonl` を
+ *   跨いだり、途中で切れた行を挟んだりしたときに、**別の世代の seq と epoch がペアになる**。
+ */
+function readLastEntry(filePath: string): { seq: number; epoch: SpeechEpoch | null } {
+  const none = { seq: 0, epoch: null };
+
   let fd: number;
   try {
     fd = fs.openSync(filePath, "r");
   } catch {
-    return 0;
+    return none;
   }
 
   try {
     const size = fs.fstatSync(fd).size;
-    if (size === 0) return 0;
+    if (size === 0) return none;
 
     const length = Math.min(size, TAIL_READ_BYTES);
     const buffer = Buffer.allocUnsafe(length);
@@ -64,37 +113,44 @@ function readLastSeq(filePath: string): number {
       try {
         const parsed: unknown = JSON.parse(line);
         if (typeof parsed === "object" && parsed !== null) {
-          const seq = (parsed as { seq?: unknown }).seq;
+          const { seq, epoch } = parsed as { seq?: unknown; epoch?: unknown };
           // ★ isSafeInteger であること。speechQueue のファイル名解釈・wsServer.parseAck と
           //   同じ基準に揃えないと、壊れた state の値がここだけ通って採番に使われる
           //   （1e300 は isInteger では true になる）
-          if (typeof seq === "number" && Number.isSafeInteger(seq)) return seq;
+          if (typeof seq === "number" && Number.isSafeInteger(seq)) {
+            // epoch はこの機能より前に書かれた行には無い。その場合は null（LEGACY_EPOCH に落ちる）
+            return { seq, epoch: isValidEpoch(epoch) ? epoch : null };
+          }
         }
       } catch {
         // 途中で切れた行。さらに遡る
       }
     }
-    return 0;
+    return none;
   } finally {
     fs.closeSync(fd);
   }
 }
 
-function readStateNextSeq(statePath: string): number {
+function readState(statePath: string): { nextSeq: number; epoch: SpeechEpoch | null } {
   try {
     const parsed: unknown = JSON.parse(fs.readFileSync(statePath, "utf-8"));
     if (typeof parsed === "object" && parsed !== null) {
-      const next = (parsed as { nextSeq?: unknown }).nextSeq;
-      if (typeof next === "number" && Number.isSafeInteger(next) && next >= 1) return next;
+      const { nextSeq, epoch } = parsed as { nextSeq?: unknown; epoch?: unknown };
+      const valid = typeof nextSeq === "number" && Number.isSafeInteger(nextSeq) && nextSeq >= 1;
+      return {
+        nextSeq: valid ? nextSeq : 1,
+        epoch: isValidEpoch(epoch) ? epoch : null,
+      };
     }
   } catch {
     // 無い・壊れているのは異常ではない。ログ末尾から復旧する
   }
-  return 1;
+  return { nextSeq: 1, epoch: null };
 }
 
-function writeStateNextSeq(statePath: string, nextSeq: number): void {
-  writeFileAtomic(statePath, `${JSON.stringify({ nextSeq })}\n`);
+function writeState(statePath: string, nextSeq: number, epoch: SpeechEpoch): void {
+  writeFileAtomic(statePath, `${JSON.stringify({ nextSeq, epoch })}\n`);
 }
 
 export function createSpeechLog(deps: SpeechLogDeps): SpeechLog {
@@ -110,14 +166,30 @@ export function createSpeechLog(deps: SpeechLogDeps): SpeechLog {
    * クラッシュで両者がずれると、seq の重複（クライアントの欠落検出が壊れる）か
    * 欠番（欠落の誤検知）になる。どちらに転んでも直せるよう、大きい方を採る。
    * ローテート直後は現世代が空なので、その場合だけ1世代前も見る。
+   *
+   * epoch も同じ2つの情報源から拾う。**「採番がやり直された」と「epoch が変わった」を
+   * 一致させる**のがここの唯一の仕事:
+   *
+   * - どちらかから epoch が読めた → そのまま使う（採番は続いている）
+   * - epoch は読めないが seq は復旧できた → `LEGACY_EPOCH`（アップグレードの初回。
+   *   ここで生成すると in-flight の発話が消える。→ `LEGACY_EPOCH` のコメント）
+   * - どちらも復旧できなかった（`nextSeq === 1`）→ **やり直しなので新規生成**
    */
-  function reconcile(): number {
-    let lastSeq = readLastSeq(logPath);
-    if (lastSeq === 0) lastSeq = readLastSeq(backupPath);
-    return Math.max(readStateNextSeq(statePath), lastSeq + 1);
+  function reconcile(): { nextSeq: number; epoch: SpeechEpoch; epochIsNew: boolean } {
+    const state = readState(statePath);
+    let last = readLastEntry(logPath);
+    if (last.seq === 0) last = readLastEntry(backupPath);
+
+    const next = Math.max(state.nextSeq, last.seq + 1);
+    const known = state.epoch ?? last.epoch;
+    if (known !== null) return { nextSeq: next, epoch: known, epochIsNew: false };
+    if (next > 1) return { nextSeq: next, epoch: LEGACY_EPOCH, epochIsNew: false };
+    return { nextSeq: next, epoch: generateEpoch(), epochIsNew: true };
   }
 
-  let nextSeq = reconcile();
+  const initial = reconcile();
+  let nextSeq = initial.nextSeq;
+  const epoch = initial.epoch;
 
   /** 退避は1世代だけ。前の退避は上書きされる */
   function rotate(): void {
@@ -157,6 +229,9 @@ export function createSpeechLog(deps: SpeechLogDeps): SpeechLog {
   }
 
   return {
+    epoch,
+    epochIsNew: initial.epochIsNew,
+
     peekNextSeq: () => nextSeq,
 
     append(entries) {
@@ -164,6 +239,7 @@ export function createSpeechLog(deps: SpeechLogDeps): SpeechLog {
 
       const ts = now().toISOString();
       const records: SpeechRecord[] = entries.map((entry) => ({
+        epoch,
         seq: nextSeq++,
         ts,
         source: entry.source,
@@ -190,7 +266,7 @@ export function createSpeechLog(deps: SpeechLogDeps): SpeechLog {
       // ログを先に書く。ここで落ちても reconcile が末尾から拾い直せる
       // （state を先に書くと、落ちたときに欠番だけが残って復旧の手がかりが消える）。
       fs.appendFileSync(logPath, payload);
-      writeStateNextSeq(statePath, nextSeq);
+      writeState(statePath, nextSeq, epoch);
 
       return records;
     },

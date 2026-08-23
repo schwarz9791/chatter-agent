@@ -228,7 +228,12 @@ describe("発話の粒度（契約）", () => {
     drain({
       publish: (entries) => {
         calls.push(entries.length);
-        return entries.map((entry, i) => ({ ...entry, seq: i + 1, ts: "2026-08-16T00:00:00.000Z" }));
+        return entries.map((entry, i) => ({
+          ...entry,
+          epoch: "test-epoch",
+          seq: i + 1,
+          ts: "2026-08-16T00:00:00.000Z",
+        }));
       },
     });
 
@@ -392,7 +397,7 @@ describe("final が来なかったメッセージの救済", () => {
     const calls: number[] = [];
     const publish: DrainDeps["publish"] = (entries) => {
       calls.push(entries.length);
-      return entries.map((entry, i) => ({ ...entry, seq: i + 1, ts: "2026-08-16T00:00:00.000Z" }));
+      return entries.map((entry, i) => ({ ...entry, epoch: "test-epoch", seq: i + 1, ts: "2026-08-16T00:00:00.000Z" }));
     };
 
     drain({ publish });
@@ -414,7 +419,7 @@ describe("final が来なかったメッセージの救済", () => {
     const calls: number[] = [];
     const publish: DrainDeps["publish"] = (entries) => {
       calls.push(entries.length);
-      return entries.map((entry, i) => ({ ...entry, seq: i + 1, ts: "2026-08-16T00:00:00.000Z" }));
+      return entries.map((entry, i) => ({ ...entry, epoch: "test-epoch", seq: i + 1, ts: "2026-08-16T00:00:00.000Z" }));
     };
 
     // ★ ドレインは1回の呼び出しの中で「進展あり」なら複数パス回るので、1回だけ throw する

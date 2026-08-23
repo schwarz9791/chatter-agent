@@ -49,6 +49,17 @@ export interface SpeechQueue {
   dropOlderThan(maxAgeMs: number, now?: number): number;
   /** 件数が上限を超えていたら、古い方から捨てる。捨てた件数を返す */
   trim(maxEntries: number): number;
+  /**
+   * キューを空にする。消した件数を返す。
+   *
+   * ★ **採番がやり直されたときに、書き手（CLI）がロック下で呼ぶためのもの。**
+   *   旧世代の entry を残すと `trim` が壊れる — `trim` は seq 昇順で捨てるが、
+   *   やり直し直後は**新しく書かれた seq 1..N が最小**なので、**今書いたばかりの
+   *   新しい entry から先に消える**（`server/dispatcher.ts` の `delivered` のコメント参照）。
+   *   「どちらの世代が新しいか」はファイル名からもディレクトリの走査順からも決まらないので、
+   *   epoch を知っている書き手が消すしかない。
+   */
+  clear(): number;
   /** 落ちた enqueue が残した `.tmp` を消す。消した件数を返す */
   sweepTmp(): number;
 }
@@ -188,6 +199,14 @@ export function createSpeechQueue(queueDir: string): SpeechQueue {
       // クライアントが繋がっていなければ ack は来ないので、これが唯一の歯止めになる
       let removed = 0;
       for (const { fileName } of all.slice(0, excess)) {
+        if (remove(fileName)) removed++;
+      }
+      return removed;
+    },
+
+    clear() {
+      let removed = 0;
+      for (const { fileName } of listSeqs()) {
         if (remove(fileName)) removed++;
       }
       return removed;

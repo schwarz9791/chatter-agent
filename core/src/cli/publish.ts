@@ -31,9 +31,37 @@ export interface PublisherDeps {
 export function createPublisher(deps: PublisherDeps): (entries: SpeechEntry[]) => SpeechRecord[] {
   const { speechLog, speechQueue, maxEntries } = deps;
 
+  /**
+   * 採番がやり直された（`speech.state.json` と `speech.jsonl` の両方が消えた）ときの後始末。
+   *
+   * ★ **消すのは書き手の責務。** サーバー側では「どちらの世代が新しいか」を決められない
+   *   — やり直し直後のキューは `1(新) 2(新) … 400(旧)` になり、`list()` は seq 昇順なので
+   *   新しい世代が**先頭**に来る。ファイル名からもディレクトリの走査順からも判定できない。
+   *
+   * ★ **`enqueue` より前に呼ぶこと。** 後だと自分が今書いた entry を消す。
+   *
+   * ★ 消さずに放置すると `speechQueue.trim` が壊れる。`trim` は seq 昇順で捨てるので、
+   *   旧世代の大きい seq が残っている限り**新しい entry から先に消され続け、
+   *   その状態から自然に抜け出せない**（`server/dispatcher.ts` の `delivered` のコメント）。
+   */
+  let staleQueueCleared = !speechLog.epochIsNew;
+
   return (entries) => {
     // ここで throw したら記録も配信も無い。呼び出し側（drainSpool）に throw させて構わない
     const records = speechLog.append(entries);
+
+    if (!staleQueueCleared) {
+      // append の後だが enqueue の前。ここで throw させないのは下と同じ理由
+      staleQueueCleared = true;
+      try {
+        const stale = speechQueue.clear();
+        if (stale > 0) {
+          console.error(`[chatter-agent-speak] 採番がやり直されたため、旧世代の配信キュー ${stale} 件を捨てました`);
+        }
+      } catch (err) {
+        console.error("[chatter-agent-speak] 旧世代の配信キューの掃除に失敗しました:", err);
+      }
+    }
 
     try {
       const written = speechQueue.enqueue(records);

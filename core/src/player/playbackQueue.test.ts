@@ -7,6 +7,7 @@ const T0 = Date.parse("2026-08-15T00:00:00.000Z");
 
 function record(seq: number, overrides: Partial<SpeechRecord> = {}): SpeechRecord {
   return {
+    epoch: "test-epoch",
     seq,
     ts: new Date(T0 + seq * 1000).toISOString(),
     source: "claude-code",

@@ -2,7 +2,7 @@
 
 **Claude Code の発言を、VRM キャラクターがリアルタイムで読み上げるシステム。**
 
-Claude Code の `MessageDisplay` hook からテキストを直接受け取り、メッセージが閉じたタイミングで文単位に整形して WebSocket で配信します。受け取った表示側アプリ（デスクトップ / Android XR グラス）が TTS で読み上げ、VRM キャラクターの表情・モーション・リップシンクに反映します。
+Claude Code の `MessageDisplay` hook からテキストを直接受け取り、メッセージが閉じたタイミングで文単位に整形して WebSocket で配信します。**音声の合成はサーバー側で行い**、表示側アプリ（デスクトップ / Android XR グラス）は音声を取りに行って鳴らし、VRM キャラクターの表情・モーション・リップシンクに反映します。
 
 [CC Mascot](https://github.com/kazakago/cc-mascot)（Mac / Electron）の派生プロジェクトです。
 
@@ -27,19 +27,22 @@ chatter-agent-speak    final:true を待つ → delta 結合 → Markdown除去 
   ▼
 speech/<seq>.json  配信キュー（1文1ファイル）
   ▼
-chatter-agent-server   キューを読んで WebSocket 配信
-  ▲                    ack を受けたぶんを消す
+chatter-agent-server   キューを読んで WebSocket 配信（テキスト）
+  ▲  │                 ack を受けたぶんを消す
+  │  └──▶ GET /audio/…  同じポート。取りに来られた時点で合成する
   │ ack
   ▼
-chatter-mascot         表示側アプリ（Unity）。TTS → 再生 → VRM描画
+chatter-mascot         表示側アプリ（Unity）。音声を取得 → 再生 → VRM描画
 ```
+
+**合成をサーバーに寄せてあるので、表示側アプリに音声合成エンジンが要りません。** Android XR グラスには AivisSpeech（Python ベースのネイティブバイナリ）を置けないため、この形にしています。
 
 発話の契約は [`docs/protocol.md`](./docs/protocol.md) にあります。
 
 | ディレクトリ | 内容 |
 |---|---|
 | `plugin/` | Claude Code プラグイン（bash hook） |
-| `core/` | `chatter-agent-core` — CLI、WebSocket サーバー、発話 CLI（AivisSpeech で読み上げる） |
+| `core/` | `chatter-agent-core` — CLI、WebSocket/HTTP サーバー（AivisSpeech で合成する）、発話 CLI |
 | `apps/chatter-mascot/` | 表示側アプリ（Unity + UniVRM）。macOS 常駐と Android XR（XREAL Aura）を同じプロジェクトから |
 
 ## 対象
@@ -53,7 +56,7 @@ chatter-mascot         表示側アプリ（Unity）。TTS → 再生 → VRM描
 | | 状態 |
 |---|---|
 | `plugin/` | 実装済み。実機で確認済み |
-| `core/` | CLI + WebSocket サーバー + 発話 CLI + AI要約（既定OFF）とも実装済み |
+| `core/` | CLI + WebSocket/HTTP サーバー + 発話 CLI + AI要約（既定OFF）+ サーバー合成とも実装済み |
 | `apps/` | 未作成 |
 
 実装フェーズは **A**（plugin + CLI で記録と配信キューが育つ）→ **B**（WebSocket 配信）→ **C**（表示側アプリ）。**C は Unity + UniVRM で1プロジェクトにまとめ、発話 → VRM 表示 → プラットフォーム固有（デスクトップの透過ウィンドウ / XR の Full Space）の順に積みます。**
@@ -73,9 +76,9 @@ tail -f "${XDG_CONFIG_HOME:-$HOME/.config}/chatter-agent/speech.jsonl"
 
 ### 声で聞く
 
-`chatter-agent-player` が、配信された発話を [AivisSpeech](https://aivis-project.com/) で読み上げます。Unity の表示側アプリを待たずに音が出せて、プロトコルの参照実装も兼ねています。
+`chatter-agent-player` が、配信された発話を読み上げます。Unity の表示側アプリを待たずに音が出せて、プロトコルの参照実装も兼ねています。合成そのものは `chatter-agent-server` が [AivisSpeech](https://aivis-project.com/) にやらせるので、player は音声を取りに行って鳴らすだけです。
 
-**AivisSpeech.app を起動しておいてください**（既定の接続先は `http://127.0.0.1:10101`）。
+**AivisSpeech.app を起動しておいてください**（既定の接続先は `http://127.0.0.1:10101`）。繋ぎ先を設定するのは**サーバー側**です。
 
 ```bash
 cd core && npm install && npm run build
@@ -83,7 +86,7 @@ npm run start:server     # 別ターミナル
 npm run start:player     # 別ターミナル
 ```
 
-話者を変えるには `CHATTER_AGENT_TTS_SPEAKER_ID` を指定します（起動時に候補の一覧が出ます）。macOS 以外では `CHATTER_AGENT_PLAYER_COMMAND` に再生コマンドを指定してください（既定は `afplay`）。
+話者を変えるには**サーバーに** `CHATTER_AGENT_TTS_SPEAKER_ID` を指定します（起動時に候補の一覧が出ます）。macOS 以外では **player に** `CHATTER_AGENT_PLAYER_COMMAND` で再生コマンドを指定してください（既定は `afplay`）。
 
 ## 開発
 
@@ -98,10 +101,11 @@ npm run build
 
 npm run verify:phase-a   # spool → speech.jsonl
 npm run verify:phase-b   # 配信キュー → WebSocket
-npm run verify:player    # WebSocket → 合成 → 再生 → ack
+npm run verify:tts       # server の合成と GET /audio/
+npm run verify:player    # WebSocket → 音声取得 → 再生 → ack
 ```
 
-`verify:player` は合成エンジンと再生コマンドをスタブに差し替えるので、AivisSpeech もオーディオデバイスも要りません。
+`verify:tts` と `verify:player` は合成エンジンと再生コマンドをスタブに差し替えるので、AivisSpeech もオーディオデバイスも要りません。
 
 設計方針と作業規約は [`CLAUDE.md`](./CLAUDE.md) と [`docs/`](./docs) にあります。
 

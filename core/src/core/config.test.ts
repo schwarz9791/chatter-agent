@@ -17,10 +17,13 @@ const DEFAULTS: ChatterAgentConfig = {
   spoolMaxAgeHours: 6,
   allowedOrigins: [],
 
+  ttsEnabled: true,
   ttsBaseUrl: "http://127.0.0.1:10101",
   ttsSpeakerId: 888753760,
-  synthesisLookahead: 3,
   synthesisTimeoutMs: 30_000,
+
+  synthesisLookahead: 3,
+  audioFetchTimeoutMs: 45_000,
   playerCommand: "afplay",
   playerArgs: ["{file}"],
   playerServerUrl: "",

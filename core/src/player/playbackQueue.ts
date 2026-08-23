@@ -15,18 +15,24 @@
  * 「純粋」の意味はあくまで**外部への副作用が無い**ことで、不変性ではない。
  */
 
-import { hasSpeakableText } from "./speechFrame";
-import type { SpeechEpoch, SpeechRecord } from "../core/types";
+import type { SpeechEpoch, SpeechFrame } from "../core/types";
 
-export type ItemStatus = "pending" | "synthesizing" | "ready" | "playing" | "done";
+export type ItemStatus = "pending" | "fetching" | "ready" | "playing" | "done";
 
 export interface QueueItem {
-  record: SpeechRecord;
+  record: SpeechFrame;
   status: ItemStatus;
-  /** `ready` 以降で、合成済み WAV のパス */
+  /** `ready` 以降で、取得済み WAV のパス */
   file: string | null;
-  /** 合成を試みた回数。`synthesisAttempts` に達したら諦める */
+  /** 取得を試みた回数。`synthesisAttempts` に達したら諦める */
   attempts: number;
+  /**
+   * この時刻までは取りに行かない。503（あとで取りに来い）を受けたときに置く。
+   *
+   * ★ 503 で `attempts` を消費しないこと。消費すると、サーバー側でエンジンが
+   *   落ちているだけで**溜まっていたキューが数百 ms で全部捨てられる**。
+   */
+  retryAfter: number;
 }
 
 /**
@@ -37,9 +43,14 @@ export interface QueueItem {
  *   「こんにちは」を鳴らしながら「さようなら」を ack する、という壊れ方をする。
  */
 export type PlaybackEvent =
-  | { kind: "received"; record: SpeechRecord }
-  | { kind: "synthesized"; epoch: number; seq: number; file: string }
-  | { kind: "synthesisFailed"; epoch: number; seq: number; reason: string }
+  | { kind: "received"; record: SpeechFrame }
+  | { kind: "audioReady"; epoch: number; seq: number; file: string }
+  /** 503。試行回数を消費せず、バックオフして取り直す */
+  | { kind: "audioUnavailable"; epoch: number; seq: number; reason: string }
+  /** 404 / 音声そのものが無い。諦めて（＝長さ0の再生として）ack する */
+  | { kind: "audioGone"; epoch: number; seq: number; reason: string }
+  /** 転送の失敗。試行回数を消費する */
+  | { kind: "audioFailed"; epoch: number; seq: number; reason: string }
   | { kind: "played"; epoch: number; seq: number }
   | { kind: "playbackFailed"; epoch: number; seq: number; reason: string }
   | { kind: "connected" }
@@ -48,7 +59,7 @@ export type PlaybackEvent =
   | { kind: "tick" };
 
 export type PlaybackCommand =
-  | { kind: "synthesize"; epoch: number; seq: number; text: string }
+  | { kind: "fetchAudio"; epoch: number; seq: number; path: string }
   | { kind: "play"; epoch: number; seq: number; file: string }
   /**
    * 累積 ack（「seq までは片付いた」）。
@@ -72,12 +83,23 @@ export type PlaybackCommand =
   | { kind: "warn"; message: string };
 
 export interface PlaybackOptions {
-  /** 再生中の1件を含めて、いくつ先まで合成を走らせるか。0 なら完全直列 */
+  /** 再生中の1件を含めて、いくつ先まで音声を取りに行くか。0 なら完全直列 */
   lookahead: number;
   /** これより古い発話は音を出さずに飛ばす。0 なら無効 */
   maxAgeMs: number;
-  /** 合成を試みる上限回数。2 = 初回 + 1リトライ */
+  /** 取得を試みる上限回数。2 = 初回 + 1リトライ。**503 はこれを消費しない** */
   synthesisAttempts: number;
+  /** 503（あとで取りに来い）を受けてから取り直すまでの間隔 */
+  audioRetryMs: number;
+  /**
+   * 音声を用意できない状態がこの件数続いたら警告する。0 なら無効。
+   *
+   * ★ **無音の原因を手元に残す唯一の窓。** 合成がサーバーへ移ったので、
+   *   エンジンの不在も `ttsSpeakerId` の間違いも、クライアントからは
+   *   「503 / 404 が続く」としてしか見えない。`config.json` は実行中に読み直されるので、
+   *   サーバーが起動時に一度確かめただけでは足りない。
+   */
+  unavailableWarnAfter: number;
   /** 消費済みキーの保持数 */
   seenCapacity: number;
   /** head が動かないまま この時間 が過ぎたら警告する。0 なら無効 */
@@ -89,6 +111,8 @@ export function createDefaultOptions(): PlaybackOptions {
     lookahead: 3,
     maxAgeMs: 0,
     synthesisAttempts: 2,
+    audioRetryMs: 1_000,
+    unavailableWarnAfter: 5,
     seenCapacity: 512,
     stallWarnMs: 120_000,
   };
@@ -109,7 +133,7 @@ export interface PlaybackState {
    */
   epoch: number;
   /**
-   * サーバーが名乗っている採番の世代（`SpeechRecord.epoch`）。未受信なら null。
+   * サーバーが名乗っている採番の世代（`SpeechFrame.epoch`）。未受信なら null。
    *
    * これが変わった＝**採番がやり直された**。契約で運ばれてくるので推論しない（→ #29）。
    */
@@ -157,6 +181,9 @@ export interface PlaybackState {
   headSeq: number | null;
   headSince: number;
   stallWarned: boolean;
+  /** 音声を用意できなかった回数の連続。`audioReady` で 0 に戻る */
+  unavailableStreak: number;
+  unavailableWarned: boolean;
 }
 
 export function createPlaybackState(options: PlaybackOptions = createDefaultOptions()): PlaybackState {
@@ -174,10 +201,12 @@ export function createPlaybackState(options: PlaybackOptions = createDefaultOpti
     headSeq: null,
     headSince: 0,
     stallWarned: false,
+    unavailableStreak: 0,
+    unavailableWarned: false,
   };
 }
 
-function seenKey(record: SpeechRecord): string {
+function seenKey(record: SpeechFrame): string {
   return `${record.epoch}:${record.seq}`;
 }
 
@@ -229,7 +258,7 @@ function trackDelete(state: PlaybackState, seq: number): void {
 }
 
 /** 消費した（＝ack を打った）ことを覚える。エポック判定の基準はここだけで進む */
-function remember(state: PlaybackState, record: SpeechRecord): void {
+function remember(state: PlaybackState, record: SpeechFrame): void {
   const key = seenKey(record);
   // 追い出しは**挿入順**（Set のイテレーション順）。数値の最小から追い出すと、
   // 採番やり直しの直後に「新しく来た小さい seq」を優先的に忘れることになり、
@@ -263,6 +292,28 @@ function isStale(state: PlaybackState, item: QueueItem, now: number): boolean {
  */
 function finish(item: QueueItem): void {
   item.status = "done";
+}
+
+/**
+ * 音声を用意できなかったことを数える。続くようなら**設定ミスを疑う手がかりを1回だけ**出す。
+ *
+ * 合成がサーバーへ移った結果、`ttsBaseUrl` / `ttsSpeakerId` の間違いもエンジンの不在も、
+ * クライアント側では区別できない。`stallWarnMs`（既定120秒）の停滞警告より早く、
+ * 「どこを見ればいいか」を残す。
+ */
+function noteUnavailable(state: PlaybackState, reason: string, commands: PlaybackCommand[]): void {
+  state.unavailableStreak++;
+  const { unavailableWarnAfter } = state.options;
+  if (unavailableWarnAfter <= 0 || state.unavailableWarned) return;
+  if (state.unavailableStreak < unavailableWarnAfter) return;
+
+  state.unavailableWarned = true;
+  commands.push({
+    kind: "warn",
+    message:
+      `音声を用意できない状態が ${state.unavailableStreak} 件続いています（${reason}）。` +
+      "サーバー側の合成エンジンと ttsBaseUrl / ttsSpeakerId を確認してください",
+  });
 }
 
 function orphanKey(epoch: number, seq: number): string {
@@ -342,26 +393,32 @@ function startPlayback(state: PlaybackState, commands: PlaybackCommand[]): boole
  *   （CLI の `trim`、サーバー再起動）で、一度飛ぶと数値窓は対象ゼロになり、
  *   **音は出るのに先読みだけが恒久的に無効化される**（しかも気づけない）。
  */
-function fillWindow(state: PlaybackState, commands: PlaybackCommand[]): boolean {
+function fillWindow(state: PlaybackState, now: number, commands: PlaybackCommand[]): boolean {
   const window = smallestSeqs(state, state.options.lookahead + 1);
   let changed = false;
 
   for (const seq of window) {
     const item = state.items.get(seq);
     // done は窓の枠を1つ食うが、head に来た瞬間に消えるので実害は無い。
-    // ここで選んでしまうと合成を無限に投げ直すことになるので必ず除く
+    // ここで選んでしまうと取得を無限に投げ直すことになるので必ず除く
     if (!item || item.status !== "pending") continue;
 
-    // 約物だけの断片は合成に出さない。/audio_query は空の WAV か 4xx を返す
-    if (!hasSpeakableText(item.record.text)) {
+    // ★ 音声が無いフレームは取りに行かない。約物だけの断片（`すごい！！` → `！`）や
+    //   `ttsEnabled: false` がこれで、サーバーは `audio: null` を載せてくる。
+    //   「長さ0の再生」として終端へ落とす
+    const audio = item.record.audio;
+    if (audio === null) {
       finish(item);
       changed = true;
       continue;
     }
 
-    item.status = "synthesizing";
+    // 503 のバックオフ中。`tick` で now が進めば次のパスで拾われる
+    if (now < item.retryAfter) continue;
+
+    item.status = "fetching";
     item.attempts++;
-    commands.push({ kind: "synthesize", epoch: state.epoch, seq, text: item.record.text });
+    commands.push({ kind: "fetchAudio", epoch: state.epoch, seq, path: audio.path });
     changed = true;
   }
 
@@ -406,7 +463,7 @@ function step(state: PlaybackState, now: number, commands: PlaybackCommand[]): v
     const staled = markStale(state, now, commands);
     const consumed = consumeHead(state, commands);
     const started = startPlayback(state, commands);
-    const filled = fillWindow(state, commands);
+    const filled = fillWindow(state, now, commands);
     if (!staled && !consumed && !started && !filled) break;
   }
   checkStall(state, now, commands);
@@ -443,7 +500,7 @@ function resetEpoch(state: PlaybackState, commands: PlaybackCommand[]): void {
   commands.push({ kind: "dropPendingAck" });
 }
 
-function onReceived(state: PlaybackState, record: SpeechRecord, commands: PlaybackCommand[]): void {
+function onReceived(state: PlaybackState, record: SpeechFrame, commands: PlaybackCommand[]): void {
   const { seq } = record;
 
   // ★ 採番のやり直しは**契約が運んでくる**（#29）。以前はここで「seq が戻ったのに ts は
@@ -472,7 +529,7 @@ function onReceived(state: PlaybackState, record: SpeechRecord, commands: Playba
     return;
   }
 
-  state.items.set(seq, { record, status: "pending", file: null, attempts: 0 });
+  state.items.set(seq, { record, status: "pending", file: null, attempts: 0, retryAfter: 0 });
   trackInsert(state, seq);
 
   // ここまで来たなら、このフレームは今のエポックのもの。溜めてある ack を出してよい
@@ -515,29 +572,51 @@ export function reduce(state: PlaybackState, event: PlaybackEvent, now: number):
       onReceived(state, event.record, commands);
       break;
 
-    case "synthesized": {
+    case "audioReady": {
       // ★ エポックを先に見る。採番のやり直しを跨いだ結果を新しい item に入れると、
       //   別の文の音声で ready になり、鳴っている内容と ack がずれる
       const item = event.epoch === state.epoch ? state.items.get(event.seq) : undefined;
-      // エポックリセットや stale で消えた後に合成が返ってきた。WAV だけ捨てる
-      if (!item || item.status !== "synthesizing") {
+      // エポックリセットや stale で消えた後に取得が返ってきた。WAV だけ捨てる
+      if (!item || item.status !== "fetching") {
         commands.push({ kind: "discardFile", epoch: event.epoch, seq: event.seq, file: event.file });
         break;
       }
       item.status = "ready";
       item.file = event.file;
+      state.unavailableStreak = 0;
       break;
     }
 
-    case "synthesisFailed": {
+    case "audioUnavailable": {
+      // 503。サーバーはいるが用意できていない。**試行回数を消費しない**
       const item = event.epoch === state.epoch ? state.items.get(event.seq) : undefined;
-      if (!item || item.status !== "synthesizing") break;
+      if (!item || item.status !== "fetching") break;
+      item.attempts--;
+      item.status = "pending";
+      item.retryAfter = now + state.options.audioRetryMs;
+      noteUnavailable(state, event.reason, commands);
+      break;
+    }
+
+    case "audioGone": {
+      // 404。永久に用意できない。「長さ0の再生」として終端へ落とす
+      const item = event.epoch === state.epoch ? state.items.get(event.seq) : undefined;
+      if (!item || item.status !== "fetching") break;
+      commands.push({ kind: "warn", message: `seq=${event.seq} の音声がありません: ${event.reason}` });
+      noteUnavailable(state, event.reason, commands);
+      finish(item);
+      break;
+    }
+
+    case "audioFailed": {
+      const item = event.epoch === state.epoch ? state.items.get(event.seq) : undefined;
+      if (!item || item.status !== "fetching") break;
       if (item.attempts < state.options.synthesisAttempts) {
         // pending へ戻せば、次の step で窓が拾い直す
         item.status = "pending";
         break;
       }
-      commands.push({ kind: "warn", message: `seq=${event.seq} の合成に失敗したので飛ばします: ${event.reason}` });
+      commands.push({ kind: "warn", message: `seq=${event.seq} の音声を取れなかったので飛ばします: ${event.reason}` });
       finish(item);
       break;
     }

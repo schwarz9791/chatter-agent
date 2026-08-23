@@ -105,3 +105,30 @@ export interface SpeakMessage {
   emotion?: Emotion;
   kind?: SpeechKind;
 }
+
+/**
+ * 配信フレームに載る音声の参照。
+ *
+ * ★ **記録（`speech.jsonl`）にも配信キューにも載らない。** CLI が書く時点では音声が
+ *   存在しないため。`docs/protocol.md` の「1文1行 / 1文1ファイル / 1文1フレームで
+ *   3箇所同じ形」は、ここだけ崩れる。
+ */
+export interface AudioRef {
+  /**
+   * サーバー上の相対パス（`/audio/<epoch>-<seq>.wav`）。
+   * **クライアントが自分の接続先 authority に対して解決する**（→ `core/audioPath.ts`）。
+   */
+  path: string;
+  format: "wav";
+}
+
+/**
+ * WebSocket で1フレームとして流れる形。
+ *
+ * `SpeechRecord` に `audio` を足しただけ。`audio` が `null` なら音声は用意されない
+ * （`ttsEnabled: false`、または読み上げる中身が無い文）ので、クライアントは何も鳴らさずに
+ * ack する。
+ */
+export interface SpeechFrame extends SpeechRecord {
+  audio: AudioRef | null;
+}

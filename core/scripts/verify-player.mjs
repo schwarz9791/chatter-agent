@@ -581,7 +581,55 @@ try {
   }
 
   {
-    show("⑫ 本物の server と CLI を通したエンドツーエンド");
+    show("⑫ ★ audio を載せないサーバーに繋いだら、無音の理由を1行残す（#49 のレビュー B-1）");
+
+    // ★ **`ttsEnabled: false`（`"audio": null` が明示的に載る）と、#29 より前のサーバー
+    //   （`audio` キーが無い）を言い分ける。** 潰したままだと、後者は前者と区別なく
+    //   全文が無言で ack され、どちらの側にも1行も出ない。
+    //
+    // ★ **player は接続ごとに最初のフレームだけを見る**ので、2つのケースは
+    //   **別々の接続で**確かめること。1つの接続に並べると、2件目はラッチで
+    //   素通りするだけになり「警告しない」が何も証明しなくなる。
+    const stub = createStubServer();
+    await stub.ready;
+    seqCounter = 0;
+
+    // (1) 正常な設定（ttsEnabled: false）。**警告してはいけない** — 消す手段が無いため
+    const quiet = await startReadyPlayer(playerEnv({ CHATTER_AGENT_PLAYER_SERVER_URL: stub.url() }));
+    const silent = record("音声を用意しない設定の発言です。", { audio: null });
+    stub.send(silent);
+    check(
+      "音声を用意しない設定でも ack して進む",
+      await until(() => stub.lastAck() === silent.seq, 5000),
+      JSON.stringify(stub.state.acks),
+    );
+    check(
+      "★ 明示的な audio: null では警告しない（ttsEnabled: false は正常な設定）",
+      !quiet.log.includes("audio がありません"),
+      quiet.log,
+    );
+    await stopPlayer(quiet);
+
+    // (2) #29 より前のサーバー。同じ「無音」だが、こちらは理由を出す
+    const legacy = await startReadyPlayer(playerEnv({ CHATTER_AGENT_PLAYER_SERVER_URL: stub.url() }));
+    const undeclared = record("音声キーの無いフレームです。");
+    delete undeclared.audio; // JSON.stringify がキーごと落とす（＝ #29 より前のサーバーの形）
+    stub.send(undeclared);
+
+    check("★ 無音の理由がログに出る", await until(() => legacy.log.includes("audio がありません"), 10_000), legacy.log);
+    check(
+      "★ 挙動は変えない（それでも ack して次へ進む）",
+      await until(() => stub.lastAck() === undeclared.seq, 5000),
+      JSON.stringify(stub.state.acks),
+    );
+    check("どちらも音は鳴らない", played().length === 0, JSON.stringify(played()));
+
+    await stopPlayer(legacy);
+    await stub.close();
+  }
+
+  {
+    show("⑬ 本物の server と CLI を通したエンドツーエンド");
     const PORT = 18571;
     const chainEnv = {
       ...playerEnv(),

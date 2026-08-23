@@ -90,6 +90,32 @@ export function parseSpeechFrame(raw: string): SpeechFrame | null {
 }
 
 /**
+ * フレームに `audio` キーが**載っていない**（＝ #29 より前のサーバー）。
+ *
+ * ★ **`"audio": null` と別物として扱うこと。** `parseAudio` はどちらも null に潰すが、
+ *   ワイヤ上では区別できる:
+ *
+ *   - `ttsEnabled: false` / 読み上げる中身が無い文 → サーバーは `"audio": null` を**明示的に載せる**
+ *     （`server/dispatcher.ts` の `buildFrame` は `{ ...record, audio }` を stringify する）
+ *   - #29 より前のサーバー → `audio` キーが**存在しない**
+ *
+ *   潰したままだと、後者は前者と区別なく**全文が無言で ack され、どちらの側にも1行も出ない**。
+ *   キーの欠落だけを見るので、**`ttsEnabled: false` では原理的に発火しない**
+ *   （そこで発火すると、正常な設定に対して消す手段の無い警告が出続ける）。
+ *
+ * 読めない JSON は false。フレームごと捨てる経路が別に警告するので、ここで二重に出さない。
+ */
+export function isAudioUndeclared(raw: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+  return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) && !("audio" in parsed);
+}
+
+/**
  * 音声の参照。読めなければ null（＝鳴らさずに ack する）。
  *
  * ★ **絶対 URL を通さないこと。** 任意の URL を受け入れると、サーバーが

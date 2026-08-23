@@ -21,9 +21,12 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-function record(seq: number, text = `文${seq}。`): SpeechRecord {
+const E1 = "gen-1";
+const E2 = "gen-2";
+
+function record(seq: number, text = `文${seq}。`, overrides: Partial<SpeechRecord> = {}): SpeechRecord {
   return {
-    epoch: "test-epoch",
+    epoch: E1,
     seq,
     ts: "2026-08-15T00:00:00.000Z",
     source: "claude-code",
@@ -33,6 +36,7 @@ function record(seq: number, text = `文${seq}。`): SpeechRecord {
     kind: "assistant",
     text,
     emotion: "neutral",
+    ...overrides,
   };
 }
 
@@ -207,5 +211,89 @@ describe("catchUp", () => {
 
     expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
+  });
+});
+
+describe("epoch（採番の世代。#29）", () => {
+  it("★ 旧世代の entry は配信しない（ts が現世代より古いので乗り換えない）", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // 採番のやり直し直後の形。list() は seq 昇順なので**新しい世代が先頭に来る**
+    queue.enqueue([record(1, "新1。", { epoch: E2, ts: "2026-08-16T00:00:00.000Z" })]);
+    queue.enqueue([record(400, "旧400。")]);
+    const broadcast = vi.fn();
+    const dispatcher = createDispatcher({ queue, broadcast });
+
+    dispatcher.poll();
+
+    expect(seqsBroadcast(broadcast)).toEqual([1]);
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("見送った entry を毎 poll で読み直さない（20回/秒で同じファイルを開かない）", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    queue.enqueue([record(1, "新1。", { epoch: E2, ts: "2026-08-16T00:00:00.000Z" })]);
+    queue.enqueue([record(400, "旧400。")]);
+    const dispatcher = createDispatcher({ queue, broadcast: vi.fn() });
+    dispatcher.poll();
+
+    const read = vi.spyOn(queue, "read");
+    dispatcher.poll();
+    dispatcher.poll();
+
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("★ ts が進んでいれば新しい世代へ乗り換える（CLI を経由しない復元に対する安全網）", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    queue.enqueue([record(1, "旧1。")]);
+    const broadcast = vi.fn();
+    const dispatcher = createDispatcher({ queue, broadcast });
+    dispatcher.poll();
+    expect(seqsBroadcast(broadcast)).toEqual([1]);
+
+    queue.enqueue([record(2, "新2。", { epoch: E2, ts: "2026-08-16T00:00:00.000Z" })]);
+    dispatcher.poll();
+
+    expect(seqsBroadcast(broadcast)).toEqual([1, 2]);
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("★ 旧世代の ack は無視する（まだ喋っていない新しい entry を消させない）", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    queue.enqueue([record(1), record(2)]);
+    const dispatcher = createDispatcher({ queue, broadcast: vi.fn() });
+    dispatcher.poll();
+
+    dispatcher.ack(2, E2);
+
+    expect(queue.list()).toEqual([1, 2]);
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("世代を名乗らない ack は現世代のものとして扱う（契約上 epoch は任意）", () => {
+    queue.enqueue([record(1), record(2)]);
+    const dispatcher = createDispatcher({ queue, broadcast: vi.fn() });
+    dispatcher.poll();
+
+    dispatcher.ack(2, null);
+
+    expect(queue.list()).toEqual([]);
+  });
+
+  it("世代を乗り換えたら、旧世代について配信済みだった記憶を捨てる", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    queue.enqueue([record(1, "旧1。")]);
+    const dispatcher = createDispatcher({ queue, broadcast: vi.fn() });
+    dispatcher.poll();
+
+    queue.enqueue([record(9, "新9。", { epoch: E2, ts: "2026-08-16T00:00:00.000Z" })]);
+    dispatcher.poll();
+
+    // 旧世代の seq 1 は「配信済み」から外れているので、この ack では消えない
+    dispatcher.ack(1, E2);
+    expect(queue.list()).toEqual([1, 9]);
   });
 });

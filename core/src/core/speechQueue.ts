@@ -36,13 +36,26 @@ const SEQ_DIGITS = 12;
 const SUFFIX = ".json";
 const TMP_SUFFIX = ".tmp";
 
+/**
+ * キューの1件。
+ *
+ * ★ **行とレコードの両方を返すこと。** 配信は `line` をそのまま流す（サーバーは
+ *   `SpeechRecord` の JSON 以外を送らない契約なので、パースして組み直す理由が無い）が、
+ *   `epoch` の判定には `record` が要る。1回の読み取りで両方渡さないと、配信のたびに
+ *   同じファイルを2度読むことになる。
+ */
+export interface SpeechQueueEntry {
+  line: string;
+  record: SpeechRecord;
+}
+
 export interface SpeechQueue {
   /** 採番済みのレコードをキューに積む。書けた件数を返す（1件の fs エラーで残りを巻き添えにしない） */
   enqueue(records: SpeechRecord[]): number;
   /** `seq` 昇順。中身は読まない */
   list(): number[];
-  /** その seq の1行。読めない・空・JSON でない・payload の seq がファイル名と食い違うなら null */
-  read(seq: number): string | null;
+  /** その seq の1件。読めない・空・JSON でない・payload の seq がファイル名と食い違うなら null */
+  read(seq: number): SpeechQueueEntry | null;
   /** `seq <= upTo` を消す。消した件数を返す */
   ackUpTo(upTo: number): number;
   /** mtime が `maxAgeMs` より古い entry を消す。落ちている間に書かれた分だけを捨てるためのもの */
@@ -159,7 +172,7 @@ export function createSpeechQueue(queueDir: string): SpeechQueue {
       if (typeof parsed !== "object" || parsed === null) return null;
       if ((parsed as { seq?: unknown }).seq !== seq) return null;
 
-      return line;
+      return { line, record: parsed as SpeechRecord };
     },
 
     ackUpTo(upTo) {

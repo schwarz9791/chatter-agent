@@ -188,7 +188,7 @@ async function main(): Promise<void> {
       case "ack":
         // client の生成前にコマンドが出ることは無いが、`installShutdown` を先に登録した都合で
         // 型の上では undefined になりうる
-        client?.ack(command.seq);
+        client?.ack(command.seq, command.epochId);
         break;
       case "dropPendingAck":
         client?.dropPendingAck();

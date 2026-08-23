@@ -120,8 +120,24 @@ describe("createWsServer", () => {
 
 describe("parseAck", () => {
   it("累積 ack を読む", () => {
-    expect(parseAck('{"type":"spoken","seq":12}')).toBe(12);
-    expect(parseAck('{"type":"spoken","seq":0}')).toBe(0);
+    expect(parseAck('{"type":"spoken","seq":12}')).toEqual({ seq: 12, epoch: null });
+    expect(parseAck('{"type":"spoken","seq":0}')).toEqual({ seq: 0, epoch: null });
+  });
+
+  it("epoch は任意フィールド。載っていれば通す（→ #29）", () => {
+    expect(parseAck('{"type":"spoken","seq":12,"epoch":"gen-1"}')).toEqual({ seq: 12, epoch: "gen-1" });
+  });
+
+  it("★ epoch が載っているのに形が違うものは通さない（世代の判定に使う値なので緩めない）", () => {
+    for (const raw of [
+      '{"type":"spoken","seq":1,"epoch":""}',
+      '{"type":"spoken","seq":1,"epoch":123}',
+      '{"type":"spoken","seq":1,"epoch":null}',
+      '{"type":"spoken","seq":1,"epoch":"../../etc/passwd"}',
+      `{"type":"spoken","seq":1,"epoch":"${"a".repeat(65)}"}`,
+    ]) {
+      expect(parseAck(raw), raw).toBeNull();
+    }
   });
 
   it("★ 知らない形は捨てる（ここはクライアント由来の入力）", () => {

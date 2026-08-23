@@ -140,7 +140,7 @@ async function main(): Promise<void> {
     port: config.get("port"),
     allowedOrigins: config.get("allowedOrigins"),
     onConnect: (send) => dispatcher.catchUp(send),
-    onAck: (seq) => dispatcher.ack(seq),
+    onAck: (seq, epoch) => dispatcher.ack(seq, epoch),
   });
 
   dispatcher = createDispatcher({ queue, broadcast: (line) => wsServer.broadcast(line) });

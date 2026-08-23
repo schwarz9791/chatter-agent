@@ -125,6 +125,8 @@ describe("接続", () => {
   });
 });
 
+const EPOCH = "test-epoch";
+
 describe("ack", () => {
   // ★ このブロックは s.sockets.length ではなく events（"connected"）を待つ。
   //   client.ts の flushAck は `if (socket?.readyState !== WebSocket.OPEN) return;` より
@@ -142,9 +144,9 @@ describe("ack", () => {
     const { client, events } = connect(s.url);
     await until(() => events.includes("connected"));
 
-    client.ack(3);
+    client.ack(3, EPOCH);
     await until(() => s.received.length === 1);
-    expect(JSON.parse(s.received[0])).toEqual({ type: "spoken", seq: 3 });
+    expect(JSON.parse(s.received[0])).toEqual({ type: "spoken", seq: 3, epoch: EPOCH });
   });
 
   it("★ 短時間に何度呼んでも最大値が1回だけ飛ぶ（追いつきのバーストを畳む）", async () => {
@@ -153,10 +155,10 @@ describe("ack", () => {
     // ★ サーバー側ではなくクライアント側の connected を待つ（理由は describe 直下のコメント）
     await until(() => events.includes("connected"));
 
-    for (let seq = 1; seq <= 100; seq++) client.ack(seq);
+    for (let seq = 1; seq <= 100; seq++) client.ack(seq, EPOCH);
     await sleep(150);
     expect(s.received).toHaveLength(1);
-    expect(JSON.parse(s.received[0])).toEqual({ type: "spoken", seq: 100 });
+    expect(JSON.parse(s.received[0])).toEqual({ type: "spoken", seq: 100, epoch: EPOCH });
   });
 
   it("★ dropPendingAck が間引き中の ack を捨てる", async () => {
@@ -167,15 +169,15 @@ describe("ack", () => {
     // ★ サーバー側ではなくクライアント側の connected を待つ（理由は describe 直下のコメント）
     await until(() => events.includes("connected"));
 
-    client.ack(500);
+    client.ack(500, EPOCH);
     client.dropPendingAck();
     await sleep(150);
     expect(s.received).toEqual([]);
 
     // 捨てた後も次の ack は普通に送れる
-    client.ack(1);
+    client.ack(1, EPOCH);
     await until(() => s.received.length === 1);
-    expect(JSON.parse(s.received[0])).toEqual({ type: "spoken", seq: 1 });
+    expect(JSON.parse(s.received[0])).toEqual({ type: "spoken", seq: 1, epoch: EPOCH });
   });
 
   // ★ このテストだけ it() の第3引数に自前の予算（12_000）を持たせている。until に渡す期限は、
@@ -198,7 +200,7 @@ describe("ack", () => {
 
     s.sockets[0].terminate();
     await sleep(50);
-    client.ack(500);
+    client.ack(500, EPOCH);
     // 間引きタイマー（20ms）は発火済み。送れないので client 側に残る
     await sleep(100);
     expect(s.received).toEqual([]);
@@ -212,9 +214,9 @@ describe("ack", () => {
 
     // 次に ack が出た時点で、溜めていた最大値ごと送られる（累積 ack なので取りこぼさない）。
     // ここで待っているのは ack() 直後の間引きタイマー（ACK_FLUSH_MS = 20ms）の発火だけなので、2000 で足りる
-    client.ack(501);
+    client.ack(501, EPOCH);
     await until(() => s.received.length === 1, 2000);
-    expect(JSON.parse(s.received[0])).toEqual({ type: "spoken", seq: 501 });
+    expect(JSON.parse(s.received[0])).toEqual({ type: "spoken", seq: 501, epoch: EPOCH });
   }, 12_000);
 });
 

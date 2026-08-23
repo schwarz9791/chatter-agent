@@ -862,7 +862,10 @@ function createSpeechQueue(queueDir) {
 			}
 			if (typeof parsed !== "object" || parsed === null) return null;
 			if (parsed.seq !== seq) return null;
-			return line;
+			return {
+				line,
+				record: parsed
+			};
 		},
 		ackUpTo(upTo) {
 			if (!Number.isSafeInteger(upTo) || upTo < 0) return 0;

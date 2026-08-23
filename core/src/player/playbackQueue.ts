@@ -16,7 +16,7 @@
  */
 
 import { hasSpeakableText } from "./speechFrame";
-import type { SpeechRecord } from "../core/types";
+import type { SpeechEpoch, SpeechRecord } from "../core/types";
 
 export type ItemStatus = "pending" | "synthesizing" | "ready" | "playing" | "done";
 
@@ -57,7 +57,7 @@ export type PlaybackCommand =
    *   まとめて再送されると、ここからは 500 個の ack コマンドが出る。累積なので最大値の1回で
    *   足りる。ドライバ側で最大値を覚えて次のティックに1回だけ送ること。
    */
-  | { kind: "ack"; seq: number }
+  | { kind: "ack"; seq: number; epochId: SpeechEpoch }
   /**
    * ドライバが溜めている未送出の ack を捨てる。
    *
@@ -99,34 +99,40 @@ export interface PlaybackState {
   /**
    * 現在のエポックの通し番号。採番がやり直されるたびに +1 する。
    *
-   * これはプロセス内のカウンタで、サーバー由来ではない。`seq` がエポックを跨いで一意でない以上、
-   * **非同期の結果・一時ファイル・孤児・保留 ack のすべてを `(epoch, seq)` で識別する**必要がある。
-   * `SpeechRecord` に generation id が載れば、これはそのまま置き換えられる（→ #29）。
+   * ★ **プロセス内のカウンタで、サーバー由来の `epochId` とは別物。** サーバーの epoch は
+   *   外部由来の文字列で、そのまま一時ファイル名に入れるとパストラバーサルの経路になる。
+   *   `seq` がエポックを跨いで一意でない以上、**非同期の結果・一時ファイル・孤児・保留 ack を
+   *   `(epoch, seq)` で識別する**必要は残るので、内側では連番に読み替えて使う。
+   *
+   * ★ 消えたのは**検出**の方（#29）。「seq が戻ったのに ts は進んだ」といった推論はもう無く、
+   *   `epochId` の不一致1本で決まる。
    */
   epoch: number;
+  /**
+   * サーバーが名乗っている採番の世代（`SpeechRecord.epoch`）。未受信なら null。
+   *
+   * これが変わった＝**採番がやり直された**。契約で運ばれてくるので推論しない（→ #29）。
+   */
+  epochId: SpeechEpoch | null;
   /** seq → item。順序は seq の昇順で都度求める（挿入順とは限らない） */
   items: Map<number, QueueItem>;
   /**
-   * 消費済みの `${seq}:${ts}`。
+   * 消費済みの `${epochId}:${seq}`。
    *
    * ★ `seq` 単独（`Set<number>`）にしないこと。`~/.config/chatter-agent` を消すと CLI の採番が
    *   1 からやり直される。seq だけで覚えていると、新しい seq 1..N が「もう喋った」と判定されて
-   *   **何百文でも一切喋らず、エラーも出ない**。`ts` を混ぜれば、再送は必ず同じ `ts` を持ち、
-   *   新しいエポックの seq 1 は別の `ts` を持つので取り違えない。
+   *   **何百文でも一切喋らず、エラーも出ない**。
    *
    *   `server/dispatcher.ts` が `delivered` を水位ではなく集合にしたのと同じ罠の、鏡像。
    */
   seen: Set<string>;
-  /** 受け取った最大の seq と `ts`（ISO8601 なので辞書順＝時刻順）。**エポック変化の検出に使う** */
-  maxSeqSeen: number;
-  maxTsSeen: string;
   /**
    * **消費した**（＝ack を打った）最大の seq。`seen` から溢れた再送の検出に使う。
    *
-   * ★ 受信ベースの `maxSeqSeen` と役割を分けること。エポック変化は「seq が戻ったのに ts は
-   *   進んだ」で見るので受信ベースが要る。一方「seen から溢れた消費済みの再送」は、
-   *   消費した範囲でしか起きないので消費ベースで判定する。1つの水位で兼ねると、
-   *   接続直後の追いつきが seq 昇順で来なかっただけのフレームを**捨てて無音になる**。
+   * ★ **エポック変化とは別物として残すこと。** 世代が変わったかどうかは `epochId` で決まるが、
+   *   「`seen` の上限から溢れた消費済み entry の再送」は**同じ世代の中で**起きる。
+   *   `seenCapacity` はサーバー側のキュー上限とズレうるので溢れは起きうるし、それを
+   *   世代の変化と読んでしまうと状態を捨てて**同じ文を2回喋る**。
    */
   maxSeqConsumed: number;
   /**
@@ -157,10 +163,9 @@ export function createPlaybackState(options: PlaybackOptions = createDefaultOpti
   return {
     options,
     epoch: 0,
+    epochId: null,
     items: new Map(),
     seen: new Set(),
-    maxSeqSeen: 0,
-    maxTsSeen: "",
     maxSeqConsumed: 0,
     pendingAck: null,
     connected: false,
@@ -173,7 +178,7 @@ export function createPlaybackState(options: PlaybackOptions = createDefaultOpti
 }
 
 function seenKey(record: SpeechRecord): string {
-  return `${record.seq}:${record.ts}`;
+  return `${record.epoch}:${record.seq}`;
 }
 
 /**
@@ -266,8 +271,10 @@ function orphanKey(epoch: number, seq: number): string {
 
 /** ack を出すか、切断中なら溜める */
 function emitAck(state: PlaybackState, seq: number, commands: PlaybackCommand[]): void {
-  if (state.connected) {
-    commands.push({ kind: "ack", seq });
+  // epochId が null の状態で ack が出ることは無い（フレームを1つも受けていないため）が、
+  // 型の上では起こりうるので握る
+  if (state.connected && state.epochId !== null) {
+    commands.push({ kind: "ack", seq, epochId: state.epochId });
     return;
   }
   // 溜めるときはエポックごと覚える。エポックが変われば下の resetEpoch が捨てる
@@ -428,8 +435,6 @@ function resetEpoch(state: PlaybackState, commands: PlaybackCommand[]): void {
   }
 
   state.seen.clear();
-  state.maxSeqSeen = 0;
-  state.maxTsSeen = "";
   state.maxSeqConsumed = 0;
   state.pendingAck = null;
   state.headSeq = null;
@@ -439,10 +444,16 @@ function resetEpoch(state: PlaybackState, commands: PlaybackCommand[]): void {
 }
 
 function onReceived(state: PlaybackState, record: SpeechRecord, commands: PlaybackCommand[]): void {
-  const { seq, ts } = record;
-  const key = seenKey(record);
+  const { seq } = record;
 
-  if (state.seen.has(key)) {
+  // ★ 採番のやり直しは**契約が運んでくる**（#29）。以前はここで「seq が戻ったのに ts は
+  //   進んだ」「同じ seq が別の ts で来た」を推論していたが、その推論は
+  //   `seen` の溢れと取り違えたり、同じメッセージ内で `ts` が同値になる性質と
+  //   噛み合わなかったりする。判定は epoch の不一致1本にする。
+  if (state.epochId !== null && record.epoch !== state.epochId) resetEpoch(state, commands);
+  state.epochId = record.epoch;
+
+  if (state.seen.has(seenKey(record))) {
     // 消費済みのものが再送された ＝ サーバー側にまだ entry が残っている。
     // ack が届く前に切断された / サーバー再起動で `delivered` が空になり
     // `dispatcher.ack` が upTo=0 で捨てた、のどちらか。ack を打ち直さないと永久に残る
@@ -450,16 +461,10 @@ function onReceived(state: PlaybackState, record: SpeechRecord, commands: Playba
     return;
   }
 
-  const existing = state.items.get(seq);
-  if (existing) {
-    // 処理中のものの再送。同じ ts なら黙って捨てる（合成をやり直す意味が無い）
-    if (existing.record.ts === ts) return;
-    // 同じ seq で別の ts ＝ エポックが変わっている
-    resetEpoch(state, commands);
-  } else if (seq <= state.maxSeqSeen && ts > state.maxTsSeen) {
-    // seq が戻っているのに ts は進んでいる ＝ 採番がやり直された
-    resetEpoch(state, commands);
-  } else if (seq <= state.maxSeqConsumed) {
+  // 処理中のものの再送。同じ世代の同じ seq は同じ文なので、合成をやり直す意味が無い
+  if (state.items.has(seq)) return;
+
+  if (seq <= state.maxSeqConsumed) {
     // ★ 消費済みの範囲なのに `seen` に無い ＝ 上限から溢れたキーの再送。
     //   ここを resetEpoch に落とすと、追いつきが `seenCapacity` を超えるたびに状態を捨てて
     //   **同じ文を2回喋る**。`seenCapacity` はサーバー側の設定とズレうるので溢れは起きる
@@ -469,8 +474,6 @@ function onReceived(state: PlaybackState, record: SpeechRecord, commands: Playba
 
   state.items.set(seq, { record, status: "pending", file: null, attempts: 0 });
   trackInsert(state, seq);
-  if (seq > state.maxSeqSeen) state.maxSeqSeen = seq;
-  if (ts > state.maxTsSeen) state.maxTsSeen = ts;
 
   // ここまで来たなら、このフレームは今のエポックのもの。溜めてある ack を出してよい
   flushPendingAck(state, commands);
@@ -486,7 +489,9 @@ function flushPendingAck(state: PlaybackState, commands: PlaybackCommand[]): voi
   const held = state.pendingAck;
   if (held === null || !state.connected) return;
   state.pendingAck = null;
-  if (held.epoch === state.epoch) commands.push({ kind: "ack", seq: held.seq });
+  if (held.epoch === state.epoch && state.epochId !== null) {
+    commands.push({ kind: "ack", seq: held.seq, epochId: state.epochId });
+  }
 }
 
 /** 孤児（エポックリセットで items から外した再生中の item）の後始末。扱ったら true */

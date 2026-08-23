@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { createSpeechQueue } from "./speechQueue";
+import type { SpeechQueueEntry } from "./speechQueue";
 import type { SpeechRecord } from "./types";
 
 // ★ fs は Node の組み込みモジュールで、ESM では名前空間が configurable でないため
@@ -110,7 +111,7 @@ describe("enqueue", () => {
     // writeFileSync（tmp への書き込み）が終わった直後・renameSync の前というタイミングで
     // read() を呼び、まだ最終ファイルとしては見えないことを確認する。素の writeFileSync で
     // 直接最終ファイルへ書く実装だと、この時点で既に読めてしまい fail する
-    let seenDuringWrite: string | null | undefined;
+    let seenDuringWrite: SpeechQueueEntry | null | undefined;
     const q = queue();
 
     vi.mocked(fs.writeFileSync).mockImplementation((...args: Parameters<typeof fs.writeFileSync>) => {
@@ -190,10 +191,13 @@ describe("list", () => {
 });
 
 describe("read", () => {
-  it("そのまま配信できる1行を返す", () => {
+  it("そのまま配信できる1行と、パース済みのレコードを返す", () => {
     const q = queue();
     q.enqueue([record(1, "あ。")]);
-    expect(JSON.parse(q.read(1)!)).toMatchObject({ seq: 1, text: "あ。" });
+    const entry = q.read(1)!;
+    expect(JSON.parse(entry.line)).toMatchObject({ seq: 1, text: "あ。" });
+    // ★ epoch の判定に使うので、行だけでなくレコードも返す（1回の読み取りで両方）
+    expect(entry.record).toMatchObject({ epoch: "test-epoch", seq: 1, text: "あ。" });
   });
 
   it("無ければ null", () => {

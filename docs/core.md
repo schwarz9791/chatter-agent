@@ -218,14 +218,14 @@ cc-mascot から移植したコードを oxfmt で整形すると、上流との
 | spool | `{root}/spool/` | hook が書き、CLI が消す |
 | 発話の記録 | `{root}/speech.jsonl`（退避は `speech.1.jsonl` の1世代だけ） | CLI |
 | 配信キュー | `{root}/speech/<seq>.json` | CLI が書く。上限超過は CLI が切り、ack と起動時の掃除は server が行う |
-| seq の state | `{root}/speech.state.json` | CLI |
+| seq の state | `{root}/speech.state.json`（`{nextSeq, epoch}`） | CLI |
 | 抑制の state | `{root}/speak.state.json` | CLI |
 | 要約 CLI の cwd | `{root}/summarizer-home/` | CLI（要約 CLI を隔離実行する作業ディレクトリ。プロジェクトの `CLAUDE.md` を読ませないため） |
 | 要約の実測ログ | `{root}/summarizer.log` | CLI（要約が有効なときだけ書く。既定 OFF なら1バイトも増えない） |
 | CLI のロック | `{root}/speak.lock/`（ディレクトリ） | CLI |
 | サーバーのロック | `{root}/server.lock/`（ディレクトリ） | **server**（bind の前に取る。2台目は起動に失敗する） |
 | player のロック | `{root}/player.lock/`（ディレクトリ） | **player**（接続の前に取る。2台目は起動に失敗する） |
-| player の一時 WAV | `{root}/player-tmp/<seq>.wav` | **player**（起動時にディレクトリごと作り直す） |
+| player の一時 WAV | `{root}/player-tmp/<エポック>-<seq>.wav` | **player**（起動時にディレクトリごと作り直す。`seq` は採番の世代を跨いで一意でないので、ファイル名に世代を混ぜる） |
 
 ### 設定と環境変数
 

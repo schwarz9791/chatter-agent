@@ -84,11 +84,21 @@ function drain(overrides: Partial<DrainDeps> = {}) {
  * spool に delta を1本置く（plugin の bash hook が `<message_id>.<index>.json` を
  * tmp + rename で置くのと同じ結果になればよいので、テストでは直接 writeFileSync でよい）。
  */
-function appendDelta(messageId: string, index: number, text: string, final = false, sessionId = "sess-1"): void {
+function appendDelta(
+  messageId: string,
+  index: number,
+  text: string,
+  final = false,
+  sessionId = "sess-1",
+  // ★ [#33] 実機では MessageDisplay と PreToolUse が同じ prompt_id を持つ。既定を
+  //   `writePrompt` 側と揃えておかないと、引き上げのテストだけが特殊な payload になる
+  promptId = "p1",
+): void {
   fs.writeFileSync(
     path.join(spoolDir, `${messageId}.${index}.json`),
     JSON.stringify({
       session_id: sessionId,
+      prompt_id: promptId,
       hook_event_name: "MessageDisplay",
       turn_id: "turn-1",
       message_id: messageId,
@@ -542,6 +552,101 @@ describe("応答待ち通知", () => {
  * 長いメッセージを要約してから読み上げる経路（issue #31）。`summarize`（drain() の既定は素通し）を
  * 差し替えて確認する。無限ループ防止の第2層（summarizerSessionIds）もここでまとめて見る。
  */
+/**
+ * [#33] MessageDisplay と PreToolUse は別プロセスとして同時に走るので、どちらが先に spool へ
+ * 着くかに保証が無い。prompt が先に着くと「質問を読み上げてから、その質問に至る説明を
+ * 読み上げる」逆転が起きる（実機で観測、短い本文で −316ms）。
+ *
+ * worker.ts の `hoistMessagesBeforePrompt` が、同一セッション・同一 prompt_id の本文を
+ * prompt の前へ引き上げて順序を戻す。
+ */
+describe("★ [#33] prompt が本文を追い越して spool へ着いたとき", () => {
+  const question = {
+    session_id: "sess-1",
+    prompt_id: "p1",
+    hook_event_name: "PreToolUse",
+    tool_name: "AskUserQuestion",
+    tool_input: { questions: [{ question: "次は何をしますか？", options: [{ label: "進める" }] }] },
+  };
+
+  it("final:true の本文でも、本文 → 質問の順で発話する", () => {
+    // 逆転の実測ケース: 本文は単一 delta（index 0 に final:true）で、PreToolUse の方が先に着いた
+    writePrompt("q", question);
+    tick();
+    appendDelta("m1", 0, "監視を開始しました。", true);
+    drain();
+
+    expect(texts()).toEqual(["監視を開始しました。", "次は何をしますか？", "選択肢は、進める。"]);
+  });
+
+  it("final がまだ来ていなくても、prompt が後ろに回るので救済経路が本文を先に出す", () => {
+    writePrompt("q", question);
+    tick();
+    appendDelta("m1", 0, "監視を開始しました。");
+    drain();
+
+    expect(texts()).toEqual(["監視を開始しました。", "次は何をしますか？", "選択肢は、進める。"]);
+  });
+
+  it("★ prompt_id が違う本文は引き上げない（別ターンの本文を巻き込まない）", () => {
+    writePrompt("q", question);
+    tick();
+    appendDelta("m1", 0, "別ターンの本文です。", true, "sess-1", "p2");
+    drain();
+
+    expect(texts()).toEqual(["次は何をしますか？", "選択肢は、進める。", "別ターンの本文です。"]);
+  });
+
+  it("★ session_id が違う本文は引き上げない（Claude Code を2枚開いたとき）", () => {
+    writePrompt("q", question);
+    tick();
+    appendDelta("m1", 0, "別セッションの本文です。", true, "sess-2");
+    drain();
+
+    expect(texts()).toEqual(["次は何をしますか？", "選択肢は、進める。", "別セッションの本文です。"]);
+  });
+
+  it("同一 prompt_id の本文が複数あれば、到着順のまま全部を prompt の前に出す", () => {
+    writePrompt("q", question);
+    tick();
+    appendDelta("m1", 0, "1つめの本文です。", true);
+    tick();
+    appendDelta("m2", 0, "2つめの本文です。", true);
+    drain();
+
+    expect(texts()).toEqual(["1つめの本文です。", "2つめの本文です。", "次は何をしますか？", "選択肢は、進める。"]);
+  });
+
+  it("★ 同じ prompt_id の prompt が2つ追い越しても、本文を二重に発話しない", () => {
+    // AskUserQuestion では PreToolUse の直後に同じ prompt_id の Notification も発火する。
+    // 引き上げ済みを覚えていないと、同じ本文が2つの prompt の前にそれぞれ積まれる
+    writePrompt("a-pre", question);
+    tick();
+    writePrompt("b-notify", {
+      session_id: "sess-1",
+      prompt_id: "p1",
+      hook_event_name: "Notification",
+      message: "Claude needs your permission",
+    });
+    tick();
+    appendDelta("m1", 0, "監視を開始しました。", true);
+    drain();
+
+    expect(texts().filter((t) => t === "監視を開始しました。")).toHaveLength(1);
+    // 本文が先。Notification は PreToolUse とのペア判定で捨てられる
+    expect(texts()).toEqual(["監視を開始しました。", "次は何をしますか？", "選択肢は、進める。"]);
+  });
+
+  it("prompt が本文より後に着いた通常のケースは、並びを変えない", () => {
+    appendDelta("m1", 0, "監視を開始しました。", true);
+    tick();
+    writePrompt("q", question);
+    drain();
+
+    expect(texts()).toEqual(["監視を開始しました。", "次は何をしますか？", "選択肢は、進める。"]);
+  });
+});
+
 describe("AI要約", () => {
   it("要約が publish の手前で挟まり、要約後の文が記録される", () => {
     appendDelta("m1", 0, "とても長いメッセージです。", true);

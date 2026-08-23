@@ -202,12 +202,21 @@ describe("readMessage", () => {
     expect(readMessage(filePaths).final).toBe(true);
   });
 
-  it("payload から sessionId / turnId / messageId を取る", () => {
+  it("payload から sessionId / turnId / messageId / promptId を取る", () => {
     const filePaths = writeMessage("m1", [delta(0, "あ。")]);
     const content = readMessage(filePaths);
     expect(content.sessionId).toBe("sess-1");
     expect(content.turnId).toBe("turn-1");
     expect(content.messageId).toBe("m1");
+    // ★ [#33] 発話順の是正に使う（worker.ts の hoistMessagesBeforePrompt）
+    expect(content.promptId).toBe("p1");
+  });
+
+  it("★ [#33] prompt_id が無い payload では promptId は null（引き上げの判断材料にしない）", () => {
+    const { prompt_id: _omit, ...withoutPromptId } = delta(0, "あ。");
+    const filePath = path.join(spoolDir, "m1.0.json");
+    fs.writeFileSync(filePath, JSON.stringify(withoutPromptId));
+    expect(readMessage([filePath]).promptId).toBeNull();
   });
 
   it("index に欠番があればそこで打ち切る（歯抜けを繋いで文を壊さない）", () => {

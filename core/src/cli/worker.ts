@@ -159,6 +159,11 @@ function sessionIdOf(loaded: Loaded): string | null {
   return "content" in loaded ? loaded.content.sessionId : getEventSessionId(loaded.payload);
 }
 
+/** ユーザーのターン単位のID。message / prompt のどちらの payload にも入っている（[#33]） */
+function promptIdOf(loaded: Loaded): string | null {
+  return "content" in loaded ? loaded.content.promptId : getEventPromptId(loaded.payload);
+}
+
 /**
  * spool の削除を try/catch で包む（CLAUDE.md 承認済み計画 A-3(d)）。
  *
@@ -262,11 +267,15 @@ export function drainSpool(deps: DrainDeps): DrainResult {
       loaded.push(item);
     }
 
-    for (let i = 0; i < loaded.length; i++) {
-      const item = loaded[i]!;
+    // ★ [#33] prompt が本文を追い越して spool へ着いていたら、ここで並びを戻す。
+    //   以降の処理（`hasNewerInSameSession` を含む）はすべてこの `ordered` を見ること
+    const ordered = hoistMessagesBeforePrompt(loaded);
+
+    for (let i = 0; i < ordered.length; i++) {
+      const item = ordered[i]!;
       const outcome =
         "content" in item
-          ? processMessage(item, hasNewerInSameSession(loaded, i), deps, state)
+          ? processMessage(item, hasNewerInSameSession(ordered, i), deps, state)
           : processPrompt(item, deps, state, now);
 
       written += outcome.written;
@@ -296,6 +305,69 @@ export function drainSpool(deps: DrainDeps): DrainResult {
   if (stateDirty) tryWriteWorkerState(deps.workerStatePath, state);
 
   return { written, passes, orphansRemoved };
+}
+
+/**
+ * ★ [#33] prompt が同一 `prompt_id` の本文を追い越して spool に着いていたら、本文を prompt の
+ *   前へ引き上げる。
+ *
+ * `MessageDisplay` と `PreToolUse` は**別プロセスとして同時に走る**ので、どちらが先に spool へ
+ * 着くかに保証が無い。`scanSpool` は到着順（`birthtime`）に並べるだけなので、prompt が先に
+ * 着けばそのまま先に発話される — 実機で「質問を読み上げてから、その質問に至る説明を読み上げる」
+ * 逆転を観測している（短い本文で `PreToolUse` − `final` = −316ms）。→ docs/plugin.md
+ *
+ * ★ **引き上げるだけでよい。** prompt が後ろに回れば `hasNewerInSameSession` がそのまま成立し、
+ *   既存の救済経路（`processMessage` の `hasNewer`）が本文を publish する。`processMessage`
+ *   側には手を入れない。
+ *
+ * ★ `prompt_id` の粒度は粗く、「この質問の直前の本文はどれか」までは特定できない
+ *   （1 `prompt_id` に message が最大22件ぶら下がる実測）。**それで足りる。** 直したいのは
+ *   「prompt が到着順で本文を追い越した」ケースだけで、そのとき spool に残っている同一
+ *   `prompt_id` の本文は、定義上その prompt より前に始まったもの。複数あってもすべて先に
+ *   出せば順序は正しくなる。
+ *
+ * ★ `session_id` の一致も要求する（`hasNewerInSameSession` と同じ理由 — spool は
+ *   グローバルに1ディレクトリで、Claude Code を2枚開けば別セッションの分が混ざる）。
+ *   どちらかが取れないものは動かさない。そのまま到着順に従う方が安全。
+ *
+ * ★ 元の相対順序は保つ。引き上げた本文同士は到着順のまま並ぶ。
+ */
+function hoistMessagesBeforePrompt(loaded: Loaded[]): Loaded[] {
+  const result: Loaded[] = [];
+  const hoisted = new Set<number>();
+
+  for (let i = 0; i < loaded.length; i++) {
+    if (hoisted.has(i)) continue;
+
+    const item = loaded[i]!;
+    if ("content" in item) {
+      result.push(item);
+      continue;
+    }
+
+    const promptId = promptIdOf(item);
+    const sessionId = sessionIdOf(item);
+
+    if (promptId !== null && sessionId !== null) {
+      for (let j = i + 1; j < loaded.length; j++) {
+        // ★ 既に引き上げ済みのものを二度積まないこと。`AskUserQuestion` では PreToolUse と
+        //   直後の Notification が**同じ `prompt_id`** で2つ並ぶので、この判定が無いと
+        //   同じ本文が2回 result に入り、メッセージ全文が二重に発話される
+        if (hoisted.has(j)) continue;
+
+        const other = loaded[j]!;
+        if (!("content" in other)) continue;
+        if (promptIdOf(other) !== promptId || sessionIdOf(other) !== sessionId) continue;
+
+        result.push(other);
+        hoisted.add(j);
+      }
+    }
+
+    result.push(item);
+  }
+
+  return result;
 }
 
 /**
@@ -333,6 +405,17 @@ function hasNewerInSameSession(loaded: Loaded[], index: number): boolean {
 function countsAsNewer(loaded: Loaded): boolean {
   return "content" in loaded ? loaded.content.deltas.length > 0 : true;
 }
+
+/**
+ * ★ [#46] prompt に無条件 `true` を返すことには既知の代償がある。`PreToolUse` と `final` の
+ *   到着には数百 ms のズレがあり（実測 −316ms）、その窓でドレインが走ると
+ *   **final flush でしか来ない最終行が spool に無いまま**救済が発火して tombstone が打たれる。
+ *   遅れて届いた final の delta は孤児として破棄され、最終行は無言で失われる。
+ *
+ * ★ ここを `false` にすれば最終行は守れるが、[#33] の引き上げ（`hoistMessagesBeforePrompt`）が
+ *   救済経路に乗っているので、発話順の逆転が戻る。**順序の正しさと最終行の生存が
+ *   トレードオフになっている。** 片方だけを見て直さないこと。
+ */
 
 interface EntryOutcome {
   written: number;

@@ -184,6 +184,14 @@ jsonl の `timestamp` は**メッセージの生成時刻であって書き込�
 ドレイン完了後、ロックを解放する前にもう一度 spool を見る（走査直後に到着した分の取りこぼし防止）。
 → 設計書 §4-2
 
+**到着順（`birthtime`）だけでは発話順は決まらない。** `MessageDisplay` と `PreToolUse` は
+別プロセスとして同時に走るので、**prompt が本文を追い越して spool に着くことがある**
+（実機で `PreToolUse` − `final` = −316ms）。そのまま到着順に処理すると「質問を読み上げてから、
+その質問に至る説明を読み上げる」逆転になる。`worker.ts` の `hoistMessagesBeforePrompt` が、
+同一セッション・同一 `prompt_id` の本文を prompt の前へ引き上げて順序を戻す
+（[#33](https://github.com/schwarz9791/chatter-agent/issues/33)）。
+→ [`docs/plugin.md`](./docs/plugin.md) / `npm run verify:phase-a` の ⑱
+
 ### 5. 記録と配信を1つのファイルに兼ねさせない
 
 `speech.jsonl`（記録）と `speech/<seq>.json`（配信キュー）は別物。1つに兼ねさせると、ローテートを跨ぐ差分読み取りが要り、読み手だけが際限なく複雑になる。**取りこぼしと二重配信を実際に両方踏んだ。**

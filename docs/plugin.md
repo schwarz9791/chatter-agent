@@ -485,12 +485,37 @@ export CHATTER_AGENT_CLI=<repo>/plugin/bin/chatter-agent-speak.mjs
 > | 長い本文（16 delta） | −1ms | ほぼ同着 |
 >
 > 2つの hook は別プロセスとして同時に走るので、**どちらが先に spool へ着くかは保証が無い**。
-> 到着順は `birthtime` で決まり、ワーカーはそれに従うだけなので、そのまま発話順に出る。
+> 到着順は `birthtime` で決まる。**この事実は変わらない。**
 >
 > **[#30](https://github.com/schwarz9791/chatter-agent/issues/30) はこの被害範囲を広げた。**
 > 以前は手前の文を既に喋り終えていて、質問の後ろに回るのは最終行の1文だけだった。
-> いまは**メッセージ全体**が質問の後ろに回る。→ 対策は
-> [#33](https://github.com/schwarz9791/chatter-agent/issues/33)
+> いまは**メッセージ全体**が質問の後ろに回る。
+
+> ★ **[#33](https://github.com/schwarz9791/chatter-agent/issues/33) で core 側に手当てを入れた。**
+> ワーカーはもう到着順にそのまま従わない。`worker.ts` の `hoistMessagesBeforePrompt` が、
+> 1回のドレインの中で **prompt と同一セッション・同一 `prompt_id` の本文を prompt の前へ
+> 引き上げる**。追い越しが起きても発話順は「本文 → 質問」になる。
+>
+> **引き上げるだけで足りる。** prompt が後ろに回れば `hasNewerInSameSession`（救済経路）が
+> そのまま成立するので、本文の `final` がまだ届いていなくても、そこまでの delta が先に出る。
+> `processMessage` 側には手を入れていない。
+>
+> `prompt_id` はユーザーのターン単位で粒度が粗く（1 `prompt_id` に message が最大22件）、
+> **「この質問の直前の本文はどれか」の特定には使えない。** それでも足りるのは、直したいのが
+> 「prompt が到着順で本文を追い越した」ケースだけで、そのとき spool に残っている同一
+> `prompt_id` の本文は**定義上その prompt より前に始まったもの**だから。複数あってもすべて
+> 先に出せば順序は正しくなる。→ `npm run verify:phase-a` の ⑱
+>
+> ★ **`session_id` の一致も要求している。** `prompt_id` の一意性には頼らない
+> （spool はグローバルに1ディレクトリで、Claude Code を2枚開けば別セッションの分が混ざる。
+> `hasNewerInSameSession` と同じ理由）。どちらかが取れない payload は動かさない。
+>
+> ★ **残っている穴。** `PreToolUse` と `final` の間には数百 ms の窓がある。この窓でドレインが
+> 走ると、救済が `final` 未着のまま発火し、**final flush でしか来ない最終行**（次節）が spool に
+> 無いまま打ち切られて tombstone が打たれる。遅れて届いた final の delta は孤児として破棄される。
+> 引き上げはこの窓を広げも狭めもしないが、逆転ケースで救済が発火するようになったぶん、
+> 踏む機会は増えている。**順序の正しさと最終行の生存が、いまトレードオフになっている。**
+> → [#46](https://github.com/schwarz9791/chatter-agent/issues/46)
 
 ### 最終行は final flush でしか来ない — これが遅延の下限
 

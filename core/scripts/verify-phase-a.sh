@@ -72,8 +72,13 @@ delta() { # message_id index final delta [extra-json]
   node "$CLI"
 }
 
-prompt() { # json
+# spool へ置くだけ。CLI は呼ばない（feed_message の prompt 版）
+feed_prompt() { # json
   printf '%s' "$1" | "$ON_PROMPT"
+}
+
+prompt() { # json
+  feed_prompt "$1"
   node "$CLI"
 }
 
@@ -713,6 +718,25 @@ node -e '
 ' "$LOG" "$SPOOL/m-summarizer-loop.0.json" "$SUMMARIZER_LOOP_TEXT"
 spoken
 
+show "⑱ ★ [#33] prompt が本文を追い越して spool に着いても、本文 → 質問の順で出る"
+
+# ★ MessageDisplay と PreToolUse は**別プロセスとして同時に走る**ので、どちらが先に spool へ
+#   着くかに保証が無い（実機で PreToolUse が本文を 316ms 追い越した）。到着順に素直に従うと
+#   「質問を読み上げてから、その質問に至る説明を読み上げる」逆転が起きる。worker.ts の
+#   hoistMessagesBeforePrompt が、同一セッション・同一 prompt_id の本文を prompt の前へ
+#   引き上げて順序を戻す。
+#
+# ★ **CLI を挟まずに** prompt → 本文 の順で spool へ置くのが肝。間に `node "$CLI"` が入ると
+#   prompt がその場で処理されてしまい、検証したい「同じドレインで両方が見えている」状態に
+#   ならない（hook を直に呼ぶ feed_prompt / feed_message を使うのはこのため）。
+#
+# ★ prompt_id を本文と揃えること。引き上げの条件は「同一セッション **かつ** 同一 prompt_id」
+#   なので、揃っていないとこの検証は素通りする（＝ p33 を extra-json で本文にも渡している）。
+feed_prompt '{"session_id":"sess-1","prompt_id":"p33","hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"追い越し検証の質問です？","options":[{"label":"はい"}]}]}}'
+feed_message m-overrun 0 true "追い越し検証の本文です。" '{"prompt_id":"p33"}'
+node "$CLI"
+spoken
+
 show "結果の検証"
 node -e '
   const fs = require("fs");
@@ -739,6 +763,13 @@ node -e '
   check("final が来なかったメッセージが後続イベントで救済されている",
     texts.includes("中断された発言です。") && texts.includes("この後 final は来ません。"));
 
+  // ★ ⑱ [#33] prompt が本文を追い越して spool へ着いたときの発話順。到着順（birthtime）に
+  //   素直に従うと質問が先に鳴るので、worker.ts の hoistMessagesBeforePrompt が本文を前へ戻す
+  const overrunBody = texts.indexOf("追い越し検証の本文です。");
+  const overrunQuestion = texts.findIndex((t) => t.includes("追い越し検証の質問です"));
+  check("prompt が本文を追い越して spool へ着いても、本文 → 質問の順で発話される（#33）",
+    overrunBody !== -1 && overrunQuestion !== -1 && overrunBody < overrunQuestion);
+
   // ★ ⑬ 孤児カスケード（CLAUDE.md 承認済み計画 B-3）。tombstone が無いと、救済で spool から
   //   消えたはずの m-orphan-a の遅延 final が「同一セッションの後続」として成立してしまい、
   //   まだストリーミング中の m-orphan-b を打ち切って発話してしまう
@@ -753,7 +784,7 @@ node -e '
   //   AI要約シナリオの spool が片付いているかは検査対象外になっていた
   check("spool は片付いている（処理済みのファイルが残っていない）",
     !fs.readdirSync(process.argv[2]).some((f) =>
-      ["m-aaa", "m-bbb", "m-ccc", "m-ddd", "m-eee", "m-zero", "m-cli-zero", "m-orphan", "m-summary-", "m-summarizer-", "prompt-"].some((p) =>
+      ["m-aaa", "m-bbb", "m-ccc", "m-ddd", "m-eee", "m-zero", "m-cli-zero", "m-orphan", "m-summary-", "m-summarizer-", "m-overrun", "prompt-"].some((p) =>
         f.startsWith(p))));
 
   // ★ #30 で保証が付いた契約（docs/protocol.md「発話の粒度」）。

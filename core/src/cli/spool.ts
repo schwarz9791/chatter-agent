@@ -61,6 +61,18 @@ export interface MessageContent {
   sessionId: string | null;
   turnId: string | null;
   messageId: string | null;
+  /**
+   * ユーザーのターン単位のID。`PreToolUse` / `Notification` の payload にも同じものが入る。
+   *
+   * ★ [#33] 発話順の是正にだけ使う。`MessageDisplay` と `PreToolUse` は別プロセスとして
+   *   同時に走るので、どちらが先に spool へ着くかに保証が無い（実測で prompt が本文を
+   *   316ms 追い越した）。`worker.ts` の `hoistMessagesBeforePrompt` が、この ID の一致で
+   *   本文を prompt の前へ戻す。
+   *
+   * ★ 粒度は粗い（1 `prompt_id` に message が最大22件ぶら下がる実測）。「この質問の直前の
+   *   本文はどれか」の特定には**使えない**。用途を広げないこと。
+   */
+  promptId: string | null;
 }
 
 /**
@@ -223,6 +235,7 @@ export function readMessage(filePaths: string[]): MessageContent {
   let sessionId: string | null = null;
   let turnId: string | null = null;
   let messageId: string | null = null;
+  let promptId: string | null = null;
 
   for (const filePath of filePaths) {
     const payload = readDeltaFile(filePath);
@@ -235,6 +248,7 @@ export function readMessage(filePaths: string[]): MessageContent {
     sessionId ??= stringOrNull(payload.session_id);
     turnId ??= stringOrNull(payload.turn_id);
     messageId ??= stringOrNull(payload.message_id);
+    promptId ??= stringOrNull(payload.prompt_id);
   }
 
   const deltas: string[] = [];
@@ -247,7 +261,7 @@ export function readMessage(filePaths: string[]): MessageContent {
 
   const hasGap = byIndex.size > deltas.length;
 
-  return { deltas, final, hasGap, sessionId, turnId, messageId };
+  return { deltas, final, hasGap, sessionId, turnId, messageId, promptId };
 }
 
 /** `prompt-<…>.json` は1イベントで完結するので、payload をそのまま返す */

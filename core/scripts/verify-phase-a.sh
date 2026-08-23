@@ -737,6 +737,25 @@ feed_message m-overrun 0 true "追い越し検証の本文です。" '{"prompt_i
 node "$CLI"
 spoken
 
+show "⑲ ★ [#33] 本文がまだ spool に無くても、待っている間に着けば本文 → 質問の順で出る"
+
+# ★ 実機（2026-08-23）で観測した典型ケース。短い本文（1〜2文）は改行で終わらないので
+#   final flush までファイルが1つも置かれず、その手前で PreToolUse が着地して CLI を起こす。
+#   ⑱ の引き上げは「同じパスで両方が見えている」ことが前提なので、これだけでは足りない
+#   （prompt が本文より 276ms 先着し、質問だけが先に発話された）。
+#   worker.ts は prompt に本文が伴っていなければ最大3秒待ってからパスをやり直す。
+#
+# ★ 本文をバックグラウンドで遅らせて置く。CLI が待っている間に着地させるのが狙い。
+#   0.1 秒は CLI の3秒の猶予に対して十分に短く、逆に CLI の起動より早く置かれてしまっても
+#   ⑱ と同じ「両方見えている」状態になるだけなので、どちらに転んでも順序は正しくなる。
+feed_prompt '{"session_id":"sess-1","prompt_id":"p19","hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"遅着検証の質問です？","options":[{"label":"了解"}]}]}}'
+( sleep 0.1; feed_message m-late 0 true "遅着検証の本文です。" '{"prompt_id":"p19"}' ) &
+late_pid=$!
+node "$CLI"
+wait "$late_pid"
+node "$CLI"   # 待ちが尽きた後に着地していた場合の取りこぼしを拾う
+spoken
+
 show "結果の検証"
 node -e '
   const fs = require("fs");
@@ -770,6 +789,12 @@ node -e '
   check("prompt が本文を追い越して spool へ着いても、本文 → 質問の順で発話される（#33）",
     overrunBody !== -1 && overrunQuestion !== -1 && overrunBody < overrunQuestion);
 
+  // ★ ⑲ [#33] 本文が spool にまだ無い状態で prompt が CLI を起こす、実機の典型ケース
+  const lateBody = texts.indexOf("遅着検証の本文です。");
+  const lateQuestion = texts.findIndex((t) => t.includes("遅着検証の質問です"));
+  check("本文が spool に無い状態で prompt が来ても、待って本文 → 質問の順で発話される（#33）",
+    lateBody !== -1 && lateQuestion !== -1 && lateBody < lateQuestion);
+
   // ★ ⑬ 孤児カスケード（CLAUDE.md 承認済み計画 B-3）。tombstone が無いと、救済で spool から
   //   消えたはずの m-orphan-a の遅延 final が「同一セッションの後続」として成立してしまい、
   //   まだストリーミング中の m-orphan-b を打ち切って発話してしまう
@@ -784,7 +809,7 @@ node -e '
   //   AI要約シナリオの spool が片付いているかは検査対象外になっていた
   check("spool は片付いている（処理済みのファイルが残っていない）",
     !fs.readdirSync(process.argv[2]).some((f) =>
-      ["m-aaa", "m-bbb", "m-ccc", "m-ddd", "m-eee", "m-zero", "m-cli-zero", "m-orphan", "m-summary-", "m-summarizer-", "m-overrun", "prompt-"].some((p) =>
+      ["m-aaa", "m-bbb", "m-ccc", "m-ddd", "m-eee", "m-zero", "m-cli-zero", "m-orphan", "m-summary-", "m-summarizer-", "m-overrun", "m-late", "prompt-"].some((p) =>
         f.startsWith(p))));
 
   // ★ #30 で保証が付いた契約（docs/protocol.md「発話の粒度」）。

@@ -2510,6 +2510,44 @@ const PROMPT_PAIR_WINDOW_MS = 1e4;
 const DUPLICATE_WINDOW_MS = 3e3;
 /** 2回連続で空振りするまで回すが、万一 spool が育ち続けても抜けられるようにする */
 const MAX_PASSES = 8;
+/**
+* ★ [#33] prompt を発話する前に、同一 `prompt_id` の本文が spool に着くのを待つ猶予
+* （`PROMPT_BODY_WAIT_POLLS × PROMPT_BODY_WAIT_POLL_MS` = **3秒**）。
+*
+* **引き上げ（`hoistMessagesBeforePrompt`）だけでは足りない。** 引き上げは「同じパスで両方が
+* 見えている」ことが前提だが、実測の典型ケースでは**本文がまだ spool に存在しない**:
+* `delta` は最後の flush を除いて行単位なので、改行で終わらない短い本文（1〜2文）は
+* **メッセージ全体が `final:true` の単一 delta で届く**（実機で採取した payload で確認）。
+* その手前で `PreToolUse` が着地して CLI を起こすと、引き上げる対象が無いまま質問だけが
+* 発話される。
+*
+* ★ **3秒の根拠は実測。ただし上限の証明ではない。**
+*
+*   | 実測 | `PreToolUse` → 本文の着地 |
+*   |---|---|
+*   | 2026-08-16（#33 起票時） | 316ms |
+*   | 2026-08-23 1回目 | 276ms |
+*   | 2026-08-23 3回目 | **約 550ms** |
+*
+*   最初は 500ms にしたが、3件目（550ms）で待ち切れずに逆転が再現した。ばらつきが大きく
+*   （`final` が届く時刻は「その手前でモデルが何をどれだけ生成したか」で決まる — docs/plugin.md）、
+*   **秒数を仕様として扱わないこと**。ここを縮めると逆転が戻る。
+*
+* ★ 待ってよい理由は `LOCK_MAX_WAIT_MS` と同じ。CLI は hook からデタッチ起動されているので、
+*   ここで待っても hook 自体はブロックしない。待つ側（本文の hook が起こした CLI）は
+*   `LOCK_MAX_WAIT_MS`（3秒）で諦めるが、**待っているワーカーが自分のドレインの中で拾う**ので
+*   発話は失われない（`LOCK_MAX_WAIT_MS` のヘッダにある「先行ワーカーが拾う」と同じ構造）。
+*
+* ★ 代償: **本文が伴わない質問（許可プロンプトなど）でも毎回3秒遅れる。** `final` の待ちが
+*   中央値0秒・最悪で数十秒であることに比べれば無視できる、という判断で受け入れている。
+*
+* ★ 時間ではなく**回数**で打ち切ること。`deps.now` はテストで固定値を返す（進まない）ので、
+*   `now() >= deadline` を終了条件にすると無限ループになる。
+*
+* ★ **1回のドレインにつき1回だけ待つ。** パスごとに待つと `MAX_PASSES` を食い潰す。
+*/
+const PROMPT_BODY_WAIT_POLLS = 60;
+const PROMPT_BODY_WAIT_POLL_MS = 50;
 function sessionIdOf(loaded) {
 	return "content" in loaded ? loaded.content.sessionId : getEventSessionId(loaded.payload);
 }
@@ -2562,12 +2600,14 @@ function tryWriteWorkerState(statePath, state) {
 }
 function drainSpool(deps) {
 	const now = deps.now ?? Date.now;
+	const sleep = deps.sleep ?? sleepSync;
 	const orphansRemoved = cleanOrphans(deps.spoolDir, deps.spoolMaxAgeMs, now());
 	const state = readWorkerState(deps.workerStatePath);
 	let stateDirty = false;
 	let written = 0;
 	let passes = 0;
 	let unchangedStreak = 0;
+	let waitedForBody = false;
 	for (; passes < MAX_PASSES; passes++) {
 		const entries = scanSpool(deps.spoolDir);
 		if (entries.length === 0) break;
@@ -2594,6 +2634,11 @@ function drainSpool(deps) {
 			}
 			loaded.push(item);
 		}
+		if (!waitedForBody && hasPromptWithoutBody(loaded)) {
+			waitedForBody = true;
+			waitForBodyArrival(deps.spoolDir, countMessages(loaded), sleep);
+			continue;
+		}
 		const ordered = hoistMessagesBeforePrompt(loaded);
 		for (let i = 0; i < ordered.length; i++) {
 			const item = ordered[i];
@@ -2615,6 +2660,46 @@ function drainSpool(deps) {
 		passes,
 		orphansRemoved
 	};
+}
+/**
+* ★ [#33] このパスに「本文が伴っていない prompt」がいるか。
+*
+* いるなら、その本文はまだ spool に着いていない可能性がある（`PROMPT_BODY_WAIT_POLLS` の
+* ヘッダ参照）。判定は引き上げ（`hoistMessagesBeforePrompt`）と同じ条件 —
+* 同一セッション・同一 `prompt_id` の message エントリがこのパスに居るか。
+*
+* ★ 「本文は既に発話済みなので待つ必要が無い」ケースも true になる（待ち損）。用途上、
+*   質問の発話が 500ms 遅れることの実害は無い（`final` の待ちは中央値 0秒 / 最悪は数十秒）ので、
+*   判定を複雑にして取りこぼす方を避けている。
+*/
+function hasPromptWithoutBody(loaded) {
+	return loaded.some((item) => {
+		if ("content" in item) return false;
+		const promptId = promptIdOf(item);
+		const sessionId = sessionIdOf(item);
+		if (promptId === null || sessionId === null) return false;
+		return !loaded.some((other) => "content" in other && promptIdOf(other) === promptId && sessionIdOf(other) === sessionId);
+	});
+}
+/** このパスに居る message エントリの数。本文が新しく着いたかの基準にする */
+function countMessages(loaded) {
+	return loaded.filter((item) => "content" in item).length;
+}
+/**
+* ★ [#33] 本文が spool に着くのを待つ。新しい message エントリが1つでも増えたら即座に戻り、
+*   増えなければ `PROMPT_BODY_WAIT_POLLS` 回で諦める。
+*
+* ★ ここでは `prompt_id` の一致まで見ない（`scanSpool` だけで済ませ、`readMessage` を
+*   ポーリングのたびに走らせない）。増えたかどうかだけを見て呼び出し側にパスをやり直させ、
+*   正確な判定はそちらの `hasPromptWithoutBody` / `hoistMessagesBeforePrompt` に任せる。
+*   別セッションの delta で早く抜けても、やり直したパスで待ち直すことはない
+*   （待ちは1ドレインにつき1回）ので、余計に遅れることもない。
+*/
+function waitForBodyArrival(spoolDir, before, sleep) {
+	for (let i = 0; i < 60; i++) {
+		sleep(PROMPT_BODY_WAIT_POLL_MS);
+		if (scanSpool(spoolDir).filter((entry) => entry.kind === "message").length > before) return;
+	}
 }
 /**
 * ★ [#33] prompt が同一 `prompt_id` の本文を追い越して spool に着いていたら、本文を prompt の

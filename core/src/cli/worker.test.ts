@@ -7,7 +7,7 @@ import { createSpeechLog } from "../core/speechLog";
 import { createSpeechQueue } from "../core/speechQueue";
 import type { SpeechRecord } from "../core/types";
 import { removeEntry, scanSpool } from "./spool";
-import { acquireLockWithRetry, drainSpool } from "./worker";
+import { acquireLockWithRetry, drainSpool, PROMPT_BODY_WAIT_POLLS } from "./worker";
 import type { DrainDeps } from "./worker";
 import { addSummarizerSession, emptyWorkerState, readWorkerState, writeWorkerState } from "./workerState";
 
@@ -76,6 +76,9 @@ function drain(overrides: Partial<DrainDeps> = {}) {
     // 既定は素通し（要約しない）。要約の挙動そのものを見るテストだけ個別に差し替える
     summarize: (text) => text,
     now: () => clock,
+    // ★ [#33] 既定は待たない。実際に 500ms 待たせると prompt を扱う全テストが遅くなる。
+    //   待ちの挙動そのものを見るテストだけ overrides で差し替える
+    sleep: () => {},
     ...overrides,
   });
 }
@@ -635,6 +638,72 @@ describe("★ [#33] prompt が本文を追い越して spool へ着いたとき"
     expect(texts().filter((t) => t === "監視を開始しました。")).toHaveLength(1);
     // 本文が先。Notification は PreToolUse とのペア判定で捨てられる
     expect(texts()).toEqual(["監視を開始しました。", "次は何をしますか？", "選択肢は、進める。"]);
+  });
+
+  /**
+   * ★ 引き上げだけでは足りなかったケース。実機（2026-08-23）で観測した典型は
+   * 「本文がまだ spool に存在しない」状態で PreToolUse が CLI を起こすもので、
+   * 並べ替える対象が無いまま質問だけが発話されていた（prompt が本文より 276ms 先着）。
+   */
+  describe("本文がまだ spool に無いとき（実機の典型ケース）", () => {
+    it("★ 待っている間に本文が着けば、本文 → 質問の順で出る", () => {
+      // 短い本文（1〜2文）は改行で終わらないので、final flush までファイルが1つも置かれない
+      writePrompt("q", question);
+
+      let slept = 0;
+      drain({
+        sleep: () => {
+          slept++;
+          // 1回目のポーリングの後に本文が着地する
+          if (slept === 1) appendDelta("m1", 0, "監視を開始しました。", true);
+        },
+      });
+
+      expect(texts()).toEqual(["監視を開始しました。", "次は何をしますか？", "選択肢は、進める。"]);
+      // 着地を検知して即座に抜けている（待ち切っていない）
+      expect(slept).toBeLessThan(PROMPT_BODY_WAIT_POLLS);
+    });
+
+    it("★ 待っても本文が来なければ、prompt はそのまま発話される（無限に待たない）", () => {
+      writePrompt("q", question);
+
+      let slept = 0;
+      drain({ sleep: () => void slept++ });
+
+      expect(texts()).toEqual(["次は何をしますか？", "選択肢は、進める。"]);
+      // ★ 待ちは1ドレインにつき1回。パスをやり直しても待ち直さない
+      expect(slept).toBe(PROMPT_BODY_WAIT_POLLS);
+    });
+
+    it("本文が既に spool にあれば待たない", () => {
+      appendDelta("m1", 0, "監視を開始しました。", true);
+      tick();
+      writePrompt("q", question);
+
+      let slept = 0;
+      drain({ sleep: () => void slept++ });
+
+      expect(slept).toBe(0);
+      expect(texts()).toEqual(["監視を開始しました。", "次は何をしますか？", "選択肢は、進める。"]);
+    });
+
+    it("★ session_id が違う本文が着いても、待ち直さずに prompt を出す（待ちは1回）", () => {
+      writePrompt("q", question);
+
+      let slept = 0;
+      drain({
+        sleep: () => {
+          slept++;
+          // 別セッションの delta が着地して待ちループは早く抜けるが、
+          // やり直したパスでは prompt_id / session_id が合わないので引き上げは起きない
+          if (slept === 1) appendDelta("other", 0, "別セッションです。", true, "sess-2");
+        },
+      });
+
+      // 別セッションの本文は引き上げの対象外なので、prompt の後ろのまま
+      expect(texts()).toEqual(["次は何をしますか？", "選択肢は、進める。", "別セッションです。"]);
+      expect(slept).toBeLessThan(PROMPT_BODY_WAIT_POLLS);
+    });
   });
 
   it("prompt が本文より後に着いた通常のケースは、並びを変えない", () => {

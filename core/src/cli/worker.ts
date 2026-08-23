@@ -2,10 +2,15 @@
  * spool のドレイン。ロックを取れた1プロセスだけがここに入る。
  *
  * 順序の保証（CLAUDE.md「絶対に守ること」4）:
- * - spool は**到着順**に処理する
+ * - spool は**到着順**（`birthtime`）に処理する。**ただしそれだけでは発話順は決まらない** —
+ *   `MessageDisplay` と `PreToolUse` は別プロセスとして同時に走るので、prompt が本文を
+ *   追い越して着くことがある。`hoistMessagesBeforePrompt`（引き上げ）と `needsBodyWait`
+ *   （本文待ち）の2つが、到着順の上でこれを補正する（[#33]）
  * - 空振り（進展なし）が**2回連続**するまで繰り返す。1回目の空振りの後にもう一周させることが
  *   「解放完了後にもう一度 spool を見る」に当たり、直前の走査が終わった直後に到着した分の
  *   取りこぼしを防ぐ
+ *
+ * [#33]: https://github.com/schwarz9791/chatter-agent/issues/33
  */
 
 import {
@@ -23,6 +28,7 @@ import type { Summarize } from "../summarizer/types";
 import { assembleSentences } from "./messageAssembler";
 import {
   cleanOrphans,
+  countSpoolMessageFiles,
   readMessage,
   readPromptPayload,
   removeEntry,
@@ -120,6 +126,71 @@ const DUPLICATE_WINDOW_MS = 3_000;
 /** 2回連続で空振りするまで回すが、万一 spool が育ち続けても抜けられるようにする */
 const MAX_PASSES = 8;
 
+/**
+ * ★ [#33] prompt を発話する前に、同一 `prompt_id` の本文が spool に着くのを待つ猶予
+ * （`PROMPT_BODY_WAIT_POLLS × PROMPT_BODY_WAIT_POLL_MS` = **3秒**）。
+ *
+ * **引き上げ（`hoistMessagesBeforePrompt`）だけでは足りない。** 引き上げは「同じパスで両方が
+ * 見えている」ことが前提だが、実測の典型ケースでは**本文がまだ spool に存在しない**:
+ * `delta` は最後の flush を除いて行単位なので、改行で終わらない短い本文（1〜2文）は
+ * **メッセージ全体が `final:true` の単一 delta で届く**（実機で採取した payload で確認）。
+ * その手前で `PreToolUse` が着地して CLI を起こすと、引き上げる対象が無いまま質問だけが
+ * 発話される。
+ *
+ * ★ **3秒の根拠は実測。ただし上限の証明ではない。**
+ *
+ *   | 実測 | `PreToolUse` → 本文の着地 |
+ *   |---|---|
+ *   | 2026-08-16（#33 起票時） | 316ms |
+ *   | 2026-08-23 1回目 | 276ms |
+ *   | 2026-08-23 3回目 | **約 550ms** |
+ *
+ *   最初は 500ms にしたが、3件目（550ms）で待ち切れずに逆転が再現した。ばらつきが大きく
+ *   （`final` が届く時刻は「その手前でモデルが何をどれだけ生成したか」で決まる — docs/plugin.md）、
+ *   **秒数を仕様として扱わないこと**。ここを縮めると逆転が戻る。
+ *
+ * ★ 待ってよい理由は `LOCK_MAX_WAIT_MS` と同じ。CLI は hook からデタッチ起動されているので、
+ *   ここで待っても hook 自体はブロックしない。待つ側（本文の hook が起こした CLI）は
+ *   `LOCK_MAX_WAIT_MS`（3秒）で諦めるが、**待っているワーカーが自分のドレインの中で拾う**ので
+ *   発話は失われない（`LOCK_MAX_WAIT_MS` のヘッダにある「先行ワーカーが拾う」と同じ構造）。
+ *
+ * ★ 代償: **本文が伴わない質問でも、その prompt の発話が最大3秒遅れる。** `final` の待ちが
+ *   中央値0秒・最悪で数十秒であることに比べれば無視できる、という判断で受け入れている。
+ *
+ * ★★ **待つのは `processPrompt` の直前であって、パスの先頭ではない**（PR #47 レビュー P1）。
+ *   ここをパスの先頭に戻すと、次の3つが同時に壊れる:
+ *
+ *   1. **発話しない prompt にも3秒払う。** `speakPrompts: false` のときも、`formatPromptEvent`
+ *      が `[]` を返す prompt（`AskUserQuestion` / `ExitPlanMode` 以外）のときも、待った末に
+ *      `processPrompt` が捨てるだけになる → `needsBodyWait` が発話対象かを見ている理由
+ *   2. **待ちが prompt だけでなくパス全部に乗る。** 同じパスに居た**完成済みメッセージ**まで
+ *      巻き添えで3秒遅れる。`getSpoolDir()` にセッション成分が無いので**セッションを跨ぐ** —
+ *      Claude Code を2枚開くと、片方の許可プロンプトがもう片方の完成済み発話を止める
+ *   3. 待ちの予算が `boolean` だと、**無関係な delta で明けたときに待ち直せない**（下記）
+ *
+ * ★★ **予算は「ドレイン全体の残ポール数」で持つこと**（PR #47 レビュー P1）。`waitedForBody`
+ *   のような boolean にすると、脱出条件（`countSpoolMessageFiles` が増えたか）が
+ *   **待っている本文とは無関係な delta**で満たされたときに、やり直したパスで待ち直せず
+ *   **逆転が戻る**。実運用でこれを踏む経路が2つある: Claude Code 2枚（spool がグローバル）と、
+ *   要約 ON（要約 CLI 自身の `MessageDisplay` delta が同じ spool に落ちる）。
+ *
+ * ★ 時間ではなく**回数**で打ち切ること。`deps.now` はテストで固定値を返す（進まない）ので、
+ *   `now() >= deadline` を終了条件にすると無限ループになる。合計 ms は
+ *   `worker.test.ts` が `sleep` に渡された総和で assert している（`POLL_MS` を勝手に
+ *   動かすと赤くなる）。
+ */
+export const PROMPT_BODY_WAIT_POLLS = 60;
+export const PROMPT_BODY_WAIT_POLL_MS = 50;
+
+/**
+ * ★ [#33] 引き上げ（`hoistMessagesBeforePrompt`）が「その prompt より前に始まった本文」と
+ *   みなす到着時刻の窓。ナノ秒（`SpoolEntry.order` の単位）。
+ *
+ * **待ちの上限と同じ値であること。** 理由はそちらのヘッダ ★★ を参照（待って捕まえる相手と
+ * 引き上げてよい相手を同じ定義にする）。
+ */
+const HOIST_WINDOW_NS = BigInt(PROMPT_BODY_WAIT_POLLS * PROMPT_BODY_WAIT_POLL_MS) * 1_000_000n;
+
 export interface DrainDeps {
   spoolDir: string;
   /**
@@ -141,6 +212,8 @@ export interface DrainDeps {
    */
   summarize: Summarize;
   now?: () => number;
+  /** テスト用。既定は実際に待つ `sleepSync`（[#33] の本文待ちで使う） */
+  sleep?: (ms: number) => void;
 }
 
 export interface DrainResult {
@@ -157,6 +230,11 @@ type Loaded =
 
 function sessionIdOf(loaded: Loaded): string | null {
   return "content" in loaded ? loaded.content.sessionId : getEventSessionId(loaded.payload);
+}
+
+/** ユーザーのターン単位のID。message / prompt のどちらの payload にも入っている（[#33]） */
+function promptIdOf(loaded: Loaded): string | null {
+  return "content" in loaded ? loaded.content.promptId : getEventPromptId(loaded.payload);
 }
 
 /**
@@ -206,6 +284,7 @@ function tryWriteWorkerState(statePath: string, state: WorkerState): boolean {
 
 export function drainSpool(deps: DrainDeps): DrainResult {
   const now = deps.now ?? Date.now;
+  const sleep = deps.sleep ?? sleepSync;
 
   const orphansRemoved = cleanOrphans(deps.spoolDir, deps.spoolMaxAgeMs, now());
 
@@ -217,6 +296,9 @@ export function drainSpool(deps: DrainDeps): DrainResult {
   // 終わった直後に届いた spool を見ないまま抜けてしまう（CLAUDE.md「絶対に守ること」4）。
   // 2回連続してはじめて「もう届く分は無い」とみなす
   let unchangedStreak = 0;
+  // ★ [#33] 本文待ちの予算。**boolean にしないこと**（PROMPT_BODY_WAIT_POLLS のヘッダ ★★）。
+  //   無関係な delta で待ちが明けたとき、残りを使って待ち直せる必要がある
+  let remainingWaitPolls = PROMPT_BODY_WAIT_POLLS;
 
   for (; passes < MAX_PASSES; passes++) {
     const entries = scanSpool(deps.spoolDir);
@@ -262,11 +344,27 @@ export function drainSpool(deps: DrainDeps): DrainResult {
       loaded.push(item);
     }
 
-    for (let i = 0; i < loaded.length; i++) {
-      const item = loaded[i]!;
+    // ★ [#33] prompt が本文を追い越して spool へ着いていたら、ここで並びを戻す。
+    //   以降の処理（`hasNewerInSameSession` を含む）はすべてこの `ordered` を見ること
+    const ordered = hoistMessagesBeforePrompt(loaded);
+
+    let waited = false;
+
+    for (let i = 0; i < ordered.length; i++) {
+      const item = ordered[i]!;
+
+      // ★ [#33] prompt に到達した。その本文がまだ spool に着いていないなら、**ここで**待つ。
+      //   パスの先頭で待ってはいけない理由は PROMPT_BODY_WAIT_POLLS のヘッダ ★★ を参照
+      //   （手前の完成済みメッセージは、この時点で既に publish されている）
+      if (!("content" in item) && remainingWaitPolls > 0 && needsBodyWait(item, ordered, deps)) {
+        remainingWaitPolls -= waitForBodyArrival(deps.spoolDir, remainingWaitPolls, sleep);
+        waited = true;
+        break; // 本文が着いたかもしれない。パスをやり直して引き上げからやる
+      }
+
       const outcome =
         "content" in item
-          ? processMessage(item, hasNewerInSameSession(loaded, i), deps, state)
+          ? processMessage(item, hasNewerInSameSession(ordered, i), deps, state)
           : processPrompt(item, deps, state, now);
 
       written += outcome.written;
@@ -274,10 +372,16 @@ export function drainSpool(deps: DrainDeps): DrainResult {
       if (outcome.stateDirty) stateDirty = true;
     }
 
-    if (changed) {
-      unchangedStreak = 0;
-      continue;
-    }
+    // ★ `changed` を捨てないこと（PR #47 レビュー P3）。待ちで break したパスでも、
+    //   その手前の tombstone 掃除・要約セッション掃除・publish は起きている。ここを飛ばすと
+    //   「空振りが2回連続するまで繰り返す」が1回ぶん早く打ち切られる
+    if (changed) unchangedStreak = 0;
+
+    // ★ 待ちは「空振り」ではない。ここで unchangedStreak を進めると、本文の到着を待った
+    //   ぶんだけドレインが早く終わる
+    if (waited) continue;
+
+    if (changed) continue;
 
     // 何も動かなかった。ここで即抜けると、この走査の直後に届いた分を見ないまま終わる。
     // もう一周だけ確認し、それでも空振りならようやく「到着待ちだけが残っている」と判断する
@@ -296,6 +400,152 @@ export function drainSpool(deps: DrainDeps): DrainResult {
   if (stateDirty) tryWriteWorkerState(deps.workerStatePath, state);
 
   return { written, passes, orphansRemoved };
+}
+
+/**
+ * ★ [#33] この prompt を発話する前に、本文の到着を待つべきか。
+ *
+ * 待つのは、**発話される prompt** に **同一セッション・同一 `prompt_id` の本文が伴っていない**
+ * とき。判定の後半は引き上げ（`hoistMessagesBeforePrompt`）と同じ条件にしてある。
+ *
+ * ★ **発話しない prompt のために待たないこと**（PR #47 レビュー P1）。`speakPrompts: false` の
+ *   ときも、`formatPromptEvent` が `[]` を返す prompt（`AskUserQuestion` / `ExitPlanMode` 以外の
+ *   `PreToolUse`、廃止した進捗サイドカーの残骸など）のときも、待った末に `processPrompt` が
+ *   `tryRemoveEntry` して捨てるだけになる。`formatPromptEvent` はここと `processPrompt` で
+ *   2回呼ぶことになるが、純粋関数で payload 1件ぶんなので測って気にする対象ではない。
+ *
+ * ★ 「本文は既に発話済みなので待つ必要が無い」ケースも true になる（待ち損）。用途上、
+ *   その prompt の発話が最大3秒遅れることの実害は無い（`final` の待ちは中央値 0秒 /
+ *   最悪は数十秒）ので、判定を複雑にして**待つべきときに取りこぼす**方を避けている。
+ *   待ちが乗るのは**この prompt 以降**だけで、手前の完成済みメッセージには乗らない
+ *   （`drainSpool` が prompt に到達してから待つため）。
+ */
+function needsBodyWait(item: Extract<Loaded, { payload: unknown }>, ordered: Loaded[], deps: DrainDeps): boolean {
+  if (!deps.speakPrompts) return false;
+  if (item.payload === null) return false;
+  if (formatPromptEvent(item.payload).length === 0) return false;
+
+  const promptId = promptIdOf(item);
+  const sessionId = sessionIdOf(item);
+  if (promptId === null || sessionId === null) return false;
+
+  return !ordered.some(
+    (other) => "content" in other && promptIdOf(other) === promptId && sessionIdOf(other) === sessionId,
+  );
+}
+
+/**
+ * ★ [#33] 本文が spool に着くのを待つ。delta ファイルが1つでも増えたら即座に戻り、
+ *   増えなければ `maxPolls` 回で諦める。**使ったポール数を返す**（呼び出し側が
+ *   ドレイン全体の予算から差し引く）。
+ *
+ * ★ ここでは `prompt_id` の一致まで見ない。見るには delta ファイルを読む必要があり、
+ *   ポーリングのたびに走らせるには重い。「何か増えた」で呼び出し側にパスをやり直させ、
+ *   正確な判定はそちらの `needsBodyWait` / `hoistMessagesBeforePrompt` に任せる。
+ *
+ * ★★ **粗いぶん、無関係な delta でも明ける**（別セッション、要約 CLI 自身の出力）。それでも
+ *   逆転が戻らないのは、呼び出し側が**予算を残ポール数で持っていて待ち直せる**から
+ *   （`PROMPT_BODY_WAIT_POLLS` のヘッダ ★★）。ここを boolean 1回に戻すと、この粗さが
+ *   そのまま「1回の無関係な delta で待ちが終わり、質問が本文を追い越す」に化ける。
+ *
+ * ★ 件数は `countSpoolMessageFiles`（`readdirSync` 1回）で取る。`scanSpool` は全ファイルに
+ *   bigint `statSync` を打つので、ロックを握ったまま最大60回回すには重すぎる。
+ *   **前後で同じ関数を使うこと** — 基準と比較先のソースがずれると、`tryRemoveEntry` が
+ *   失敗して残ったファイルを片方だけが数え、1ポール目で待ちが明ける。
+ */
+function waitForBodyArrival(spoolDir: string, maxPolls: number, sleep: (ms: number) => void): number {
+  const before = countSpoolMessageFiles(spoolDir);
+
+  for (let polls = 1; polls <= maxPolls; polls++) {
+    sleep(PROMPT_BODY_WAIT_POLL_MS);
+    if (countSpoolMessageFiles(spoolDir) > before) return polls;
+  }
+
+  return maxPolls;
+}
+
+/**
+ * ★ [#33] prompt が同一 `prompt_id` の本文を追い越して spool に着いていたら、本文を prompt の
+ *   前へ引き上げる。
+ *
+ * `MessageDisplay` と `PreToolUse` は**別プロセスとして同時に走る**ので、どちらが先に spool へ
+ * 着くかに保証が無い。`scanSpool` は到着順（`birthtime`）に並べるだけなので、prompt が先に
+ * 着けばそのまま先に発話される — 実機で「質問を読み上げてから、その質問に至る説明を読み上げる」
+ * 逆転を観測している（短い本文で `PreToolUse` − `final` = −316ms）。→ docs/plugin.md
+ *
+ * ★ **引き上げるだけでよい。** prompt が後ろに回れば `hasNewerInSameSession` がそのまま成立し、
+ *   既存の救済経路（`processMessage` の `hasNewer`）が本文を publish する。`processMessage`
+ *   側には手を入れない。
+ *
+ * ★ `prompt_id` の粒度は粗く、「この質問の直前の本文はどれか」までは特定できない
+ *   （1 `prompt_id` に message が最大22件ぶら下がる実測）。**それで足りる。** 直したいのは
+ *   「prompt が到着順で本文を追い越した」ケースだけで、そのとき spool に残っている同一
+ *   `prompt_id` の本文は、ほぼ常にその prompt より前に始まったもの。複数あってもすべて先に
+ *   出せば順序は正しくなる。
+ *
+ * ★★ **「ほぼ常に」の例外を時間窓で外している**（PR #47 レビュー P2）。1ターンに prompt が
+ *   2つ出ることはある（`PROMPT_PAIR_WINDOW_MS` のコメント自身が「同じターンで質問の後に別途
+ *   Bash の許可プロンプトが出る」ケースを認めている）。そのとき
+ *
+ *       [本文A, 許可プロンプトP1, 本文B, AskUserQuestion P2]   ← すべて同じ prompt_id
+ *
+ *   が同じパスに乗ると、`j > i` を無条件に舐める実装では `[A, B, P1, P2]` になり、
+ *   **B が P1 を追い越す** — #33 と同じ形の逆転が別の場所で起きる。
+ *
+ *   区別の材料は到着時刻しかない。**追い越しは数百ms**（実測 276〜550ms）なのに対し、
+ *   prompt の後に始まった本文はユーザーの応答時間を挟むので桁が違う。そこで
+ *   `HOIST_WINDOW_NS` を超えて後に着いた本文は引き上げない。
+ *
+ *   窓を待ちの上限（`PROMPT_BODY_WAIT_POLLS × PROMPT_BODY_WAIT_POLL_MS`）と同じ値にするのは、
+ *   **「待って捕まえる相手」と「引き上げてよい相手」を同じ定義にする**ため。別々の定数に
+ *   すると、待ちだけ伸ばして引き上げが追随しない（＝待って捕まえたのに並べ替えない）ズレが入る。
+ *
+ * ★ `session_id` の一致も要求する（`hasNewerInSameSession` と同じ理由 — spool は
+ *   グローバルに1ディレクトリで、Claude Code を2枚開けば別セッションの分が混ざる）。
+ *   どちらかが取れないものは動かさない。そのまま到着順に従う方が安全。
+ *
+ * ★ 元の相対順序は保つ。引き上げた本文同士は到着順のまま並ぶ。
+ */
+function hoistMessagesBeforePrompt(loaded: Loaded[]): Loaded[] {
+  const result: Loaded[] = [];
+  const hoisted = new Set<number>();
+
+  for (let i = 0; i < loaded.length; i++) {
+    if (hoisted.has(i)) continue;
+
+    const item = loaded[i]!;
+    if ("content" in item) {
+      result.push(item);
+      continue;
+    }
+
+    const promptId = promptIdOf(item);
+    const sessionId = sessionIdOf(item);
+
+    if (promptId !== null && sessionId !== null) {
+      for (let j = i + 1; j < loaded.length; j++) {
+        // ★ 既に引き上げ済みのものを二度積まないこと。`AskUserQuestion` では PreToolUse と
+        //   直後の Notification が**同じ `prompt_id`** で2つ並ぶので、この判定が無いと
+        //   同じ本文が2回 result に入り、メッセージ全文が二重に発話される
+        if (hoisted.has(j)) continue;
+
+        const other = loaded[j]!;
+        if (!("content" in other)) continue;
+        if (promptIdOf(other) !== promptId || sessionIdOf(other) !== sessionId) continue;
+
+        // ★ 時間窓の外＝この prompt より**後に始まった**本文とみなして引き上げない（上の ★★）。
+        //   `loaded` は order 昇順なので `j > i` の範囲では差は常に非負
+        if (other.entry.order - item.entry.order > HOIST_WINDOW_NS) continue;
+
+        result.push(other);
+        hoisted.add(j);
+      }
+    }
+
+    result.push(item);
+  }
+
+  return result;
 }
 
 /**
@@ -329,6 +579,15 @@ function hasNewerInSameSession(loaded: Loaded[], index: number): boolean {
  *   `deltas` が空になるのは「閉じたメッセージの遅延分（index 0 が既に消えた孤児）」か
  *   「一過性の読み取り失敗」のどちらかで、どちらも「次のメッセージを打ち切ってよい理由」には
  *   ならない。
+ *
+ * ★★ [#46] **prompt に無条件 `true` を返すことには既知の代償がある。** `PreToolUse` と `final`
+ *   の到着には数百 ms のズレがあり（実測 −316ms）、その窓でドレインが走ると
+ *   **final flush でしか来ない最終行が spool に無いまま**救済が発火して tombstone が打たれる。
+ *   遅れて届いた final の delta は孤児として破棄され、最終行は無言で失われる。
+ *
+ * ★★ ここを `false` にすれば最終行は守れるが、[#33] の引き上げ（`hoistMessagesBeforePrompt`）が
+ *   救済経路に乗っているので、発話順の逆転が戻る。**順序の正しさと最終行の生存が
+ *   トレードオフになっている。** 片方だけを見て直さないこと。
  */
 function countsAsNewer(loaded: Loaded): boolean {
   return "content" in loaded ? loaded.content.deltas.length > 0 : true;

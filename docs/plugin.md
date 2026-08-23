@@ -346,6 +346,34 @@ hook script は `${CLAUDE_PLUGIN_ROOT}` を**環境変数としては使って�
 `${BASH_SOURCE[0]%/*}/..` で自分の位置から辿る。`hooks.json` 側の `${CLAUDE_PLUGIN_ROOT}` は
 Claude Code が置換するので、そちらは確実に効く。
 
+> ★ **コピーが作られることと、そのコピーが走ることは別**（2026-08-23 実測）。
+>
+> marketplace を**ローカルディレクトリ**として登録していると
+> （`known_marketplaces.json` の `source.source` が `"directory"`）、キャッシュにコピーは
+> 作られるのに、**hook が実行されるのは登録元のディレクトリの方**だった。
+>
+> | ファイル | フィールド | 今回の値 | hook が走るか |
+> |---|---|---|---|
+> | `installed_plugins.json` | `installPath` | `~/.claude/plugins/cache/…/0.1.0` | **走らない** |
+> | `known_marketplaces.json` | `installLocation` | `/Users/schwarz/dev/chatter-agent` | **走る** |
+>
+> `${BASH_SOURCE[0]%/*}/..` は「実行された script の位置」なので、hook script 側の実装は
+> どちらでも正しく動く。問題になるのは**人間がバンドルを差し替えるとき**だけ。
+>
+> ★ **実機確認でバンドルを差し替えるなら `installLocation` を見ること。** キャッシュ側だけを
+> 差し替えて「まだ直っていない」と**3回**誤診した（#33 の実機確認）。毎回 `speech.jsonl` の
+> `ts` は 100ms 前後の別ドレインを示していて、それを「待ちの閾値が足りない」と読み違え、
+> 500ms → 3秒と伸ばす無駄な往復までした。**迷うなら両方に置くのが速い。**
+>
+> ```bash
+> # どちらが走るか分からないときは両方に置く
+> /bin/cp -f plugin/bin/chatter-agent-speak.mjs "$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.env.HOME+"/.claude/plugins/known_marketplaces.json","utf8"))["chatter-agent"].installLocation)')/plugin/bin/"
+> /bin/cp -f plugin/bin/chatter-agent-speak.mjs ~/.claude/plugins/cache/chatter-agent/chatter-agent/*/bin/
+> ```
+>
+> ★ `cp` が `-i` の alias になっている環境では確認プロンプトで**黙って上書きされない**。
+> `/bin/cp -f` のように alias を迂回すること（これも1回踏んだ）。
+
 ## 検証時の落とし穴
 
 ### 設定変更はセッション再起動が必要
@@ -405,6 +433,10 @@ export CHATTER_AGENT_CLI=<repo>/plugin/bin/chatter-agent-speak.mjs
 
 **`bin/` の差し替えはセッション再起動が要らない。** hook が毎回 spawn し直すため。
 `scripts/` と `hooks.json` を直したときだけ再起動する。
+
+★ **差し替え先を間違えないこと。** キャッシュではなく `installLocation` が走ることがある
+（→ 上の「`${CLAUDE_PLUGIN_ROOT}` の実体」）。`/reload-plugins` は関係ない —
+`bin/` は hook が実行時に読むだけで、リロードの対象ではない。
 
 ### 実機で測るときは診断ログを点ける
 
@@ -485,12 +517,79 @@ export CHATTER_AGENT_CLI=<repo>/plugin/bin/chatter-agent-speak.mjs
 > | 長い本文（16 delta） | −1ms | ほぼ同着 |
 >
 > 2つの hook は別プロセスとして同時に走るので、**どちらが先に spool へ着くかは保証が無い**。
-> 到着順は `birthtime` で決まり、ワーカーはそれに従うだけなので、そのまま発話順に出る。
+> 到着順は `birthtime` で決まる。**この事実は変わらない。**
 >
 > **[#30](https://github.com/schwarz9791/chatter-agent/issues/30) はこの被害範囲を広げた。**
 > 以前は手前の文を既に喋り終えていて、質問の後ろに回るのは最終行の1文だけだった。
-> いまは**メッセージ全体**が質問の後ろに回る。→ 対策は
-> [#33](https://github.com/schwarz9791/chatter-agent/issues/33)
+> いまは**メッセージ全体**が質問の後ろに回る。
+
+> ★ **[#33](https://github.com/schwarz9791/chatter-agent/issues/33) で core 側に手当てを入れた。**
+> ワーカーはもう到着順にそのまま従わない。**手当ては2段ある。**
+>
+> **1. 引き上げ（`hoistMessagesBeforePrompt`）。** 1回のドレインの中で、prompt と同一セッション・
+> 同一 `prompt_id` の本文を prompt の前へ移す。prompt が後ろに回れば
+> `hasNewerInSameSession`（救済経路）がそのまま成立するので、本文の `final` がまだ届いて
+> いなくても、そこまでの delta が先に出る。`processMessage` 側には手を入れていない。
+>
+> **2. 本文待ち（`PROMPT_BODY_WAIT_POLLS`）。** prompt に本文が伴っていなければ、
+> 最大 **3秒**（50ms × 60回）待ってからパスをやり直す。待つのは **`processPrompt` の直前**で、
+> **発話される prompt** のときだけ（`speakPrompts: false` や、読み上げ文が組み立たない
+> `PreToolUse` では待たない）。予算はドレイン全体の**残ポール数**で持ち、無関係な delta で
+> 待ちが明けても残りで待ち直す。
+>
+> ★ **1 だけでは足りない。** 引き上げは「同じパスで両方が見えている」ことが前提だが、
+> **実機の典型ケースでは本文がまだ spool に存在しない**。`delta` は最後の flush を除いて
+> 行単位なので、改行で終わらない短い本文（1〜2文）はファイルが1つも置かれないまま
+> `final` flush を待つ。その手前で `PreToolUse` が着地して CLI を起こすと、引き上げる対象が
+> 無いまま質問だけが発話される。
+>
+> | 実測 | `PreToolUse` → 本文の着地 | そのとき何が起きたか |
+> |---|---|---|
+> | 2026-08-16（#33 起票時 / 単一 delta 66B） | 316ms | 逆転（起票のきっかけ） |
+> | 2026-08-23 1回目（引き上げのみ実装） | 276ms | **逆転。1 だけでは直らないと判明** |
+> | 2026-08-23 3回目（待ち 500ms を実装） | **約 550ms** | **逆転。500ms では足りないと判明 → 3秒へ** |
+>
+> 2026-08-23 の2件はどちらも「直したつもりで実機に出したら、まだ逆転した」という失敗の記録。
+> 1回目は `speech.jsonl` の `ts` が 276ms 離れており、**2回の別々の publish** になっていた
+> （＝同じドレインで両方を見ていなかった）。3回目は待ちが 500ms を使い切ってから prompt を
+> publish し、その約 100ms 後に本文が着いていた。→ `npm run verify:phase-a` の ⑱（引き上げ）と ⑲（待ち）
+>
+> ★ **この 3秒も上限の証明ではない。** `final` が届く時刻は「その手前でモデルが何をどれだけ
+> 生成したか」で決まるので（上表）、**秒数を仕様として扱わないこと**。
+>
+> ★ 待ってよい理由は `LOCK_MAX_WAIT_MS` と同じ。CLI は hook からデタッチ起動されているので、
+> ここで待っても hook 自体はブロックしない。待つ側（本文の hook が起こした CLI）は
+> `LOCK_MAX_WAIT_MS`（3秒）で諦めるが、待っているワーカーが自分のドレインの中で拾う。
+> 代償は「本文が来ない質問（許可プロンプトなど）でも、**その質問の発話が**最大3秒遅れる」ことだが、
+> `final` の待ちが中央値0秒・最悪で数十秒であることに比べれば無視できる。
+>
+> ★ **待ちを `drainSpool` のパス先頭に戻さないこと**（PR #47 レビュー P1）。そうすると
+> (1) 発話しない prompt にも3秒払い、(2) 同じパスの**完成済みメッセージ**まで巻き添えで遅れ
+> （spool はグローバルなので**セッションを跨ぐ** — Claude Code 2枚で片方の許可プロンプトが
+> もう片方の完成済み発話を止める）、(3) 予算が boolean だと無関係な delta で待ちが明けたときに
+> 待ち直せず**逆転が戻る**。
+>
+> `prompt_id` はユーザーのターン単位で粒度が粗く（1 `prompt_id` に message が最大22件）、
+> **「この質問の直前の本文はどれか」の特定には使えない。** それでも足りるのは、直したいのが
+> 「prompt が到着順で本文を追い越した」ケースだけで、そのとき spool に残っている同一
+> `prompt_id` の本文は**定義上その prompt より前に始まったもの**だから。複数あってもすべて
+> 先に出せば順序は正しくなる。
+>
+> ★ **`session_id` の一致も要求している。** `prompt_id` の一意性には頼らない
+> （spool はグローバルに1ディレクトリで、Claude Code を2枚開けば別セッションの分が混ざる。
+> `hasNewerInSameSession` と同じ理由）。どちらかが取れない payload は動かさない。
+>
+> ★ **残っている穴。** `PreToolUse` と `final` の間には数百 ms の窓がある。この窓でドレインが
+> 走ると、救済が `final` 未着のまま発火し、**final flush でしか来ない最終行**（次節）が spool に
+> 無いまま打ち切られて tombstone が打たれる。遅れて届いた final の delta は孤児として破棄される。
+> 引き上げはこの窓を広げも狭めもしないが、逆転ケースで救済が発火するようになったぶん、
+> 踏む機会は増えている。**順序の正しさと最終行の生存が、いまトレードオフになっている。**
+> → [#46](https://github.com/schwarz9791/chatter-agent/issues/46)
+>
+> ★ **本文待ちは、この穴を一部だけ塞ぐ。** 「本文がまだ spool に無い」ケースでは3秒待つ
+> あいだに `final` が着地するので、救済ではなく通常経路で全文が出る（最終行も残る）。
+> ただし**待つのは本文が1つも見えていないときだけ**なので、複数 delta の本文で
+> 「index 0 は着いたが `final` はこれから」という状態には効かない。#46 はそのまま残る。
 
 ### 最終行は final flush でしか来ない — これが遅延の下限
 

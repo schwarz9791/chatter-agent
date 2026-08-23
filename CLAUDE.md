@@ -51,7 +51,9 @@ hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公�
 
 実測で潰れた前提は [`docs/plugin.md`](./docs/plugin.md) に集約してある。要点だけ:
 
-- `/plugin install` はプラグインを**完全コピー**する。`bin/` も実行権限ごと入るので、バンドル同梱の前提は成立
+- `/plugin install` はプラグインを**完全コピー**する。`bin/` も実行権限ごと入るので、バンドル同梱の前提は成立。
+  ただし**ローカルディレクトリを marketplace に登録している場合、hook が走るのはコピーではなく登録元**
+  （`known_marketplaces.json` の `installLocation`）。実機確認でバンドルを差し替えるときに刺さる（→ [`docs/plugin.md`](./docs/plugin.md)）
 - **thinking でもサブエージェントでも発火しない**（読み上げ事故は起きない）
 - **メッセージの最終行だけは final flush でしか来ない。** これが `final` を待つ設計の遅延の下限で、`AskUserQuestion` の直前では数十秒に達する
 
@@ -183,6 +185,23 @@ jsonl の `timestamp` は**メッセージの生成時刻であって書き込�
 
 ドレイン完了後、ロックを解放する前にもう一度 spool を見る（走査直後に到着した分の取りこぼし防止）。
 → 設計書 §4-2
+
+**到着順（`birthtime`）だけでは発話順は決まらない。** `MessageDisplay` と `PreToolUse` は
+別プロセスとして同時に走るので、**prompt が本文を追い越して spool に着くことがある**
+（実機で `PreToolUse` − `final` = −316ms）。そのまま到着順に処理すると「質問を読み上げてから、
+その質問に至る説明を読み上げる」逆転になる（[#33](https://github.com/schwarz9791/chatter-agent/issues/33)）。
+`worker.ts` の手当ては**2段**:
+
+1. **引き上げ**（`hoistMessagesBeforePrompt`）— 同一セッション・同一 `prompt_id` の本文を prompt の前へ移す
+2. **本文待ち**（`PROMPT_BODY_WAIT_POLLS`）— 発話される prompt に本文が伴っていなければ、
+   **`processPrompt` の直前で**最大 **3秒**待ってパスをやり直す（予算はドレイン全体の残ポール数）
+
+★ **1 だけでは足りない。** 短い本文（1〜2文）は改行で終わらないので `final` flush まで
+spool にファイルが1つも置かれず（メッセージ全体が単一 delta で届く）、**引き上げる対象が
+存在しない**。実機で 2 を入れるまで逆転が残った（2026-08-23、276ms）。
+**待ちの秒数を縮めないこと。** 500ms では足りず（実測 550ms）逆転が再現した。
+`final` の到着時刻はばらつくので**秒数を仕様として扱わないこと**。
+→ [`docs/plugin.md`](./docs/plugin.md) / `npm run verify:phase-a` の ⑱⑲
 
 ### 5. 記録と配信を1つのファイルに兼ねさせない
 

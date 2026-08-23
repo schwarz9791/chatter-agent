@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { cleanOrphans, readMessage, readPromptPayload, removeEntry, scanSpool } from "./spool";
+import { cleanOrphans, countSpoolMessageFiles, readMessage, readPromptPayload, removeEntry, scanSpool } from "./spool";
 
 let spoolDir: string;
 
@@ -202,12 +202,21 @@ describe("readMessage", () => {
     expect(readMessage(filePaths).final).toBe(true);
   });
 
-  it("payload から sessionId / turnId / messageId を取る", () => {
+  it("payload から sessionId / turnId / messageId / promptId を取る", () => {
     const filePaths = writeMessage("m1", [delta(0, "あ。")]);
     const content = readMessage(filePaths);
     expect(content.sessionId).toBe("sess-1");
     expect(content.turnId).toBe("turn-1");
     expect(content.messageId).toBe("m1");
+    // ★ [#33] 発話順の是正に使う（worker.ts の hoistMessagesBeforePrompt）
+    expect(content.promptId).toBe("p1");
+  });
+
+  it("★ [#33] prompt_id が無い payload では promptId は null（引き上げの判断材料にしない）", () => {
+    const { prompt_id: _omit, ...withoutPromptId } = delta(0, "あ。");
+    const filePath = path.join(spoolDir, "m1.0.json");
+    fs.writeFileSync(filePath, JSON.stringify(withoutPromptId));
+    expect(readMessage([filePath]).promptId).toBeNull();
   });
 
   it("index に欠番があればそこで打ち切る（歯抜けを繋いで文を壊さない）", () => {
@@ -264,6 +273,29 @@ describe("readMessage", () => {
 
   it("空配列なら空", () => {
     expect(readMessage([]).deltas).toEqual([]);
+  });
+});
+
+describe("countSpoolMessageFiles", () => {
+  it("delta ファイルだけを数える（prompt / tmp / 廃止した進捗サイドカーは数えない）", () => {
+    writeMessage("m1", [delta(0, "あ。"), delta(1, "い。")]);
+    writeMessage("m2", [delta(0, "う。", false, "m2")]);
+    fs.writeFileSync(path.join(spoolDir, "prompt-x.json"), "{}");
+    fs.writeFileSync(path.join(spoolDir, "m3.0.json.tmp"), "{}"); // rename 前
+    writeStaleProgress("m4.progress.json");
+
+    expect(countSpoolMessageFiles(spoolDir)).toBe(3);
+  });
+
+  it("ディレクトリが無ければ 0（まだ hook が動いていない）", () => {
+    expect(countSpoolMessageFiles(path.join(spoolDir, "nope"))).toBe(0);
+  });
+
+  it("★ scanSpool の message エントリ数ではなく**ファイル数**を返す（待ちの脱出条件はその方が鋭敏）", () => {
+    writeMessage("m1", [delta(0, "あ。"), delta(1, "い。"), delta(2, "う。")]);
+
+    expect(scanSpool(spoolDir).filter((e) => e.kind === "message")).toHaveLength(1);
+    expect(countSpoolMessageFiles(spoolDir)).toBe(3);
   });
 });
 

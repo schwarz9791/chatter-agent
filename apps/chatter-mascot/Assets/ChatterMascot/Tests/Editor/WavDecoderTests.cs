@@ -175,6 +175,35 @@ namespace ChatterMascot.Tests
             UnityEngine.Object.DestroyImmediate(clip);
         }
 
+        /// <summary>
+        /// ★ <b>チャンク長が <c>int.MaxValue</c> 級でも例外にならないこと。</b>
+        ///
+        /// 前進は <c>body + declared</c> を int で計算するので、越える長さでは<b>負に折り返す</b>。
+        /// すると <c>offset</c> が負のままループ条件を通り、<c>Encoding4</c> の
+        /// <c>data[offset]</c> が <c>IndexOutOfRangeException</c> を投げる。
+        /// <c>Decode</c> に try/catch は無く、呼び出し元の <c>FetchAudioAsync</c> は
+        /// fire-and-forget なので、<b>例外は未観測のまま捨てられ、キューの head が黙って止まる</b>。
+        ///
+        /// ★ このテストは戻り値より<b>「投げないこと」の方が本体</b>。
+        /// </summary>
+        [Test]
+        public void DoesNotOverflowOnHugeChunkSize()
+        {
+            var wav = BuildWav(new short[] { 0, 16384 });
+            var withHugeChunk = new List<byte>();
+            withHugeChunk.AddRange(new ArraySegment<byte>(wav, 0, 12));                  // RIFF/WAVE
+            withHugeChunk.AddRange(System.Text.Encoding.ASCII.GetBytes("LIST"));
+            withHugeChunk.AddRange(BitConverter.GetBytes(int.MaxValue));                 // ★ 溢れる長さ
+            withHugeChunk.AddRange(new ArraySegment<byte>(wav, 12, wav.Length - 12));    // fmt + data
+
+            string error;
+            // 直る前はこの行が IndexOutOfRangeException を投げる
+            var clip = WavDecoder.Decode(withHugeChunk.ToArray(), "test", out error);
+
+            Assert.That(clip, Is.Null);
+            Assert.That(error, Is.Not.Null);
+        }
+
         /// <summary>実体で測り直しても中身が無ければ、読めなかったことにする</summary>
         [Test]
         public void RejectsTrulyEmptyDataChunk()

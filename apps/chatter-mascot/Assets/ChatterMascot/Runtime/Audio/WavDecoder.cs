@@ -94,7 +94,15 @@ namespace ChatterMascot.Audio
                 //   長さ 0 のチャンクはここで 8 バイトだけ進み、走査が続く。
                 // ★ 負の長さ（0xFFFFFFFF）では前進できない。offset が戻ると走査が終わらないので、
                 //   ここで打ち切る（data なら上で測り直して break 済み）。
-                if (declared < 0) break;
+                // ★ **末尾を越える長さでも打ち切ること。** `body + declared` は int で計算するので、
+                //   `declared` が int.MaxValue 級だと**負に折り返す**。すると offset が負のまま
+                //   ループ条件（offset + 8 <= wav.Length）を通り、Encoding4 の `data[offset]` が
+                //   IndexOutOfRangeException を投げる。Decode に try/catch は無く、呼び出し元の
+                //   FetchAudioAsync は fire-and-forget なので、例外は**未観測のまま捨てられ**、
+                //   その seq に AudioReady も AudioFailed も来ないまま**キューの head が黙って止まる**。
+                //   `declared <= available` なら body + declared <= wav.Length なので溢れない。
+                //   越えている時点でその先に走査するものは無いので、打ち切りが正しい挙動でもある。
+                if (declared < 0 || declared > available) break;
                 // チャンクは2バイト境界に整列する
                 offset = body + declared + (declared % 2);
             }

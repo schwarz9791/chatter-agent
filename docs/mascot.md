@@ -273,9 +273,23 @@ ack のように「送れたことを前提に手元から消す」値でこれ�
 写し元も測り直しは `data` の分岐の中だけで、**前進には宣言値をそのまま使っている**
 （`core/src/player/audioPlayer.ts`）。長さ 0 のチャンクはそこで 8 バイトだけ進んで走査が続く。
 
+★ **ただし「前進は宣言値」だけだと int が溢れる。** `body + declared` は int で計算するので、
+`declared` が `int.MaxValue` 級だと**負に折り返す**。すると `offset` が負のままループ条件
+（`offset + 8 <= wav.Length`）を通り、`Encoding4` の `data[offset]` が
+`IndexOutOfRangeException` を投げる。`Decode` に try/catch は無く、呼び出し元の
+`FetchAudioAsync` は `_ = FetchAudioAsync(...)` の fire-and-forget なので、
+**例外は未観測のまま捨てられ、その seq に `AudioReady` も `AudioFailed` も来ないまま
+キューの head が黙って止まる**——無音の原因が読めない、いちばん困る形。
+
+`declared <= available` を前進の条件に足せば `body + declared <= wav.Length` なので溢れない。
+越えている時点でその先に走査するものは無いので、打ち切りが正しい挙動でもある。
+
+> **これは測り直しの回帰（上）を直した副作用ではなく、最初からあった。** 全チャンクに
+> 広げていた間だけ、`declared <= available` の判定が偶然ガードになって隠れていた。
+
 回帰テスト: `WavDecoderTests` の `MeasuresZeroSizedDataChunk` /
 `MeasuresOversizedDataChunk` / `RejectsTrulyEmptyDataChunk` /
-`SkipsZeroSizedChunkBeforeData`。
+`SkipsZeroSizedChunkBeforeData` / `DoesNotOverflowOnHugeChunkSize`。
 
 ### ★ .NET の正規表現は JS より緩い（`$` と `\d`）
 

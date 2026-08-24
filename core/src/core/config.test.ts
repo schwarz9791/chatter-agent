@@ -21,6 +21,9 @@ const DEFAULTS: ChatterAgentConfig = {
   ttsBaseUrl: "http://127.0.0.1:10101",
   ttsSpeakerId: 888753760,
   synthesisTimeoutMs: 30_000,
+  ttsSpawn: true,
+  ttsSpawnCommand: "",
+  ttsSpawnArgs: [],
 
   synthesisLookahead: 3,
   audioFetchTimeoutMs: 45_000,
@@ -189,6 +192,33 @@ describe("createConfigStore", () => {
     expect(store({ CHATTER_AGENT_PLAYER_ARGS: "-q,1,{file}" }).get("playerArgs")).toEqual(["-q", "1", "{file}"]);
     write({ playerArgs: ["{file}", "--volume", "0.5"] });
     expect(store().get("playerArgs")).toEqual(["{file}", "--volume", "0.5"]);
+  });
+
+  it("ttsSpawn は 0 / false / off で切れる（verify-phase-b が渡す形）", () => {
+    expect(store().get("ttsSpawn")).toBe(true);
+    expect(store({ CHATTER_AGENT_TTS_SPAWN: "0" }).get("ttsSpawn")).toBe(false);
+    expect(store({ CHATTER_AGENT_TTS_SPAWN: "false" }).get("ttsSpawn")).toBe(false);
+    expect(store({ CHATTER_AGENT_TTS_SPAWN: "off" }).get("ttsSpawn")).toBe(false);
+  });
+
+  it("ttsSpawnCommand は環境変数と config.json の両方から読める", () => {
+    expect(store({ CHATTER_AGENT_TTS_SPAWN_COMMAND: "/opt/aivis/run" }).get("ttsSpawnCommand")).toBe("/opt/aivis/run");
+    write({ ttsSpawnCommand: "~/bin/run" });
+    expect(store().get("ttsSpawnCommand")).toBe("~/bin/run");
+  });
+
+  /**
+   * ★ `parsePlayerArgs` に差し替えられたら落ちる回帰テスト。あれは `{file}` を含まない列と
+   *   空入力を弾くが、`ttsSpawnArgs` では**空に「ttsBaseUrl から導出する」意味がある**。
+   */
+  it("ttsSpawnArgs は {file} を含まない引数列を受け、空なら [] になる", () => {
+    expect(store({ CHATTER_AGENT_TTS_SPAWN_ARGS: "--use_gpu,--load_all_models" }).get("ttsSpawnArgs")).toEqual([
+      "--use_gpu",
+      "--load_all_models",
+    ]);
+    expect(store({ CHATTER_AGENT_TTS_SPAWN_ARGS: "" }).get("ttsSpawnArgs")).toEqual([]);
+    write({ ttsSpawnArgs: ["--host", "127.0.0.1", "--port", "10101"] });
+    expect(store().get("ttsSpawnArgs")).toEqual(["--host", "127.0.0.1", "--port", "10101"]);
   });
 
   it("未知のキーは無視して警告する", () => {

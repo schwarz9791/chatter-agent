@@ -21,6 +21,7 @@ core/src/
 │   ├── index.ts             合成ルート。ロック → bind → 古いキューの掃除 → ポーリング
 │   ├── dispatcher.ts        配信済み seq と**採番の世代**の判断。フレームの組み立てもここ（ユニットテストのため純粋な部品に切り出してある）
 │   ├── audioStore.ts        ★合成のキャッシュと single-flight。ディスクを持たない（issue #29）
+│   ├── engineProcess.ts     ★合成エンジンを起こす条件の判断と、プロセスグループごとの停止（issue #51）
 │   ├── httpServer.ts        `GET /audio/<epoch>-<seq>.wav`。200 / 503 / 404 / 403 の切り分け
 │   ├── wsServer.ts          配信と ack。Origin 検査、外部 http.Server への相乗りもここ
 │   └── throttledWarn.ts     同じ警告を間引く（503 の連発と Origin 拒否。黙らせずに件数を出す）
@@ -40,6 +41,7 @@ core/src/
 │   ├── config.ts            ← cc-mascot-xr configStore 流用
 │   ├── lock.ts              mkdir の原子性を使った単一ワーカー / 単一サーバーのロック
 │   ├── atomicWrite.ts       tmp + rename の共通化。キュー entry / seq state / worker state の3箇所が使う
+│   ├── commandPath.ts       外部コマンドの絶対パス探索（spawn しない）。要約 CLI と合成エンジンが共有する（issue #51 で summarizer/ から移設）
 │   ├── speechLog.ts         記録への追記 / epoch と seq の採番 / state 整合
 │   └── speechQueue.ts       配信キュー。list/read/enqueue/ackUpTo/dropOlderThan/trim/clear/sweepTmp
 ├── text/         テキスト整形・文分割        ← textFilter.ts のみ cc-mascot 由来
@@ -52,18 +54,19 @@ core/src/
 └── summarizer/   AI要約（既定OFF。issue #31）
     ├── types.ts             Summarize / SummaryOutcome / ClaudeCliResult の型定義
     ├── prompt.ts            要約 CLI に渡す指示文（SUMMARY_INSTRUCTION）
-    ├── claudeCli.ts         コマンド解決 / 引数組み立て / execFileSync での同期実行
+    ├── claudeCli.ts         引数組み立て / execFileSync での同期実行（コマンド解決は `core/commandPath.ts`）
     └── summaryPipeline.ts   判定とフォールバック（createSummaryPipeline）。cli/worker.ts から呼ばれる
 ```
 
 判断ロジックは基本的に `cli/` と `core/` に置く。**`server/index.ts` と `wsServer.ts` は判断ロジックを持たない** — 配線に留める。
 
-判断は**2つの部品に切り出してある**。`index.ts` に埋めるとユニットテストから触れないため。
+判断は**3つの部品に切り出してある**。`index.ts` に埋めるとユニットテストから触れないため。
 
 | | |
 |---|---|
 | `server/dispatcher.ts` | 何を配信済みとし、何を消してよいか。どの世代の entry を配信し、どの ack を弾くか |
 | `server/audioStore.ts` | 何を合成し、何を覚えておくか（issue #29） |
+| `server/engineProcess.ts` | 合成エンジンを起こしてよいか、どう止めるか（issue #51） |
 
 > ★ **`audioStore.ts` は #29 で増えた2つ目の例外。** 「サーバーは判断ロジックを持たない」という
 > 方針そのものは変えていない。合成を GET が来たときに走らせる形にしたので、
@@ -172,12 +175,22 @@ npm run verify:phase-a   # spool → speech.jsonl（scripts/verify-phase-a.sh。
 npm run verify:phase-b   # 配信キュー → WebSocket（scripts/verify-phase-b.mjs）
 npm run verify:tts       # server の合成と GET /audio/（scripts/verify-tts.mjs）
 npm run verify:player    # WebSocket → 音声取得 → 再生 → ack（scripts/verify-player.mjs）
-npm run start:server     # 手で動かすとき
-npm run start:player     # 耳で聞くとき（AivisSpeech を起動しておく）
+npm run start:server     # 手で動かすとき。**エンジンが居なければサーバーが起こす**（#51）
+npm run start:player     # 耳で聞くとき
 ```
 
+★ **`start:*` は `dist/` を実行するだけでビルドしない。** `dist` は `.gitignore` 済みなので、
+ソースを直したら `npm run build` してから起動すること。**`[Player]` というプレフィックスで
+エンジンのエラーが出たら、それは #29 より前の古いビルド**（読み手が player → server に移る前のもの）。
+
 **`verify:tts` も `verify:player` も AivisSpeech もオーディオデバイスも要らない。** 合成エンジンは
-スタブ HTTP に、再生コマンドは `scripts/fake-player.mjs` に差し替わる。**プレイヤーコマンドを
+スタブ HTTP に、再生コマンドは `scripts/fake-player.mjs` に差し替わる。**スタブに疎通できる＝
+条件3が成立するので、エンジンを起こすこともない**（#51）。`verify:tts` の⑭がそれを検査していて、
+**この2本には `CHATTER_AGENT_TTS_SPAWN=0` を入れていない** —— 入れると条件3が壊れても素通りし、
+開発機では代わりに本物の AivisSpeech が黙って起動してしまう。
+逆に **`verify:phase-b` だけは `CHATTER_AGENT_TTS_SPAWN=0` を渡す**。あちらは TTS 系の env を
+一切渡さないので、既定の `127.0.0.1:10101` に繋ぎに行って失敗し、そこで本物を起こしてしまう
+（`CHATTER_AGENT_TTS_ENABLED=false` では逃げられない。音声の相対パスを検査しているため）。**プレイヤーコマンドを
 config で差し替えられるようにした決定が、そのまま CI 可能性になっている**（`playerCommand` /
 `playerArgs`）。偽プレイヤーが受け取ったファイル名を追記するので、**実際に何がどの順で鳴ったか**まで
 検証できる。`verify:player` の最後のシナリオでは本物の server と CLI を通して、
@@ -300,12 +313,15 @@ server（音声合成）だけが読むキー。**別ファイルに分けない
 | `ttsBaseUrl` | `"http://127.0.0.1:10101"` | `CHATTER_AGENT_TTS_URL` |
 | `ttsSpeakerId` | `888753760` | `CHATTER_AGENT_TTS_SPEAKER_ID` |
 | `synthesisTimeoutMs` | `30000` | `CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS` |
+| `ttsSpawn` | `true` | `CHATTER_AGENT_TTS_SPAWN` |
+| `ttsSpawnCommand` | `""` | `CHATTER_AGENT_TTS_SPAWN_COMMAND` |
+| `ttsSpawnArgs` | `[]` | `CHATTER_AGENT_TTS_SPAWN_ARGS` |
 
 ★ **#29 で読み手が player → server に移ったが、キー名も意味も変えていない。** 改名すると、
 既存の `config.json` に残った旧キーが**全バイナリで**未知キー警告を出す（#11 で
 `speechLogGenerations` を廃止したときに実際に踏んだ）。
 
-- 既定の `ttsBaseUrl` は **AivisSpeech.app を単体起動したときの標準ポート**。cc-mascot は
+- 既定の `ttsBaseUrl` は **AivisSpeech の標準ポート**。cc-mascot は
   エンジンを自分で `--port 8564` で spawn するので、そちらに繋ぐなら明示的に指定する
 - `ttsSpeakerId` の既定は AivisSpeech 標準同梱の Anneli（ノーマル）。起動時に `/speakers` で
   存在を検査し、無ければ候補を並べて警告する（**設定ミスの症状が「無音」なので、これが無いと切り分けできない**）。
@@ -313,6 +329,60 @@ server（音声合成）だけが読むキー。**別ファイルに分けない
   「数十秒の無音は正常」と区別できなくなる。音声だけを 503 に落として、原因を症状に出す
 - `ttsEnabled: false` にすると配信フレームの `audio` が常に `null` になり、`GET /audio/…` も 404 を返す。
   **テキストの配信は止まらない**ので、自前で合成するクライアントや字幕だけのクライアントの逃げ道になる
+
+#### エンジンを起こす（`ttsSpawn*`、[#51](https://github.com/schwarz9791/chatter-agent/issues/51)）
+
+**エンジンが居なければサーバーが起こす。** GUI（AivisSpeech.app）を終了すると GUI が spawn した
+エンジンも道連れで落ちる（PID の親子を実測）ため、「GUI を閉じてエンジンだけ残す」運用は成立しない。
+このエンジンは chatter-agent 以外に使わないので、**サーバーが落ちたらエンジンも一緒に落とす**。
+
+★ **起こすだけで、起動を待たない。** `[Server] Ready` は先に出て、合成は今までどおり
+`GET /audio/…` が来たときに走る。#29 の柱（エンジンが落ちてもテキストの配信は止まらない）は
+変わらない（→ `CLAUDE.md`「絶対に守ること」7）。
+
+起こすのは**次の5つを全部満たすときだけ**:
+
+1. `ttsEnabled` が `true`
+2. `ttsSpawn` が `true`
+3. **起動時の疎通確認に失敗した**
+4. `ttsBaseUrl` のホストがループバック（`127.0.0.0/8` / `[::1]` / `localhost`）
+5. コマンドが解決できた
+
+★ **条件3が要。** 「まず繋いでみて、居なければ起こす」形にしたことで、GUI 併用・verify のスタブ・
+別ポート運用のすべてが**追加の分岐なしで**素通りする（ポート衝突を判定するコードが要らない）。
+判定は `listSpeakers` に**繋がったか**だけで、`ttsSpeakerId` が実在するかは混ぜない
+——混ぜると、スタブが生きているのに話者 ID だけ間違えている状態で**二重起動**する。
+
+- `ttsSpawnCommand` が空なら、AivisSpeech.app の既知の場所を順に見る:
+  `/Applications/AivisSpeech.app/Contents/Resources/AivisSpeech-Engine/run` →
+  `~/Applications/…` の同じパス。**指定した値が見つからないとき、既知候補にフォールバックしない**
+  （指定を黙って別のバイナリに読み替えるのは、最も気づきにくい失敗の仕方になる）
+- `ttsSpawnArgs` が空なら `ttsBaseUrl` から `--host <host> --port <port>` を組む。
+  **指定すると導出は行われない**（追加ではなく置換）。自分で書くなら `--host` / `--port` も自分で書く
+- **落ちても再起動しない**（初版）。起動失敗ループの方が害が大きい。落ちた後は `recheckEngine` が
+  分単位で診断を出し続ける。異常終了なら `[Engine]` が終了コードと **stderr の末尾**を出す
+  ——これが無いと「起動したはずなのに繋がらない」の原因が1文字も残らない
+- 停止は**プロセスグループごと**（`detached: true` で起こし、`process.kill(-pid, …)`）。
+  `run` は PyInstaller のバイナリで**自分の子を持つ**ので、`child.kill()` では孫が残ってポートを掴み続ける
+- ★ **サーバーが `SIGKILL` されるとエンジンは残る**（終了処理が走らないため）。これは実害が無い
+  ——次回起動時の条件3が残ったエンジンに疎通し、起こさずに再利用する
+- ★ **ログのプレフィックスは `[Engine]`。** エンジンのプロセスそのものに関する行だけがこれで、
+  起こす / 起こさないの判断は `[Server]` が出す
+
+**実機で確認した**（macOS / AivisSpeech 1.1.0-dev、2026-08-24）:
+
+- GUI を終了し `lsof -nP -iTCP:10101 -sTCP:LISTEN` が空の状態から、`npm run start:server` と
+  `npm run start:player` だけで**音が出た**。エンジンの親は `node dist/chatter-agent-server.mjs`
+  （GUI ではない）
+- サーバーを止めると `lsof` が空に戻る（プロセスグループごとの停止が効いている）
+- **GUI が上げている状態ではサーバーは起こさない**（条件3）。ログには
+  `音声合成エンジンに繋がりました` だけが出て `[Engine]` の行は出ない
+- 起こしてから `/speakers` が応答するまでは**数秒**かかる。★ **この秒数を仕様として扱わないこと** ——
+  マシンとモデルで変わる。その間の `GET /audio/…` は `503` になり、クライアントが取り直す
+
+★ **話者を増やすときは GUI が要る。** エンジン単体だと、音声モデルの追加は API を叩くか
+`~/Library/Application Support/AivisSpeech-Engine/Models/` に `.aivmx` を直接置くことになる。
+モデル自体は GUI から独立しているので、**一度入れた話者はエンジン単体でもそのまま使える**。
 - ★ **`synthesisTimeoutMs` は2つの場所に効く。** エンジンへの**1リクエストあたり**の上限
   （`audio_query` と `synthesis` に別々に。2往復で1つの予算にすると、モデルロードで
   `/audio_query` が食い切ったとき CPU 律速の `/synthesis` に残り0が渡る）と、

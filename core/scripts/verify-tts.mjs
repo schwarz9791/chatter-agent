@@ -353,6 +353,20 @@ try {
     }
     check("★ SIGTERM の後、誰も listen していない", !reachable);
   }
+
+  {
+    show("⑭ ★ 疎通できるので合成エンジンを起こさない（#51 の条件3）");
+    // ここまでの全シナリオでスタブのエンジンが listen している。条件3が壊れると、
+    // 開発機（macOS）では代わりに**本物の AivisSpeech** が黙って起動する。
+    // ★ このスクリプトに CHATTER_AGENT_TTS_SPAWN=0 を入れないこと —— 入れると
+    //   条件3が壊れても素通りしてしまい、この検査の意味が無くなる
+    check("★ [Engine] 起動しました が1度も出ていない", !serverLogs().includes("[Engine] 起動しました"), serverLogs());
+    check(
+      "★ ttsSpeakerId が違っても（⑫）疎通は成立しているので起こさない",
+      !serverLogs().includes("合成エンジンが見つかりません") && !serverLogs().includes("ループバックではない"),
+      serverLogs(),
+    );
+  }
 } catch (err) {
   console.error("\n\x1b[31m検証中に例外が発生しました\x1b[0m");
   console.error(err);

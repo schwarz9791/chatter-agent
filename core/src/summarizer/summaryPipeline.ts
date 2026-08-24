@@ -16,7 +16,8 @@
 import { randomUUID } from "crypto";
 import * as fs from "fs";
 import { toSpeechSentences } from "../text/speechText";
-import { buildSummaryArgs, findCommandPath, runClaudeCli } from "./claudeCli";
+import { findCommandPath } from "../core/commandPath";
+import { buildSummaryArgs, runClaudeCli } from "./claudeCli";
 import { SUMMARY_INSTRUCTION, SUMMARY_MAX_CHARS } from "./prompt";
 import type { Summarize, SummaryOutcome } from "./types";
 

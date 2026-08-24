@@ -78,7 +78,9 @@ tail -f "${XDG_CONFIG_HOME:-$HOME/.config}/chatter-agent/speech.jsonl"
 
 `chatter-agent-player` が、配信された発話を読み上げます。Unity の表示側アプリを待たずに音が出せて、プロトコルの参照実装も兼ねています。合成そのものは `chatter-agent-server` が [AivisSpeech](https://aivis-project.com/) にやらせるので、player は音声を取りに行って鳴らすだけです。
 
-**AivisSpeech.app を起動しておいてください**（既定の接続先は `http://127.0.0.1:10101`）。繋ぎ先を設定するのは**サーバー側**です。
+**AivisSpeech をインストールだけしておいてください**（既定の接続先は `http://127.0.0.1:10101`）。エンジンが動いていなければ `chatter-agent-server` が起こし、サーバーを止めれば一緒に落ちます。繋ぎ先を設定するのは**サーバー側**です。
+
+> 起こさせたくないときは `CHATTER_AGENT_TTS_SPAWN=0`。**新しい話者をダウンロードするときだけは AivisSpeech.app（GUI）が要ります** — 一度入れた音声モデルは GUI から独立しているので、以後はエンジン単体でもそのまま使えます。
 
 ```bash
 cd core && npm install && npm run build
@@ -105,7 +107,7 @@ npm run verify:tts       # server の合成と GET /audio/
 npm run verify:player    # WebSocket → 音声取得 → 再生 → ack
 ```
 
-`verify:tts` と `verify:player` は合成エンジンと再生コマンドをスタブに差し替えるので、AivisSpeech もオーディオデバイスも要りません。
+`verify:tts` と `verify:player` は合成エンジンと再生コマンドをスタブに差し替えるので、AivisSpeech もオーディオデバイスも要りません（スタブに疎通できるぶん、エンジンを起こすこともありません）。`verify:phase-b` はスタブを持たないので、`CHATTER_AGENT_TTS_SPAWN=0` を渡して起こさないようにしてあります。
 
 設計方針と作業規約は [`CLAUDE.md`](./CLAUDE.md) と [`docs/`](./docs) にあります。
 

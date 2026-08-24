@@ -170,6 +170,7 @@ namespace ChatterMascot
             _state = new PlaybackState(options);
 
             _player = new AudioClipPlayer(audioSource);
+            _player.Warn += message => Debug.LogWarning("[Mascot] " + message);
             // 音声は WebSocket と同じ authority から取る。サーバーは自分の到達アドレスを
             // 知らないので、フレームには相対パスしか載らない
             _fetcher = new AudioFetcher(AudioFetcher.DeriveAudioBaseUrl(serverUrl), audioFetchTimeoutMs);

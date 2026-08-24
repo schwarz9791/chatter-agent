@@ -97,6 +97,24 @@ namespace ChatterMascot.Net
 
         private async Task RunAsync()
         {
+            // ★ **最後の受け皿。復旧のためではなく、可視化のために置く。**
+            //   RunAsync は `_ = RunAsync()` で起動しているので、ここまで例外が上がると
+            //   その Task が fault したまま**誰にも観測されずに捨てられる**。
+            //   ログが1行も出ないまま再接続ループだけが消え、セッションが終わるまで無音になる
+            //   ——「サーバーが何も言っていない」と区別がつかない、いちばん困る壊れ方。
+            //   個々のコールバックは SafeInvoke で握ってあるので、ここに来るのは想定外だけ。
+            try
+            {
+                await ConnectLoopAsync();
+            }
+            catch (Exception e)
+            {
+                Warn?.Invoke("再接続ループが止まりました（アプリの再起動が要ります）: " + e);
+            }
+        }
+
+        private async Task ConnectLoopAsync()
+        {
             while (!_closed && !_cancellation.IsCancellationRequested)
             {
                 var socket = new ClientWebSocket();
@@ -122,7 +140,7 @@ namespace ChatterMascot.Net
                 _openedAtMs = NowMs();
                 _lastReceivedAtMs = _openedAtMs;
                 Log?.Invoke("接続しました: " + _url);
-                Connected?.Invoke();
+                SafeInvoke(Connected, "Connected");
 
                 await ReceiveLoopAsync(socket);
 
@@ -138,8 +156,32 @@ namespace ChatterMascot.Net
                 _openedAtMs = 0;
 
                 Warn?.Invoke("切断されました" + closeDetail + "。繋ぎ直します");
-                Disconnected?.Invoke();
+                SafeInvoke(Disconnected, "Disconnected");
                 await BackoffAsync();
+            }
+        }
+
+        /// <summary>
+        /// 購読者の例外を接続の外へ出さない。
+        ///
+        /// ★ <b><see cref="SpeechClient"/> は購読者が何をするか知らない。</b>
+        ///   <c>MascotRunner</c> は3つのイベントすべてを <c>PlaybackQueue.Reduce</c> →
+        ///   コマンド実行へ繋いでいるので、そこの1つの例外が<b>受信ループや再接続ループを
+        ///   道連れにする</b>形にしてはいけない。
+        ///
+        /// ★ <b>握るのは「例外が出ること」への対処ではなく、「出たことが誰にも分からない」
+        ///   ことへの対処。</b> 必ず <see cref="Warn"/> に出す。
+        /// </summary>
+        private void SafeInvoke(Action handler, string what)
+        {
+            if (handler == null) return;
+            try
+            {
+                handler();
+            }
+            catch (Exception e)
+            {
+                Warn?.Invoke(what + " の購読者が例外を投げました（無視して続けます）: " + e.Message);
             }
         }
 
@@ -201,7 +243,19 @@ namespace ChatterMascot.Net
 
                     var text = Encoding.UTF8.GetString(message.ToArray());
                     message.SetLength(0);
-                    FrameReceived?.Invoke(text);
+
+                    // ★ **1フレームぶんだけ握って、次のフレームへ進む。接続は切らない。**
+                    //   ここを握らないと、パーサの1つの例外（例: seq が long を超える）で
+                    //   受信ループが終わり、繋ぎ直した先でサーバーが**同じ未 ack のフレームを
+                    //   再送する**ので、また落ちる——直せないループになる
+                    try
+                    {
+                        FrameReceived?.Invoke(text);
+                    }
+                    catch (Exception e)
+                    {
+                        Warn?.Invoke("フレームの処理で例外が出ました（このフレームは捨てます）: " + e.Message);
+                    }
                 }
             }
             catch (OperationCanceledException)

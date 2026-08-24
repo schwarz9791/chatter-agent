@@ -258,6 +258,27 @@ namespace ChatterMascot.Tests
             }
         }
 
+        /// <summary>
+        /// ★ <c>long</c> に収まらない <c>seq</c> で<b>例外を投げないこと</b>。
+        ///
+        /// Newtonsoft は <c>long</c> を超える整数を <c>BigInteger</c> で持つが、
+        /// <c>JTokenType</c> は <c>Integer</c> のままなので型検査を通り、
+        /// <c>Value&lt;long&gt;()</c> が <c>OverflowException</c> を投げる。
+        /// パースの外へ出ると <c>SpeechClient</c> の受信ループごと落ち、繋ぎ直した先で
+        /// サーバーが<b>同じ未 ack のフレームを再送する</b>ので、また落ちるループになる。
+        ///
+        /// ★ <c>OnlyPositiveSafeIntegerSeq</c> の <c>9007199254740992</c> は
+        ///   <c>long</c> に収まるので、このケースを踏めていない。
+        /// </summary>
+        [Test]
+        public void HugeSeqIsRejectedWithoutThrowing()
+        {
+            foreach (var seq in new[] { "99999999999999999999", "-99999999999999999999" })
+            {
+                Assert.That(Parse(Replace("\"seq\":1", "\"seq\":" + seq)), Is.Null, "seq=" + seq);
+            }
+        }
+
         private static string Replace(string from, string to)
         {
             return Frame().Replace(from, to);

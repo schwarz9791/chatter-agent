@@ -110,6 +110,57 @@ namespace ChatterMascot.Tests
         }
 
         /// <summary>
+        /// ★ <c>data</c> の宣言サイズが <b>0</b> でも実体で測り直して読む。
+        ///
+        /// ストリーミングで書かれた WAV はここが 0 や <c>0xFFFFFFFF</c> になる。
+        /// 0 を弾くと、合成側が data サイズを後追いで埋める書き方に変えただけで
+        /// <b>全文が無音のままスキップされる</b>（AudioFailed → 1回リトライ →
+        /// 「seq=N の音声を取れなかったので飛ばします」）。
+        /// 参照実装（<c>core/src/player/audioPlayer.ts</c>）も両方を実体で測り直している。
+        /// </summary>
+        [Test]
+        public void MeasuresZeroSizedDataChunk()
+        {
+            var wav = BuildWav(new short[] { 0, 16384, -16384, 32767 });
+            OverwriteDataChunkSize(wav, 0);
+
+            string error;
+            var clip = WavDecoder.Decode(wav, "test", out error);
+
+            Assert.That(clip, Is.Not.Null, error);
+            Assert.That(clip.samples, Is.EqualTo(4));
+
+            UnityEngine.Object.DestroyImmediate(clip);
+        }
+
+        /// <summary>★ <c>0xFFFFFFFF</c>（Int32 では -1）も同じく実体で測り直す</summary>
+        [Test]
+        public void MeasuresOversizedDataChunk()
+        {
+            var wav = BuildWav(new short[] { 0, 16384, -16384, 32767 });
+            OverwriteDataChunkSize(wav, -1);
+
+            string error;
+            var clip = WavDecoder.Decode(wav, "test", out error);
+
+            Assert.That(clip, Is.Not.Null, error);
+            Assert.That(clip.samples, Is.EqualTo(4));
+
+            UnityEngine.Object.DestroyImmediate(clip);
+        }
+
+        /// <summary>実体で測り直しても中身が無ければ、読めなかったことにする</summary>
+        [Test]
+        public void RejectsTrulyEmptyDataChunk()
+        {
+            var wav = BuildWav(new short[0]);
+
+            string error;
+            Assert.That(WavDecoder.Decode(wav, "test", out error), Is.Null);
+            Assert.That(error, Does.Contain("data"));
+        }
+
+        /// <summary>
         /// fmt より前に別のチャンクが挟まっても読める（LIST など。順序を決め打ちにしない）
         /// </summary>
         [Test]
@@ -129,6 +180,15 @@ namespace ChatterMascot.Tests
             Assert.That(clip.samples, Is.EqualTo(2));
 
             UnityEngine.Object.DestroyImmediate(clip);
+        }
+
+        /// <summary><c>data</c> チャンクの宣言サイズだけを書き換える（中身はそのまま）。</summary>
+        private static void OverwriteDataChunkSize(byte[] wav, int size)
+        {
+            var index = IndexOf(wav, "data");
+            Assert.That(index, Is.GreaterThan(0));
+            var bytes = BitConverter.GetBytes(size);
+            for (var i = 0; i < 4; i++) wav[index + 4 + i] = bytes[i];
         }
 
         private static int IndexOf(byte[] data, string tag)

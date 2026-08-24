@@ -218,11 +218,37 @@ namespace ChatterMascot.Protocol
             return token.Value<string>();
         }
 
+        /// <summary>
+        /// 整数として読む。<c>long</c> に収まらなければ読めなかったことにする。
+        ///
+        /// ★ <b>Newtonsoft は <c>long</c> を超える整数を <c>BigInteger</c> で持つが、
+        ///   <c>JTokenType</c> は <c>Integer</c> のまま。</b> 型検査は通り、
+        ///   <c>Value&lt;long&gt;()</c> が投げる。
+        ///
+        /// ★ <b>例外の型を決め打ちにしないこと。</b> 実測で投げたのは <c>OverflowException</c> ではなく
+        ///   <c>InvalidCastException</c>（"Object must implement IConvertible"）だった——
+        ///   <c>System.Numerics.BigInteger</c> が <c>IConvertible</c> を実装していないため、
+        ///   <c>Convert.ChangeType</c> の手前で落ちる。値の持ち方は Newtonsoft のビルド構成
+        ///   （<c>HAVE_BIG_INTEGER</c>）で変わるので、<b>「読めたか読めなかったか」だけを返す</b>。
+        ///
+        /// ★ <b>ここで握らないと、受信ループごと落ちる。</b> <see cref="TryParse"/> の
+        ///   <c>try</c> は <c>JToken.Load</c> しか囲っていないので、例外は素通りして
+        ///   <c>SpeechClient</c> の受信ループまで上がる。そこで接続が切れ、繋ぎ直した先で
+        ///   サーバーが<b>同じ未 ack のフレームを再送する</b>ので、**また落ちる**。
+        ///   ログは「受信でエラー」1行だけで、以後ずっと無音になる。
+        /// </summary>
         private static bool TryAsInteger(JToken token, out long value)
         {
             value = 0;
             if (token == null || token.Type != JTokenType.Integer) return false;
-            value = token.Value<long>();
+            try
+            {
+                value = token.Value<long>();
+            }
+            catch (Exception)
+            {
+                return false;
+            }
             return true;
         }
     }

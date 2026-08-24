@@ -49,14 +49,22 @@ namespace ChatterMascot.Audio
             while (offset + 8 <= wav.Length)
             {
                 var chunkId = Encoding4(wav, offset);
-                var chunkSize = BitConverter.ToInt32(wav, offset + 4);
+                var declared = BitConverter.ToInt32(wav, offset + 4);
                 var body = offset + 8;
-                if (chunkSize < 0 || body + chunkSize > wav.Length)
-                {
-                    // 壊れた長さ。ここまでに data が見つかっていれば、残りは末尾まで読む
-                    chunkSize = wav.Length - body;
-                    if (chunkSize < 0) break;
-                }
+                // ループ条件（offset + 8 <= wav.Length）から body <= wav.Length が保証されるので、
+                // available は必ず 0 以上。「負なら break」のような検査は要らない
+                var available = wav.Length - body;
+
+                // ★ **宣言された長さが使えないなら実体で測り直す。**
+                //   ストリーミングで書かれた WAV は data のサイズが 0 や 0xFFFFFFFF
+                //   （Int32 では -1）のことがある。参照実装も両方を実体で測り直している
+                //   （core/src/player/audioPlayer.ts の `declared > 0 && declared <= actual`）。
+                // ★ <b>0 を弾かないこと。</b> 合成側が data サイズを後追いで埋める書き方に
+                //   変えただけで、全フレームが「data チャンクがありません」になり、
+                //   **1文も鳴らないまま無言でスキップされる**（AudioFailed → 1回リトライ →
+                //   「seq=N の音声を取れなかったので飛ばします」）
+                var usable = declared > 0 && declared <= available;
+                var chunkSize = usable ? declared : available;
 
                 if (chunkId == "fmt " && chunkSize >= 16)
                 {
@@ -75,6 +83,9 @@ namespace ChatterMascot.Audio
                 {
                     dataOffset = body;
                     dataLength = chunkSize;
+                    // 実体で末尾まで測ったなら、その先にチャンクは残っていない。
+                    // 走査を続けると offset が範囲外へ出るだけなので、ここで打ち切る
+                    if (!usable) break;
                 }
 
                 // チャンクは2バイト境界に整列する
@@ -86,9 +97,15 @@ namespace ChatterMascot.Audio
                 error = "fmt チャンクが読めません";
                 return null;
             }
-            if (dataOffset < 0 || dataLength <= 0)
+            if (dataOffset < 0)
             {
                 error = "data チャンクがありません";
+                return null;
+            }
+            // 実体で測り直しても 0 なら、本当に中身が無い
+            if (dataLength <= 0)
+            {
+                error = "data チャンクが空です";
                 return null;
             }
 

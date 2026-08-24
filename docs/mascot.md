@@ -120,6 +120,58 @@ Inspector 上も正常に見える。**ビルドしたアプリのログを読�
 
 回帰テスト: `Tests/Editor/SpeechFrameTests.cs` の `IsoTimestampStaysString`。
 
+### ★ Newtonsoft は `long` を超える整数を `BigInteger` で持つ（`JTokenType` は `Integer` のまま）
+
+`seq` の型検査（`token.Type != JTokenType.Integer`）は**通ってしまう**。落ちるのはその次の
+`Value<long>()` で、**例外の型は `OverflowException` ではない** —— 実測では
+`InvalidCastException`（"Object must implement IConvertible"）だった。
+`System.Numerics.BigInteger` が `IConvertible` を実装していないので、
+`Convert.ChangeType` の手前で落ちる。
+
+★ **この壊れ方が悪いのは、1フレームで済まないこと。** `TryParse` の外へ例外が出ると:
+
+1. `SpeechClient` の受信ループが終わる（ログは「受信でエラー」1行）
+2. 再接続する
+3. サーバーは**未 ack の同じフレームを再送する**
+4. また落ちる —— 直すまで永久にこのループ
+
+だから手当ては2層にしてある:
+
+- `TryAsInteger` が例外を握って「読めなかった」に倒す（**型を決め打ちにしない**。
+  値の持ち方は Newtonsoft のビルド構成 `HAVE_BIG_INTEGER` で変わる）
+- `SpeechClient` が `FrameReceived` の購読者例外を**1フレームぶんだけ**握る
+  （→ 下の「購読者の例外を接続の外へ出さない」）
+
+回帰テスト: `SpeechFrameTests.HugeSeqIsRejectedWithoutThrowing`。
+既存の `OnlyPositiveSafeIntegerSeq` の `9007199254740992` は **`long` に収まる**ので、
+このケースを踏めていなかった。
+
+### ★ 購読者の例外を接続の外へ出さない
+
+`SpeechClient` は購読者が何をするか知らない。`MascotRunner` は `FrameReceived` /
+`Connected` / `Disconnected` の3つとも `PlaybackQueue.Reduce` → コマンド実行に繋いでいるので、
+そこの1つの例外が**受信ループや再接続ループを道連れにする**。
+
+とくに `RunAsync` は `_ = RunAsync()` で起動しているので、そこまで上がった例外は
+**未観測の `Task` の fault として捨てられる** —— ログが1行も出ないまま再接続ループだけが消え、
+セッションが終わるまで無音になる。「サーバーが何も言っていない」と区別がつかない。
+
+`SafeInvoke` で握って必ず `Warn` に出す。`RunAsync` の最外殻にも try/catch を置くが、
+**あれは復旧のためではなく可視化のため**（復旧できないなら、せめて
+「再接続ループが止まりました」と言わせる）。
+
+### ★ ストリーミングで書かれた WAV は `data` のサイズが 0 のことがある
+
+`0xFFFFFFFF`（Int32 では -1）だけでなく **0 も実体で測り直す**
+（参照実装 `core/src/player/audioPlayer.ts` の `declared > 0 && declared <= actual`）。
+
+0 を弾くと「data チャンクがありません」になり、`AudioFailed` → 1回リトライ →
+**「seq=N の音声を取れなかったので飛ばします」で全文が無音スキップ**される。
+合成側が data サイズを後追いで埋める書き方に変えただけでこうなる。
+
+回帰テスト: `WavDecoderTests` の `MeasuresZeroSizedDataChunk` /
+`MeasuresOversizedDataChunk` / `RejectsTrulyEmptyDataChunk`。
+
 ### ★ テストアセンブリの `overrideReferences` に注意
 
 `ChatterMascot.Tests.asmdef` は `overrideReferences: true` なので、

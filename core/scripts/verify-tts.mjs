@@ -361,11 +361,83 @@ try {
     // ★ このスクリプトに CHATTER_AGENT_TTS_SPAWN=0 を入れないこと —— 入れると
     //   条件3が壊れても素通りしてしまい、この検査の意味が無くなる
     check("★ [Engine] 起動しました が1度も出ていない", !serverLogs().includes("[Engine] 起動しました"), serverLogs());
+    // ★ スキップ理由が増えるたびにここを足さないと、否定検査は落ちるのではなく
+    //   **黙って空振りする**（vacuous pass）。全変種が「起こせません」か「見つかりません」を
+    //   含むことは describeEngineSkip の単体テスト側で固定してある
     check(
       "★ ttsSpeakerId が違っても（⑫）疎通は成立しているので起こさない",
-      !serverLogs().includes("合成エンジンが見つかりません") && !serverLogs().includes("ループバックではない"),
+      !serverLogs().includes("合成エンジンが見つかりません") && !serverLogs().includes("起こせません"),
       serverLogs(),
     );
+  }
+  {
+    show("⑮ ★ 起こす経路では「503 を返します」を先に出さない（#52 レビュー）");
+    // ★ **⑭ より後ろに置くこと。** ⑭ は累積ログに対して「[Engine] 起動しました が1度も
+    //   出ていない」を検査しているので、前に置くと必ず落ちる。
+    // ★ **CHATTER_AGENT_TTS_SPAWN_COMMAND を必ず渡すこと。** 渡さないと開発機（macOS）で
+    //   **本物の AivisSpeech** が起きる。起こす相手はここで作る使い捨ての実行ファイルに限る
+    await stopServer();
+    const fakeEngine = path.join(root, "fake-engine");
+    fs.writeFileSync(fakeEngine, "#!/bin/sh\nsleep 600\n");
+    fs.chmodSync(fakeEngine, 0o755);
+
+    // 誰も listen していないループバックのポート（条件3を落として spawn 経路へ入れる）
+    await startServer(
+      serverEnv({
+        CHATTER_AGENT_TTS_URL: `http://127.0.0.1:${PORT + 1}`,
+        CHATTER_AGENT_TTS_SPAWN_COMMAND: fakeEngine,
+      }),
+    );
+    await until(() => (server?.log ?? "").includes("[Engine] 起動しました"), 5000);
+
+    // ★ **累積ログ（serverLogs()）で判定しないこと。** 前のシナリオが出した行を拾ってしまう
+    const spawnLog = server?.log ?? "";
+    check("★ 起こす前の観測は残る（原因が消えない）", spawnLog.includes("音声合成エンジンに繋がりません"), spawnLog);
+    check("★ エンジンを起こした", spawnLog.includes("[Engine] 起動しました"), spawnLog);
+    check(
+      "★ 直後の行が否定する警告を出さない（帰結は起こさないと決めた側だけが出す）",
+      !spawnLog.includes("音声の GET は 503 を返します"),
+      spawnLog,
+    );
+
+    const enginePid = Number(/\[Engine\] 起動しました \(pid=(\d+)\)/.exec(spawnLog)?.[1]);
+    check("起動ログに pid が載っている", Number.isInteger(enginePid) && enginePid > 0, String(enginePid));
+
+    await stopServer();
+    // ★ CI で「サーバーを止めるとエンジンも落ちる」を見る唯一の場所（今までは実機確認だけ）
+    const gone = await until(() => {
+      try {
+        process.kill(enginePid, 0);
+        return false;
+      } catch {
+        return true;
+      }
+    }, 5000);
+    check("★ サーバーを止めるとエンジンも落ちる（プロセスグループごと）", gone, `pid=${enginePid}`);
+  }
+
+  {
+    show("⑯ ★ 名前から解決したときは黙って読み替えず、名指しする（#52 レビュー）");
+    await stopServer();
+    // ★ **`run` を渡さないこと。** 退行していた場合に verify 自身が無関係なバイナリを起動する。
+    //   ここで見たいのは「名前から引いたら名指しする」ことだけなので、実在しない名前で足りる
+    await startServer(
+      serverEnv({
+        CHATTER_AGENT_TTS_URL: `http://127.0.0.1:${PORT + 2}`,
+        CHATTER_AGENT_TTS_SPAWN_COMMAND: "chatter-agent-no-such-engine-xyz",
+      }),
+    );
+    await until(() => (server?.log ?? "").includes("合成エンジンが見つかりません"), 5000);
+
+    const missLog = server?.log ?? "";
+    check(
+      "★ 探した場所をフルパスで並べる",
+      /\n?\[Server\] {2}\/.*chatter-agent-no-such-engine-xyz/.test(missLog),
+      missLog,
+    );
+    check("★ 実行ビットの注意も出す", missLog.includes("実行ビット"), missLog);
+    check("エンジンは起こしていない", !missLog.includes("[Engine] 起動しました"), missLog);
+    check("★ ここでは帰結（503）まで言う", missLog.includes("音声の GET は 503 を返します"), missLog);
   }
 } catch (err) {
   console.error("\n\x1b[31m検証中に例外が発生しました\x1b[0m");

@@ -130,40 +130,6 @@ describe("findCommandPath", () => {
     expect(found).toBe(realFile);
   });
 
-  /**
-   * ★ 既知の bin ディレクトリは「バージョンマネージャが入れた CLI」を拾うための並びなので、
-   *   ありふれた名前（合成エンジンの `run` が実例）だと無関係なバイナリを掴む。
-   *   呼び出し側が切れること自体を固定する（→ PR #52 のレビュー）。
-   */
-  it("★ searchKnownBinDirs: false なら既知の bin ディレクトリを探さない", () => {
-    const homeDir = path.join(dir, "home-known");
-    const knownDir = path.join(homeDir, ".local", "bin");
-    fs.mkdirSync(knownDir, { recursive: true });
-    const bin = path.join(knownDir, "run");
-    fs.writeFileSync(bin, "#!/bin/sh\n");
-    fs.chmodSync(bin, 0o755);
-
-    // 既定（true）なら見つかる
-    expect(findCommandPath("run", { env: { PATH: "" }, homeDir })).toBe(bin);
-    // 切ったら見つからない
-    expect(findCommandPath("run", { env: { PATH: "" }, homeDir, searchKnownBinDirs: false })).toBeUndefined();
-  });
-
-  it("searchKnownBinDirs: false でも PATH は探す", () => {
-    const binDir = path.join(dir, "path-bin-only");
-    fs.mkdirSync(binDir);
-    const bin = path.join(binDir, "run");
-    fs.writeFileSync(bin, "#!/bin/sh\n");
-    fs.chmodSync(bin, 0o755);
-
-    const found = findCommandPath("run", {
-      env: { PATH: binDir },
-      homeDir: path.join(dir, "empty-home"),
-      searchKnownBinDirs: false,
-    });
-    expect(found).toBe(bin);
-  });
-
   it("~/ で始まるパスは homeDir に展開される", () => {
     const homeDir = path.join(dir, "home-tilde");
     const binDir = path.join(homeDir, ".local", "bin");

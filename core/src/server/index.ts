@@ -22,13 +22,7 @@ import { getServerLockDir, getSpeechQueueDir } from "../core/paths";
 import { createSpeechQueue } from "../core/speechQueue";
 import { createVoicevoxClient, flattenStyles, hasStyle } from "../tts/voicevoxClient";
 import { createAudioStore } from "./audioStore";
-import {
-  resolveEngineSpawn,
-  startEngine,
-  TRIED_HINT_LIMIT,
-  type EngineProcess,
-  type EngineSpawnSkip,
-} from "./engineProcess";
+import { describeEngineSkip, resolveEngineSpawn, startEngine, type EngineProcess } from "./engineProcess";
 import { createDispatcher, type Dispatcher } from "./dispatcher";
 import { createAudioHttpServer } from "./httpServer";
 import { createWsServer } from "./wsServer";
@@ -257,14 +251,24 @@ async function main(): Promise<void> {
       args: config.get("ttsSpawnArgs"),
     });
     if ("skip" in plan) {
-      // 条件4 / 条件5。どちらも従来どおりの 503 運用に落ちるだけ
-      reportSkip(plan);
+      // 条件4 / 条件5。どちらも従来どおりの 503 運用に落ちるだけ。
+      // ★ 文面は `engineProcess.ts` が組む（既知候補の一覧を持っているのがあちらなので）
+      for (const line of describeEngineSkip(plan)) console.warn(line);
       warnAudioUnavailable();
       return;
     }
 
     // ★ **この判定と spawn の間に await を挟まないこと。** 挟むと「終了処理が始まった後に
     //   spawn する」窓ができ、detached の子がサーバーより長生きする（孤児のエンジンが残る）
+    // ★ 名前から引いた実行ファイルは**必ず名指しする。** PATH には `~/.local/bin` も
+    //   mise / asdf の shims も普通に載っている（実測で 7/7）ので、`run` のようなありふれた名前は
+    //   別のバイナリに当たりうる。禁止はしない（`ttsSpawnCommand: "docker"` でコンテナの
+    //   エンジンを起こす運用が潰れる）が、**黙って読み替えない**（→ PR #52 のレビュー）
+    if (plan.resolvedFrom !== undefined) {
+      console.warn(`[Server] ttsSpawnCommand "${plan.resolvedFrom}" を名前から解決しました: ${plan.command}`);
+      console.warn("[Server]   意図した実行ファイルでなければ、絶対パスで指定してください");
+    }
+
     if (stopping) return;
     engine = startEngine(plan);
 
@@ -393,30 +397,6 @@ async function main(): Promise<void> {
  *   `ttsSpeakerId` の診断が永久に出なくなる — これが「無音なのにログが数行しかない」の真因。
  *   合成が失敗するたびに呼び直す（間隔は `ENGINE_RECHECK_INTERVAL_MS` で間引く）。
  */
-/**
- * エンジンを起こさなかった理由を出す。
- *
- * ★ **探した場所を出すこと。** 「見つかりません: aivis-run」だけだと、PATH を直すのか・
- *   ファイル名を直すのか・実行ビットを立てるのか判断できない。話者候補（下）と同じく
- *   複数行で出し、**切ったら残件数を出す**（黙って truncate すると「全部探した」と読まれる）。
- */
-function reportSkip(plan: EngineSpawnSkip): void {
-  if (plan.skip === "not-loopback") {
-    console.warn(`[Server] ${plan.host} はループバックではないので合成エンジンを起こせません`);
-    return;
-  }
-  if (plan.skip === "not-http") {
-    console.warn(`[Server] ${plan.protocol} のエンジンは起こせません（起こせるのは平文の http: だけ）`);
-    return;
-  }
-  console.warn("[Server] 合成エンジンが見つかりません。探した場所:");
-  for (const candidate of plan.tried.slice(0, TRIED_HINT_LIMIT)) {
-    console.warn(`[Server]   ${candidate}`);
-  }
-  const rest = plan.tried.length - TRIED_HINT_LIMIT;
-  if (rest > 0) console.warn(`[Server]    …ほか ${rest} 件`);
-}
-
 async function checkEngine(tts: ReturnType<typeof createVoicevoxClient>, speakerId: number): Promise<EngineProbe> {
   let speakers;
   try {

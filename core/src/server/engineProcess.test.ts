@@ -12,7 +12,20 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { knownEnginePaths, resolveEngineSpawn, startEngine, type EngineProcess } from "./engineProcess";
+import {
+  describeEngineSkip,
+  knownEnginePaths,
+  resolveEngineSpawn,
+  startEngine,
+  type EngineProcess,
+  type EngineSpawnSkip,
+} from "./engineProcess";
+
+let dir: string;
+
+beforeEach(() => {
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "chatter-agent-engine-"));
+});
 
 const HOME = "/Users/tester";
 const APP = path.join("/Applications", "AivisSpeech.app", "Contents", "Resources", "AivisSpeech-Engine", "run");
@@ -155,33 +168,39 @@ describe("resolveEngineSpawn", () => {
   });
 
   /**
-   * ★ **この回帰テストが本題。** エンジンのバイナリ名は literally `run` なので、
-   *   `findCommandPath` の既定（既知の bin ディレクトリも探す）のままだと mise / asdf の
-   *   shim や `~/.local/bin/run` を掴み、まったく別のバイナリが `--host … --port …` 付きで
-   *   起動される（→ PR #52 のレビュー）。
+   * ★ **名前からの解決は禁止しない**（`ttsSpawnCommand: "docker"` でコンテナのエンジンを
+   *   起こす運用が潰れるため）。代わりに**黙って読み替えない** —— 元の値を `resolvedFrom` で
+   *   返し、呼び出し側が名指しでログに出す（→ PR #52 のレビュー）。
+   *
+   * ★ 一度は「既知の bin ディレクトリを探さない」で塞ごうとしたが、**実測すると
+   *   `getKnownBinDirs` の 7 件は 7/7 とも PATH に載っていた**ので穴が1つも塞がらなかった。
    */
-  it('★ ttsSpawnCommand: "run" がバージョンマネージャの shim を掴まない', () => {
-    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "chatter-agent-shim-"));
-    try {
-      const shimDir = path.join(homeDir, ".local", "bin");
-      fs.mkdirSync(shimDir, { recursive: true });
-      const shim = path.join(shimDir, "run");
-      fs.writeFileSync(shim, "#!/bin/sh\n");
-      fs.chmodSync(shim, 0o755);
+  it("★ 名前から解決したときは resolvedFrom に元の値を残す", () => {
+    const binDir = path.join(dir, "path-bin");
+    fs.mkdirSync(binDir, { recursive: true });
+    const bin = path.join(binDir, "run");
+    fs.writeFileSync(bin, "#!/bin/sh\n");
+    fs.chmodSync(bin, 0o755);
 
-      const result = resolveEngineSpawn({
-        baseUrl: "http://127.0.0.1:10101",
-        command: "run",
-        args: [],
-        homeDir,
-        env: { PATH: "" },
-        exists: () => false,
-      });
-      expect(result).toMatchObject({ skip: "not-found" });
-      expect(result).not.toMatchObject({ command: shim });
-    } finally {
-      fs.rmSync(homeDir, { recursive: true, force: true });
-    }
+    expect(resolve({ command: "run", env: { PATH: binDir } })).toMatchObject({
+      command: bin,
+      resolvedFrom: "run",
+    });
+  });
+
+  it("絶対パスで指定したときは resolvedFrom を付けない（読み替えが起きていない）", () => {
+    expect(resolve({ command: "/opt/aivis/run" })).toEqual({
+      command: "/opt/aivis/run",
+      args: ["--host", "127.0.0.1", "--port", "10101"],
+    });
+  });
+
+  it("~/ 指定も読み替えではないので resolvedFrom を付けない", () => {
+    expect(resolve({ command: "~/bin/run" })).not.toHaveProperty("resolvedFrom");
+  });
+
+  it("既知候補から見つけたときも resolvedFrom は付かない", () => {
+    expect(resolve({}, [APP])).not.toHaveProperty("resolvedFrom");
   });
 
   it("★ ttsSpawnArgs を指定したら --host/--port は足さない（追加ではなく置換）", () => {
@@ -189,14 +208,59 @@ describe("resolveEngineSpawn", () => {
   });
 });
 
+describe("describeEngineSkip", () => {
+  it("ループバックでない理由はホスト名を名指しする", () => {
+    expect(describeEngineSkip({ skip: "not-loopback", host: "example.com" })).toEqual([
+      "[Server] example.com はループバックではないので合成エンジンを起こせません",
+    ]);
+  });
+
+  it("http 以外はスキームを名指しする", () => {
+    expect(describeEngineSkip({ skip: "not-http", protocol: "https:" })[0]).toContain("https:");
+  });
+
+  /** ★ フルパスは1本で 80 文字を超えるので、`/` で連結すると端末の折り返しで読めなくなる */
+  it("★ not-found は1行1件で出す（連結しない）", () => {
+    const lines = describeEngineSkip({ skip: "not-found", tried: ["/a/run", "/b/run"] });
+    expect(lines.some((l) => l.includes("/a/run") && l.includes("/b/run"))).toBe(false);
+    expect(lines.filter((l) => l.includes("/a/run"))).toHaveLength(1);
+    expect(lines.filter((l) => l.includes("/b/run"))).toHaveLength(1);
+  });
+
+  /** ★ `ls` で見えるファイルが「探した場所」に並ぶので、これが無いと 0644 に辿り着けない */
+  it("★ 実行ビットを見ていることを伝える", () => {
+    const lines = describeEngineSkip({ skip: "not-found", tried: ["/a/run"] });
+    expect(lines.some((l) => l.includes("実行ビット"))).toBe(true);
+  });
+
+  it("★ 上限で切ったら残件数を出す（黙って truncate しない）", () => {
+    const tried = Array.from({ length: 30 }, (_, i) => `/dir${i}/run`);
+    const lines = describeEngineSkip({ skip: "not-found", tried });
+    expect(lines.some((l) => l.includes("ほか 18 件"))).toBe(true);
+    expect(lines.some((l) => l.includes("/dir29/run"))).toBe(false);
+  });
+
+  it("上限以内なら残件数の行を出さない", () => {
+    const lines = describeEngineSkip({ skip: "not-found", tried: ["/a/run", "/b/run"] });
+    expect(lines.some((l) => l.includes("ほか"))).toBe(false);
+  });
+
+  /** ★ 帰結（503）を知っているのは呼び出し側だけ。ここで言うと spawn する経路で嘘になる */
+  it("★ 帰結（503）は書かない", () => {
+    const skips: EngineSpawnSkip[] = [
+      { skip: "not-loopback", host: "h" },
+      { skip: "not-http", protocol: "https:" },
+      { skip: "not-found", tried: ["/a/run"] },
+    ];
+    for (const skip of skips) {
+      expect(describeEngineSkip(skip).some((l) => l.includes("503"))).toBe(false);
+    }
+  });
+});
+
 // ── startEngine ────────────────────────────────────────────────────────────
 
 const started: EngineProcess[] = [];
-let dir: string;
-
-beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "chatter-agent-engine-"));
-});
 
 /** テストが落ちても `sleep 30` を残さない */
 afterEach(async () => {
@@ -296,7 +360,7 @@ describe("startEngine", () => {
    * ★ stdout を捨てていると「起こしたのに 503 が続く」を調べる人が、エンジンが死ぬまで
    *   一切の出力を見られない（→ PR #52 のレビュー）。uvicorn の起動ログは stdout に出る。
    */
-  it("★ stdout も同じ tail に取り込む", async () => {
+  it("★ stdout しか出さないエンジンでも手がかりが残る", async () => {
     const warnings: string[] = [];
     const engine = start("/bin/sh", ["-c", 'echo "stdout に出た手がかり"; exit 2'], {
       warn: (m) => void warnings.push(m),
@@ -304,6 +368,21 @@ describe("startEngine", () => {
 
     expect(await until(() => engine.exited())).toBe(true);
     expect(warnings.some((m) => m.includes("stdout に出た手がかり"))).toBe(true);
+  });
+
+  /**
+   * ★ 混ぜると、エンジンが stdout に出すアクセスログ（uvicorn は合成のたびに1行出す）が
+   *   窓を埋め、**落ちた瞬間の stderr を押し出す**。窓は分けて、出すときは stderr を優先する。
+   */
+  it("★ stdout の洪水が stderr を押し出さない（窓が分かれている）", async () => {
+    const warnings: string[] = [];
+    const engine = start("/bin/sh", ["-c", 'echo "本当の原因" >&2; printf "A%.0s" $(seq 1 4000); exit 1'], {
+      warn: (m) => void warnings.push(m),
+    });
+
+    expect(await until(() => engine.exited())).toBe(true);
+    const dump = warnings.find((m) => m.includes("出力(末尾)")) ?? "";
+    expect(dump).toContain("本当の原因");
   });
 
   it("★ 自分で止めたときは stderr を出さない（SIGTERM だと code は null になる）", async () => {

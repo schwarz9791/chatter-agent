@@ -30,6 +30,16 @@ import { findCommandPath } from "../core/commandPath";
 export interface EngineSpawnPlan {
   command: string;
   args: string[];
+  /**
+   * `ttsSpawnCommand` に**非絶対パス**が書かれていて、名前から解決したときだけ入る（元の値）。
+   *
+   * ★ **解決したことを呼び出し側に名指しさせるためのもの。** PATH には `~/.local/bin` や
+   *   mise/asdf の shims が普通に載っている（実測で 7/7）ので、`run` のようなありふれた名前だと
+   *   まったく別のバイナリに当たりうる。禁止はしない —— `ttsSpawnCommand: "docker"` で
+   *   コンテナのエンジンを起こす運用が潰れるため —— 代わりに**黙って読み替えない**
+   *   （→ PR #52 のレビュー）。
+   */
+  resolvedFrom?: string;
 }
 
 /**
@@ -60,12 +70,6 @@ const IPV4_LOOPBACK = /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
 
 /** `http:` の既定ポート。`ttsBaseUrl` はポートを省略できる（`makeUrlParser` が通す） */
 const DEFAULT_HTTP_PORT = "80";
-
-/**
- * `tried` に載せる探索先の上限。PATH は10個を超えるのが普通なので全部は出さない。
- * ★ 切ったら残件数を出すこと（黙って truncate すると「全部探した」と読まれる）。
- */
-export const TRIED_HINT_LIMIT = 12;
 
 function isLoopback(hostname: string): boolean {
   return LOOPBACK_HOSTNAMES.has(hostname) || IPV4_LOOPBACK.test(hostname);
@@ -125,16 +129,17 @@ export function resolveEngineSpawn(deps: ResolveEngineSpawnDeps): EngineSpawnRes
 
   if (deps.command) {
     // ★ 明示指定が見つからなくても既知候補へ**フォールバックしない**。
-    //   指定を黙って別のバイナリに読み替えるのは、最も気づきにくい失敗の仕方になる。
-    //
-    // ★ `searchKnownBinDirs: false` が要る。既定（true）だと mise / asdf の shim や
-    //   `~/.local/bin` まで探すので、**エンジンのバイナリ名が literally `run`** である以上、
-    //   `ttsSpawnCommand: "run"` がまったく別のバイナリを掴む（→ PR #52 のレビュー）。
-    //   上の `knownEnginePaths` のコメントが「`getKnownBinDirs` は流用しない」と言っているのに、
-    //   `findCommandPath` 経由で結局その探索に乗っていた
-    const resolved = findCommandPath(deps.command, { homeDir, env, searchKnownBinDirs: false });
+    //   指定を黙って別のバイナリに読み替えるのは、最も気づきにくい失敗の仕方になる
+    const resolved = findCommandPath(deps.command, { homeDir, env });
     if (resolved === undefined) return { skip: "not-found", tried: searchedPaths(deps.command, env) };
-    return { command: resolved, args: buildArgs(deps.args, url) };
+    // ★ 名前から引いたなら、それを呼び出し側に伝える（上の `resolvedFrom`）。
+    //   `path.isAbsolute` で見るのは**展開後**の値 —— `~/bin/run` は絶対パスに展開される
+    const namedLookup = resolved !== deps.command && !path.isAbsolute(deps.command) && !deps.command.startsWith("~/");
+    return {
+      command: resolved,
+      args: buildArgs(deps.args, url),
+      ...(namedLookup ? { resolvedFrom: deps.command } : {}),
+    };
   }
 
   const candidates = knownEnginePaths(homeDir);
@@ -173,6 +178,53 @@ function buildArgs(args: readonly string[], url: URL): string[] {
   return ["--host", host, "--port", port];
 }
 
+/** ログの主語。エンジンのプロセスそのものの行は `[Engine]`、判断の行は `[Server]`（docs/core.md） */
+const LOG_PREFIX = "[Server]";
+/** 候補を1行1件で出すときのインデント。話者候補（`index.ts` の `SPEAKER_HINT_LIMIT` ループ）と同じ形 */
+const ITEM_INDENT = "  ";
+
+/**
+ * `tried` に載せる探索先の上限。PATH は10個を超えるのが普通なので全部は出さない。
+ * ★ 切ったら残件数を出すこと（黙って truncate すると「全部探した」と読まれる）。
+ */
+const TRIED_HINT_LIMIT = 12;
+
+/**
+ * 起こさなかった理由を**そのままログに出せる行**へ落とす。
+ *
+ * ★ **`index.ts` に文字列を組ませない。** 既知候補の一覧を持っているのはこのファイルなので、
+ *   組み立てを外に置くと定義が2箇所に分裂する（`EngineSpawnSkip` の註記）。`index.ts` は
+ *   「配線と終了処理しか置かない」方針でテストも無いので、分岐をあちらに残すと検査もされない。
+ *
+ * ★ **`join(" / ")` で1行にまとめない。** エンジンのフルパスは1本で 80 文字を超えるので、
+ *   2本並べただけで端末が折り返し、どこまでが1つのパスか読めなくなる。
+ *
+ * ★ **帰結（音声が 503 になる）はここに書かない。** それを知っているのは呼び出し側だけ
+ *   （→ `index.ts` の `warnAudioUnavailable`）。
+ */
+export function describeEngineSkip(skip: EngineSpawnSkip): string[] {
+  switch (skip.skip) {
+    case "not-loopback":
+      return [`${LOG_PREFIX} ${skip.host} はループバックではないので合成エンジンを起こせません`];
+
+    case "not-http":
+      return [`${LOG_PREFIX} ${skip.protocol} のエンジンは起こせません（起こせるのは平文の http: だけ）`];
+
+    case "not-found": {
+      const shown = skip.tried.slice(0, TRIED_HINT_LIMIT);
+      const rest = skip.tried.length - shown.length;
+      return [
+        `${LOG_PREFIX} 合成エンジンが見つかりません。探した場所:`,
+        ...shown.map((candidate) => `${LOG_PREFIX}${ITEM_INDENT}${candidate}`),
+        ...(rest > 0 ? [`${LOG_PREFIX}${ITEM_INDENT}…ほか ${rest} 件`] : []),
+        // ★ 実行ビットまで見ていることを言う。`ls` で見えるファイルが「探した場所」に並ぶので、
+        //   これが無いと「在るのに見つからない」の原因（0644）に辿り着けない
+        `${LOG_PREFIX} ファイルが在っても実行ビット（chmod +x）が無いと候補から外れます`,
+      ];
+    }
+  }
+}
+
 /**
  * 起こした子プロセスのハンドル。
  *
@@ -205,7 +257,7 @@ export interface StartEngineDeps {
   warn?: (message: string) => void;
 }
 
-/** 落ちた理由を残すのに要る量。数 KB あれば足りる。stdout と stderr で共有する */
+/** 落ちた理由を残すのに要る量。数 KB あれば足りる。stdout / stderr がそれぞれ持つ */
 const OUTPUT_TAIL_CHARS = 2048;
 
 /**
@@ -246,18 +298,24 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
 
   // ★ **末尾**を保つ（`audioPlayer.ts` は先頭を保つが、あちらは短命なコマンドの第一報が
   //   欲しいのに対し、こちらは常駐プロセスが**落ちた理由**が欲しいので逆にする）
-  let outputTail = "";
-  const collect = (stream: NodeJS.ReadableStream | null): void => {
+  // ★ **stdout と stderr で窓を分けること。** 混ぜると、エンジンが stdout に出すアクセスログ
+  //   （uvicorn は合成のたびに1行出す）が窓を埋め、**落ちた瞬間の stderr を押し出す**。
+  //   出すときは stderr を先に、空なら stdout を使う
+  let stderrTail = "";
+  let stdoutTail = "";
+  const collect = (stream: NodeJS.ReadableStream | null, onChunk: (chunk: string) => void): void => {
     if (!stream) return;
     // ★ setEncoding すること。付けないとチャンク境界で UTF-8 が割れ、日本語のエラーが
     //   U+FFFD に化ける（`String(chunk)` を毎回するのと同じ罠）
     stream.setEncoding("utf-8");
-    stream.on("data", (chunk: string) => {
-      outputTail = (outputTail + chunk).slice(-OUTPUT_TAIL_CHARS);
-    });
+    stream.on("data", onChunk);
   };
-  collect(child.stdout);
-  collect(child.stderr);
+  collect(child.stdout, (chunk) => {
+    stdoutTail = (stdoutTail + chunk).slice(-OUTPUT_TAIL_CHARS);
+  });
+  collect(child.stderr, (chunk) => {
+    stderrTail = (stderrTail + chunk).slice(-OUTPUT_TAIL_CHARS);
+  });
 
   log(`[Engine] 起動しました (pid=${child.pid ?? "?"}): ${plan.command} ${plan.args.join(" ")}`);
 
@@ -265,7 +323,10 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
   //   「起動したつもりで永久に繋がらない」状態になる（→ `player/audioPlayer.ts`）
   child.on("error", (err) => {
     exited = true;
-    warn(`[Engine] 起動できません (${plan.command}): ${String(err)}`);
+    // ★ 帰結までここで言い切る。`index.ts` の `warnAudioUnavailable` は「起こさないと決めた」
+    //   経路の行なので、**起こしてから失敗した**この経路には届かない。
+    //   ENOENT / EACCES は `ttsSpawnCommand` を書き間違えた人が最も踏む経路
+    warn(`[Engine] 起動できません (${plan.command}): ${String(err)}。音声は 503 になります`);
   });
 
   child.on("exit", (code, signal) => {
@@ -278,7 +339,10 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
     }
     warn(`[Engine] 終了しました (code=${code} signal=${signal})。再起動はしません（音声は 503 になります）`);
     // ★ これが無いと「起動したはずなのに繋がらない」の原因が1文字も残らない
-    if (code !== 0 && outputTail.trim()) warn(`[Engine] 出力(末尾):\n${outputTail.trim()}`);
+    if (code === 0) return;
+    // stderr を優先。エンジンによっては全部 stdout に出す（uvicorn がそう）ので、その場合は stdout
+    const tail = stderrTail.trim() || stdoutTail.trim();
+    if (tail) warn(`[Engine] 出力(末尾):\n${tail}`);
   });
 
   const waitExit = (ms: number): Promise<boolean> =>

@@ -23,6 +23,25 @@ namespace ChatterMascot
         [Tooltip("chatter-agent-server の WebSocket。音声は同じ authority から HTTP で取る")]
         [SerializeField] private string serverUrl = "ws://127.0.0.1:8570";
 
+        /// <summary>
+        /// フレームレートの上限。
+        ///
+        /// ★ <b>Unity の既定は無制限。</b> テンプレートの <c>vSyncCount: 0</c> と
+        ///   <c>Application.targetFrameRate = -1</c> の組み合わせで、Cube 1個のシーンでも
+        ///   <b>CPU 261% / GPU 93.5%</b> まで行った（実測）。常駐アプリなので電力に直接効く。
+        ///
+        /// ★ <b><c>vSyncCount</c> ではなくこちらで絞ること。</b>
+        ///   <c>targetFrameRate</c> は VSync が有効だと<b>無視される</b>ので、
+        ///   <c>vSyncCount: 0</c> のままの方が確実に効く（透過ウィンドウで VSync が効くかも不明）。
+        ///
+        /// ★ <b>この 30 はデスクトップ限定の値。</b> Android XR ではヘッドセットの
+        ///   リフレッシュレートに合わせる必要がある（→ #25）。VRM のリップシンクと
+        ///   spring bone が入ったら見直す（→ #17）。
+        /// </summary>
+        [Header("表示")]
+        [Tooltip("フレームレートの上限。常駐アプリなので電力に直接効く。0 以下なら制限しない")]
+        [SerializeField] private int targetFrameRate = 30;
+
         [Header("再生")]
         [Tooltip("音を出す AudioSource。未設定なら自分に付いているものを使う")]
         [SerializeField] private AudioSource audioSource;
@@ -73,6 +92,11 @@ namespace ChatterMascot
 
         private void Awake()
         {
+            // ★ 何より先に上限を入れる。無制限のままだと Update / コルーチンが毎秒数千回回り、
+            //   メインスレッドが飽和して**サーバーの ping に pong を返せなくなる**
+            //   （症状は「アプリが重い」より先に「接続が繰り返し切れる」として出る）
+            if (targetFrameRate > 0) Application.targetFrameRate = targetFrameRate;
+
             if (audioSource == null) audioSource = GetComponent<AudioSource>();
             if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
             audioSource.playOnAwake = false;

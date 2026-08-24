@@ -6,6 +6,39 @@
 
 ## 実測で潰れた前提
 
+### ★ Unity の既定はフレームレート無制限。常駐アプリでは必ず上限を入れる
+
+テンプレートは `vSyncCount: 0`（VSync 無効）で、`Application.targetFrameRate` の既定は
+`-1`（無制限）。**両方が効いていないと、Cube 1個のシーンでも CPU 261% / GPU 93.5% に行く**
+（実測。スレッド62、1時間で CPU 時間 2:22:41）。
+
+`Update()` が毎秒数千回回るので、その頻度で次が全部動く:
+
+- `MascotRunner.Update()` → `SpeechClient.Tick()` — 毎回 `DateTimeOffset.UtcNow`（システムコール）
+- UniWindowController の `HitTestCoroutine` — ネイティブのカーソル座標取得 + `EventSystem.RaycastAll`
+- `AudioClipPlayer.PlayAsync` の `while (isPlaying) await Task.Yield()`
+
+★ **症状は「アプリが重い」より先に「接続が繰り返し切れる」として出る。**
+メインスレッドが飽和すると `ReceiveAsync` の継続が遅れ、**サーバーの ping に pong を
+返せなくなる**。サーバー側（`core/src/server/wsServer.ts`）はそれを見て切る:
+
+```
+[WS] No pong, terminating dead connection   → socket.terminate()
+[WS] Backpressure (NB buffered), closing    → socket.close(1013, "too slow")
+```
+
+実際に `Player.log` に「切断されました」が15回出ていて、CPU を見るまで原因が分からなかった。
+**切断のログには必ず close コードを出すこと**（→ `SpeechClient.DescribeClose`）。
+1013 なら「こちらが遅い」、close フレーム無しなら「pong が返せていない」と読める。
+
+★ **`vSyncCount` ではなく `Application.targetFrameRate` で絞る。**
+`targetFrameRate` は VSync が有効だと**無視される**ので、`vSyncCount: 0` のままの方が
+確実に効く（透過ウィンドウで VSync が効くかも確かめていない）。
+
+★ **既定の 30fps はデスクトップ限定。** Android XR ではヘッドセットのリフレッシュレートに
+合わせる必要がある（→ #25）。VRM のリップシンクと spring bone が入ったら、
+30fps で口の動きが足りるか見直す（→ #17）。`MascotRunner` の Inspector で変えられる。
+
 ### ★ MCP 経由のビルドは、モーダルダイアログが出た瞬間に沈黙する
 
 `Unity_RunCommand`（unity-mcp）から `BuildPipeline.BuildPlayer` を呼ぶと、

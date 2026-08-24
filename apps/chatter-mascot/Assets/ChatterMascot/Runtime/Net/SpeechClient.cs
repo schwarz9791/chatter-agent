@@ -126,6 +126,9 @@ namespace ChatterMascot.Net
 
                 await ReceiveLoopAsync(socket);
 
+                // ★ **Dispose の前に読むこと。** 閉じた後は CloseStatus が取れない
+                var closeDetail = DescribeClose(socket);
+
                 if (_socket == socket) _socket = null;
                 socket.Dispose();
                 if (_closed) break;
@@ -134,10 +137,49 @@ namespace ChatterMascot.Net
                 if (_openedAtMs != 0 && NowMs() - _openedAtMs >= BackoffResetAfterMs) _attempt = 0;
                 _openedAtMs = 0;
 
-                Warn?.Invoke("切断されました。繋ぎ直します");
+                Warn?.Invoke("切断されました" + closeDetail + "。繋ぎ直します");
                 Disconnected?.Invoke();
                 await BackoffAsync();
             }
+        }
+
+        /// <summary>
+        /// 切断の理由を人が読める形にする。
+        ///
+        /// ★ <b>コードを落とさないこと。</b> サーバーの切断理由は2つあり
+        /// （<c>wsServer.ts</c>）、区別できないと無音の原因に辿り着けない:
+        ///
+        ///   - <c>close(1013, "too slow")</c> — バックプレッシャ。<b>こちらが遅い</b>
+        ///   - <c>terminate()</c> — ping に pong が返らなかった。<b>こちらが応答できていない</b>
+        ///
+        /// どちらも「クライアント側が詰まっている」を意味するので、出さないと
+        /// 「たまたま切れた」と読んでしまう。参照実装（<c>core/src/player/client.ts</c>）は
+        /// <c>code=</c> を出している。
+        ///
+        /// ★ <b>close フレームが来ないのも情報。</b> <c>terminate()</c> は TCP をいきなり
+        ///   切るので <c>CloseStatus</c> が null になる。こちらの無受信 watchdog が
+        ///   <c>Abort()</c> したときも同じなので、直前の警告と併せて読む。
+        /// </summary>
+        private static string DescribeClose(ClientWebSocket socket)
+        {
+            WebSocketCloseStatus? status;
+            string description;
+            try
+            {
+                status = socket.CloseStatus;
+                description = socket.CloseStatusDescription;
+            }
+            catch (Exception)
+            {
+                // 既に破棄されている
+                return string.Empty;
+            }
+
+            if (status == null) return "（close フレーム無し。サーバーの terminate か、こちらの watchdog）";
+
+            // ★ 1013（try again later）は WebSocketCloseStatus に定義が無いので数値で出す
+            var code = ((int)status.Value).ToString();
+            return string.IsNullOrEmpty(description) ? " (code=" + code + ")" : " (code=" + code + " " + description + ")";
         }
 
         private async Task ReceiveLoopAsync(ClientWebSocket socket)

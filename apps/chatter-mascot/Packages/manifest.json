@@ -2,7 +2,6 @@
   "dependencies": {
     "com.kirurobo.uniwinc": "https://github.com/kirurobo/UniWindowController.git#upm",
     "com.unity.nuget.newtonsoft-json": "3.2.1",
-    "com.unity.ai.assistant": "2.18.0-pre.2",
     "com.unity.ai.navigation": "2.0.14",
     "com.unity.collab-proxy": "2.13.5",
     "com.unity.ide.rider": "3.0.38",

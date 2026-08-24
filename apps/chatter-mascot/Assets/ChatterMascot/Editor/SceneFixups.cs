@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -6,7 +7,7 @@ using UnityEngine.EventSystems;
 namespace ChatterMascot.EditorTools
 {
     /// <summary>
-    /// シーンに「無いと静かに壊れるもの」が揃っているか保証する。
+    /// プロジェクトとシーンに「無いと静かに壊れるもの」が揃っているか保証する。
     /// <c>-executeMethod ChatterMascot.EditorTools.SceneFixups.FixAll</c> で回す。
     ///
     /// ★ <b>シーンを作り直したら必ず走らせること。</b> 足りないと出るのは
@@ -19,6 +20,11 @@ namespace ChatterMascot.EditorTools
             "Assets/Scenes/Mascot.unity",
             "Assets/Scenes/TransparencyProbe.unity",
         };
+
+        /// <summary>
+        /// ビルド対象。<c>File &gt; Build Settings</c> や <c>-buildScene</c> を渡さない経路が使う。
+        /// </summary>
+        private const string ProductionScene = "Assets/Scenes/Mascot.unity";
 
         public static void FixAll()
         {
@@ -46,8 +52,34 @@ namespace ChatterMascot.EditorTools
                 }
             }
 
-            Debug.Log($"[Fixups] 完了（{changed} シーンを更新）");
+            if (EnsureBuildScenes()) changed++;
+
+            Debug.Log($"[Fixups] 完了（{changed} 件を更新）");
             EditorApplication.Exit(0);
+        }
+
+        /// <summary>
+        /// ★ <b>ビルド対象シーンを本番シーン1本に固定する。</b>
+        ///
+        /// <c>scripts/build.sh</c> は <c>-buildScene</c> を明示で渡すので通るが、
+        /// <b>Unity の <c>File &gt; Build Settings &gt; Build</c> や、
+        /// <c>-buildScene</c> を渡さない経路（#54 の CI）は EditorBuildSettings を見る</b>。
+        /// テンプレート既定の <c>SampleScene</c> のままだと、そこには
+        /// <c>MascotRunner</c> も <c>UniWindowController</c> も <c>EventSystem</c> も無いので、
+        /// 出来上がる <c>.app</c> は<b>不透明なウィンドウが出て、何にも繋がらず、エラーも出さない</b>。
+        /// </summary>
+        private static bool EnsureBuildScenes()
+        {
+            var current = EditorBuildSettings.scenes;
+            if (current.Length == 1 && current[0].enabled && current[0].path == ProductionScene) return false;
+
+            var scenes = new List<EditorBuildSettingsScene>
+            {
+                new EditorBuildSettingsScene(ProductionScene, true),
+            };
+            EditorBuildSettings.scenes = scenes.ToArray();
+            Debug.Log($"[Fixups] ビルド対象シーンを {ProductionScene} にしました");
+            return true;
         }
 
         /// <summary>

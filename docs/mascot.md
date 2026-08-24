@@ -234,6 +234,41 @@ ack のように「送れたことを前提に手元から消す」値でこれ�
 **`precompiledReferences` に挙げた DLL しか参照できない**。テストが Newtonsoft を直接使うなら
 `Newtonsoft.Json.dll` を足す（`nunit.framework.dll` だけだとコンパイルが通らない）。
 
+### ★ `build.sh` は終了コードを捨てないこと
+
+`| grep ... || true` にすると `BuildScript` の `EditorApplication.Exit(1)` が消え、
+判定が「成果物があるか」だけになる。**一度でも成功していれば古い `.app` が残っている**ので、
+コンパイルエラーでも「できました」と言って exit 0 する —— 直っていないバイナリを
+直ったつもりで起動することになる。`test.sh` と同じ `PIPESTATUS` の形に揃える。
+
+`$OUTPUT` が絶対パスのとき（`BuildScript.cs` の `Path.IsPathRooted` が許容する）に
+`$PROJECT_PATH/` を前置しないことも要る。
+
+### ★ ビルド対象シーンは `EditorBuildSettings` にも入れる
+
+`scripts/build.sh` は `-buildScene` を明示で渡すので通るが、
+**Unity の `File > Build Settings > Build` や `-buildScene` を渡さない経路（#54 の CI）は
+`EditorBuildSettings` を見る**。テンプレート既定の `SampleScene` のままだと、
+そこには `MascotRunner` も `UniWindowController` も `EventSystem` も無いので、
+出来上がる `.app` は**不透明なウィンドウが出て、何にも繋がらず、エラーも出さない**。
+
+`SceneFixups.EnsureBuildScenes()` が本番シーン1本に揃える。
+
+### テンプレートの残骸はリポジトリ唯一の Git-LFS 依存だった
+
+`Assets/TutorialInfo/`（`ReadmeEditor.cs` / `Readme.cs` / `Layout.wlt` / `Icons/URP.png`）と
+`Assets/Readme.asset` / `Assets/Scenes/SampleScene.unity` は、どこからも参照されていなかった。
+
+外した理由は diff のノイズだけではない。`.gitattributes` の `*.png` が
+`Icons/URP.png` を LFS 送りにしていて、**`git lfs ls-files` の出力がこの1件だけ**だった。
+消したことでリポジトリの LFS オブジェクトがゼロになり、clone と #54 の CI checkout が
+LFS を要求しなくなった。
+
+★ `.gitattributes` の `*.png` 規則は**残してある**（#17 で VRM のテクスチャが入る）。
+
+★ あわせて `com.unity.ai.assistant`（unity-mcp が使う）も外した。MCP ビルドが
+モーダルダイアログで沈黙する罠を踏んで CLI batchmode に切り替えたので、依存の理由が消えている。
+
 ### Sentis（`com.unity.ai.inference`）はテンプレート同梱だが要らない
 
 3D テンプレートに入っているが、**誰も依存していない**（unity-mcp が使う

@@ -160,6 +160,21 @@ namespace ChatterMascot
 
         private void Start()
         {
+            // ★ **ここで検査しないと「動いて見える死体」になる。**
+            //   下の DeriveAudioBaseUrl は new Uri() を呼ぶので、Inspector に
+            //   `127.0.0.1:8570`（スキーム無し）や空文字を入れただけで UriFormatException が
+            //   飛び、Start() が最後まで走らない。すると _client が null のまま
+            //   Update() の Tick も Dispatch も何も起こさず、**ウィンドウは出て、
+            //   フレームレート上限も効いて、接続先のログすら出ない**。
+            //   Player.log に埋もれたスタックトレース1本以外に手がかりが残らない
+            if (!IsValidServerUrl(serverUrl))
+            {
+                Debug.LogError($"[Mascot] serverUrl が不正です: \"{serverUrl}\"。" +
+                               "ws:// か wss:// で始まる絶対 URL を指定してください（例: ws://127.0.0.1:8570）");
+                enabled = false;
+                return;
+            }
+
             var options = new PlaybackOptions
             {
                 Lookahead = lookahead,
@@ -357,6 +372,17 @@ namespace ChatterMascot
         {
             _clips.Remove(Key(epoch, seq));
             if (clip != null) Destroy(clip);
+        }
+
+        /// <summary>
+        /// ★ スキームまで見ること。<c>Uri.TryCreate</c> は <c>http://…</c> も
+        ///   <c>file:///…</c> も通すが、<c>ClientWebSocket</c> は <c>ws</c> / <c>wss</c> しか繋げない。
+        /// </summary>
+        private static bool IsValidServerUrl(string url)
+        {
+            Uri parsed;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out parsed)) return false;
+            return parsed.Scheme == "ws" || parsed.Scheme == "wss";
         }
 
         private static string Key(int epoch, long seq)

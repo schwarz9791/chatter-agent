@@ -64,6 +64,16 @@ namespace ChatterMascot.Net
 
         private const int ReceiveBufferSize = 8192;
 
+        /// <summary>
+        /// 1フレームの上限。超えたら接続を捨てて繋ぎ直す。
+        ///
+        /// ★ <b><c>EndOfMessage</c> が来ない限りバッファは伸び続ける。</b> 契約上のフレームは
+        ///   1メッセージぶんのテキストなので、壊れたプロデューサーか間に何か挟まっているだけで
+        ///   OOM に行き着く。上限が要るのはこの1点で、「再接続のたびに積まれる」からではない
+        ///   （<c>message</c> は受信ループのローカルで、抜ければ参照が切れて GC される）。
+        /// </summary>
+        private const int MaxFrameBytes = 4 * 1024 * 1024;
+
         /// <summary>受け取った生フレーム。パースは呼び出し側。</summary>
         public event Action<string> FrameReceived;
 
@@ -103,20 +113,6 @@ namespace ChatterMascot.Net
         public SpeechClient(string url)
         {
             _url = url;
-        }
-
-        /// <summary>
-        /// <c>playerServerUrl</c> が空のときの接続先。
-        ///
-        /// ★ <c>host</c> をそのまま使えない。既定の <c>0.0.0.0</c> は
-        ///   <b>bind アドレスであって接続先ではない</b>。
-        /// </summary>
-        public static string DeriveServerUrl(string host, int port)
-        {
-            var target = string.IsNullOrEmpty(host) || host == "0.0.0.0" || host == "::" ? "127.0.0.1" : host;
-            // IPv6 リテラルは角括弧で囲む必要がある
-            var authority = target.Contains(":") ? "[" + target + "]" : target;
-            return "ws://" + authority + ":" + port;
         }
 
         public void Start()
@@ -257,34 +253,42 @@ namespace ChatterMascot.Net
         private async Task ReceiveLoopAsync(ClientWebSocket socket)
         {
             var buffer = new byte[ReceiveBufferSize];
-            var message = new MemoryStream();
 
             try
             {
-                while (socket.State == WebSocketState.Open && !_cancellation.IsCancellationRequested)
+                using (var message = new MemoryStream())
                 {
-                    var result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), _cancellation.Token);
-                    _lastReceivedAtMs = NowMs();
-
-                    if (result.MessageType == WebSocketMessageType.Close) break;
-
-                    message.Write(buffer, 0, result.Count);
-                    if (!result.EndOfMessage) continue;
-
-                    var text = Encoding.UTF8.GetString(message.ToArray());
-                    message.SetLength(0);
-
-                    // ★ **1フレームぶんだけ握って、次のフレームへ進む。接続は切らない。**
-                    //   ここを握らないと、パーサの1つの例外（例: seq が long を超える）で
-                    //   受信ループが終わり、繋ぎ直した先でサーバーが**同じ未 ack のフレームを
-                    //   再送する**ので、また落ちる——直せないループになる
-                    try
+                    while (socket.State == WebSocketState.Open && !_cancellation.IsCancellationRequested)
                     {
-                        FrameReceived?.Invoke(text);
-                    }
-                    catch (Exception e)
-                    {
-                        Warn?.Invoke("フレームの処理で例外が出ました（このフレームは捨てます）: " + e.Message);
+                        var result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), _cancellation.Token);
+                        _lastReceivedAtMs = NowMs();
+
+                        if (result.MessageType == WebSocketMessageType.Close) break;
+
+                        if (message.Length + result.Count > MaxFrameBytes)
+                        {
+                            Warn?.Invoke($"1フレームが {MaxFrameBytes / (1024 * 1024)}MB を超えました。接続し直します");
+                            break;
+                        }
+
+                        message.Write(buffer, 0, result.Count);
+                        if (!result.EndOfMessage) continue;
+
+                        var text = Encoding.UTF8.GetString(message.ToArray());
+                        message.SetLength(0);
+
+                        // ★ **1フレームぶんだけ握って、次のフレームへ進む。接続は切らない。**
+                        //   ここを握らないと、パーサの1つの例外（例: seq が long を超える）で
+                        //   受信ループが終わり、繋ぎ直した先でサーバーが**同じ未 ack のフレームを
+                        //   再送する**ので、また落ちる——直せないループになる
+                        try
+                        {
+                            FrameReceived?.Invoke(text);
+                        }
+                        catch (Exception e)
+                        {
+                            Warn?.Invoke("フレームの処理で例外が出ました（このフレームは捨てます）: " + e.Message);
+                        }
                     }
                 }
             }

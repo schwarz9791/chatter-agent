@@ -279,6 +279,42 @@ namespace ChatterMascot.Tests
             }
         }
 
+        /// <summary>
+        /// ★ .NET の <c>$</c> は<b>末尾の改行の手前にもマッチする</b>。
+        ///
+        /// 写し元の JS（<c>core/src/core/types.ts</c> / <c>audioPath.ts</c>）にその挙動は無いので、
+        /// <c>^…$</c> のまま移植すると <c>gen-1\n</c> や
+        /// <c>/audio/gen-1-000000000001.wav\n</c> が通ってしまう。
+        /// 通った値は <c>BaseUrl</c> と連結されてそのまま URL になる。
+        /// </summary>
+        [Test]
+        public void TrailingNewlineIsRejected()
+        {
+            Assert.That(Parse(Replace("\"epoch\":\"" + Epoch + "\"", "\"epoch\":\"" + Epoch + "\\n\"")), Is.Null);
+
+            // audio は読めなくてもフレームごとは捨てない（Audio が null になる）
+            var frame = Parse(Replace(Path1, Path1 + "\\n"));
+            Assert.That(frame, Is.Not.Null);
+            Assert.That(frame.Audio, Is.Null);
+        }
+
+        /// <summary>
+        /// ★ .NET の <c>\d</c> は <b>Unicode の十進数字</b>にマッチする（JS の <c>\d</c> は ASCII のみ）。
+        ///
+        /// <c>[0-9]</c> に直さないと、アラビア・インド数字12桁の <c>seq</c> が
+        /// <c>AudioPath</c> を通り抜けて URL に入る。
+        /// </summary>
+        [Test]
+        public void NonAsciiDigitsInAudioPathAreRejected()
+        {
+            var arabicIndic = "\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669\u0660\u0661";
+            var path = "/audio/" + Epoch + "-" + arabicIndic + ".wav";
+
+            var frame = Parse(Replace(Path1, path));
+            Assert.That(frame, Is.Not.Null);
+            Assert.That(frame.Audio, Is.Null);
+        }
+
         private static string Replace(string from, string to)
         {
             return Frame().Replace(from, to);

@@ -213,6 +213,21 @@ ack のように「送れたことを前提に手元から消す」値でこれ�
 回帰テスト: `WavDecoderTests` の `MeasuresZeroSizedDataChunk` /
 `MeasuresOversizedDataChunk` / `RejectsTrulyEmptyDataChunk`。
 
+### ★ .NET の正規表現は JS より緩い（`$` と `\d`）
+
+契約の charset を JS から写すときに2箇所ずれる:
+
+- **`$` は末尾の改行の手前にもマッチする。** `^…$` のままだと `gen-1\n` や
+  `/audio/gen-1-000000000001.wav\n` が通る。**`\A` / `\z`** を使う
+- **`\d` は Unicode の十進数字にマッチする**（JS の `\d` は ASCII のみ）。
+  アラビア・インド数字（`٠`-`٩`）12桁の `seq` が通る。**`[0-9]`** を使う
+
+どちらも `core/src/core/audioPath.ts` は弾く。通った値は `BaseUrl` と連結されて
+**そのまま URL になる**（`Runtime/Protocol/SpeechEpoch.cs`）。
+
+回帰テスト: `SpeechFrameTests` の `TrailingNewlineIsRejected` /
+`NonAsciiDigitsInAudioPathAreRejected`。
+
 ### ★ テストアセンブリの `overrideReferences` に注意
 
 `ChatterMascot.Tests.asmdef` は `overrideReferences: true` なので、
@@ -310,6 +325,33 @@ voice をプールして **`Stop()` の効果を自分の再生ぶんに限定�
 ★ **閾値を短くしないこと。** 数十秒の無音は正常（`AskUserQuestion` の直前）。
 誤爆しても未 ack 分が再送されるだけなので安全側に倒れるが、短くすると
 「正常な沈黙のたびに切断する」ことになる。
+
+### `forceSingleInstance` が防げること / 防げないこと
+
+`docs/protocol.md` のクライアント責務6は「同じルートに対して繋ぐクライアントは1台にすること」。
+ack は累積で、サーバーは `seq <= N` を**キューから物理削除する**（誰が受け取ったかは見ない）ので、
+速いクライアントの ack が遅いクライアントのまだ喋っていない entry を消す。
+
+`ProjectSettings.asset` の `forceSingleInstance: 1` を立ててあるが、**これで防げるのは
+同じ `.app` の二重起動だけ**。`npm run start:player` との併走は防げない。
+
+完全な排他は参照実装と同じ `player.lock`（`core/src/core/paths.ts` の `getPlayerLockDir`）を
+Unity 側からも取ることになるが、ランタイムルートの発見が要るうえ、
+**Android XR にはサーバーと共有するファイルシステムが無い**ので macOS 限定の仕組みになる。
+今は立てていない。
+
+★ 症状は「発話を食い合う」＋「音声が 404 になる」。**耳で聞くと『たまに飛ぶ』**にしか
+聞こえないので、無音の切り分けをする前に**player が動いていないかを先に確認する**こと。
+
+### ★ `serverUrl` が不正だと「動いて見える死体」になる
+
+`AudioFetcher.DeriveAudioBaseUrl` は `new Uri(serverUrl)` を呼ぶので、Inspector に
+`127.0.0.1:8570`（スキーム無し）や空文字を入れただけで `UriFormatException` が飛び、
+`MascotRunner.Start()` が最後まで走らない。すると **ウィンドウは出て、フレームレート上限も効いて、
+接続先のログすら出ない**。Player.log に埋もれたスタックトレース1本以外に手がかりが残らない。
+
+`Start()` の頭で `Uri.TryCreate` + スキーム（`ws` / `wss`）を検査して、
+駄目なら入力値を名指しした `LogError` を出して `enabled = false` で止める。
 
 ### `ClientWebSocket` を選んだ理由
 

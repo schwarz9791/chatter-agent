@@ -22,7 +22,13 @@ import { getServerLockDir, getSpeechQueueDir } from "../core/paths";
 import { createSpeechQueue } from "../core/speechQueue";
 import { createVoicevoxClient, flattenStyles, hasStyle } from "../tts/voicevoxClient";
 import { createAudioStore } from "./audioStore";
-import { resolveEngineSpawn, startEngine, type EngineProcess } from "./engineProcess";
+import {
+  resolveEngineSpawn,
+  startEngine,
+  TRIED_HINT_LIMIT,
+  type EngineProcess,
+  type EngineSpawnSkip,
+} from "./engineProcess";
 import { createDispatcher, type Dispatcher } from "./dispatcher";
 import { createAudioHttpServer } from "./httpServer";
 import { createWsServer } from "./wsServer";
@@ -133,6 +139,14 @@ function installShutdown(cleanup: () => Promise<void>): void {
 
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
+  // ★ SIGHUP も拾う。**端末のウィンドウを閉じる**のは日常操作なのに、既定動作のまま死ぬと
+  //   cleanup が走らず、`detached` で起こしたエンジンが孤児として残る（端末の SIGHUP は
+  //   別プロセスグループのエンジンには届かない）。→ PR #52 のレビュー
+  //
+  // ★ **2回目の Ctrl-C（`process.exit(130)`）と watchdog（`process.exit(1)`）は今も
+  //   cleanup を通らない。** 「早く死ぬ」を優先した既存の設計で、残った孤児は次回起動時の
+  //   疎通確認（条件3）が再利用する
+  process.on("SIGHUP", onSignal);
   // 常駐プロセスなので1件の rejection / 例外で落とさない
   process.on("unhandledRejection", (err) => console.error("[Server] Unhandled rejection:", err));
   process.on("uncaughtException", (err) => console.error("[Server] Uncaught exception:", err));
@@ -188,11 +202,20 @@ async function main(): Promise<void> {
     return await checkEngine(ttsFor(voice), voice.speakerId);
   };
 
+  /**
+   * 「音声は出ないがテキストは流れる」という結論。**`checkEngine` ではなくここが出す。**
+   * 起動時のプローブは直後に spawn するかもしれないので、結論を出せるのは状況を知っている側だけ。
+   */
+  const warnAudioUnavailable = (): void => {
+    console.warn("[Server] 音声の GET は 503 を返します。テキストの配信は続きます");
+  };
+
   /** 合成が失敗したときの診断。`ENGINE_RECHECK_INTERVAL_MS` に1回だけ実際に走る */
   const recheckEngine = async (): Promise<void> => {
     if (!config.get("ttsEnabled")) return;
     if (Date.now() - lastEngineCheckAt < ENGINE_RECHECK_INTERVAL_MS) return;
-    await probeEngine();
+    // 合成が**実際に失敗した**あとの診断なので、繋がらなければ結論まで出してよい
+    if ((await probeEngine()) === "unreachable") warnAudioUnavailable();
   };
 
   /**
@@ -223,7 +246,8 @@ async function main(): Promise<void> {
 
     if (!config.get("ttsSpawn")) {
       // ★ 黙らない。切ったまま忘れた人の症状が「無音」だけになるのが最悪の失敗の仕方
-      console.log("[Server] ttsSpawn=false: 合成エンジンは起こしません（音声は 503 になります）");
+      console.log("[Server] ttsSpawn=false: 合成エンジンは起こしません");
+      warnAudioUnavailable();
       return;
     }
 
@@ -234,11 +258,8 @@ async function main(): Promise<void> {
     });
     if ("skip" in plan) {
       // 条件4 / 条件5。どちらも従来どおりの 503 運用に落ちるだけ
-      if (plan.skip === "not-loopback") {
-        console.warn(`[Server] ${plan.host} はループバックではないので合成エンジンを起こせません`);
-      } else {
-        console.warn(`[Server] 合成エンジンが見つかりません: ${plan.tried.join(" / ")}`);
-      }
+      reportSkip(plan);
+      warnAudioUnavailable();
       return;
     }
 
@@ -372,13 +393,40 @@ async function main(): Promise<void> {
  *   `ttsSpeakerId` の診断が永久に出なくなる — これが「無音なのにログが数行しかない」の真因。
  *   合成が失敗するたびに呼び直す（間隔は `ENGINE_RECHECK_INTERVAL_MS` で間引く）。
  */
+/**
+ * エンジンを起こさなかった理由を出す。
+ *
+ * ★ **探した場所を出すこと。** 「見つかりません: aivis-run」だけだと、PATH を直すのか・
+ *   ファイル名を直すのか・実行ビットを立てるのか判断できない。話者候補（下）と同じく
+ *   複数行で出し、**切ったら残件数を出す**（黙って truncate すると「全部探した」と読まれる）。
+ */
+function reportSkip(plan: EngineSpawnSkip): void {
+  if (plan.skip === "not-loopback") {
+    console.warn(`[Server] ${plan.host} はループバックではないので合成エンジンを起こせません`);
+    return;
+  }
+  if (plan.skip === "not-http") {
+    console.warn(`[Server] ${plan.protocol} のエンジンは起こせません（起こせるのは平文の http: だけ）`);
+    return;
+  }
+  console.warn("[Server] 合成エンジンが見つかりません。探した場所:");
+  for (const candidate of plan.tried.slice(0, TRIED_HINT_LIMIT)) {
+    console.warn(`[Server]   ${candidate}`);
+  }
+  const rest = plan.tried.length - TRIED_HINT_LIMIT;
+  if (rest > 0) console.warn(`[Server]    …ほか ${rest} 件`);
+}
+
 async function checkEngine(tts: ReturnType<typeof createVoicevoxClient>, speakerId: number): Promise<EngineProbe> {
   let speakers;
   try {
     speakers = await tts.listSpeakers();
   } catch (err) {
     console.warn(`[Server] 音声合成エンジンに繋がりません (${tts.baseUrl}): ${String(err)}`);
-    console.warn("[Server] 音声の GET は 503 を返します。テキストの配信は続きます");
+    // ★ **「503 になる」の結論はここで出さない。** 起動時のプローブから呼ばれたときは、
+    //   直後にエンジンを起こすかもしれず、その場合この行は嘘になる（実機ログで、
+    //   spawn する経路でだけ必ず出ていた）。結論は状況を知っている呼び出し側が出す
+    //   （`warnAudioUnavailable`）。→ PR #52 のレビュー
     return "unreachable";
   }
 

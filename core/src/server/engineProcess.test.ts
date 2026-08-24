@@ -36,6 +36,9 @@ function resolve(
     command: "",
     args: [],
     homeDir: HOME,
+    // ★ 既定で PATH を空にする。渡す口が無かった頃は、明示 `ttsSpawnCommand` の分岐だけ
+    //   実環境の PATH とホームの中身に依存していた（→ PR #52 のレビュー）
+    env: { PATH: "" },
     exists: (p) => present.includes(p),
     ...overrides,
   });
@@ -96,12 +99,20 @@ describe("resolveEngineSpawn", () => {
     expect(exists).not.toHaveBeenCalled();
   });
 
-  it("ポートを省略した baseUrl はスキームの既定に落とす", () => {
+  it("ポートを省略した baseUrl は http の既定（80）に落とす", () => {
     expect(resolve({ baseUrl: "http://127.0.0.1" }, [APP])).toMatchObject({
       args: ["--host", "127.0.0.1", "--port", "80"],
     });
-    expect(resolve({ baseUrl: "https://127.0.0.1" }, [APP])).toMatchObject({
-      args: ["--host", "127.0.0.1", "--port", "443"],
+  });
+
+  /**
+   * ★ `makeUrlParser` は `https:` も通すので、ここで弾かないと `--port 443` で
+   *   **平文のエンジン**が立ち上がる（非 root なら bind に失敗する）。
+   */
+  it("★ https のループバックは起こさない（起こせるのは平文の http だけ）", () => {
+    expect(resolve({ baseUrl: "https://127.0.0.1:10101" }, [APP])).toEqual({
+      skip: "not-http",
+      protocol: "https:",
     });
   });
 
@@ -129,11 +140,48 @@ describe("resolveEngineSpawn", () => {
       command: "chatter-agent-no-such-engine-xyz",
       args: [],
       homeDir: HOME,
+      env: { PATH: "" },
       exists,
-      // PATH を空にして、実環境の PATH を引かないようにする
     });
-    expect(result).toEqual({ skip: "not-found", tried: ["chatter-agent-no-such-engine-xyz"] });
+    expect(result).toMatchObject({ skip: "not-found" });
     expect(exists).not.toHaveBeenCalled();
+  });
+
+  it("★ not-found は探した場所をフルパスで返す（生のコマンド名だけにしない）", () => {
+    expect(resolve({ command: "aivis-run", env: { PATH: "/opt/bin:/usr/bin" } })).toEqual({
+      skip: "not-found",
+      tried: ["/opt/bin/aivis-run", "/usr/bin/aivis-run"],
+    });
+  });
+
+  /**
+   * ★ **この回帰テストが本題。** エンジンのバイナリ名は literally `run` なので、
+   *   `findCommandPath` の既定（既知の bin ディレクトリも探す）のままだと mise / asdf の
+   *   shim や `~/.local/bin/run` を掴み、まったく別のバイナリが `--host … --port …` 付きで
+   *   起動される（→ PR #52 のレビュー）。
+   */
+  it('★ ttsSpawnCommand: "run" がバージョンマネージャの shim を掴まない', () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "chatter-agent-shim-"));
+    try {
+      const shimDir = path.join(homeDir, ".local", "bin");
+      fs.mkdirSync(shimDir, { recursive: true });
+      const shim = path.join(shimDir, "run");
+      fs.writeFileSync(shim, "#!/bin/sh\n");
+      fs.chmodSync(shim, 0o755);
+
+      const result = resolveEngineSpawn({
+        baseUrl: "http://127.0.0.1:10101",
+        command: "run",
+        args: [],
+        homeDir,
+        env: { PATH: "" },
+        exists: () => false,
+      });
+      expect(result).toMatchObject({ skip: "not-found" });
+      expect(result).not.toMatchObject({ command: shim });
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
   });
 
   it("★ ttsSpawnArgs を指定したら --host/--port は足さない（追加ではなく置換）", () => {
@@ -231,7 +279,7 @@ describe("startEngine", () => {
     expect(warnings.some((m) => m.includes("ここが原因です"))).toBe(true);
   });
 
-  it("★ stderr は末尾を残す（落ちた理由が欲しい）", async () => {
+  it("★ 出力は末尾を残す（落ちた理由が欲しい）", async () => {
     const warnings: string[] = [];
     // 2048 文字を超えて流し、先頭が消えて末尾が残ることを見る
     const engine = start("/bin/sh", ["-c", 'printf "A%.0s" $(seq 1 3000) >&2; echo "-LAST-" >&2; exit 1'], {
@@ -239,9 +287,23 @@ describe("startEngine", () => {
     });
 
     expect(await until(() => engine.exited())).toBe(true);
-    const dump = warnings.find((m) => m.includes("stderr")) ?? "";
+    const dump = warnings.find((m) => m.includes("出力(末尾)")) ?? "";
     expect(dump).toContain("-LAST-");
     expect(dump.length).toBeLessThan(2_200);
+  });
+
+  /**
+   * ★ stdout を捨てていると「起こしたのに 503 が続く」を調べる人が、エンジンが死ぬまで
+   *   一切の出力を見られない（→ PR #52 のレビュー）。uvicorn の起動ログは stdout に出る。
+   */
+  it("★ stdout も同じ tail に取り込む", async () => {
+    const warnings: string[] = [];
+    const engine = start("/bin/sh", ["-c", 'echo "stdout に出た手がかり"; exit 2'], {
+      warn: (m) => void warnings.push(m),
+    });
+
+    expect(await until(() => engine.exited())).toBe(true);
+    expect(warnings.some((m) => m.includes("stdout に出た手がかり"))).toBe(true);
   });
 
   it("★ 自分で止めたときは stderr を出さない（SIGTERM だと code は null になる）", async () => {
@@ -291,7 +353,7 @@ describe("startEngine", () => {
     expect(sent).toEqual([[-pid, "SIGTERM"]]);
   });
 
-  it("spawn には detached / shell:false / stderr のパイプを渡す", () => {
+  it("spawn には detached / shell:false / stdout と stderr のパイプを渡す", () => {
     const calls: unknown[][] = [];
     startEngine(
       { command: "/bin/echo", args: ["x"] },
@@ -301,10 +363,67 @@ describe("startEngine", () => {
         spawn: ((...callArgs: unknown[]) => {
           calls.push(callArgs);
           // exit も error も出さない最小のダミー
-          return { pid: 1234, stderr: null, on: () => {}, once: () => {} } as never;
+          return { pid: 1234, stdout: null, stderr: null, on: () => {}, once: () => {} } as never;
         }) as never,
       },
     );
-    expect(calls[0]?.[2]).toMatchObject({ detached: true, shell: false, stdio: ["ignore", "ignore", "pipe"] });
+    expect(calls[0]?.[2]).toMatchObject({ detached: true, shell: false, stdio: ["ignore", "pipe", "pipe"] });
+  });
+
+  /**
+   * ★ 以前は ESRCH（もう居ない）も EPERM（送れなかった）も同じ `false` を返していたので、
+   *   **グループが生きているのに昇格せず**、終了処理が成功扱いになっていた
+   *   （→ PR #52 のレビュー）。
+   */
+  it("★ ESRCH 以外の kill 失敗では SIGKILL まで進む", async () => {
+    const sent: string[] = [];
+    const engine = start("/bin/sh", ["-c", "sleep 30"], {
+      kill: (_pid, signal) => {
+        sent.push(signal);
+        const err = new Error("operation not permitted") as NodeJS.ErrnoException;
+        err.code = "EPERM";
+        throw err;
+      },
+      termGraceMs: 50,
+      killWaitMs: 50,
+    });
+    await until(() => engine.pid !== undefined);
+
+    await engine.stop();
+    expect(sent).toEqual(["SIGTERM", "SIGKILL"]);
+
+    // 実際には送れていないので、後始末は自前で
+    if (engine.pid !== undefined) {
+      try {
+        process.kill(-engine.pid, "SIGKILL");
+      } catch {
+        // 既に居ないなら何もしない
+      }
+    }
+  });
+
+  it("ESRCH（もう居ない）なら SIGKILL へ進まない", async () => {
+    const sent: string[] = [];
+    const engine = start("/bin/sh", ["-c", "sleep 30"], {
+      kill: (_pid, signal) => {
+        sent.push(signal);
+        const err = new Error("no such process") as NodeJS.ErrnoException;
+        err.code = "ESRCH";
+        throw err;
+      },
+      termGraceMs: 50,
+    });
+    await until(() => engine.pid !== undefined);
+
+    await engine.stop();
+    expect(sent).toEqual(["SIGTERM"]);
+
+    if (engine.pid !== undefined) {
+      try {
+        process.kill(-engine.pid, "SIGKILL");
+      } catch {
+        // 既に居ないなら何もしない
+      }
+    }
   });
 });

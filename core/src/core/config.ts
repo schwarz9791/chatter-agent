@@ -102,6 +102,10 @@ export interface ChatterAgentConfig {
    *
    * ★ 明示した値が見つからないとき、既知の候補へ**フォールバックしない**。
    *   指定を黙って別のバイナリに読み替えるのは最悪の失敗の仕方になる。
+   *
+   * ★ **非絶対パスなら `PATH` だけを見る。** 要約 CLI（`aiSummaryCommand`）が使っている
+   *   「既知のインストール先」（mise / asdf の shim、`~/.local/bin` など）は探さない ——
+   *   エンジンのバイナリ名が literally `run` なので、あの並びを探すと無関係な `run` を掴む。
    */
   ttsSpawnCommand: string;
   /**

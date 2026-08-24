@@ -324,7 +324,8 @@ npm run start:player     # 耳で確認する
 ```
 
 **発話を耳で聞くのに AivisSpeech.app を起動しておく必要は無い**（[#51](https://github.com/schwarz9791/chatter-agent/issues/51)）。
-エンジンが居なければ `chatter-agent-server` が起こし、サーバーを止めれば一緒に落ちる。
+エンジンが居なければ `chatter-agent-server` が起こし、サーバーを止めれば一緒に落ちる
+（`SIGKILL` / 2回目の `Ctrl-C` / 終了処理の watchdog では残るが、次回起動時に再利用される）。
 **インストールだけしておけばよい**（既定の接続先は `http://127.0.0.1:10101`）。
 手で起こす必要があるのは、別ホストのエンジンに繋ぐときと `ttsSpawn: false` にしたときだけ。
 cc-mascot が `--port 8564` で spawn するエンジンとは別物なので、そちらに繋ぐなら

@@ -37,7 +37,10 @@ export interface EngineSpawnPlan {
  * 呼び出し側（`index.ts`）が「どこを探したか」を組み立て直さずにログへ出せる形にしておく
  * ——そうしないと既知候補の定義が2箇所に分裂する。
  */
-export type EngineSpawnSkip = { skip: "not-loopback"; host: string } | { skip: "not-found"; tried: string[] };
+export type EngineSpawnSkip =
+  | { skip: "not-loopback"; host: string }
+  | { skip: "not-http"; protocol: string }
+  | { skip: "not-found"; tried: string[] };
 
 export type EngineSpawnResolution = EngineSpawnPlan | EngineSpawnSkip;
 
@@ -55,8 +58,14 @@ const LOOPBACK_HOSTNAMES = new Set(["localhost", "[::1]"]);
  */
 const IPV4_LOOPBACK = /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
 
-/** スキームごとの既定ポート。`ttsBaseUrl` はポートを省略できる（`makeUrlParser` が通す） */
-const DEFAULT_PORTS: Record<string, string> = { "http:": "80", "https:": "443" };
+/** `http:` の既定ポート。`ttsBaseUrl` はポートを省略できる（`makeUrlParser` が通す） */
+const DEFAULT_HTTP_PORT = "80";
+
+/**
+ * `tried` に載せる探索先の上限。PATH は10個を超えるのが普通なので全部は出さない。
+ * ★ 切ったら残件数を出すこと（黙って truncate すると「全部探した」と読まれる）。
+ */
+export const TRIED_HINT_LIMIT = 12;
 
 function isLoopback(hostname: string): boolean {
   return LOOPBACK_HOSTNAMES.has(hostname) || IPV4_LOOPBACK.test(hostname);
@@ -84,6 +93,14 @@ export interface ResolveEngineSpawnDeps {
   exists?: (filePath: string) => boolean;
   /** テスト用。既定 `os.homedir()` */
   homeDir?: string;
+  /**
+   * テスト用。既定 `process.env`。
+   *
+   * ★ **これが無いと明示 `ttsSpawnCommand` の分岐だけ実環境の PATH に依存する。**
+   *   `exists` は既知候補の分岐にしか効かず、`findCommandPath` は実 `process.env.PATH` を読む
+   *   ——「純関数」と書いてあるのにそこだけシームが空いていた（→ PR #52 のレビュー）。
+   */
+  env?: NodeJS.ProcessEnv;
 }
 
 /**
@@ -96,16 +113,27 @@ export interface ResolveEngineSpawnDeps {
 export function resolveEngineSpawn(deps: ResolveEngineSpawnDeps): EngineSpawnResolution {
   const exists = deps.exists ?? fs.existsSync;
   const homeDir = deps.homeDir ?? os.homedir();
+  const env = deps.env ?? process.env;
 
   const url = new URL(deps.baseUrl);
   // ★ リモートのエンジンは起こせない。ここで返すので、この先 fs には一切触らない
   if (!isLoopback(url.hostname)) return { skip: "not-loopback", host: url.hostname };
+  // ★ `makeUrlParser` は `https:` も通すが、起こせるのは平文のエンジンだけ。
+  //   受理すると `--port 443` で平文サーバーが立ち（非 root なら bind に失敗し）、
+  //   ユーザーは「起動したことすら知らないプロセス」の stderr を読む羽目になる
+  if (url.protocol !== "http:") return { skip: "not-http", protocol: url.protocol };
 
   if (deps.command) {
     // ★ 明示指定が見つからなくても既知候補へ**フォールバックしない**。
-    //   指定を黙って別のバイナリに読み替えるのは、最も気づきにくい失敗の仕方になる
-    const resolved = findCommandPath(deps.command, { homeDir });
-    if (resolved === undefined) return { skip: "not-found", tried: [deps.command] };
+    //   指定を黙って別のバイナリに読み替えるのは、最も気づきにくい失敗の仕方になる。
+    //
+    // ★ `searchKnownBinDirs: false` が要る。既定（true）だと mise / asdf の shim や
+    //   `~/.local/bin` まで探すので、**エンジンのバイナリ名が literally `run`** である以上、
+    //   `ttsSpawnCommand: "run"` がまったく別のバイナリを掴む（→ PR #52 のレビュー）。
+    //   上の `knownEnginePaths` のコメントが「`getKnownBinDirs` は流用しない」と言っているのに、
+    //   `findCommandPath` 経由で結局その探索に乗っていた
+    const resolved = findCommandPath(deps.command, { homeDir, env, searchKnownBinDirs: false });
+    if (resolved === undefined) return { skip: "not-found", tried: searchedPaths(deps.command, env) };
     return { command: resolved, args: buildArgs(deps.args, url) };
   }
 
@@ -113,6 +141,20 @@ export function resolveEngineSpawn(deps: ResolveEngineSpawnDeps): EngineSpawnRes
   const found = candidates.find((candidate) => exists(candidate));
   if (found === undefined) return { skip: "not-found", tried: candidates };
   return { command: found, args: buildArgs(deps.args, url) };
+}
+
+/**
+ * `not-found` のときに「どこを探したか」を返す。
+ *
+ * ★ **生のコマンド名だけを返さないこと。** `合成エンジンが見つかりません: aivis-run` だけでは、
+ *   PATH を直すのか・ファイル名を直すのか・実行ビットを立てるのか判断できない。
+ *   既知候補の経路がフルパスを全部載せているのに対して非対称でもある（→ PR #52 のレビュー）。
+ */
+function searchedPaths(command: string, env: NodeJS.ProcessEnv): string[] {
+  // 絶対パスは `findCommandPath` がそのまま返すので、ここには来ない（= 非絶対パスだけ）
+  const dirs = (env.PATH || "").split(path.delimiter).filter(Boolean);
+  if (dirs.length === 0) return [command];
+  return dirs.map((dir) => path.join(dir, command));
 }
 
 function buildArgs(args: readonly string[], url: URL): string[] {
@@ -124,9 +166,10 @@ function buildArgs(args: readonly string[], url: URL): string[] {
   //   角括弧なしを期待し、`[::1]` を渡すと bind に失敗する
   const host = url.hostname.replace(/^\[|\]$/g, "");
   // ★ ポート省略（`http://127.0.0.1`）だと `url.port` は空文字。そのまま渡すと壊れるので
-  //   スキームの既定に落とす。80 は非 root で bind できないが、その失敗は exit コードと
-  //   stderr の末尾としてログに出る（下の `startEngine`）ので、原因が症状に出る
-  const port = url.port || DEFAULT_PORTS[url.protocol] || "80";
+  //   `http:` の既定に落とす（ここに来る時点でスキームは `http:` に絞ってある）。
+  //   80 は非 root で bind できないが、その失敗は exit コードと stderr の末尾としてログに出る
+  //   （下の `startEngine`）ので、原因が症状に出る
+  const port = url.port || DEFAULT_HTTP_PORT;
   return ["--host", host, "--port", port];
 }
 
@@ -136,8 +179,14 @@ function buildArgs(args: readonly string[], url: URL): string[] {
  * `stop()` は**冪等**で、**reject しない**（終了処理の途中で throw させない）。
  */
 export interface EngineProcess {
+  /**
+   * ★ **`pid` と `exited()` に本番の呼び出し元は無い**（`index.ts` は `stop()` しか呼ばない）。
+   *   テストの観測点として意図的に残してある。**再起動しない方針が確定している**ので
+   *   ヘルスチェック等の用途が生まれる見込みも無い —— 次に読む人が用途を探さなくて済むように
+   *   ここに書いておく（→ PR #52 のレビュー）。
+   */
   readonly pid: number | undefined;
-  /** 既に終わっているか */
+  /** 既に終わっているか（テストの観測点。上記参照） */
   exited: () => boolean;
   /** プロセスグループごと止める */
   stop: () => Promise<void>;
@@ -156,8 +205,8 @@ export interface StartEngineDeps {
   warn?: (message: string) => void;
 }
 
-/** 落ちた理由を残すのに要る量。数 KB あれば足りる */
-const STDERR_TAIL_CHARS = 2048;
+/** 落ちた理由を残すのに要る量。数 KB あれば足りる。stdout と stderr で共有する */
+const OUTPUT_TAIL_CHARS = 2048;
 
 /**
  * 終了処理の予算。
@@ -181,7 +230,11 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
     // ★ shell は噛ませない。パスに空白が入るだけで壊れるし、設定ファイル経由の
     //   コマンド実行経路をわざわざ作る理由が無い（→ `player/audioPlayer.ts`）
     shell: false,
-    stdio: ["ignore", "ignore", "pipe"],
+    // ★ stdout も拾う。エンジンが listen した瞬間を知る手段は観測しかないのに、捨てていると
+    //   「起こしたのに 503 が続く」を調べる人が、エンジンが死ぬまで一切の出力を見られない
+    //   （→ PR #52 のレビュー）。tail は stderr と共有する —— 順序は保証しないが、
+    //   落ちた理由を追うには足りる
+    stdio: ["ignore", "pipe", "pipe"],
     // ★ POSIX では setsid される。これが「`-pid` でプロセスグループごと撃てる」の前提。
     //   `run` は PyInstaller のバイナリで**自分の子を持つ**ので、`child.kill()`（自分だけ）では
     //   孫が残り、ポートを掴んだままになる
@@ -193,13 +246,18 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
 
   // ★ **末尾**を保つ（`audioPlayer.ts` は先頭を保つが、あちらは短命なコマンドの第一報が
   //   欲しいのに対し、こちらは常駐プロセスが**落ちた理由**が欲しいので逆にする）
-  let stderrTail = "";
-  // ★ setEncoding すること。付けないとチャンク境界で UTF-8 が割れ、日本語のエラーが
-  //   U+FFFD に化ける（`String(chunk)` を毎回するのと同じ罠）
-  child.stderr?.setEncoding("utf-8");
-  child.stderr?.on("data", (chunk: string) => {
-    stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_CHARS);
-  });
+  let outputTail = "";
+  const collect = (stream: NodeJS.ReadableStream | null): void => {
+    if (!stream) return;
+    // ★ setEncoding すること。付けないとチャンク境界で UTF-8 が割れ、日本語のエラーが
+    //   U+FFFD に化ける（`String(chunk)` を毎回するのと同じ罠）
+    stream.setEncoding("utf-8");
+    stream.on("data", (chunk: string) => {
+      outputTail = (outputTail + chunk).slice(-OUTPUT_TAIL_CHARS);
+    });
+  };
+  collect(child.stdout);
+  collect(child.stderr);
 
   log(`[Engine] 起動しました (pid=${child.pid ?? "?"}): ${plan.command} ${plan.args.join(" ")}`);
 
@@ -220,7 +278,7 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
     }
     warn(`[Engine] 終了しました (code=${code} signal=${signal})。再起動はしません（音声は 503 になります）`);
     // ★ これが無いと「起動したはずなのに繋がらない」の原因が1文字も残らない
-    if (code !== 0 && stderrTail.trim()) warn(`[Engine] stderr(末尾):\n${stderrTail.trim()}`);
+    if (code !== 0 && outputTail.trim()) warn(`[Engine] 出力(末尾):\n${outputTail.trim()}`);
   });
 
   const waitExit = (ms: number): Promise<boolean> =>
@@ -234,18 +292,24 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
       });
     });
 
-  const signalGroup = (signal: NodeJS.Signals): boolean => {
+  /**
+   * ★ **「送れた」と「もう居ない」と「送れなかった」を混ぜないこと。**
+   *   以前はどれも `false` を返していたので、EPERM のときに `doStop` が「完了」と見なして
+   *   SIGKILL へ進まず、**グループが生きたまま**終了処理が成功扱いになっていた
+   *   （→ PR #52 のレビュー）。短絡してよいのは `gone` だけ。
+   */
+  const signalGroup = (signal: NodeJS.Signals): "sent" | "gone" | "failed" => {
     const pid = child.pid;
-    if (pid === undefined) return false;
+    if (pid === undefined) return "gone";
     try {
       // ★ 負の pid で**プロセスグループ全体**へ送る（`detached: true` が前提）
       kill(-pid, signal);
-      return true;
+      return "sent";
     } catch (err) {
-      // ESRCH = そのグループはもう居ない。止めるという目的は達しているので黙って戻る
-      if ((err as NodeJS.ErrnoException).code === "ESRCH") return false;
+      // ESRCH = そのグループはもう居ない。止めるという目的は達している
+      if ((err as NodeJS.ErrnoException).code === "ESRCH") return "gone";
       warn(`[Engine] ${signal} を送れませんでした (pid=${pid}): ${String(err)}`);
-      return false;
+      return "failed";
     }
   };
 
@@ -258,8 +322,19 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
     //   代償は「子が先に落ちて孫だけ残った場合に取り逃す」こと —— これはサーバーが SIGKILL された
     //   ときと同じ状態で、次回起動時の疎通確認（条件3）が残ったエンジンを再利用する
     if (exited || child.pid === undefined) return;
-    if (!signalGroup("SIGTERM")) return;
+    if (signalGroup("SIGTERM") === "gone") return;
     if (await waitExit(termGraceMs)) return;
+
+    // ★ **昇格の直前にも入口と同じガードを置くこと。** 猶予の終わり際に子が死んで、Node が
+    //   まだ `exit` を配送していないと `waitExit` は `false` を返す。そのまま撃つと、
+    //   reap 済みの pid を持つ**無関係なプロセスグループ**に SIGKILL が飛びうる
+    //   （→ PR #52 のレビュー）。
+    //
+    //   ★ **これで窓が閉じきるわけではない。** `exited` が立つのは `exit` の配送時なので、
+    //     reap から配送までの間は「実際は死んでいるがフラグは false」になる。狭めるだけ。
+    //     **既存の入口ガードと区別できる単体テストは書けない**ので、意図をここに残す
+    if (exited) return;
+
     warn(`[Engine] SIGTERM で終わらないので SIGKILL します (pid=${child.pid})`);
     signalGroup("SIGKILL");
     await waitExit(killWaitMs);

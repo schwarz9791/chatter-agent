@@ -78,7 +78,7 @@ tail -f "${XDG_CONFIG_HOME:-$HOME/.config}/chatter-agent/speech.jsonl"
 
 `chatter-agent-player` が、配信された発話を読み上げます。Unity の表示側アプリを待たずに音が出せて、プロトコルの参照実装も兼ねています。合成そのものは `chatter-agent-server` が [AivisSpeech](https://aivis-project.com/) にやらせるので、player は音声を取りに行って鳴らすだけです。
 
-**AivisSpeech をインストールだけしておいてください**（既定の接続先は `http://127.0.0.1:10101`）。エンジンが動いていなければ `chatter-agent-server` が起こし、サーバーを止めれば一緒に落ちます。繋ぎ先を設定するのは**サーバー側**です。
+**AivisSpeech をインストールだけしておいてください**（既定の接続先は `http://127.0.0.1:10101`）。エンジンが動いていなければ `chatter-agent-server` が起こし、サーバーを止めれば一緒に落ちます（`Ctrl-C` を連打して即座に落とした場合や `SIGKILL` の場合は残りますが、次回起動時にそれを見つけて再利用します）。繋ぎ先を設定するのは**サーバー側**です。
 
 > 起こさせたくないときは `CHATTER_AGENT_TTS_SPAWN=0`。**新しい話者をダウンロードするときだけは AivisSpeech.app（GUI）が要ります** — 一度入れた音声モデルは GUI から独立しているので、以後はエンジン単体でもそのまま使えます。
 

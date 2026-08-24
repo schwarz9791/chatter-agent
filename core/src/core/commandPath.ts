@@ -14,9 +14,18 @@
  *   の `chatter_spawn_cli` が同じ前提でログを残す。`core/scripts/verify-phase-a.sh` の ⑫ は
  *   この状態を意図的に再現している）。ログインシェルを起動して補う（`zsh -ilc`）方針は
  *   引き続き持ち込まない — **毎 delta 起動されるプロセスの中で、要約のたびにログインシェルを
- *   立ち上げるコストが見合わないため。** 代わりに、PATH に見つからなかったときの保険として
- *   mise/asdf/nvm/volta 等の**既知のインストール先**を `fs.existsSync` だけで（spawn せずに）
- *   順に見る軽量な同期探索に絞る。
+ *   立ち上げるコストが見合わないため。**（★ かつてここには「hook の10秒制約に乗せられない」と
+ *   書いてあったが誤り。この関数が走るのは hook からデタッチ起動された `chatter-agent-speak`
+ *   の中で、hook 自身は spool に1ファイル置いて即 `exit 0` する（`_lib.sh` の
+ *   `chatter_spawn_cli` は `nohup ... &`）。同じ経路で既に `execFileSync` を既定で60秒
+ *   ブロックしうるので、10秒制約はここには掛かっていない。）代わりに、PATH に
+ *   見つからなかったときの保険として mise/asdf/nvm/volta 等の**既知のインストール先**を
+ *   `fs.existsSync` だけで（spawn せずに）順に見る軽量な同期探索に絞る。
+ *
+ * ★ **その保険を使うかは呼び出し側が選ぶ**（`searchKnownBinDirs`）。既知のインストール先は
+ *   「バージョンマネージャが入れた CLI」を想定した並びなので、探すコマンド名によっては
+ *   まったく別のバイナリを掴む。合成エンジン（`server/engineProcess.ts`）がその実例で、
+ *   バイナリ名が literally `run` なため mise / asdf の shim と衝突しうる（→ PR #52 のレビュー）。
  *
  * [#51]: https://github.com/schwarz9791/chatter-agent/issues/51
  */
@@ -30,6 +39,15 @@ export interface FindCommandPathOptions {
   env?: NodeJS.ProcessEnv;
   /** テスト用。既定 `os.homedir()` */
   homeDir?: string;
+  /**
+   * PATH で見つからなかったとき、既知のインストール先（`getKnownBinDirs`）も探すか。既定 `true`。
+   *
+   * ★ **コマンド名が一般的なときは `false` にすること。** あの並びは「バージョンマネージャが
+   *   入れた CLI」を拾うためのもので、`run` のようなありふれた名前だと mise / asdf の shim や
+   *   `~/.local/bin/run` を掴む。要約 CLI（`claude`）は名前が固有で、かつ Finder / Dock 起動で
+   *   PATH が痩せる前提があるので `true` のまま使う。
+   */
+  searchKnownBinDirs?: boolean;
 }
 
 /** CLI がよくインストールされる既知のディレクトリ（PATH に含まれないことがある） */
@@ -76,7 +94,8 @@ function getKnownBinDirs(homeDir: string): string[] {
  * - 展開後に絶対パスならそのまま使う。ユーザーが `aiSummaryCommand` / `ttsSpawnCommand` に
  *   明示した値を信頼し、存在確認はしない（間違っていれば実行側が ENOENT を返すだけで、
  *   `no-command` と `error` を厳密に分けることに実利が無い）
- * - そうでなければ `PATH` の各ディレクトリ → 既知の bin ディレクトリの順に探す。
+ * - そうでなければ `PATH` の各ディレクトリ → 既知の bin ディレクトリ（`searchKnownBinDirs`
+ *   が false ならこちらは見ない）の順に探す。
  *   ファイルが存在するだけでなく**実行ビット**（`X_OK`）も見る。0644 の同名ファイル
  *   （インストールの残骸や補完スタブ）が後続の正しい候補を隠さないようにするため
  * - 見つからなければ `undefined`。呼び出し側（`summaryPipeline` は原文へフォールバック、
@@ -99,7 +118,9 @@ export function findCommandPath(command: string, opts: FindCommandPathOptions = 
     }
   };
   for (const d of (env.PATH || "").split(path.delimiter)) push(d);
-  for (const d of getKnownBinDirs(homeDir)) push(d);
+  if (opts.searchKnownBinDirs ?? true) {
+    for (const d of getKnownBinDirs(homeDir)) push(d);
+  }
 
   for (const dir of dirs) {
     const fullPath = path.join(dir, expanded);

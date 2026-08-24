@@ -300,7 +300,7 @@ Aivis Cloud のレート制限下でバッチングするとき（別 Issue）�
 | [`docs/plugin.md`](./docs/plugin.md) | `plugin/` を触るとき。bash hook の制約、spool 命名、検証時の落とし穴 |
 | [`docs/origin.md`](./docs/origin.md) | cc-mascot 由来のコードを触るとき。移植の対応表、フォーク点、ライセンス義務 |
 | `docs/architecture.md` | **未作成。** 設計書が一次情報。実装で契約が動いたら分離を検討する |
-| [`docs/mascot.md`](./docs/mascot.md) | `apps/chatter-mascot/` を触るとき。**Unity 側で踏んだ罠**（MCP ビルドがダイアログで沈黙する / 透過に要る3設定 / Newtonsoft が `ts` を DateTime にする / ping watchdog が作れない）。セットアップ手順は [`apps/chatter-mascot/SETUP.md`](./apps/chatter-mascot/SETUP.md) |
+| [`docs/mascot.md`](./docs/mascot.md) | `apps/chatter-mascot/` を触るとき。**Unity 側で踏んだ罠**（フレームレートが既定で無制限 / MCP ビルドがダイアログで沈黙する / 透過に要る3設定 / Newtonsoft が `ts` を DateTime にする / `long` 超えを `BigInteger` で持つ / `SendAsync` を `_ = ` で投げると例外が `catch` を素通りする / `AudioSource` 1本では孤児の契約を守れない / `EventSystem` だけではポインタイベントが配送されない / ping watchdog が作れない）。セットアップ手順は [`apps/chatter-mascot/SETUP.md`](./apps/chatter-mascot/SETUP.md) |
 
 ## 開発コマンド
 

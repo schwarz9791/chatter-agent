@@ -78,8 +78,17 @@ namespace ChatterMascot
         /// </summary>
         private readonly Dictionary<string, AudioClip> _clips = new Dictionary<string, AudioClip>();
 
+        /// <summary>
+        /// 終了を待たせるのに使える予算。
+        ///
+        /// ★ 切ること。応答しない相手を掴むと<b>アプリが終了しなくなる</b>。
+        ///   参照実装（<c>core/src/player/index.ts</c>）の <c>step()</c> も予算付きで待っている。
+        /// </summary>
+        private const int ShutdownBudgetMs = 3000;
+
         private float _nextTickAt;
         private bool _shuttingDown;
+        private bool _quitRequested;
 
         /// <summary>
         /// 接続ごとに1回で足りる警告のラッチ。
@@ -100,6 +109,53 @@ namespace ChatterMascot
             if (audioSource == null) audioSource = GetComponent<AudioSource>();
             if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
             audioSource.playOnAwake = false;
+
+            Application.wantsToQuit += OnWantsToQuit;
+        }
+
+        /// <summary>
+        /// 終了を1回だけ保留して、ack を投げ切ってから閉じる。
+        ///
+        /// ★ <b><see cref="OnDestroy"/> では間に合わない。</b> そこから
+        ///   <c>_ = client.CloseAsync()</c> を投げても、await の継続が走る前に
+        ///   プロセスが消える。喋り終えた ack が落ちると、次回起動でその文がもう一度鳴る。
+        ///
+        /// ★ <b>Editor の Play Mode 停止では保留できない。</b> Unity のドキュメントが
+        ///   「The return value of this event is ignored when exiting Play mode in the Editor」と
+        ///   明記している。イベント自体は呼ばれるが <c>false</c> が効かないので、
+        ///   <b>この経路の確認はビルドした <c>.app</c> で行うこと</b>。
+        ///
+        /// ★ 保留できない経路（強制終了 / <c>SIGKILL</c>）では ack が落ちるが、
+        ///   次回起動でその文がもう一度鳴るだけ。<b>取りこぼしより二重発話の方が軽い。</b>
+        /// </summary>
+        private bool OnWantsToQuit()
+        {
+            if (_quitRequested) return true;
+            _quitRequested = true;
+            _ = ShutdownThenQuitAsync();
+            return false;
+        }
+
+        private async Task ShutdownThenQuitAsync()
+        {
+            _shuttingDown = true;
+
+            var client = _client;
+            _client = null;
+            if (client != null)
+            {
+                try
+                {
+                    // 予算内で閉じ切る。返らない相手のためにアプリを終了させないことはしない
+                    await Task.WhenAny(client.CloseAsync(), Task.Delay(ShutdownBudgetMs));
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning("[Mascot] 終了処理で例外が出ました: " + e.Message);
+                }
+            }
+
+            Application.Quit();
         }
 
         private void Start()
@@ -142,8 +198,16 @@ namespace ChatterMascot
             Dispatch(PlaybackEvent.Tick());
         }
 
+        /// <summary>
+        /// 後始末の best-effort。
+        ///
+        /// ★ <b>ack を投げ切るのはここではない</b>（→ <see cref="OnWantsToQuit"/>）。
+        ///   ここはシーンのアンロード、Editor のドメインリロード、
+        ///   <c>wantsToQuit</c> を保留できない経路の受け皿。
+        /// </summary>
         private void OnDestroy()
         {
+            Application.wantsToQuit -= OnWantsToQuit;
             _shuttingDown = true;
             _player?.StopAll();
             foreach (var clip in _clips.Values)

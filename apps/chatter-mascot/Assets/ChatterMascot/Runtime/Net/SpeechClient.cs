@@ -46,6 +46,22 @@ namespace ChatterMascot.Net
         /// <summary>ack をまとめて送るまでの猶予。累積 ack なので最大値の1回で足りる。</summary>
         private const int AckFlushMs = 20;
 
+        /// <summary>
+        /// ack の送信に失敗したあと、次に試すまでの間隔。
+        ///
+        /// ★ 失敗しても <c>_pendingAckSeq</c> は消さない（→ <see cref="FlushAckAsync"/>）ので、
+        ///   これが無いと <c>Tick()</c> のたびに叩き直すことになる。
+        /// </summary>
+        private const int AckRetryMs = 1000;
+
+        /// <summary>
+        /// 終了時、最後の ack を投げ切るのに使う予算。
+        ///
+        /// ★ 参照実装（<c>core/src/player/index.ts</c>）の <c>step()</c> が
+        ///   2.5秒で切っているのと同じ理由。応答しない相手を掴むと終了できなくなる。
+        /// </summary>
+        private const int CloseAckBudgetMs = 2000;
+
         private const int ReceiveBufferSize = 8192;
 
         /// <summary>受け取った生フレーム。パースは呼び出し側。</summary>
@@ -68,6 +84,19 @@ namespace ChatterMascot.Net
         private long? _pendingAckSeq;
         private string _pendingAckEpochId;
         private long _ackDeadlineMs;
+
+        /// <summary>
+        /// 送信中フラグ。<c>ClientWebSocket.SendAsync</c> は同時に2本走らせられない
+        /// （<c>InvalidOperationException</c>）。
+        ///
+        /// ★ <c>SemaphoreSlim</c> は要らない。Unity の <c>SynchronizationContext</c> により
+        ///   継続はメインスレッドで走るので、<see cref="Tick"/> と await の再開が
+        ///   同時に動くことはない。
+        /// </summary>
+        private bool _sending;
+
+        /// <summary>接続ごとに1回で足りる警告のラッチ。壊れた相手だとログが洪水になる。</summary>
+        private bool _warnedAckFailure;
 
         private readonly Random _random = new Random();
 
@@ -139,6 +168,7 @@ namespace ChatterMascot.Net
 
                 _openedAtMs = NowMs();
                 _lastReceivedAtMs = _openedAtMs;
+                _warnedAckFailure = false;
                 Log?.Invoke("接続しました: " + _url);
                 SafeInvoke(Connected, "Connected");
 
@@ -324,7 +354,8 @@ namespace ChatterMascot.Net
         {
             var now = NowMs();
 
-            if (_pendingAckSeq != null && now >= _ackDeadlineMs) FlushAck();
+            // FlushAckAsync は中で全部握るので、fire-and-forget でも fault が漏れない
+            if (_pendingAckSeq != null && now >= _ackDeadlineMs) _ = FlushAckAsync(_cancellation.Token);
 
             var socket = _socket;
             if (socket != null && socket.State == WebSocketState.Open &&
@@ -337,41 +368,99 @@ namespace ChatterMascot.Net
             }
         }
 
-        private void FlushAck()
+        /// <summary>
+        /// 溜めていた ack を送る。
+        ///
+        /// ★ <b>「消してから送る」ではなく「送れてから消す」。</b> 先に消すと、
+        ///   送信が失敗したときに ack が<b>こちら側からも状態機械側からも消えて</b>
+        ///   復旧手段が無くなる。復旧するのはサーバーが同じ entry を再送して
+        ///   重複排除の枝が ack を再発行したときだけで、偶然に頼ることになる。
+        ///
+        /// ★ <b><c>await</c> すること。</b> <c>_ = SendAsync(...)</c> だと、送信中の例外
+        ///   （送信の重なり、<c>State</c> 検査の直後にソケットが落ちた、half-open の書き込み
+        ///   エラー）は<b>返り値の <c>Task</c> に載る</b>ので同期的には投げられず、
+        ///   <c>catch</c> がほとんど発火しない。
+        ///
+        /// ★ <b>失敗しても戻す処理は要らない。</b> 消していないので、次の <see cref="Tick"/> が
+        ///   そのまま再送する。「await の間に <c>DropPendingAck()</c> が走った」
+        ///   「もっと新しい seq が積まれた」「世代が変わった」を見分ける復元処理は、
+        ///   どれか1つ落とすと<b>まだ喋っていない entry を消す ack</b> が飛ぶ。
+        ///   消さなければその分岐が存在しない。
+        /// </summary>
+        /// <param name="token">
+        /// ★ <b>終了時は <c>_cancellation.Token</c> を渡さないこと。</b>
+        ///   <see cref="CloseAsync"/> が直後に <c>Cancel()</c> するので、
+        ///   たった今投げた送信を自分で中断することになる。
+        /// </param>
+        private async Task FlushAckAsync(CancellationToken token)
         {
-            if (_pendingAckSeq == null) return;
+            if (_sending || _pendingAckSeq == null) return;
 
             var socket = _socket;
-            // ★ 送れると分かってから消費すること。先に消すと、状態機械が接続中のつもりで ack を
-            //   出した直後にソケットが閉じていたケースで、ack が両側から消えて復旧手段が無くなる
             if (socket == null || socket.State != WebSocketState.Open) return;
 
             var seq = _pendingAckSeq.Value;
             var epochId = _pendingAckEpochId;
-            _pendingAckSeq = null;
-            _pendingAckEpochId = null;
+            var bytes = Encoding.UTF8.GetBytes(BuildAck(seq, epochId));
 
-            // ★ epoch を必ず載せる。**null にしないこと** — 契約上は「省略」と同じ扱いだが、
-            //   意図せず「世代を名乗らない ack」になる
-            var json = "{\"type\":\"spoken\",\"seq\":" + seq + ",\"epoch\":" + Quote(epochId) + "}";
-            var bytes = Encoding.UTF8.GetBytes(json);
+            _sending = true;
             try
             {
-                _ = socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, _cancellation.Token);
+                await socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, token);
+
+                // ★ 送れてから消す。await の間に積まれたぶん・世代が変わったぶんは残す
+                //   （次の Tick が送る）。DropPendingAck が走っていたら、消す対象がもう無い
+                if (_pendingAckSeq == seq && _pendingAckEpochId == epochId)
+                {
+                    _pendingAckSeq = null;
+                    _pendingAckEpochId = null;
+                }
             }
             catch (Exception e)
             {
-                Warn?.Invoke("ack の送信に失敗しました: " + e.Message);
+                if (!_warnedAckFailure)
+                {
+                    _warnedAckFailure = true;
+                    Warn?.Invoke("ack の送信に失敗しました（次の機会に送り直します）: " + e.Message);
+                }
+                _ackDeadlineMs = NowMs() + AckRetryMs;
             }
+            finally
+            {
+                _sending = false;
+            }
+        }
+
+        /// <summary>
+        /// ★ <c>epoch</c> を必ず載せる。<b><c>null</c> にしないこと</b> —— 契約上は「省略」と
+        ///   同じ扱いだが、意図せず「世代を名乗らない ack」になる。
+        /// </summary>
+        private static string BuildAck(long seq, string epochId)
+        {
+            return "{\"type\":\"spoken\",\"seq\":" + seq + ",\"epoch\":" + Quote(epochId) + "}";
         }
 
         /// <summary>再接続をやめて閉じる。</summary>
         public async Task CloseAsync()
         {
             _closed = true;
+
             // 喋り終えた直後に終了しても、間引き中の ack は投げてから閉じる。
-            // 落とすと次回起動でその文がもう一度鳴る
-            FlushAck();
+            // 落とすと次回起動でその文がもう一度鳴る。
+            //
+            // ★ **Cancel() より前に、_cancellation.Token とは別のトークンで待つこと。**
+            //   同じトークンを渡すと、たった今投げた送信を自分で中断する。
+            using (var budget = new CancellationTokenSource(CloseAckBudgetMs))
+            {
+                try
+                {
+                    await FlushAckAsync(budget.Token);
+                }
+                catch (Exception)
+                {
+                    // 予算切れ。次回起動でその文がもう一度鳴るだけなので、ここで粘らない
+                }
+            }
 
             var socket = _socket;
             _socket = null;

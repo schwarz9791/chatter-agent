@@ -160,6 +160,47 @@ Inspector 上も正常に見える。**ビルドしたアプリのログを読�
 **あれは復旧のためではなく可視化のため**（復旧できないなら、せめて
 「再接続ループが止まりました」と言わせる）。
 
+### ★ `ClientWebSocket.SendAsync` を `_ = ` で投げると、例外が `catch` を素通りする
+
+返るのは `Task` なので、送信中の例外（送信の重なりによる `InvalidOperationException`、
+`State` 検査の直後にソケットが落ちた、half-open の書き込みエラー）は**その `Task` に載る**。
+同期的には投げられないので、囲った `try/catch` はほとんど発火しない。
+
+ack のように「送れたことを前提に手元から消す」値でこれをやると、**ack が
+こちら側からも状態機械側からも消える**。復旧するのはサーバーが同じ entry を再送して
+重複排除の枝が ack を再発行したときだけで、偶然に頼ることになる。
+
+手当ては「**消してから送る」を「送れてから消す」に反転させる**こと
+（`Runtime/Net/SpeechClient.cs` の `FlushAckAsync`）。消さなければ、
+失敗しても次の `Tick` がそのまま再送する。
+
+★ **復元処理（送れなかったら戻す）を書かないこと。** 「await の間に `DropPendingAck()` が
+走った」「もっと新しい seq が積まれた」「世代が変わった」を見分ける必要があり、
+どれか1つ落とすと**まだ喋っていない entry を消す ack** が飛ぶ。消さなければその分岐が無い。
+
+★ **`SendAsync` は同時に2本走らせられない。** `Tick()` は毎フレーム呼ばれるので、
+送信中フラグで直列化する。`SemaphoreSlim` は要らない（Unity の
+`SynchronizationContext` により継続はメインスレッドで走る）。
+
+### ★ 終了時の ack は `Application.wantsToQuit` で保留しないと投げ切れない
+
+`OnDestroy` から `_ = client.CloseAsync()` を投げても、await の継続が走る前に
+プロセスが消える。喋り終えた ack が落ちると、**次回起動でその文がもう一度鳴る**。
+
+`wantsToQuit` で1回だけ `false` を返して終了を保留し、閉じ切ってから
+`Application.Quit()` を呼び直す。予算（3秒）を切ること —— 返らない相手を掴むと
+**アプリが終了しなくなる**。
+
+★ **Editor の Play Mode 停止では保留できない。** Unity のドキュメントが
+「The return value of this event is ignored when exiting Play mode in the Editor」と
+明記している。イベント自体は呼ばれるが `false` が効かないので、
+**この経路の確認はビルドした `.app` でしか取れない**。Editor で ack が落ちても実装の失敗ではない。
+
+★ **iOS / iPadOS では戻り値が効かない**（ドキュメント明記）。**Android での挙動は未確認**（→ #25）。
+
+★ `CloseAsync` の中で最後の ack を待つときは、**`_cancellation.Token` を渡さないこと**。
+直後の `Cancel()` が、たった今投げた送信を自分で中断する。
+
 ### ★ ストリーミングで書かれた WAV は `data` のサイズが 0 のことがある
 
 `0xFFFFFFFF`（Int32 では -1）だけでなく **0 も実体で測り直す**

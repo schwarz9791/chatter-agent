@@ -30,3 +30,29 @@ Portions of this product are derived from that work:
   - VRM の描画・音声合成・リップシンクを担うレンダラー側は移植していない。
     表示側のクライアントアプリを Unity + UniVRM で作り直し、macOS
     デスクトップと Android XR の両方をそこから作る。
+
+---
+
+## ビルド成果物に含まれる第三者ライブラリ
+
+`apps/chatter-mascot/` は次のライブラリを Unity Package Manager 経由で取得する。
+**リポジトリには含まれないが、ビルドした `.app` / `.apk` には含まれる。**
+
+  - UniWindowController (https://github.com/kirurobo/UniWindowController)
+      Copyright (c) kirurobo, licensed under the MIT License.
+      macOS / Windows のウィンドウ透過・最前面・クリック透過を担う。
+      ★ **配布するときは MIT の著作権表示とライセンス条文を同梱する義務がある**
+        （→ issue #16）。パッケージ内の LICENSE.md がそれ。
+
+  - Newtonsoft.Json (com.unity.nuget.newtonsoft-json)
+      Copyright (c) James Newton-King, licensed under the MIT License.
+      Unity が再配布しているものをそのまま使っている。
+
+Unity 本体および Unity が提供するパッケージ（URP / Input System / Test Framework など）は
+Unity Software License に従う。
+
+**`apps/chatter-mascot/` の C# は、すべて chatter-agent で新規に書いたもので、
+cc-mascot 由来のコードは含まない。** 発話キューの状態機械
+（`Assets/ChatterMascot/Runtime/Playback/PlaybackQueue.cs`）は
+`core/src/player/playbackQueue.ts` の移植だが、その TypeScript 自体が
+本リポジトリの著作物である（issue #11 で新規に書いた）。

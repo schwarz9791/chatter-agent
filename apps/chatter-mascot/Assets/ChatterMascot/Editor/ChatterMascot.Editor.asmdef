@@ -1,0 +1,20 @@
+{
+    "name": "ChatterMascot.Editor",
+    "rootNamespace": "ChatterMascot.EditorTools",
+    "references": [
+        "ChatterMascot.Runtime",
+        "Kirurobo.UniWindowController",
+        "Unity.InputSystem"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

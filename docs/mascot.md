@@ -265,8 +265,17 @@ ack のように「送れたことを前提に手元から消す」値でこれ�
 **「seq=N の音声を取れなかったので飛ばします」で全文が無音スキップ**される。
 合成側が data サイズを後追いで埋める書き方に変えただけでこうなる。
 
+★ **測り直しを全チャンクに広げないこと。** 広げると、宣言サイズ 0 のチャンクで
+「末尾まで」が採用されて `offset` が範囲外へ飛び、**その先の `data` に到達しないまま
+「data チャンクがありません」になる**。踏むのは「`data` より手前に長さ 0 の
+`LIST` / `fact` がある WAV」だけだが、**この PR で一度実際に入れて指摘された**。
+
+写し元も測り直しは `data` の分岐の中だけで、**前進には宣言値をそのまま使っている**
+（`core/src/player/audioPlayer.ts`）。長さ 0 のチャンクはそこで 8 バイトだけ進んで走査が続く。
+
 回帰テスト: `WavDecoderTests` の `MeasuresZeroSizedDataChunk` /
-`MeasuresOversizedDataChunk` / `RejectsTrulyEmptyDataChunk`。
+`MeasuresOversizedDataChunk` / `RejectsTrulyEmptyDataChunk` /
+`SkipsZeroSizedChunkBeforeData`。
 
 ### ★ .NET の正規表現は JS より緩い（`$` と `\d`）
 

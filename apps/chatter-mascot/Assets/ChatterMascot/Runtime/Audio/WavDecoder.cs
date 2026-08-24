@@ -52,21 +52,31 @@ namespace ChatterMascot.Audio
                 var declared = BitConverter.ToInt32(wav, offset + 4);
                 var body = offset + 8;
                 // ループ条件（offset + 8 <= wav.Length）から body <= wav.Length が保証されるので、
-                // available は必ず 0 以上。「負なら break」のような検査は要らない
+                // available は必ず 0 以上（下の `declared < 0` は別の話で、前進できるかの検査）
                 var available = wav.Length - body;
 
-                // ★ **宣言された長さが使えないなら実体で測り直す。**
-                //   ストリーミングで書かれた WAV は data のサイズが 0 や 0xFFFFFFFF
-                //   （Int32 では -1）のことがある。参照実装も両方を実体で測り直している
-                //   （core/src/player/audioPlayer.ts の `declared > 0 && declared <= actual`）。
-                // ★ <b>0 を弾かないこと。</b> 合成側が data サイズを後追いで埋める書き方に
-                //   変えただけで、全フレームが「data チャンクがありません」になり、
-                //   **1文も鳴らないまま無言でスキップされる**（AudioFailed → 1回リトライ →
-                //   「seq=N の音声を取れなかったので飛ばします」）
-                var usable = declared > 0 && declared <= available;
-                var chunkSize = usable ? declared : available;
+                if (chunkId == "data")
+                {
+                    dataOffset = body;
 
-                if (chunkId == "fmt " && chunkSize >= 16)
+                    // ★ **実体で測り直すのは data のときだけ。**
+                    //   ストリーミングで書かれた WAV は data のサイズが 0 や 0xFFFFFFFF
+                    //   （Int32 では -1）のことがある。参照実装も data の分岐の中でだけ
+                    //   測り直している（core/src/player/audioPlayer.ts）。
+                    // ★ <b>0 を弾かないこと。</b> 合成側が data サイズを後追いで埋める書き方に
+                    //   変えただけで、全フレームが「data チャンクがありません」になり、
+                    //   **1文も鳴らないまま無言でスキップされる**（AudioFailed → 1回リトライ →
+                    //   「seq=N の音声を取れなかったので飛ばします」）。
+                    // ★ <b>この測り直しを全チャンクに広げないこと。</b> 広げると、
+                    //   <b>data より手前に長さ 0 のチャンク（LIST / fact など）が1つあるだけで</b>
+                    //   走査が末尾まで飛び、data に到達しないまま「data チャンクがありません」になる。
+                    var usable = declared > 0 && declared <= available;
+                    dataLength = usable ? declared : available;
+
+                    // 末尾まで測ったなら、その先にチャンクは残っていない
+                    if (!usable) break;
+                }
+                else if (chunkId == "fmt " && declared >= 16 && body + 16 <= wav.Length)
                 {
                     format = BitConverter.ToUInt16(wav, body);
                     channels = BitConverter.ToUInt16(wav, body + 2);
@@ -74,22 +84,19 @@ namespace ChatterMascot.Audio
                     bitsPerSample = BitConverter.ToUInt16(wav, body + 14);
 
                     // WAVE_FORMAT_EXTENSIBLE は SubFormat の先頭2バイトが実体
-                    if (format == FormatExtensible && chunkSize >= 26)
+                    if (format == FormatExtensible && declared >= 26 && body + 26 <= wav.Length)
                     {
                         format = BitConverter.ToUInt16(wav, body + 24);
                     }
                 }
-                else if (chunkId == "data")
-                {
-                    dataOffset = body;
-                    dataLength = chunkSize;
-                    // 実体で末尾まで測ったなら、その先にチャンクは残っていない。
-                    // 走査を続けると offset が範囲外へ出るだけなので、ここで打ち切る
-                    if (!usable) break;
-                }
 
+                // ★ **前進は宣言値で行う**（data で測り直した値ではない）。写し元も同じ。
+                //   長さ 0 のチャンクはここで 8 バイトだけ進み、走査が続く。
+                // ★ 負の長さ（0xFFFFFFFF）では前進できない。offset が戻ると走査が終わらないので、
+                //   ここで打ち切る（data なら上で測り直して break 済み）。
+                if (declared < 0) break;
                 // チャンクは2バイト境界に整列する
-                offset = body + chunkSize + (chunkSize % 2);
+                offset = body + declared + (declared % 2);
             }
 
             if (channels == 0 || sampleRate <= 0 || bitsPerSample == 0)

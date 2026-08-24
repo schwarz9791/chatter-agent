@@ -149,6 +149,32 @@ namespace ChatterMascot.Tests
             UnityEngine.Object.DestroyImmediate(clip);
         }
 
+        /// <summary>
+        /// ★ <b><c>data</c> より手前に長さ 0 のチャンクがあっても走査が止まらないこと。</b>
+        ///
+        /// 実体での測り直しを<b>全チャンクに広げると</b>、長さ 0 のチャンク1つで
+        /// <c>chunkSize</c> が「末尾まで」になり、<c>offset</c> が範囲外へ飛んで
+        /// <b><c>data</c> に到達しないまま「data チャンクがありません」</b>になる。
+        /// 測り直すのは <c>data</c> の分岐の中だけ、前進は宣言値で（写し元と同じ）。
+        /// </summary>
+        [Test]
+        public void SkipsZeroSizedChunkBeforeData()
+        {
+            var wav = BuildWav(new short[] { 0, 16384 });
+            var withEmptyList = new List<byte>();
+            withEmptyList.AddRange(new ArraySegment<byte>(wav, 0, 12));                  // RIFF/WAVE
+            withEmptyList.AddRange(System.Text.Encoding.ASCII.GetBytes("LIST"));
+            withEmptyList.AddRange(BitConverter.GetBytes(0));                            // ★ 長さ 0
+            withEmptyList.AddRange(new ArraySegment<byte>(wav, 12, wav.Length - 12));    // fmt + data
+
+            string error;
+            var clip = WavDecoder.Decode(withEmptyList.ToArray(), "test", out error);
+            Assert.That(clip, Is.Not.Null, error);
+            Assert.That(clip.samples, Is.EqualTo(2));
+
+            UnityEngine.Object.DestroyImmediate(clip);
+        }
+
         /// <summary>実体で測り直しても中身が無ければ、読めなかったことにする</summary>
         [Test]
         public void RejectsTrulyEmptyDataChunk()

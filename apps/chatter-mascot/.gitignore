@@ -1,0 +1,53 @@
+# Unity が生成するもの。すべて再生成できる
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
+
+# ★ .meta は追跡する。対応するアセットを無視するときだけ一緒に無視する
+!/[Aa]ssets/**/*.meta
+
+# IDE / ソリューション（Unity が毎回書き直す）
+.vs/
+.gradle/
+/[Aa]ssets/Plugins/Editor/JetBrains*
+ExportedObj/
+.consulo/
+*.csproj
+*.unityproj
+*.sln
+*.slnx
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+*.pidb.meta
+*.pdb.meta
+*.mdb.meta
+
+# クラッシュレポート
+sysinfo.txt
+crashlytics-build.properties
+
+# ビルド成果物
+*.apk
+*.aab
+*.unitypackage
+*.app
+
+# Addressables
+/[Aa]ssets/[Aa]ddressable[Aa]ssets[Dd]ata/*/*.bin*
+/[Aa]ssets/[Ss]treamingAssets/aa.meta
+/[Aa]ssets/[Ss]treamingAssets/aa/*

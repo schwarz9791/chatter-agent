@@ -1,0 +1,18 @@
+{
+    "name": "ChatterMascot.Editor",
+    "rootNamespace": "ChatterMascot.EditorTools",
+    "references": [
+        "ChatterMascot.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

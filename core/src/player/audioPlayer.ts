@@ -147,9 +147,13 @@ export function createAudioPlayer(options: AudioPlayerOptions): AudioPlayer {
         running.add(child);
 
         let stderr = "";
-        child.stderr?.on("data", (chunk) => {
+        // ★ setEncoding すること。付けないとチャンク境界で UTF-8 が割れ、日本語のエラーが
+        //   U+FFFD に化ける（`server/engineProcess.ts` が同じ罠を名指ししているのに、
+        //   長らくこちらだけ当たっていなかった → PR #52 のレビュー）
+        child.stderr?.setEncoding("utf-8");
+        child.stderr?.on("data", (chunk: string) => {
           // 数百バイトあれば原因は分かる。ハングした相手に無限に溜めない
-          if (stderr.length < 2048) stderr += String(chunk);
+          if (stderr.length < 2048) stderr += chunk;
         });
 
         // ★ error / exit / タイムアウトの3経路すべてで、必ず一度だけ決着させる。

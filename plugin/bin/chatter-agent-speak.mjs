@@ -144,6 +144,9 @@ function createDefaultConfig() {
 		ttsBaseUrl: "http://127.0.0.1:10101",
 		ttsSpeakerId: 888753760,
 		synthesisTimeoutMs: 3e4,
+		ttsSpawn: true,
+		ttsSpawnCommand: "",
+		ttsSpawnArgs: [],
 		synthesisLookahead: 3,
 		audioFetchTimeoutMs: 45e3,
 		playerCommand: "afplay",
@@ -365,6 +368,18 @@ const SPECS = {
 	synthesisTimeoutMs: {
 		env: "CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS",
 		parse: parseTimeoutMs
+	},
+	ttsSpawn: {
+		env: "CHATTER_AGENT_TTS_SPAWN",
+		parse: parseBoolean
+	},
+	ttsSpawnCommand: {
+		env: "CHATTER_AGENT_TTS_SPAWN_COMMAND",
+		parse: parseNonEmptyString
+	},
+	ttsSpawnArgs: {
+		env: "CHATTER_AGENT_TTS_SPAWN_ARGS",
+		parse: parseStringList
 	},
 	synthesisLookahead: {
 		env: "CHATTER_AGENT_SYNTHESIS_LOOKAHEAD",
@@ -1543,9 +1558,14 @@ function toSpeechSentences(text, options = {}) {
 }
 
 //#endregion
-//#region src/summarizer/claudeCli.ts
+//#region src/core/commandPath.ts
 /**
-* 要約 CLI（`claude`）のコマンド解決・引数組み立て・実行。
+* 外部コマンドの絶対パスを探す。**spawn せずに** `fs.existsSync` だけで判定する。
+*
+* ★ 元は `summarizer/claudeCli.ts` にあった（要約 CLI 専用の探索として書いた）。
+*   [#51] で `server/engineProcess.ts` が合成エンジンの実行パスを解決するのにも要るようになり、
+*   「要約 CLI のファイルからエンジンのパス解決を借りる」形を避けてここへ出した。
+*   **ロジックは移動時に変えていない。**
 *
 * ★ 移植元（cc-mascot の `detect.ts`）は Finder/Dock 起動の Electron アプリ向けに、
 *   ログインシェル PATH の解決（`zsh -ilc`、最大5秒）と `--version` の spawn を検出のたびに
@@ -1562,6 +1582,16 @@ function toSpeechSentences(text, options = {}) {
 *   ブロックしうるので、10秒制約はここには掛かっていない。）代わりに、PATH に
 *   見つからなかったときの保険として mise/asdf/nvm/volta 等の**既知のインストール先**を
 *   `fs.existsSync` だけで（spawn せずに）順に見る軽量な同期探索に絞る。
+*
+* ★ **「既知の場所を探さない」オプションは置かない。** PR #52 のレビューで
+*   「`run` のようなありふれた名前が shim を掴む」と指摘され一度足したが、**実測すると
+*   `getKnownBinDirs` の 7 件は 7/7 とも既に PATH に載っていた**（`~/.local/bin` `~/bin`
+*   `/opt/homebrew/bin` `/usr/local/bin` `~/.volta/bin` mise/asdf の shims）。切っても
+*   PATH 経由で同じものに当たるので**穴が1つも塞がらない**まま、「PATH だけ見るから安全」という
+*   誤った安心だけが残る。名前解決の危うさは、**解決結果を呼び出し側が名指しでログに出す**ことで
+*   扱う（→ `server/engineProcess.ts` の `resolvedFrom`）。
+*
+* [#51]: https://github.com/schwarz9791/chatter-agent/issues/51
 */
 /** CLI がよくインストールされる既知のディレクトリ（PATH に含まれないことがある） */
 function getKnownBinDirs(homeDir) {
@@ -1588,13 +1618,14 @@ function getKnownBinDirs(homeDir) {
 *   `parseNonEmptyString`（config.ts）がそのまま受理するが、展開しないと下の絶対パス判定に
 *   当たらず、PATH の各ディレクトリと結合されて絶対に見つからないパスになる
 *   （`~user/` のような他ユーザーのホーム形式は対応不要）
-* - 展開後に絶対パスならそのまま使う。ユーザーが `aiSummaryCommand` に明示した値を信頼し、
-*   存在確認はしない（間違っていれば `runClaudeCli` が ENOENT で `error` を返すだけで、
+* - 展開後に絶対パスならそのまま使う。ユーザーが `aiSummaryCommand` / `ttsSpawnCommand` に
+*   明示した値を信頼し、存在確認はしない（間違っていれば実行側が ENOENT を返すだけで、
 *   `no-command` と `error` を厳密に分けることに実利が無い）
 * - そうでなければ `PATH` の各ディレクトリ → 既知の bin ディレクトリの順に探す。
 *   ファイルが存在するだけでなく**実行ビット**（`X_OK`）も見る。0644 の同名ファイル
 *   （インストールの残骸や補完スタブ）が後続の正しい候補を隠さないようにするため
-* - 見つからなければ `undefined`。呼び出し側（`summaryPipeline`）が原文にフォールバックする
+* - 見つからなければ `undefined`。呼び出し側（`summaryPipeline` は原文へフォールバック、
+*   `engineProcess` は spawn を諦めて 503 運用に落ちる）が決める
 */
 function findCommandPath(command, opts = {}) {
 	const homeDir = opts.homeDir ?? os.homedir();
@@ -1621,6 +1652,19 @@ function findCommandPath(command, opts = {}) {
 		} catch {}
 	}
 }
+
+//#endregion
+//#region src/summarizer/claudeCli.ts
+/**
+* 要約 CLI（`claude`）の引数組み立てと実行。
+*
+* ★ **コマンドの解決（`findCommandPath`）は `core/commandPath.ts` にある。**
+*   [#51] で合成エンジンの実行パス解決にも要るようになり、「要約 CLI のファイルから
+*   エンジンのパス解決を借りる」形を避けて出した。PATH が痩せる問題への方針
+*   （`zsh -ilc` を持ち込まず、既知のインストール先を同期で見る）はそちらのヘッダにある。
+*
+* [#51]: https://github.com/schwarz9791/chatter-agent/issues/51
+*/
 /**
 * 要約 CLI の引数を組み立てる純粋関数（`execFileSync` を呼ばずに単体テストできるように分離）。
 *

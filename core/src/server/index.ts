@@ -22,6 +22,7 @@ import { getServerLockDir, getSpeechQueueDir } from "../core/paths";
 import { createSpeechQueue } from "../core/speechQueue";
 import { createVoicevoxClient, flattenStyles, hasStyle } from "../tts/voicevoxClient";
 import { createAudioStore } from "./audioStore";
+import { describeEngineSkip, resolveEngineSpawn, startEngine, type EngineProcess } from "./engineProcess";
 import { createDispatcher, type Dispatcher } from "./dispatcher";
 import { createAudioHttpServer } from "./httpServer";
 import { createWsServer } from "./wsServer";
@@ -85,6 +86,15 @@ const ENGINE_RECHECK_INTERVAL_MS = 60_000;
 const SPEAKER_HINT_LIMIT = 20;
 
 /**
+ * 疎通確認の結果。
+ *
+ * ★ **boolean にしないこと。** 意味は「`listSpeakers` に繋がったか」であって
+ *   「話者 ID が実在するか」ではない。`true`/`false` だと後者と読み違えられ、
+ *   読み違えたまま直すと**エンジンの二重起動**になる（→ `checkEngine`）。
+ */
+type EngineProbe = "reachable" | "unreachable";
+
+/**
  * 終了処理の1ステップを制限時間つきで実行する。
  * まとめて1つの watchdog に任せると「諦めた」ことしか分からず、
  * どのリソースが閉じられなかったのか追えなくなるため、名指しで報告して先へ進む。
@@ -123,6 +133,14 @@ function installShutdown(cleanup: () => Promise<void>): void {
 
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
+  // ★ SIGHUP も拾う。**端末のウィンドウを閉じる**のは日常操作なのに、既定動作のまま死ぬと
+  //   cleanup が走らず、`detached` で起こしたエンジンが孤児として残る（端末の SIGHUP は
+  //   別プロセスグループのエンジンには届かない）。→ PR #52 のレビュー
+  //
+  // ★ **2回目の Ctrl-C（`process.exit(130)`）と watchdog（`process.exit(1)`）は今も
+  //   cleanup を通らない。** 「早く死ぬ」を優先した既存の設計で、残った孤児は次回起動時の
+  //   疎通確認（条件3）が再利用する
+  process.on("SIGHUP", onSignal);
   // 常駐プロセスなので1件の rejection / 例外で落とさない
   process.on("unhandledRejection", (err) => console.error("[Server] Unhandled rejection:", err));
   process.on("uncaughtException", (err) => console.error("[Server] Uncaught exception:", err));
@@ -160,21 +178,105 @@ async function main(): Promise<void> {
   const ttsFor = (voice: { baseUrl: string; speakerId: number }) =>
     createVoicevoxClient({ ...voice, timeoutMs: config.get("synthesisTimeoutMs") });
 
+  let lastEngineCheckAt = Number.NEGATIVE_INFINITY;
+
   /**
-   * 合成が失敗したときの診断。`ENGINE_RECHECK_INTERVAL_MS` に1回だけ実際に走る。
+   * **間引かずに**必ず見に行く。診断ログもここで出る。
    *
    * ★ これが「無音の原因が分からない」への本命の答え。`ttsSpeakerId` を間違えていると、
    *   ここが候補一覧を出す。エンジンが落ちているなら、繋がらない旨と `baseUrl` を出す。
+   *
+   * ★ 起動時のエンジン起動判定（条件3）はこちらを直接呼ぶ。`recheckEngine` 経由にすると
+   *   60秒の間引きに引っかかって「繋がらないのに繋がった扱い」になりうる。
    */
-  let lastEngineCheckAt = Number.NEGATIVE_INFINITY;
+  const probeEngine = async (): Promise<EngineProbe> => {
+    // ★ await の前に進めること。同時に走った2本が二重に診断を出さないようにする
+    lastEngineCheckAt = Date.now();
+    const voice = currentVoice();
+    return await checkEngine(ttsFor(voice), voice.speakerId);
+  };
+
+  /**
+   * 「音声は出ないがテキストは流れる」という結論。**`checkEngine` ではなくここが出す。**
+   * 起動時のプローブは直後に spawn するかもしれないので、結論を出せるのは状況を知っている側だけ。
+   */
+  const warnAudioUnavailable = (): void => {
+    console.warn("[Server] 音声の GET は 503 を返します。テキストの配信は続きます");
+  };
+
+  /** 合成が失敗したときの診断。`ENGINE_RECHECK_INTERVAL_MS` に1回だけ実際に走る */
   const recheckEngine = async (): Promise<void> => {
     if (!config.get("ttsEnabled")) return;
-    const now = Date.now();
-    if (now - lastEngineCheckAt < ENGINE_RECHECK_INTERVAL_MS) return;
-    lastEngineCheckAt = now;
+    if (Date.now() - lastEngineCheckAt < ENGINE_RECHECK_INTERVAL_MS) return;
+    // 合成が**実際に失敗した**あとの診断なので、繋がらなければ結論まで出してよい
+    if ((await probeEngine()) === "unreachable") warnAudioUnavailable();
+  };
 
-    const voice = currentVoice();
-    await checkEngine(ttsFor(voice), voice.speakerId);
+  /**
+   * 起こしたエンジン。**起こさなかった場合は `null` のまま**（GUI が上げている / スタブが居る /
+   * `ttsSpawn=false` / リモート / コマンドが無い）。終了処理はこれを見て止める。
+   */
+  let engine: EngineProcess | null = null;
+  /** 終了処理が始まったか。**起動判定が spawn する直前に見る**（下の `startEngineIfNeeded`） */
+  let stopping = false;
+
+  /**
+   * エンジンが居なければ起こす（[#51]）。**起こすだけで、起動を待たない。**
+   *
+   * 条件は5つで、全部満たすときだけ起こす:
+   * 1. `ttsEnabled` / 2. `ttsSpawn` / 3. **起動時の疎通確認に失敗した** /
+   * 4. `ttsBaseUrl` がループバック / 5. コマンドが解決できた（4と5は `resolveEngineSpawn`）
+   *
+   * ★ **条件3が要。** 「まず繋いでみて、居なければ起こす」ことで、GUI 併用・verify のスタブ・
+   *   別ポート運用のすべてが追加の分岐なしで素通りする（ポート衝突の判定コードが要らない）。
+   *
+   * [#51]: https://github.com/schwarz9791/chatter-agent/issues/51
+   */
+  const startEngineIfNeeded = async (): Promise<void> => {
+    if (!config.get("ttsEnabled")) return; // 条件1（理由は上の起動ログで既出）
+
+    // ★ 条件3。この1回は spawn の有無に関わらず必ず走り、話者 ID の診断もここで出る
+    if ((await probeEngine()) === "reachable") return;
+
+    if (!config.get("ttsSpawn")) {
+      // ★ 黙らない。切ったまま忘れた人の症状が「無音」だけになるのが最悪の失敗の仕方
+      console.log("[Server] ttsSpawn=false: 合成エンジンは起こしません");
+      warnAudioUnavailable();
+      return;
+    }
+
+    const plan = resolveEngineSpawn({
+      baseUrl: config.get("ttsBaseUrl"),
+      command: config.get("ttsSpawnCommand"),
+      args: config.get("ttsSpawnArgs"),
+    });
+    if ("skip" in plan) {
+      // 条件4 / 条件5。どちらも従来どおりの 503 運用に落ちるだけ。
+      // ★ 文面は `engineProcess.ts` が組む（既知候補の一覧を持っているのがあちらなので）
+      for (const line of describeEngineSkip(plan)) console.warn(line);
+      warnAudioUnavailable();
+      return;
+    }
+
+    // ★ **この判定と spawn の間に await を挟まないこと。** 挟むと「終了処理が始まった後に
+    //   spawn する」窓ができ、detached の子がサーバーより長生きする（孤児のエンジンが残る）
+    // ★ 名前から引いた実行ファイルは**必ず名指しする。** PATH には `~/.local/bin` も
+    //   mise / asdf の shims も普通に載っている（実測で 7/7）ので、`run` のようなありふれた名前は
+    //   別のバイナリに当たりうる。禁止はしない（`ttsSpawnCommand: "docker"` でコンテナの
+    //   エンジンを起こす運用が潰れる）が、**黙って読み替えない**（→ PR #52 のレビュー）
+    if (plan.resolvedFrom !== undefined) {
+      console.warn(`[Server] ttsSpawnCommand "${plan.resolvedFrom}" を名前から解決しました: ${plan.command}`);
+      console.warn("[Server]   意図した実行ファイルでなければ、絶対パスで指定してください");
+    }
+
+    if (stopping) return;
+    engine = startEngine(plan);
+
+    // ★ **起動を待たない。** ここで疎通を確かめ直すと、モデルロード中なので必ず失敗し、
+    //   「繋がりません」という嘘の警告が出る。代わりに間引きを巻き戻して、最初の合成失敗で
+    //   `recheckEngine` が即座に診断を出せるようにする。起動そのものに失敗した場合は
+    //   `startEngine` の exit ハンドラが終了コードと stderr の末尾を出す
+    lastEngineCheckAt = Number.NEGATIVE_INFINITY;
   };
 
   const audioStore = createAudioStore({
@@ -256,12 +358,26 @@ async function main(): Promise<void> {
   //
   // ★ 話者 ID の不一致は `/audio_query` の 4xx になり、全文が 503 になって**無音**になる。
   //   症状から設定ミスに辿り着けないので、起動時に候補を並べておく。
-  void recheckEngine();
+  //
+  // ★ エンジンを起こすのもここ（#51）。**`Ready` より後ろのまま**にすること —— 前に出すと
+  //   起動が疎通待ちで伸び、上の理由がそのまま当てはまる状態に戻る
+  void startEngineIfNeeded().catch((err: unknown) => console.error("[Server] 合成エンジンの起動判定に失敗:", err));
 
   installShutdown(async () => {
+    // ★ 先に立てること。起動判定がまだ走っていれば、spawn する直前で引き返す
+    stopping = true;
     clearInterval(poll);
     // wsServer.close() は httpServer も閉じる（ws は options.server を閉じない → wsServer.ts）
     await step("websocket / http server", () => wsServer.close());
+    // ★ **入口を閉じてから道具を捨てる。** 先にエンジンを落とすと、受理済みの
+    //   `GET /audio/…` が最後の1件だけ 503 に化ける。
+    //
+    // ★ **step は2つまで。** `SHUTDOWN_STEP_TIMEOUT_MS`(2500) × 2 = 5000ms で
+    //   `SHUTDOWN_TIMEOUT_MS`(6000) の内側に収まるが、3つ目を足すと 7500ms になって
+    //   watchdog に食われる。この Issue で枠を使い切った
+    await step("合成エンジン", async () => {
+      await engine?.stop();
+    });
     // ★ isStale() は所有印が読めるなら pid の生死だけで判定する（core/lock.ts）。
     //   このサーバーは常駐で staleMs（既定60秒）をとうに超えて動き続けるが、
     //   pid が生きている限り自分のロックを他プロセスに奪われることはない。
@@ -281,25 +397,32 @@ async function main(): Promise<void> {
  *   `ttsSpeakerId` の診断が永久に出なくなる — これが「無音なのにログが数行しかない」の真因。
  *   合成が失敗するたびに呼び直す（間隔は `ENGINE_RECHECK_INTERVAL_MS` で間引く）。
  */
-async function checkEngine(tts: ReturnType<typeof createVoicevoxClient>, speakerId: number): Promise<void> {
+async function checkEngine(tts: ReturnType<typeof createVoicevoxClient>, speakerId: number): Promise<EngineProbe> {
   let speakers;
   try {
     speakers = await tts.listSpeakers();
   } catch (err) {
     console.warn(`[Server] 音声合成エンジンに繋がりません (${tts.baseUrl}): ${String(err)}`);
-    console.warn("[Server] 音声の GET は 503 を返します。テキストの配信は続きます");
-    return;
+    // ★ **「503 になる」の結論はここで出さない。** 起動時のプローブから呼ばれたときは、
+    //   直後にエンジンを起こすかもしれず、その場合この行は嘘になる（実機ログで、
+    //   spawn する経路でだけ必ず出ていた）。結論は状況を知っている呼び出し側が出す
+    //   （`warnAudioUnavailable`）。→ PR #52 のレビュー
+    return "unreachable";
   }
 
   if (hasStyle(speakers, speakerId)) {
     console.log(`[Server] 音声合成エンジンに繋がりました (${tts.baseUrl}, speaker=${speakerId})`);
-    return;
+    return "reachable";
   }
 
   console.warn(`[Server] ttsSpeakerId=${speakerId} はこのエンジンに存在しません。音声は 503 になります`);
   for (const style of flattenStyles(speakers).slice(0, SPEAKER_HINT_LIMIT)) {
     console.warn(`[Server]   ${style.id}  ${style.label}`);
   }
+  // ★ **話者は無いが、エンジンには繋がっている。** ここを "unreachable" にすると、
+  //   スタブや GUI が生きているのに `ttsSpeakerId` だけ間違えている状態（verify-tts の
+  //   シナリオ⑫がまさにこれ）で**エンジンを二重に起こす**
+  return "reachable";
 }
 
 main().catch((err: unknown) => {

@@ -51,6 +51,12 @@ const env = {
   CHATTER_AGENT_HOST: "127.0.0.1",
   CHATTER_AGENT_PORT: String(PORT),
   CHATTER_AGENT_SPEECH_QUEUE_MAX_ENTRIES: String(QUEUE_MAX),
+  // ★ このスクリプトだけ TTS 系の env を渡していないので、サーバーは既定の
+  //   127.0.0.1:10101 に繋ぎに行って失敗する。#51 以降はそこで**本物の AivisSpeech を
+  //   起こしてしまう**（開発機には実体がある）ので、明示的に切る。
+  //   `CHATTER_AGENT_TTS_ENABLED=false` では逃げられない —— 下の「音声の相対パスが
+  //   載っている」がフレームの audio を検査しているため
+  CHATTER_AGENT_TTS_SPAWN: "0",
 };
 
 const queueSize = () => fs.readdirSync(queueDir).filter((f) => f.endsWith(".json")).length;

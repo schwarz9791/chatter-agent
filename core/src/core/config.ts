@@ -80,6 +80,42 @@ export interface ChatterAgentConfig {
    */
   synthesisTimeoutMs: number;
 
+  /**
+   * エンジンが居ないときに、サーバーが自分で起こすか（[#51]）。
+   *
+   * ★ **起こすだけで、起動を待たない。** `[Server] Ready` は今までどおり先に出て、合成は
+   *   今までどおり `GET /audio/…` が来たときに走る。間に合わなければ `503`。
+   *   #29 の柱（エンジンが落ちてもテキストの配信は止まらない）を崩さないため
+   *   （→ CLAUDE.md「絶対に守ること」7）。
+   *
+   * ★ **起動時に疎通できたら起こさない。** GUI（AivisSpeech.app）が既に上げている場合や、
+   *   verify のスタブが居る場合に二重起動しないための条件で、ポート衝突の判定コードが要らない。
+   *
+   * ★ **落ちても再起動しない**（初版）。起動失敗ループの方が害が大きい。
+   *
+   * [#51]: https://github.com/schwarz9791/chatter-agent/issues/51
+   */
+  ttsSpawn: boolean;
+  /**
+   * 起こすエンジンの実行パス。空なら AivisSpeech.app の既知の場所を順に見る
+   * （`/Applications/…` → `~/Applications/…`。→ `server/engineProcess.ts`）。
+   *
+   * ★ 明示した値が見つからないとき、既知の候補へ**フォールバックしない**。
+   *   指定を黙って別のバイナリに読み替えるのは最悪の失敗の仕方になる。
+   *
+   * ★ **非絶対パス（`docker` など）も受ける**が、名前から解決したときは起動前に名指しで
+   *   ログに出る。PATH には `~/.local/bin` も mise / asdf の shims も載っているので、
+   *   `run` のようなありふれた名前は別のバイナリに当たりうる。確実にしたいなら絶対パスで書く。
+   */
+  ttsSpawnCommand: string;
+  /**
+   * 起こすときの引数。空なら `ttsBaseUrl` から `--host <host> --port <port>` を組む。
+   *
+   * ★ **指定すると導出は行われない**（追加ではなく置換）。自分で書くなら `--host` と
+   *   `--port` も自分で書くこと。「足りない分だけ補う」形は挙動が読めなくなる。
+   */
+  ttsSpawnArgs: string[];
+
   // ── 以下は発話クライアント（player）だけが読む ─────────────────────────
 
   /**
@@ -205,6 +241,9 @@ export function createDefaultConfig(): ChatterAgentConfig {
     ttsBaseUrl: "http://127.0.0.1:10101",
     ttsSpeakerId: 888753760,
     synthesisTimeoutMs: 30_000,
+    ttsSpawn: true,
+    ttsSpawnCommand: "",
+    ttsSpawnArgs: [],
     synthesisLookahead: 3,
     audioFetchTimeoutMs: 45_000,
     playerCommand: "afplay",
@@ -425,6 +464,13 @@ const SPECS = {
   ttsBaseUrl: { env: "CHATTER_AGENT_TTS_URL", parse: makeUrlParser(["http:", "https:"]) },
   ttsSpeakerId: { env: "CHATTER_AGENT_TTS_SPEAKER_ID", parse: parseNonNegativeInt },
   synthesisTimeoutMs: { env: "CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS", parse: parseTimeoutMs },
+  ttsSpawn: { env: "CHATTER_AGENT_TTS_SPAWN", parse: parseBoolean },
+  ttsSpawnCommand: { env: "CHATTER_AGENT_TTS_SPAWN_COMMAND", parse: parseNonEmptyString },
+  // ★ `parsePlayerArgs` を流用しないこと。あれは `{file}` を含まない列を弾き、空も弾くが、
+  //   ここでは**空に「`ttsBaseUrl` から導出する」という意味がある**（意味が逆）。
+  //   `parseStringList` は空入力で `[]` を返すので、`CHATTER_AGENT_TTS_SPAWN_ARGS=` が
+  //   既定どおり導出に落ちる。issue #51 の表は `parsePlayerArgs` と書いてあるが誤り
+  ttsSpawnArgs: { env: "CHATTER_AGENT_TTS_SPAWN_ARGS", parse: parseStringList },
   synthesisLookahead: { env: "CHATTER_AGENT_SYNTHESIS_LOOKAHEAD", parse: parseNonNegativeInt },
   audioFetchTimeoutMs: { env: "CHATTER_AGENT_AUDIO_FETCH_TIMEOUT_MS", parse: parseTimeoutMs },
   playerCommand: { env: "CHATTER_AGENT_PLAYER_COMMAND", parse: parseNonEmptyString },

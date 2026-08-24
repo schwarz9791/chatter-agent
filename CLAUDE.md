@@ -28,7 +28,7 @@ hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公�
 | ディレクトリ | 内容 | 状態 |
 |---|---|---|
 | `plugin/` | Claude Code プラグイン（bash hook） | **実装済み。** 実機で動作確認している |
-| `core/` | `chatter-agent-core`（CLI + WebSocket/HTTP サーバー + 発話 CLI） | **実装済み。** `summarizer/`（AI要約、既定OFF）と**サーバー合成**（[#29](https://github.com/schwarz9791/chatter-agent/issues/29)）も含めて完了 |
+| `core/` | `chatter-agent-core`（CLI + WebSocket/HTTP サーバー + 発話 CLI） | **実装済み。** `summarizer/`（AI要約、既定OFF）・**サーバー合成**（[#29](https://github.com/schwarz9791/chatter-agent/issues/29)）・**エンジンの spawn**（[#51](https://github.com/schwarz9791/chatter-agent/issues/51)）も含めて完了 |
 | `core/src/player/` | `chatter-agent-player`（WebSocket → 音声を GET → 再生 → ack） | **実装済み**（[#11](https://github.com/schwarz9791/chatter-agent/issues/11)）。**プロトコルの参照実装。捨てない** |
 | `apps/chatter-mascot/` | 表示側アプリ（**Unity + UniVRM**。macOS 常駐 + Android XR を1プロジェクトで） | 未作成 |
 | `docs/` | 作業規約 | protocol / core / plugin / origin の4本 |
@@ -125,6 +125,7 @@ speech/<seq>.json            配信キュー。1文1ファイル
 chatter-agent-server         キューを読んで WebSocket 配信（テキスト。即座に seq 順）
   ▲  │                       ack を受けたぶんを消す
   │  └──▶ GET /audio/<epoch>-<seq>.wav    **同じポート。** 取りに来られた時点で AivisSpeech に合成させる
+  │                          （エンジンが居なければ起動時に起こす。待たない → #51）
   │ ack
   ├──▶ chatter-agent-player  発話 CLI。音声を GET → afplay。**プロトコルの参照実装**
   ▼
@@ -279,6 +280,11 @@ single-flight なので終わればキャッシュに入り、取り直しが即
 「クライアントの取得タイムアウトはサーバーの合成タイムアウトより長く」という
 **設定間の暗黙の順序制約が要らない**。
 
+★ **サーバーがエンジンを spawn するようになっても（[#51](https://github.com/schwarz9791/chatter-agent/issues/51)）、
+この節は変わらない。** spawn は「エンジンが居ないなら起こす」だけで、**起動を待たない** —— `Ready` は
+先に出るし、合成は今までどおり `GET /audio/…` が来たときに走り、間に合わなければ `503`。
+「押し出す形（合成が終わってからフレームを配る）に戻った」わけではない。
+
 ★ **`prompt` を配信順で追い越させないこと。** #29 の Issue 本文にある
 「`prompt` は来た瞬間に単独で合成して割り込ませる」は**合成リクエストの優先度**の話で、
 Aivis Cloud のレート制限下でバッチングするとき（別 Issue）に効く要件。配信順を変えると
@@ -313,13 +319,18 @@ npm run verify:phase-a   # spool → 記録 + 配信キュー（payload を実�
 npm run verify:phase-b   # 配信キュー → WebSocket（実サーバーを起動して確認）
 npm run verify:tts       # server の合成と GET /audio/（エンジンは要らない。CI で回る）
 npm run verify:player    # WebSocket → 音声取得 → 再生 → ack（エンジンも音も要らない。CI で回る）
-npm run start:server
-npm run start:player     # 耳で確認する。AivisSpeech を起動しておくこと
+npm run start:server     # エンジンが居なければサーバーが起こす（#51）
+npm run start:player     # 耳で確認する
 ```
 
-**発話を耳で聞くには AivisSpeech.app を単体で起動する**（既定の接続先は `http://127.0.0.1:10101`）。
+**発話を耳で聞くのに AivisSpeech.app を起動しておく必要は無い**（[#51](https://github.com/schwarz9791/chatter-agent/issues/51)）。
+エンジンが居なければ `chatter-agent-server` が起こし、サーバーを止めれば一緒に落ちる
+（`SIGKILL` / 2回目の `Ctrl-C` / 終了処理の watchdog では残るが、次回起動時に再利用される）。
+**インストールだけしておけばよい**（既定の接続先は `http://127.0.0.1:10101`）。
+手で起こす必要があるのは、別ホストのエンジンに繋ぐときと `ttsSpawn: false` にしたときだけ。
 cc-mascot が `--port 8564` で spawn するエンジンとは別物なので、そちらに繋ぐなら
-`CHATTER_AGENT_TTS_URL=http://127.0.0.1:8564` を渡す。
+`CHATTER_AGENT_TTS_URL=http://127.0.0.1:8564` を渡す（ループバックなので、居なければこちらも起こしに行く）。
+★ **話者を増やすときは GUI が要る**（エンジン単体だとモデル追加は API か `Models/` への手動配置になる）。
 ★ **`tts*` を読むのは `chatter-agent-server` の方**（[#29](https://github.com/schwarz9791/chatter-agent/issues/29) で読み手が移った）。
 player 側には渡さなくてよい。
 

@@ -1,8 +1,10 @@
 using System.Collections.Generic;
+using Kirurobo;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.InputSystem.UI;
 
 namespace ChatterMascot.EditorTools
 {
@@ -38,13 +40,19 @@ namespace ChatterMascot.EditorTools
                 }
 
                 var scene = EditorSceneManager.OpenScene(path, OpenSceneMode.Single);
-                var touched = EnsureEventSystem();
-                if (touched)
+
+                var fixes = new List<string>();
+                if (EnsureEventSystem()) fixes.Add("EventSystem");
+                if (EnsureInputModule()) fixes.Add("InputSystemUIInputModule");
+                if (EnsurePhysicsRaycaster()) fixes.Add("PhysicsRaycaster");
+                foreach (var name in EnsureDragHandles()) fixes.Add("UniWindowMoveHandle(" + name + ")");
+
+                if (fixes.Count > 0)
                 {
                     EditorSceneManager.MarkSceneDirty(scene);
                     EditorSceneManager.SaveScene(scene);
                     changed++;
-                    Debug.Log($"[Fixups] {path} に EventSystem を足しました");
+                    Debug.Log($"[Fixups] {path} に足しました: {string.Join(", ", fixes)}");
                 }
                 else
                 {
@@ -89,9 +97,11 @@ namespace ChatterMascot.EditorTools
         /// クリック透過が一切効かなくなる。ウィンドウの透過そのものは成立するので、
         /// <b>ビルドしたアプリのログを読むまで気づけない</b>。
         ///
-        /// 入力モジュール（<c>InputSystemUIInputModule</c> など）は足していない。
-        /// UniWindowController が使うのは <c>RaycastAll</c> だけで、
-        /// UI の操作が要るのは #16 から。
+        /// ★ <b><c>EventSystem</c> だけではポインタイベントは1つも配送されない</b>
+        ///   （→ <see cref="EnsureInputModule"/>）。クリック透過が動いていたのは
+        ///   <c>UniWindowController.HitTestByRaycast</c> が <c>RaycastAll</c> の後ろに
+        ///   <c>Physics.Raycast</c> のフォールバックを持っているからで、
+        ///   <b>EventSystem が仕事をしていた証拠ではない</b>。
         /// </summary>
         private static bool EnsureEventSystem()
         {
@@ -100,6 +110,76 @@ namespace ChatterMascot.EditorTools
             var go = new GameObject("EventSystem");
             go.AddComponent<EventSystem>();
             return true;
+        }
+
+        /// <summary>
+        /// ★ <b>入力モジュールが無いと、<c>EventSystem</c> があってもポインタイベントは
+        ///   1つも配送されない。</b> <c>IDragHandler</c> は永久に呼ばれず、
+        ///   <b>ドラッグでウィンドウが動かない</b>（エラーも出ない）。
+        ///
+        /// <c>ProjectSettings.asset</c> の <c>activeInputHandler: 1</c>（Input System のみ）なので
+        /// <c>StandaloneInputModule</c> ではなくこちらを足す。
+        /// </summary>
+        private static bool EnsureInputModule()
+        {
+            var eventSystem = Object.FindFirstObjectByType<EventSystem>();
+            if (eventSystem == null) return false;
+            if (eventSystem.GetComponent<BaseInputModule>() != null) return false;
+
+            eventSystem.gameObject.AddComponent<InputSystemUIInputModule>();
+            return true;
+        }
+
+        /// <summary>
+        /// ★ <b>3D のコライダーに <c>EventSystem</c> のポインタイベントを届けるのに要る。</b>
+        ///   これが無いと <c>RaycastAll</c> はレイキャスタを1つも持たず、
+        ///   <c>UniWindowMoveHandle</c> の <c>IDragHandler</c> が呼ばれない。
+        ///
+        /// ★ ヒットテスト（クリック透過）の結果は変わらない。今までは
+        ///   <c>UniWindowController</c> の <c>Physics.Raycast</c> フォールバックで当たっていたのが、
+        ///   <c>RaycastAll</c> の側で当たるようになるだけ。
+        /// </summary>
+        private static bool EnsurePhysicsRaycaster()
+        {
+            var camera = Camera.main;
+            if (camera == null) return false;
+            if (camera.GetComponent<PhysicsRaycaster>() != null) return false;
+
+            camera.gameObject.AddComponent<PhysicsRaycaster>();
+            return true;
+        }
+
+        /// <summary>
+        /// <b>掴める（＝クリック透過で「実体」とみなされる）ものは、ドラッグで動かせる。</b>
+        ///
+        /// ★ <b>対象を名前で決め打ちにしない。</b> 判定は「<c>Collider</c> を持っているか」——
+        ///   クリック透過のヒットテストが <c>Physics.Raycast</c> で見ているのと同じ条件なので、
+        ///   <b>掴める領域とドラッグできる領域が定義上ずれない</b>。
+        ///   #17 で Cube が VRM に置き換わっても、クリック透過のために <c>Collider</c> を
+        ///   付ける以上、そのままここに乗る。
+        ///
+        /// ★ 位置の永続化は入れていない（起動のたびに中央へ戻る）。マルチモニタ・解像度変更・
+        ///   画面外からの復帰の扱いが要るので #16 でまとめて設計する。
+        ///
+        /// <c>UniWindowMoveHandle</c> は UniWindowController 同梱（MIT）。自前で書かないのは、
+        /// <b>macOS の Retina 座標系の手当てが既に入っている</b>ため
+        /// （<c>eventData.position</c> の系とウィンドウ座標系でスケールが一致しなくなる。
+        /// このプロジェクトは <c>macRetinaSupport: 1</c>）。
+        /// </summary>
+        private static IEnumerable<string> EnsureDragHandles()
+        {
+            var added = new List<string>();
+            if (Object.FindFirstObjectByType<UniWindowController>() == null) return added;
+
+            foreach (var collider in Object.FindObjectsByType<Collider>(FindObjectsSortMode.None))
+            {
+                var go = collider.gameObject;
+                if (go.GetComponent<UniWindowMoveHandle>() != null) continue;
+
+                go.AddComponent<UniWindowMoveHandle>();
+                added.Add(go.name);
+            }
+            return added;
         }
     }
 }

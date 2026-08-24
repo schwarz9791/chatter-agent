@@ -86,6 +86,47 @@ batchmode はダイアログを出さないので、この失敗の仕方をし�
 > HDR との相性なので、**Unity や URP のバージョンが上がったら再確認すること。**
 > 「効いた組み合わせ」を仕様として扱わない。
 
+### ★ `EventSystem` があってもポインタイベントは配送されない
+
+**入力モジュール（`InputSystemUIInputModule`）とレイキャスタ（3D なら `PhysicsRaycaster`）が
+別に要る。** どちらも無いと `IDragHandler` / `IPointerDownHandler` は永久に呼ばれず、
+**エラーも出ない**。
+
+★ **クリック透過が動いていたのは EventSystem のおかげではない。**
+`UniWindowController.HitTestByRaycast` は `EventSystem.RaycastAll` を呼んだあと、
+ヒットが無ければ **`Physics.Raycast` に落ちる**。レイキャスタが1つも登録されていなかったので、
+実際にはこの後者だけで動いていた。`PhysicsRaycaster` を足すと前者で当たるようになるが、
+ヒットテストの結果は変わらない。
+
+`ProjectSettings.asset` の `activeInputHandler: 1`（Input System のみ）なので、
+`StandaloneInputModule` ではなく `InputSystemUIInputModule` を足す。
+`SceneFixups` が面倒を見る。
+
+### ★ マスコットのドラッグ移動は UniWindowController 同梱の `UniWindowMoveHandle` を使う
+
+自前で書かないのは、**macOS の Retina 座標系の手当てが既に入っている**ため:
+
+```csharp
+// UniWindowMoveHandle.cs
+#if UNITY_EDITOR_OSX || UNITY_STANDALONE_OSX
+    // eventData.position の系と、ウィンドウ座標系でスケールが一致しなくなってしまう
+    _dragStartedPosition = _uniwinc.windowPosition - _uniwinc.cursorPosition;
+#else
+    _dragStartedPosition = eventData.position;
+#endif
+```
+
+このプロジェクトは `macRetinaSupport: 1` なので、自前実装だと必ず踏む。
+修飾キー中は動かさない / 最大化中は無効 / ドラッグ中だけヒットテストを切って戻す、も入っている。
+
+★ **対象を名前で決め打ちにしない。** `SceneFixups.EnsureDragHandles()` の判定は
+「`Collider` を持っているか」——クリック透過のヒットテストが `Physics.Raycast` で見ているのと
+同じ条件なので、**掴める領域とドラッグできる領域が定義上ずれない**。#17 で Cube が VRM に
+置き換わっても、クリック透過のために `Collider` を付ける以上そのまま乗る。
+
+★ **位置の永続化は入れていない**（起動のたびに中央へ戻る）。マルチモニタ・解像度変更・
+画面外からの復帰の扱いが要るので #16 でまとめて設計する。
+
 ### ★ シーンに `EventSystem` が無いとクリック透過が死ぬ
 
 `UniWindowController` の Raycast ヒットテストは `EventSystem.current.RaycastAll` を呼ぶ。

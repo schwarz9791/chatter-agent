@@ -2,7 +2,9 @@
     "name": "ChatterMascot.Editor",
     "rootNamespace": "ChatterMascot.EditorTools",
     "references": [
-        "ChatterMascot.Runtime"
+        "ChatterMascot.Runtime",
+        "Kirurobo.UniWindowController",
+        "Unity.InputSystem"
     ],
     "includePlatforms": [
         "Editor"

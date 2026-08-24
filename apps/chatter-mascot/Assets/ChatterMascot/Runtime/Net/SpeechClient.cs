@@ -454,6 +454,7 @@ namespace ChatterMascot.Net
             //
             // ★ **Cancel() より前に、_cancellation.Token とは別のトークンで待つこと。**
             //   同じトークンを渡すと、たった今投げた送信を自分で中断する。
+            var pendingAtClose = _pendingAckSeq;
             using (var budget = new CancellationTokenSource(CloseAckBudgetMs))
             {
                 try
@@ -463,6 +464,24 @@ namespace ChatterMascot.Net
                 catch (Exception)
                 {
                     // 予算切れ。次回起動でその文がもう一度鳴るだけなので、ここで粘らない
+                }
+            }
+
+            // ★ **終了処理が何をしたかを残すこと。** 保留中の ack があったかどうかは
+            //   再生終了から数十 ms の窓でしか変わらないので、**ログが無いと
+            //   「終了処理が働いたのか、そもそも出番が無かったのか」を後から区別できない**
+            //   （実機確認でここに詰まった）。送れなかった側は次回起動での二重発話に
+            //   直結するので、必ず出す。
+            if (pendingAtClose != null)
+            {
+                if (_pendingAckSeq == null)
+                {
+                    Log?.Invoke($"終了時に保留していた ack を送りました (seq={pendingAtClose})");
+                }
+                else
+                {
+                    Warn?.Invoke($"終了時に ack を送れませんでした (seq={pendingAtClose})。" +
+                                 "次回起動でその文がもう一度鳴ります");
                 }
             }
 

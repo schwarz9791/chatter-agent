@@ -277,7 +277,12 @@ namespace ChatterMascot.Audio
         {
         }
 
-        private static float TimeoutSecondsFor(int durationMs)
+        /// <summary>
+        /// 再生を諦めるまでの秒数。参照実装の <c>playbackTimeoutMs</c> と同じ形。
+        ///
+        /// ★ <c>public</c> なのはテストで固定するため（<c>MascotRunner.IsParked</c> と同じ扱い）。
+        /// </summary>
+        public static float TimeoutSecondsFor(int durationMs)
         {
             // ★ 0 は「長さ 0」ではなく「不明」（→ WavHeader.DurationMs）
             if (durationMs <= 0) return FallbackTimeoutSeconds;

@@ -464,7 +464,13 @@ voice をプールして **`Stop()` の効果を自分の再生ぶんに限定�
   「採番のやり直しが、音が鳴り終わる前に繰り返されている」ときだけなので、
   **本数そのものが原因を指す材料**になる
 - **`Current`（最後に鳴らし始めた voice）を公開している。** #17 のリップシンクが
-  `GetOutputData` を読む先を1つに決めるため
+  `GetOutputData` を読む先を1つに決めるため。
+  ★ **ただし macOS ではこの前提が成立しない。** 再生の実体が `AfplaySpeechPlayer` になり、
+  **音は `afplay` 子プロセスの中にあって `GetOutputData` に相当するものが存在しない**。
+  `MascotRunner._player` も `ISpeechPlayer` 型なので、`Current` はインターフェース越しに届かない。
+  → #17 では **`Prepare` の時点で WAV から振幅エンベロープ（20ms ごとの RMS）を作って
+  ハンドルに載せる**方式に寄せることになる。`WavDecoder.TryReadHeader` で既にサンプル位置と
+  フォーマットが分かるので追加のパースは要らず、**3つの実装すべてで同じコードが使える**
 - **設定の写し取り（`CopySettings`）を増やしたらここにも書くこと。**
   #17 でミキサーや 3D 配置を入れて写し漏らすと、症状は「**孤児だけ音量が違う**」のような、
   再現条件が採番のやり直しに縛られた形になる
@@ -557,6 +563,30 @@ Unity 内蔵オーディオが有効なままだと Unity 側がデバイスを�
 ★ **時計は `Time.realtimeSinceStartupAsDouble` を使う**（`DateTimeOffset.UtcNow` ではなく）。
 猶予は差分でしか見ないので、**時計が巻き戻ると手放したまま戻らない**。
 
+#### プロジェクト設定まわりで踏んだこと
+
+★ **Unity は YAML に無い `SerializeField` に C# のイニシャライザ値を残す。** `MascotRunner` に
+`audioIdleSuspendMs = 5000` を足したがシーンを保存し直していないので、`Mascot.unity` の
+`MonoBehaviour` ブロックにこのキーは**無い**。それでも実測では 5000 が効いていた
+（キーが無い状態のビルドで「無音が続いたので…」のログが12回出た）。型の既定値 0 が
+当たるわけではない。★ ただし**シーンを一度でも保存すると値が焼かれる**ので、
+既定を変えるときはシーンも見ること。
+
+★ **`AudioManager.asset` に Unity 6 の新キーが4つ増えている**（`m_EnableOutputSuspension: 1` /
+`m_AudioFoundation: 0` / `m_OutputChannelLayout: 2` / `m_OutputSamplingRate: 48000`）。
+`BuildScript` が `m_DisableAudio` を書き換えるとき `AssetDatabase.SaveAssets()` が走り、
+Unity がアセット全体を再シリアライズしてテンプレートに無かったフィールドを既定値で書き出したもの。
+
+- **値はすべて Unity 6000.5.8f1 の既定値**。Editor バイナリの `-enhancedAudioFoundation` の
+  ヘルプが `Default: 48000` / `Stereo (default)` と明記している
+- **環境固有の値ではない**。この Mac の既定出力デバイスは 44100（`system_profiler`）で、
+  48000 とは一致しない
+- ★ **`m_AudioFoundation: 0`（Classic）なので、`m_OutputSamplingRate` と
+  `m_OutputChannelLayout` は無視される**（"If it is disabled, sampling rate and channel layout
+  parameters will be ignored."）。Android で AivisSpeech の 24kHz が余計にリサンプルされる、
+  ということは起きない
+- 従来設定の `m_SampleRate: 0`（システム既定に従う）は**別のキーで、変更されていない**
+
 ★ **`mixerSuspend` 系の API は `mixerResume` と同じスレッドから呼ぶ必要がある。**
 `Update()` も `Execute()` も `PlayAsync` の継続も Unity のメインスレッドなので自然に
 満たせるが、実装側にも検査を置くこと。壊れ方が「たまに無音」なので静かに壊れさせない。
@@ -579,13 +609,20 @@ Unity 内蔵オーディオが有効なままだと Unity 側がデバイスを�
 失敗したときに返すのは「読めなかった」だけで**理由が残らない**。無音の原因を残す窓を
 潰さないために、渡す前に `TryReadHeader` で見る。
 
-### ★ 音声はメモリ上の `AudioClip` にする。ファイルに落とさない
+### ★ ストリーム再生にしない（音声の持ち方はプラットフォームで違う）
 
 契約の「ローカルに落としてから再生すること」は**ストリーム再生の禁止**であって、
-ファイルを要求しているわけではない。参照実装（Node の player）が一時ファイルを使うのは
-`afplay` に渡すためで、Unity は `AudioClip` をメモリに持てる。
+ファイルを要求しているわけではない。**先に全部受け取ってから鳴らす**のが趣旨。
 
-状態機械の `DiscardAudio` コマンドは **`Object.Destroy(clip)`** に読み替える。
+音声の実体は再生の実装ごとに違う（→ 上の「★ 無音時にオーディオ出力デバイスを掴まない」）:
+
+| | 音声の持ち方 | `DiscardAudio` の実体 |
+|---|---|---|
+| macOS（`AfplaySpeechPlayer`） | 一時ファイル（`afplay` に渡すため） | `File.Delete` |
+| Android / iOS（`AudioClipPlayer`） | メモリ上の `AudioClip` | `Object.Destroy(clip)` |
+
+どちらも状態機械からは `object` の不透明なハンドルで、`DiscardAudio` コマンドは
+**`ISpeechPlayer.Discard`** に読み替える。
 
 ★ **`UnityWebRequestMultimedia.GetAudioClip` を URL に直接使わないこと。** ストリーム再生に
 なりうるうえ、**503 / 404 の本文（診断の理由）が取れない**。無音の原因を残す唯一の窓なので落とせない。

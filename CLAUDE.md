@@ -30,7 +30,7 @@ hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公�
 | `plugin/` | Claude Code プラグイン（bash hook） | **実装済み。** 実機で動作確認している |
 | `core/` | `chatter-agent-core`（CLI + WebSocket/HTTP サーバー + 発話 CLI） | **実装済み。** `summarizer/`（AI要約、既定OFF）・**サーバー合成**（[#29](https://github.com/schwarz9791/chatter-agent/issues/29)）・**エンジンの spawn**（[#51](https://github.com/schwarz9791/chatter-agent/issues/51)）も含めて完了 |
 | `core/src/player/` | `chatter-agent-player`（WebSocket → 音声を GET → 再生 → ack） | **実装済み**（[#11](https://github.com/schwarz9791/chatter-agent/issues/11)）。**プロトコルの参照実装。捨てない** |
-| `apps/chatter-mascot/` | 表示側アプリ（**Unity + UniVRM**。macOS 常駐 + Android XR を1プロジェクトで） | **土台と発話は実装済み**（[#12](https://github.com/schwarz9791/chatter-agent/issues/12)）。WebSocket → 音声取得 → 再生 → ack の全経路と EditMode テスト95件。**macOS ビルドで透過も成立**。**無音時にオーディオデバイスを手放す**（macOS は `afplay` を1発話1プロセス + ビルド時だけ `Disable Unity Audio`、Android は `AudioSettings.Mobile.StopAudioOutput()`）。VRM 表示は [#17](https://github.com/schwarz9791/chatter-agent/issues/17) |
+| `apps/chatter-mascot/` | 表示側アプリ（**Unity + UniVRM**。macOS 常駐 + Android XR を1プロジェクトで） | **土台と発話は実装済み**（[#12](https://github.com/schwarz9791/chatter-agent/issues/12)）。WebSocket → 音声取得 → 再生 → ack の全経路と EditMode テスト112件。**macOS ビルドで透過も成立**。**無音時にオーディオデバイスを手放す**（macOS は `afplay` を1発話1プロセス + ビルド時だけ `Disable Unity Audio`、Android は `AudioSettings.Mobile.StopAudioOutput()`）。VRM 表示は [#17](https://github.com/schwarz9791/chatter-agent/issues/17) |
 | `docs/` | 作業規約 | protocol / core / plugin / origin の4本 |
 | `.github/workflows/` | CI（typecheck / lint / format / bundle / test / verify） | 稼働中 |
 

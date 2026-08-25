@@ -108,6 +108,13 @@ namespace ChatterMascot.Audio
         ///
         /// ★ <b>多voice 化で「どこから読むか」が曖昧になるのを先に潰すためにある。</b>
         ///   #17 のリップシンクは <c>GetOutputData</c> をここから読む。
+        ///
+        /// ★ <b>ただし macOS ではこの前提が成立しない。</b> 再生の実体が
+        ///   <c>AfplaySpeechPlayer</c> になり、<b>音は子プロセスの中にあって
+        ///   <c>GetOutputData</c> に相当するものが存在しない</b>。<c>MascotRunner</c> が持つのも
+        ///   <see cref="ISpeechPlayer"/> 型なので、これはインターフェース越しに届かない。
+        ///   → #17 では <b><c>Prepare</c> の時点で WAV から振幅エンベロープを作ってハンドルに
+        ///   載せる</b>方式に寄せることになる（3つの実装すべてで同じコードが使える）。
         /// </summary>
         public AudioSource Current { get; private set; }
 

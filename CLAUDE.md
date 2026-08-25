@@ -30,7 +30,7 @@ hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公�
 | `plugin/` | Claude Code プラグイン（bash hook） | **実装済み。** 実機で動作確認している |
 | `core/` | `chatter-agent-core`（CLI + WebSocket/HTTP サーバー + 発話 CLI） | **実装済み。** `summarizer/`（AI要約、既定OFF）・**サーバー合成**（[#29](https://github.com/schwarz9791/chatter-agent/issues/29)）・**エンジンの spawn**（[#51](https://github.com/schwarz9791/chatter-agent/issues/51)）も含めて完了 |
 | `core/src/player/` | `chatter-agent-player`（WebSocket → 音声を GET → 再生 → ack） | **実装済み**（[#11](https://github.com/schwarz9791/chatter-agent/issues/11)）。**プロトコルの参照実装。捨てない** |
-| `apps/chatter-mascot/` | 表示側アプリ（**Unity + UniVRM**。macOS 常駐 + Android XR を1プロジェクトで） | **土台と発話は実装済み**（[#12](https://github.com/schwarz9791/chatter-agent/issues/12)）。WebSocket → 音声取得 → 再生 → ack の全経路と EditMode テスト75件。**macOS ビルドで透過も成立**。VRM 表示は [#17](https://github.com/schwarz9791/chatter-agent/issues/17) |
+| `apps/chatter-mascot/` | 表示側アプリ（**Unity + UniVRM**。macOS 常駐 + Android XR を1プロジェクトで） | **土台と発話は実装済み**（[#12](https://github.com/schwarz9791/chatter-agent/issues/12)）。WebSocket → 音声取得 → 再生 → ack の全経路と EditMode テスト112件。**macOS ビルドで透過も成立**。**無音時にオーディオデバイスを手放す**（macOS は `afplay` を1発話1プロセス + ビルド時だけ `Disable Unity Audio`、Android は `AudioSettings.Mobile.StopAudioOutput()`）。VRM 表示は [#17](https://github.com/schwarz9791/chatter-agent/issues/17) |
 | `docs/` | 作業規約 | protocol / core / plugin / origin の4本 |
 | `.github/workflows/` | CI（typecheck / lint / format / bundle / test / verify） | 稼働中 |
 
@@ -300,7 +300,7 @@ Aivis Cloud のレート制限下でバッチングするとき（別 Issue）�
 | [`docs/plugin.md`](./docs/plugin.md) | `plugin/` を触るとき。bash hook の制約、spool 命名、検証時の落とし穴 |
 | [`docs/origin.md`](./docs/origin.md) | cc-mascot 由来のコードを触るとき。移植の対応表、フォーク点、ライセンス義務 |
 | `docs/architecture.md` | **未作成。** 設計書が一次情報。実装で契約が動いたら分離を検討する |
-| [`docs/mascot.md`](./docs/mascot.md) | `apps/chatter-mascot/` を触るとき。**Unity 側で踏んだ罠**（フレームレートが既定で無制限 / MCP ビルドがダイアログで沈黙する / 透過に要る3設定 / Newtonsoft が `ts` を DateTime にする / `long` 超えを `BigInteger` で持つ / `SendAsync` を `_ = ` で投げると例外が `catch` を素通りする / `AudioSource` 1本では孤児の契約を守れない / `EventSystem` だけではポインタイベントが配送されない / ping watchdog が作れない）。セットアップ手順は [`apps/chatter-mascot/SETUP.md`](./apps/chatter-mascot/SETUP.md) |
+| [`docs/mascot.md`](./docs/mascot.md) | `apps/chatter-mascot/` を触るとき。**Unity 側で踏んだ罠**（フレームレートが既定で無制限 / MCP ビルドがダイアログで沈黙する / 透過に要る3設定 / Newtonsoft が `ts` を DateTime にする / `long` 超えを `BigInteger` で持つ / `SendAsync` を `_ = ` で投げると例外が `catch` を素通りする / `AudioSource` 1本では孤児の契約を守れない / **無音でも macOS の出力デバイスを掴み続ける**（Bluetooth の電力） / `EventSystem` だけではポインタイベントが配送されない / ping watchdog が作れない）。セットアップ手順は [`apps/chatter-mascot/SETUP.md`](./apps/chatter-mascot/SETUP.md) |
 
 ## 開発コマンド
 

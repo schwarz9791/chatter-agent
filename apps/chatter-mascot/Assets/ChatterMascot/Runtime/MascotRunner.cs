@@ -46,6 +46,21 @@ namespace ChatterMascot
         [Tooltip("音を出す AudioSource。未設定なら自分に付いているものを使う")]
         [SerializeField] private AudioSource audioSource;
 
+        /// <summary>
+        /// 無音がこれだけ続いたらオーディオ出力デバイスを手放す。
+        ///
+        /// ★ <b>効き方はプラットフォームで違う</b>（→ <c>SpeechPlayerFactory</c>）。
+        ///   <b>macOS では何もしない</b> —— 1発話 = 1プロセスなので、鳴り終われば
+        ///   OS がデバイスを解放する。手放すものが残っていない。
+        ///   <b>Android / iOS でだけ</b> <c>AudioSettings.Mobile.StopAudioOutput()</c> が走る。
+        ///
+        /// ★ <b>短くしすぎないこと。</b> 文と文の間で往復すると、Bluetooth では
+        ///   A2DP の張り直しが毎文入って<b>かえって悪化する</b>。長すぎる害は
+        ///   省電力が薄れるだけ（無害側）。
+        /// </summary>
+        [Tooltip("無音がこれだけ続いたら出力デバイスを手放す（ミリ秒）。0 以下で無効")]
+        [SerializeField] private int audioIdleSuspendMs = 5000;
+
         [Header("キュー")]
         [Tooltip("再生中の1件を含めて、いくつ先まで音声を取りに行くか")]
         [SerializeField] private int lookahead = 3;
@@ -67,16 +82,19 @@ namespace ChatterMascot
         private PlaybackState _state;
         private SpeechClient _client;
         private AudioFetcher _fetcher;
-        private AudioClipPlayer _player;
+        private ISpeechPlayer _player;
+        private AudioIdleGate _idleGate;
 
         /// <summary>
         /// 取得済みの音声。キーは <c>"{epoch}:{seq}"</c>。
         ///
+        /// ★ <b>中身は再生の実体ごとに違う</b>（<c>ISpeechPlayer.Prepare</c> が作る不透明なハンドル）。
+        ///   解放は <c>_player.Discard</c> に任せ、ここでは寿命だけを見る。
         /// ★ <b><c>seq</c> だけをキーにしないこと。</b> 採番のやり直しを跨いだ瞬間に別の文と衝突する。
         /// ★ <b>サーバーの epoch をそのままキーに使わないこと</b>（外部由来の文字列）。
         ///   状態機械が読み替えた<b>プロセス内の連番</b>を使う。
         /// </summary>
-        private readonly Dictionary<string, AudioClip> _clips = new Dictionary<string, AudioClip>();
+        private readonly Dictionary<string, object> _handles = new Dictionary<string, object>();
 
         /// <summary>
         /// 終了を待たせるのに使える予算。
@@ -167,6 +185,20 @@ namespace ChatterMascot
             //   Update() の Tick も Dispatch も何も起こさず、**ウィンドウは出て、
             //   フレームレート上限も効いて、接続先のログすら出ない**。
             //   Player.log に埋もれたスタックトレース1本以外に手がかりが残らない
+            // ★ 測定や切り分けのためにコマンドラインから差し替えられる。繋がらない URL を渡せば
+            //   「サーバーに一度も繋がない状態」を**本番シーンのまま**作れる（→ docs/mascot.md）。
+            //   専用のシーンを複製すると、#17 で VRM が入った瞬間に本番を代表しなくなり、
+            //   **しかも失敗が見えない**（変わらずビルドでき、変わらず計測でき、
+            //   ただ別のアプリを測っているだけになる）。
+            //
+            //   open Build/ChatterMascot.app --args -serverUrl ws://127.0.0.1:9
+            var overridden = CommandLineArgument("-serverUrl");
+            if (!string.IsNullOrEmpty(overridden))
+            {
+                Debug.Log($"[Mascot] serverUrl をコマンドラインで上書きします: \"{overridden}\"");
+                serverUrl = overridden;
+            }
+
             if (!IsValidServerUrl(serverUrl))
             {
                 Debug.LogError($"[Mascot] serverUrl が不正です: \"{serverUrl}\"。" +
@@ -184,8 +216,20 @@ namespace ChatterMascot
             };
             _state = new PlaybackState(options);
 
-            _player = new AudioClipPlayer(audioSource);
+            _player = SpeechPlayerFactory.Create(audioSource);
             _player.Warn += message => Debug.LogWarning("[Mascot] " + message);
+            _idleGate = new AudioIdleGate(audioIdleSuspendMs)
+            {
+                // ★ **手放せない実装ではゲートごと止める。** 呼んでも何も起きない実装で回すと、
+                //   何も手放していないのに「手放しました」とログに出続け、次のデバッグを誤誘導する
+                Enabled = audioIdleSuspendMs > 0 && _player.CanSuspendOutput,
+            };
+            if (!_idleGate.Enabled)
+            {
+                Debug.Log(audioIdleSuspendMs > 0
+                    ? "[Mascot] このプラットフォームでは出力デバイスを手放せないので、アイドル判定は動かしません"
+                    : "[Mascot] audioIdleSuspendMs が 0 以下なのでアイドル判定は動かしません");
+            }
             // 音声は WebSocket と同じ authority から取る。サーバーは自分の到達アドレスを
             // 知らないので、フレームには相対パスしか載らない
             _fetcher = new AudioFetcher(AudioFetcher.DeriveAudioBaseUrl(serverUrl), audioFetchTimeoutMs);
@@ -209,6 +253,13 @@ namespace ChatterMascot
             // ack の間引き送出と、無受信 watchdog
             _client?.Tick();
 
+            // ★ **下の間引き（TickIntervalSeconds）に乗せないこと。** 判定は加算と比較だけなので
+            //   毎フレームで足りるし、間引きに乗せると Resume が最大1秒遅れる
+            if (_idleGate != null)
+            {
+                ApplyIdle(_idleGate.Tick(IdleNowMs(), _player == null ? 0 : _player.ActiveCount, InFlightCount()));
+            }
+
             if (Time.realtimeSinceStartup < _nextTickAt) return;
             _nextTickAt = Time.realtimeSinceStartup + TickIntervalSeconds;
             Dispatch(PlaybackEvent.Tick());
@@ -226,11 +277,11 @@ namespace ChatterMascot
             Application.wantsToQuit -= OnWantsToQuit;
             _shuttingDown = true;
             _player?.StopAll();
-            foreach (var clip in _clips.Values)
+            foreach (var handle in _handles.Values)
             {
-                if (clip != null) Destroy(clip);
+                _player?.Discard(handle);
             }
-            _clips.Clear();
+            _handles.Clear();
 
             var client = _client;
             _client = null;
@@ -273,6 +324,133 @@ namespace ChatterMascot
             Dispatch(PlaybackEvent.Received(frame));
         }
 
+        /// <summary>
+        /// ゲートの指示を実行する。
+        ///
+        /// ★ <b>ここから例外を出さないこと。</b> <see cref="Dispatch"/> は
+        ///   <c>foreach (var command in Reduce(...)) Execute(command)</c> で、この呼び出しは
+        ///   <c>FetchAudio</c> の処理の中にいる。例外が抜けると<b>そのバッチの残りのコマンド
+        ///   （<c>Ack</c> / <c>Play</c> / <c>DiscardAudio</c>）が全部落ち</b>、
+        ///   <c>FetchAudioAsync</c> も始まらないので head が <c>Pending</c> のまま
+        ///   in-flight 無しになる —— <b>キューが恒久停止する</b>。
+        /// </summary>
+        private void ApplyIdle(IdleAction action)
+        {
+            if (_player == null) return;
+            switch (action)
+            {
+                case IdleAction.Suspend:
+                    try
+                    {
+                        _player.SuspendOutput();
+                        Debug.Log("[Mascot] 無音が続いたのでオーディオ出力を止めました");
+                    }
+                    catch (Exception e)
+                    {
+                        // ★ 手放せなかったのに「手放した」状態が残ると実態とズレる。かといって
+                        //   状態だけ戻すと**猶予のたびに失敗を繰り返してログが埋まる**ので、
+                        //   一度失敗したら機能ごと止める。掴んだままになるだけで発話は無事
+                        if (_idleGate != null) _idleGate.Enabled = false;
+                        Debug.LogWarning("[Mascot] オーディオ出力を止められませんでした。" +
+                                         "以後この機能を無効にします: " + e.Message);
+                    }
+                    break;
+
+                case IdleAction.Resume:
+                    try
+                    {
+                        _player.ResumeOutput();
+                        Debug.Log("[Mascot] オーディオ出力を掴み直しました");
+                    }
+                    catch (Exception e)
+                    {
+                        // ★ **握りつぶして続行する。** ゲートの _suspended は既に false へ
+                        //   倒れている（Wake() が Resume を返す前に落としている）ので、
+                        //   状態は「掴んでいる」側にある。次の発話でもう一度 resume を試す
+                        Debug.LogWarning("[Mascot] オーディオ出力を掴み直せませんでした: " + e.Message);
+                    }
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// アイドル判定の時計。
+        ///
+        /// ★ <b>壁時計（<c>DateTimeOffset.UtcNow</c>）を使わないこと。</b> 猶予は差分でしか
+        ///   見ないので、時計が巻き戻ると<b>手放したまま戻らない</b>（無音が続く）。
+        ///   <c>realtimeSinceStartup</c> は単調。
+        /// </summary>
+        private static long IdleNowMs()
+        {
+            return (long)(Time.realtimeSinceStartupAsDouble * 1000.0);
+        }
+
+        /// <summary>
+        /// キューに残っていて<b>まもなく鳴る</b>件数。孤児を含める —— 採番のやり直しで
+        /// <c>Items</c> から外れた再生中の音がそこにいる（契約1）。
+        ///
+        /// ★★ <b>時計を取り違えないこと。</b> <c>RetryAfter</c> は <see cref="Dispatch"/> と同じ
+        ///   <b>壁時計</b>（Unix epoch ミリ秒 ≈ 1.7兆）で置かれる。アイドル判定の
+        ///   <see cref="IdleNowMs"/> は<b>単調時計</b>（起動からの経過 ≈ 数万）で桁が違うので、
+        ///   そちらで比較すると<b>全 item が「停車中」に見えて常に手放し、1文目の頭が切れる</b>。
+        ///   だからここで壁時計を取る（引数で受け取らない）。
+        /// </summary>
+        private int InFlightCount()
+        {
+            if (_state == null) return 0;
+
+            var wallNow = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var count = _state.Orphans.Count;
+            foreach (var item in _state.Items.Values)
+            {
+                if (IsParked(item, wallNow)) continue;
+                count++;
+            }
+            return count;
+        }
+
+        /// <summary>
+        /// 503 のバックオフで停車中か。
+        ///
+        /// ★ <b>503 は意図的に <c>Attempts</c> を消費しない</b>（→ <c>QueueItem.RetryAfter</c>）ので、
+        ///   合成エンジンが落ちている間、item は <c>Pending</c> + <c>RetryAfter</c> のまま
+        ///   <b>永久に <c>Items</c> に残る</b>。これを「まもなく鳴る」と数えると、
+        ///   <b>無音がいちばん長く続く状況で出力デバイスを掴みっぱなしになる</b> ——
+        ///   この機能がいちばん得をするはずの場面で効かない。
+        ///
+        /// ★ <c>public static</c> なのはテストで固定するため（private では固定できない）。
+        /// </summary>
+        public static bool IsParked(QueueItem item, long wallNowMs)
+        {
+            return item != null && item.Status == ItemStatus.Pending && wallNowMs < item.RetryAfter;
+        }
+
+        /// <summary>
+        /// 起動引数を読む。<c>BuildScript.Argument()</c> と同じ形。
+        ///
+        /// ★ 取れない環境でも<b>起動を止めないこと</b>。ここで throw すると
+        ///   「動いて見える死体」ですらなく、接続先のログも出ないまま落ちる。
+        /// </summary>
+        private static string CommandLineArgument(string name)
+        {
+            string[] args;
+            try
+            {
+                args = Environment.GetCommandLineArgs();
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+            if (args == null) return null;
+
+            for (var i = 0; i < args.Length - 1; i++)
+            {
+                if (args[i] == name) return args[i + 1];
+            }
+            return null;
+        }
+
         private void Dispatch(PlaybackEvent ev)
         {
             if (_state == null) return;
@@ -285,11 +463,15 @@ namespace ChatterMascot
             switch (command.Kind)
             {
                 case PlaybackCommandKind.FetchAudio:
+                    // ★ **再生の直前ではなくここで掴み直す。** GET はサーバーに合成させるので
+                    //   数百ms〜数秒かかり、先読みのぶんだけ再生よりさらに手前で走る。
+                    //   デバイスの掴み直し（Bluetooth なら A2DP の張り直し）はその裏に隠れる
+                    if (_idleGate != null) ApplyIdle(_idleGate.NoteWorkIncoming());
                     _ = FetchAudioAsync(command.Epoch, command.Seq, command.Path);
                     break;
 
                 case PlaybackCommandKind.Play:
-                    _ = PlayAsync(command.Epoch, command.Seq, command.Audio as AudioClip);
+                    _ = PlayAsync(command.Epoch, command.Seq, command.Audio);
                     break;
 
                 case PlaybackCommandKind.Ack:
@@ -301,7 +483,7 @@ namespace ChatterMascot
                     break;
 
                 case PlaybackCommandKind.DiscardAudio:
-                    DiscardAudio(command.Epoch, command.Seq, command.Audio as AudioClip);
+                    DiscardAudio(command.Epoch, command.Seq, command.Audio);
                     break;
 
                 case PlaybackCommandKind.Log:
@@ -346,21 +528,21 @@ namespace ChatterMascot
             }
 
             string error;
-            var clip = WavDecoder.Decode(result.Wav, $"speech-{epoch}-{seq}", out error);
-            if (clip == null)
+            var handle = _player.Prepare(result.Wav, $"speech-{epoch}-{seq}", out error);
+            if (handle == null)
             {
                 Dispatch(PlaybackEvent.AudioFailed(epoch, seq, error ?? "WAV を読めませんでした"));
                 return;
             }
 
-            // ★ 状態機械へ渡す前に手元にも持つこと。Destroy の対象を取り違えないための台帳
-            _clips[Key(epoch, seq)] = clip;
-            Dispatch(PlaybackEvent.AudioReady(epoch, seq, clip));
+            // ★ 状態機械へ渡す前に手元にも持つこと。解放の対象を取り違えないための台帳
+            _handles[Key(epoch, seq)] = handle;
+            Dispatch(PlaybackEvent.AudioReady(epoch, seq, handle));
         }
 
-        private async Task PlayAsync(int epoch, long seq, AudioClip clip)
+        private async Task PlayAsync(int epoch, long seq, object audio)
         {
-            var error = await _player.PlayAsync(clip);
+            var error = await _player.PlayAsync(audio);
             if (_shuttingDown) return;
 
             Dispatch(error == null
@@ -368,10 +550,10 @@ namespace ChatterMascot
                 : PlaybackEvent.PlaybackFailed(epoch, seq, error));
         }
 
-        private void DiscardAudio(int epoch, long seq, AudioClip clip)
+        private void DiscardAudio(int epoch, long seq, object audio)
         {
-            _clips.Remove(Key(epoch, seq));
-            if (clip != null) Destroy(clip);
+            _handles.Remove(Key(epoch, seq));
+            _player?.Discard(audio);
         }
 
         /// <summary>

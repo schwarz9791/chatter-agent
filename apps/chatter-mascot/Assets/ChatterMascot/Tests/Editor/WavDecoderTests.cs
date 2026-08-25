@@ -246,6 +246,84 @@ namespace ChatterMascot.Tests
             for (var i = 0; i < 4; i++) wav[index + 4 + i] = bytes[i];
         }
 
+        // ---- ヘッダだけを読む経路（再生の実体が AudioSource でなくなっても残る） ----
+
+        /// <summary>
+        /// 再生時間は fmt の byteRate から出す。参照実装（<c>core/src/player/audioPlayer.ts</c> の
+        /// <c>wavDurationMs</c>）と同じ根拠にしてある。
+        /// </summary>
+        [Test]
+        public void ReadsDurationFromByteRate()
+        {
+            // 24000Hz / 1ch / 16bit で 2400 サンプル = ちょうど 100ms
+            var wav = BuildWav(new short[2400]);
+
+            WavHeader header;
+            string error;
+            Assert.That(WavDecoder.TryReadHeader(wav, out header, out error), Is.True);
+
+            Assert.That(error, Is.Null);
+            Assert.That(header.DurationMs, Is.EqualTo(100));
+            Assert.That(header.SampleRate, Is.EqualTo(24000));
+            Assert.That(header.Channels, Is.EqualTo(1));
+            Assert.That(header.BitsPerSample, Is.EqualTo(16));
+            Assert.That(header.DataLength, Is.EqualTo(4800));
+        }
+
+        /// <summary>
+        /// ★ byteRate が読めないときの 0 は「長さ 0」ではなく「不明」。
+        ///
+        /// 長さ 0 として期限を計算すると <c>0 * 2 + 5秒</c> になり、<b>すべての再生が
+        /// 5秒で打ち切られる</b>。打ち切られた文は PlaybackFailed → ack に落ちるので
+        /// サーバーのキューからも消えて二度と鳴らせない。呼び出し側は 0 を見たら
+        /// 120秒のフォールバックに倒すこと。
+        /// </summary>
+        [Test]
+        public void ReportsUnknownDurationWhenByteRateIsZero()
+        {
+            var wav = BuildWav(new short[2400]);
+            // fmt チャンクの byteRate は先頭から 28 バイト目
+            //   RIFF(4) + size(4) + WAVE(4) + "fmt "(4) + size(4) + format(2) + channels(2) + sampleRate(4)
+            BitConverter.GetBytes(0).CopyTo(wav, 28);
+
+            WavHeader header;
+            string error;
+            Assert.That(WavDecoder.TryReadHeader(wav, out header, out error), Is.True);
+
+            Assert.That(error, Is.Null);
+            Assert.That(header.DurationMs, Is.EqualTo(0));
+            // 他の項目は読めている（byteRate だけが欠けた WAV でも再生自体はできる）
+            Assert.That(header.SampleRate, Is.EqualTo(24000));
+            Assert.That(header.DataLength, Is.EqualTo(4800));
+        }
+
+        /// <summary>
+        /// 溢れる長さのチャンクは <see cref="WavDecoder.TryReadHeader"/> の側で打ち切る。
+        ///
+        /// ★ <see cref="WavDecoder.Decode"/> 経由の同じ回帰（<c>DoesNotOverflowOnHugeChunkSize</c>）と
+        ///   重複して見えるが、こちらは <c>AudioClip.Create</c> を通らない。
+        ///   <c>Disable Unity Audio</c> を入れて <c>AudioClip</c> が作れなくなっても、
+        ///   走査の回帰はこのテストが守る。
+        /// </summary>
+        [Test]
+        public void TryReadHeaderDoesNotOverflowOnHugeChunkSize()
+        {
+            var wav = BuildWav(new short[] { 0, 16384 });
+            var withHugeChunk = new List<byte>();
+            withHugeChunk.AddRange(new ArraySegment<byte>(wav, 0, 12));                  // RIFF/WAVE
+            withHugeChunk.AddRange(System.Text.Encoding.ASCII.GetBytes("LIST"));
+            withHugeChunk.AddRange(BitConverter.GetBytes(int.MaxValue));                 // ★ 溢れる長さ
+            withHugeChunk.AddRange(new ArraySegment<byte>(wav, 12, wav.Length - 12));    // fmt + data
+
+            WavHeader header;
+            string error;
+            // 直る前はこの行が IndexOutOfRangeException を投げる
+            var ok = WavDecoder.TryReadHeader(withHugeChunk.ToArray(), out header, out error);
+
+            Assert.That(ok, Is.False);
+            Assert.That(error, Is.Not.Null);
+        }
+
         private static int IndexOf(byte[] data, string tag)
         {
             for (var i = 0; i + tag.Length <= data.Length; i++)

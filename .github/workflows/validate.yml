@@ -198,3 +198,27 @@ jobs:
       # AivisSpeech もオーディオデバイスも要らない
       - name: Verify player (WebSocket → 音声取得 → 再生 → ack)
         run: npm run verify:player
+
+  unity-audio-settings:
+    name: Unity のオーディオ設定が出荷値
+    runs-on: ubuntu-latest
+
+    # scripts/build.sh は macOS ビルドのあいだだけ Disable Unity Audio を ON にして戻す
+    # （Unity 内蔵オーディオが有効なままだと、AudioSource を1つも鳴らさなくても
+    # 出力デバイスを掴み続けるため）。BuildScript の finally と build.sh の trap で戻しているが、
+    # SIGKILL はどちらでも拾えない。ON が残ったままコミットされると、次の Android ビルドは
+    # Unity 内蔵オーディオごと無効 → AudioClipPlayer が鳴らない → isPlaying が即 false →
+    # 全部 ack されてサーバーのキューから消える。ここが最後の砦。
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: m_DisableAudio が出荷値（0）であること
+        working-directory: .
+        run: |
+          asset=apps/chatter-mascot/ProjectSettings/AudioManager.asset
+          if ! grep -qx "  m_DisableAudio: 0" "$asset"; then
+            echo "::error file=$asset::m_DisableAudio が出荷値（0）ではありません。macOS ビルドが中断して ON のまま残った可能性があります。0 に直してコミットしてください（Android ビルドが無音になります）"
+            grep -n "m_DisableAudio" "$asset" || true
+            exit 1
+          fi

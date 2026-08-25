@@ -4,12 +4,50 @@ using UnityEngine;
 namespace ChatterMascot.Audio
 {
     /// <summary>
+    /// WAV のヘッダから読み取れること。<see cref="WavDecoder.TryReadHeader"/> が埋める。
+    ///
+    /// ★ <b><see cref="AudioClip"/> を作らずにここまで分かる</b>ことが要点。再生の実体が
+    ///   <see cref="AudioSource"/> でなくなっても、期限の根拠と診断の窓はこの構造体で足りる。
+    /// </summary>
+    public struct WavHeader
+    {
+        /// <summary>1 = PCM、3 = IEEE float。EXTENSIBLE は SubFormat の実体に解決済み</summary>
+        public ushort Format;
+
+        public ushort Channels;
+        public int SampleRate;
+        public ushort BitsPerSample;
+
+        /// <summary>data チャンクの本体が始まる位置</summary>
+        public int DataOffset;
+
+        /// <summary>data チャンクの本体の長さ。宣言値が使えないときは実体で測り直した値</summary>
+        public int DataLength;
+
+        /// <summary>
+        /// 再生時間（ミリ秒）。<b>読めなければ 0</b>。
+        ///
+        /// ★ <b>0 を「長さ 0」と読まないこと。</b> 参照実装（<c>core/src/player/audioPlayer.ts</c> の
+        ///   <c>wavDurationMs</c>）は読めないときに <c>null</c> を返し、呼び出し側が
+        ///   <c>FALLBACK_TIMEOUT_MS</c>（120秒）に倒す。こちらも同じで 0 は「不明」を意味する。
+        ///   長さ 0 として期限を計算すると、<b>すべての再生が数秒で打ち切られる</b>。
+        /// </summary>
+        public int DurationMs;
+    }
+
+    /// <summary>
     /// サーバーから取った WAV を <see cref="AudioClip"/> にする。
     ///
     /// ★ <b>ストリーム再生にしないこと</b>（契約）。URL から直接鳴らすと、ack でキューが
-    ///   消えた瞬間に途中で切れる。参照実装（Node の player）は一時ファイルに落としてから
-    ///   <c>afplay</c> に渡すが、Unity は <see cref="AudioClip"/> をメモリに持てるので
-    ///   <b>ファイルは要らない</b>。「先に全部受け取ってから鳴らす」という趣旨は同じ。
+    ///   消えた瞬間に途中で切れる。「先に全部受け取ってから鳴らす」が趣旨で、
+    ///   <b>ファイルにするかメモリに置くかは実装の自由</b> —— macOS は
+    ///   <c>afplay</c> に渡すため一時ファイルに落とし、Android / iOS は
+    ///   <see cref="AudioClip"/> をメモリに持つ（→ <c>docs/mascot.md</c>）。
+    ///
+    /// ★ <b>ヘッダの検証を再生エンジンに任せないこと。</b> FMOD の <c>createSound</c> も
+    ///   OS のプレイヤーも、失敗したときに返すのは「読めなかった」だけで<b>理由が残らない</b>。
+    ///   無音の原因を残す窓（→ <c>AudioFetcher</c> の 503/404 の本文）を潰さないために、
+    ///   渡す前に <see cref="TryReadHeader"/> で見る。
     ///
     /// 合成エンジン（AivisSpeech）が返すのは 16bit PCM だが、読み手を決め打ちにしない。
     /// </summary>
@@ -20,27 +58,30 @@ namespace ChatterMascot.Audio
         private const ushort FormatExtensible = 0xFFFE;
 
         /// <summary>
-        /// 読めたら <see cref="AudioClip"/>、読めなければ <c>null</c>（呼び出し側が転送失敗として扱う）。
+        /// RIFF チャンクを走査して <see cref="WavHeader"/> を埋める。
+        /// 読めなければ <c>false</c> と <paramref name="error"/>（呼び出し側が診断に使う）。
         /// </summary>
-        public static AudioClip Decode(byte[] wav, string name, out string error)
+        public static bool TryReadHeader(byte[] wav, out WavHeader header, out string error)
         {
+            header = default;
             error = null;
             if (wav == null || wav.Length < 12)
             {
                 error = "WAV が短すぎます";
-                return null;
+                return false;
             }
 
             if (!Matches(wav, 0, "RIFF") || !Matches(wav, 8, "WAVE"))
             {
                 error = "RIFF/WAVE ヘッダがありません";
-                return null;
+                return false;
             }
 
             ushort format = 0;
             ushort channels = 0;
             var sampleRate = 0;
             ushort bitsPerSample = 0;
+            var byteRate = 0;
             var dataOffset = -1;
             var dataLength = 0;
 
@@ -81,6 +122,9 @@ namespace ChatterMascot.Audio
                     format = BitConverter.ToUInt16(wav, body);
                     channels = BitConverter.ToUInt16(wav, body + 2);
                     sampleRate = BitConverter.ToInt32(wav, body + 4);
+                    // ★ 再生時間はこの byteRate から出す。参照実装と同じ根拠にするため、
+                    //   sampleRate * channels * bits/8 で計算し直さない（詰め物のある WAV でずれる）
+                    byteRate = BitConverter.ToInt32(wav, body + 8);
                     bitsPerSample = BitConverter.ToUInt16(wav, body + 14);
 
                     // WAVE_FORMAT_EXTENSIBLE は SubFormat の先頭2バイトが実体
@@ -97,7 +141,7 @@ namespace ChatterMascot.Audio
                 // ★ **末尾を越える長さでも打ち切ること。** `body + declared` は int で計算するので、
                 //   `declared` が int.MaxValue 級だと**負に折り返す**。すると offset が負のまま
                 //   ループ条件（offset + 8 <= wav.Length）を通り、Encoding4 の `data[offset]` が
-                //   IndexOutOfRangeException を投げる。Decode に try/catch は無く、呼び出し元の
+                //   IndexOutOfRangeException を投げる。ここに try/catch は無く、呼び出し元の
                 //   FetchAudioAsync は fire-and-forget なので、例外は**未観測のまま捨てられ**、
                 //   その seq に AudioReady も AudioFailed も来ないまま**キューの head が黙って止まる**。
                 //   `declared <= available` なら body + declared <= wav.Length なので溢れない。
@@ -110,34 +154,71 @@ namespace ChatterMascot.Audio
             if (channels == 0 || sampleRate <= 0 || bitsPerSample == 0)
             {
                 error = "fmt チャンクが読めません";
-                return null;
+                return false;
             }
             if (dataOffset < 0)
             {
                 error = "data チャンクがありません";
-                return null;
+                return false;
             }
             // 実体で測り直しても 0 なら、本当に中身が無い
             if (dataLength <= 0)
             {
                 error = "data チャンクが空です";
-                return null;
+                return false;
             }
 
+            header = new WavHeader
+            {
+                Format = format,
+                Channels = channels,
+                SampleRate = sampleRate,
+                BitsPerSample = bitsPerSample,
+                DataOffset = dataOffset,
+                DataLength = dataLength,
+                // ★ byteRate が読めなければ 0（= 不明）。長さ 0 ではない
+                DurationMs = byteRate > 0
+                    ? (int)Math.Round((double)dataLength / byteRate * 1000.0)
+                    : 0,
+            };
+            return true;
+        }
+
+        /// <summary>
+        /// 読めたら <see cref="AudioClip"/>、読めなければ <c>null</c>（呼び出し側が転送失敗として扱う）。
+        /// </summary>
+        public static AudioClip Decode(byte[] wav, string name, out string error)
+        {
+            if (!TryReadHeader(wav, out var header, out error)) return null;
+            return Decode(wav, name, header, out error);
+        }
+
+        /// <summary>
+        /// <see cref="TryReadHeader"/> を済ませている呼び出し向け。<b>RIFF をもう一度走査しない。</b>
+        ///
+        /// ★ 期限の根拠にヘッダが要る実装（<c>ISpeechPlayer.Prepare</c>）は先に
+        ///   <see cref="TryReadHeader"/> を呼ぶので、引数無しの版を使うと同じ走査を2回する。
+        /// </summary>
+        public static AudioClip Decode(byte[] wav, string name, WavHeader header, out string error)
+        {
+            error = null;
+
             float[] samples;
-            if (!TryReadSamples(wav, dataOffset, dataLength, format, bitsPerSample, out samples, out error))
+            if (!TryReadSamples(
+                    wav, header.DataOffset, header.DataLength, header.Format, header.BitsPerSample,
+                    out samples, out error))
             {
                 return null;
             }
 
-            var perChannel = samples.Length / channels;
+            var perChannel = samples.Length / header.Channels;
             if (perChannel <= 0)
             {
                 error = "サンプルが空です";
                 return null;
             }
 
-            var clip = AudioClip.Create(name, perChannel, channels, sampleRate, false);
+            var clip = AudioClip.Create(name, perChannel, header.Channels, header.SampleRate, false);
             clip.SetData(samples, 0);
             return clip;
         }

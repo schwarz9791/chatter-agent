@@ -39,6 +39,72 @@
 合わせる必要がある（→ #25）。VRM のリップシンクと spring bone が入ったら、
 30fps で口の動きが足りるか見直す（→ #17）。`MascotRunner` の Inspector で変えられる。
 
+### ★ Unity は無音でも macOS の出力デバイスを掴み続ける
+
+常駐アプリなので、実使用時間のほとんどが「無音」になる。そのあいだ Bluetooth の
+A2DP リンクが張られたままになり、**イヤホンの電池を食う**。
+
+実測（2026-08-25 / macOS 26.6.2 / 既定の出力は Bluetooth イヤホン）:
+
+| | 掴んでいる時間 | 手放すまで |
+|---|---|---|
+| CLI Player（`afplay` を1発話ごとに spawn） | 発話中だけ | 発話終了から **0.5〜1秒** |
+| Unity | **起動から終了までずっと** | 手放さない |
+
+Unity 側は `ws://127.0.0.1:9`（listen していないポート）を焼いたビルドで測ったので、
+**`AudioSource.Play()` を一度も呼んでいない**。それでも 60秒間 119サンプルすべてで
+`kAudioProcessPropertyIsRunningOutput` が 1 だった。`-batchmode -nographics` で
+シーンをビルドしているだけの Unity も掴んでいる。
+
+**macOS には、Unity 内蔵オーディオで手放す手段が無い:**
+
+| 手段 | なぜ使えないか |
+|---|---|
+| `AudioSettings.Mobile.StopAudioOutput()` | **iOS / Android 専用。** macOS でもコンパイルは通り例外も出ないが、実行すると Unity が `"implemented for iOS and Android only"` とログに出して**何もしない**（実測: 呼んだ後も 40秒間 `proc=1` のまま）。★ **Android では効くので #25 では使える** |
+| `Enable Output Suspension` | **Editor 専用**（公式マニュアル明記）。スタンドアロンには効かない |
+| `Disable Unity Audio` | 静的なプロジェクト設定。ランタイムに切り替えられない |
+| `AudioSettings.Reset()` | 「再初期化」であって解放ではない |
+| `AudioListener.pause` / `volume = 0` | DSP を止めるだけ。出力ストリームは開いたまま |
+
+★ **`AudioSettings.Mobile` の存在は見落としやすい。** `AudioSettings` 直下ではなく
+`Mobile` のネストクラスにあり、macOS ビルドターゲットでも**コンパイルが通ってしまう**ので、
+書いた側は効いているつもりになる。手がかりは `Player.log` の1行だけ。
+
+内蔵オーディオは FMOD を組み込んだものだが、その System ハンドルが公開されていないので
+`System::mixerSuspend()`（「オーディオハードウェアの使用を手放す」）を呼ぶ口が無い。
+Native Audio Plugin SDK は DSP エフェクトを挿す仕組みで、デバイスの開閉には触れない。
+**「`AudioSource` はそのままで無音時だけ解放する」プラグインは原理的に作れない。**
+解放するにはエンジンごと差し替えるしかない（→ `ISpeechPlayer`）。
+
+#### 測り方（同じ測定をやり直すとき）
+
+★ **CoreAudio の `kAudioProcessPropertyIsRunningOutput`（macOS 14.2+）を pid ごとに読む。**
+`kAudioDevicePropertyDeviceIsRunningSomewhere` はシステム全体の値なので、ブラウザや
+通知音で 1 になる。**プロセス単位でないと帰属が取れない。**
+`kAudioHardwarePropertyTranslatePIDToProcessObject` で pid → AudioObjectID を引く。
+
+★ **「自分が黙っていれば無音」ではない。** サーバーは1つで、**複数の Claude Code
+セッションの発話が同じキューに入る**。1回目の測定はこれで無効になった（別セッションの
+発話が Unity に流れて、実際に鳴っていた）。**サーバーに繋がない状態で測ること**:
+
+```bash
+open Build/ChatterMascot.app --args -serverUrl ws://127.0.0.1:9
+```
+
+ポート 9（discard）は listen していないので絶対に繋がらない。`MascotRunner.Start()` が
+起動引数で `serverUrl` を上書きする（`IsValidServerUrl` は後段なので、不正な値を渡しても
+「動いて見える死体」にはならず `enabled = false` で止まる）。
+
+★ **測定のためにシーンを複製しないこと。** 一度やって消した。`Mascot.unity` の完全コピーで
+差分は `serverUrl` の1行だけ（797行の重複）だったが、問題は重複そのものではなく
+**失敗が見えないこと** —— #17 で VRM が入った瞬間、#16 で UniWindowController が付いた瞬間に
+複製は本番を代表しなくなるが、**変わらずビルドでき、変わらず計測でき、ただ別のアプリを
+測っているだけになる**。この設計の根拠にした CoreAudio の実測値が、そこで静かに無効化される。
+
+★ **測定でクライアントを2台繋がないこと。** → [`docs/protocol.md`](./protocol.md) の
+クライアント側の責務6。速いクライアントの ack が、遅いクライアントのまだ喋っていない
+entry を消す。CLI Player を動かしたまま Unity を繋いで実際に踏んだ。
+
 ### ★ MCP 経由のビルドは、モーダルダイアログが出た瞬間に沈黙する
 
 `Unity_RunCommand`（unity-mcp）から `BuildPipeline.BuildPlayer` を呼ぶと、
@@ -398,7 +464,13 @@ voice をプールして **`Stop()` の効果を自分の再生ぶんに限定�
   「採番のやり直しが、音が鳴り終わる前に繰り返されている」ときだけなので、
   **本数そのものが原因を指す材料**になる
 - **`Current`（最後に鳴らし始めた voice）を公開している。** #17 のリップシンクが
-  `GetOutputData` を読む先を1つに決めるため
+  `GetOutputData` を読む先を1つに決めるため。
+  ★ **ただし macOS ではこの前提が成立しない。** 再生の実体が `AfplaySpeechPlayer` になり、
+  **音は `afplay` 子プロセスの中にあって `GetOutputData` に相当するものが存在しない**。
+  `MascotRunner._player` も `ISpeechPlayer` 型なので、`Current` はインターフェース越しに届かない。
+  → #17 では **`Prepare` の時点で WAV から振幅エンベロープ（20ms ごとの RMS）を作って
+  ハンドルに載せる**方式に寄せることになる。`WavDecoder.TryReadHeader` で既にサンプル位置と
+  フォーマットが分かるので追加のパースは要らず、**3つの実装すべてで同じコードが使える**
 - **設定の写し取り（`CopySettings`）を増やしたらここにも書くこと。**
   #17 でミキサーや 3D 配置を入れて写し漏らすと、症状は「**孤児だけ音量が違う**」のような、
   再現条件が採番のやり直しに縛られた形になる
@@ -434,13 +506,123 @@ seq 7000 を積み、あとから実際の発話が seq 6000台で publish さ�
 7000 を再生中により小さい seq が head として入る。実運用では CLI が seq を戻さないので
 起きないが、**多voice 化していなければ「重なる」ではなく「消える」になっていた**。
 
-### ★ 音声はメモリ上の `AudioClip` にする。ファイルに落とさない
+### ★ 無音時にオーディオ出力デバイスを掴まない
+
+**手放し方はプラットフォームで違う。** 選ぶのは `SpeechPlayerFactory`。
+
+| | 再生の実体 | 手放し方 |
+|---|---|---|
+| **macOS** | `AfplaySpeechPlayer`（1発話 = 1プロセスで `afplay`） | プロセスが消えれば OS が解放する（実測 **0.5〜1秒**） |
+| **Android / iOS** | `AudioClipPlayer`（Unity 内蔵） | `AudioSettings.Mobile.StopAudioOutput()` |
+| その他 | `AudioClipPlayer` | **手放せない**（Windows / Linux は未対応） |
+
+★ **macOS では `Disable Unity Audio` が ON でないと意味が無い。** 外部プロセスで鳴らしても、
+Unity 内蔵オーディオが有効なままだと Unity 側がデバイスを掴む（上の実測）。
+`BuildScript.BuildMacOS` が**ビルド時だけ**切り替えて、ビルド後に戻す。
+プロジェクト設定はプラットフォーム別に持てないので、**コミットされた値は Android 側の要求
+（オフ）に合わせてある**。★ **Editor の GUI からビルドすると切り替わらない**ので、
+ビルドは `scripts/build.sh` から行うこと。
+
+★ **実測（本番ビルドで実際に喋らせた / 2026-08-25）**: afplay の pid が発話ごとに入れ替わり、
+文の切れ目で `device=0` になる。Unity 本体は **103サンプルすべてで CoreAudio に認識されず**、
+**うち 95サンプルは afplay が鳴っている最中**だった（＝「鳴っていないから掴んでいない」ではない）。
+
+★ **`AudioIdleGate` は macOS では働かない。** afplay 方式には手放すものが残っていないので
+`SuspendOutput` は no-op。**Android / iOS でだけ効く**（→ [#25](https://github.com/schwarz9791/chatter-agent/issues/25)）。
+それでも判定を切り出してあるのは、猶予の設計とテストをプラットフォーム間で共有するため。
+
+**「喋っていない期間」は `AudioIdleGate` を作るまでコードのどこにも存在しなかった。**
+`PlaybackQueue.HeadItem(state) == null` と `ActiveCount == 0` の副次的な帰結としてしか
+観測できず、名前が無かった。デバイスを手放す判断は間違えると**孤児の音が凍る**ので、
+テストで固定できる純粋クラスに切り出してある。
+
+**アイドルの定義**: `ISpeechPlayer.ActiveCount == 0` かつ `PlaybackState.Items.Count == 0`
+かつ `Orphans.Count == 0` が猶予ぶん続いた状態。
+
+- `Items` を見るのは、`Pending` / `Fetching` / `Ready` が「合成待ちで、まもなく鳴る」から。
+  ここで手放すと掴み直しが再生に間に合わず**1文目の頭が切れる**
+- **`Orphans` を見るのは契約（孤児を鳴らし切る）のため。** `ResetEpoch` は再生中の item を
+  `Items` から外して `Orphans` へ移すので、**`Items` が空でも鳴っていることがある**
+
+★ **`PlaybackQueue` には手を入れないこと。** `Items` / `Orphans` は public なので
+ドライバから**読むだけ**で足りる。状態機械にコマンドを増やすと、EditMode テストの
+コマンド列比較が全部壊れる。
+
+★ **resume は再生の直前ではなく `FetchAudio` で打つ。** `GET /audio/…` はサーバーに
+合成させるので数百ms〜数秒かかり、先読みのぶんだけ再生よりさらに手前で走る。
+デバイスの掴み直し（Bluetooth なら A2DP の張り直し）は**その待ちの裏に隠れる**。
+保険として各実装の `PlayAsync` 冒頭でも `ResumeOutput()` を呼ぶ（べき等）。
+
+★ **猶予を短くしすぎないこと。** 文と文の間で往復すると、A2DP の張り直しが毎文入って
+**かえって悪化する**。長すぎる害は省電力が薄れるだけ（無害側）。既定は 5秒。
+`audioIdleSuspendMs` を 0 以下にすると無効（キルスイッチ）。
+
+★ **アイドル判定を `TickIntervalSeconds`（1秒）の間引きに乗せないこと。** 判定は加算と
+比較だけなので毎フレームで足りるし、間引きに乗せると **resume が最大1秒遅れる**。
+
+★ **時計は `Time.realtimeSinceStartupAsDouble` を使う**（`DateTimeOffset.UtcNow` ではなく）。
+猶予は差分でしか見ないので、**時計が巻き戻ると手放したまま戻らない**。
+
+#### プロジェクト設定まわりで踏んだこと
+
+★ **Unity は YAML に無い `SerializeField` に C# のイニシャライザ値を残す。** `MascotRunner` に
+`audioIdleSuspendMs = 5000` を足したがシーンを保存し直していないので、`Mascot.unity` の
+`MonoBehaviour` ブロックにこのキーは**無い**。それでも実測では 5000 が効いていた
+（キーが無い状態のビルドで「無音が続いたので…」のログが12回出た）。型の既定値 0 が
+当たるわけではない。★ ただし**シーンを一度でも保存すると値が焼かれる**ので、
+既定を変えるときはシーンも見ること。
+
+★ **`AudioManager.asset` に Unity 6 の新キーが4つ増えている**（`m_EnableOutputSuspension: 1` /
+`m_AudioFoundation: 0` / `m_OutputChannelLayout: 2` / `m_OutputSamplingRate: 48000`）。
+`BuildScript` が `m_DisableAudio` を書き換えるとき `AssetDatabase.SaveAssets()` が走り、
+Unity がアセット全体を再シリアライズしてテンプレートに無かったフィールドを既定値で書き出したもの。
+
+- **値はすべて Unity 6000.5.8f1 の既定値**。Editor バイナリの `-enhancedAudioFoundation` の
+  ヘルプが `Default: 48000` / `Stereo (default)` と明記している
+- **環境固有の値ではない**。この Mac の既定出力デバイスは 44100（`system_profiler`）で、
+  48000 とは一致しない
+- ★ **`m_AudioFoundation: 0`（Classic）なので、`m_OutputSamplingRate` と
+  `m_OutputChannelLayout` は無視される**（"If it is disabled, sampling rate and channel layout
+  parameters will be ignored."）。Android で AivisSpeech の 24kHz が余計にリサンプルされる、
+  ということは起きない
+- 従来設定の `m_SampleRate: 0`（システム既定に従う）は**別のキーで、変更されていない**
+
+★ **`mixerSuspend` 系の API は `mixerResume` と同じスレッドから呼ぶ必要がある。**
+`Update()` も `Execute()` も `PlayAsync` の継続も Unity のメインスレッドなので自然に
+満たせるが、実装側にも検査を置くこと。壊れ方が「たまに無音」なので静かに壊れさせない。
+
+★ **resume に失敗しても「掴んでいる」側に倒すこと。** suspend したままのフラグが残ると
+**二度と resume を試さず恒久的に無音になる**。無音より二重 resume の方が軽い。
+
+### ★ 再生の期限は `WavHeader.DurationMs` から出す（`AudioClip.length` ではない）
+
+実装をまたいで（Unity / FMOD / 外部プロセス）**期限の根拠を1つに揃える**ため、
+`WavDecoder.TryReadHeader` が fmt チャンクの `byteRate` から計算する。式は参照実装
+（`core/src/player/audioPlayer.ts` の `wavDurationMs`）と同じ `dataBytes / byteRate * 1000`。
+
+★ **`DurationMs` の 0 は「長さ 0」ではなく「不明」。** 呼び出し側は 120秒
+（参照実装の `FALLBACK_TIMEOUT_MS`）に倒すこと。長さ 0 として `0 * 2 + 5秒` を計算すると
+**すべての再生が5秒で打ち切られ**、切られた文は `PlaybackFailed` → ack に落ちて
+サーバーのキューからも消える（二度と鳴らせない）。
+
+★ **ヘッダの検証を再生エンジンに任せないこと。** FMOD の `createSound` も OS のプレイヤーも、
+失敗したときに返すのは「読めなかった」だけで**理由が残らない**。無音の原因を残す窓を
+潰さないために、渡す前に `TryReadHeader` で見る。
+
+### ★ ストリーム再生にしない（音声の持ち方はプラットフォームで違う）
 
 契約の「ローカルに落としてから再生すること」は**ストリーム再生の禁止**であって、
-ファイルを要求しているわけではない。参照実装（Node の player）が一時ファイルを使うのは
-`afplay` に渡すためで、Unity は `AudioClip` をメモリに持てる。
+ファイルを要求しているわけではない。**先に全部受け取ってから鳴らす**のが趣旨。
 
-状態機械の `DiscardAudio` コマンドは **`Object.Destroy(clip)`** に読み替える。
+音声の実体は再生の実装ごとに違う（→ 上の「★ 無音時にオーディオ出力デバイスを掴まない」）:
+
+| | 音声の持ち方 | `DiscardAudio` の実体 |
+|---|---|---|
+| macOS（`AfplaySpeechPlayer`） | 一時ファイル（`afplay` に渡すため） | `File.Delete` |
+| Android / iOS（`AudioClipPlayer`） | メモリ上の `AudioClip` | `Object.Destroy(clip)` |
+
+どちらも状態機械からは `object` の不透明なハンドルで、`DiscardAudio` コマンドは
+**`ISpeechPlayer.Discard`** に読み替える。
 
 ★ **`UnityWebRequestMultimedia.GetAudioClip` を URL に直接使わないこと。** ストリーム再生に
 なりうるうえ、**503 / 404 の本文（診断の理由）が取れない**。無音の原因を残す唯一の窓なので落とせない。

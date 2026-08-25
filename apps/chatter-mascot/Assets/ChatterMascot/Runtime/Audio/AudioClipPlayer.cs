@@ -6,6 +6,22 @@ using UnityEngine;
 namespace ChatterMascot.Audio
 {
     /// <summary>
+    /// Unity 内蔵オーディオで鳴らすときのハンドル。<see cref="AudioClipPlayer.Prepare"/> が作る。
+    ///
+    /// ★ <b>長さを <c>AudioClip.length</c> から取らない</b>のは、再生の実体が
+    ///   <see cref="AudioSource"/> でない実装（FMOD / 外部プロセス）と<b>期限の根拠を
+    ///   揃える</b>ため。どれも <see cref="WavHeader.DurationMs"/>（fmt の byteRate 由来、
+    ///   参照実装の <c>wavDurationMs</c> と同じ式）を見る。
+    /// </summary>
+    public sealed class UnityAudioHandle
+    {
+        public AudioClip Clip;
+
+        /// <summary>再生時間（ミリ秒）。<b>0 は「長さ 0」ではなく「不明」</b></summary>
+        public int DurationMs;
+    }
+
+    /// <summary>
     /// <see cref="AudioSource"/> で鳴らす。<b>順序の判断は持たない</b>
     /// （→ <c>ChatterMascot.Playback.PlaybackQueue</c> が head しか再生しない）。
     ///
@@ -24,7 +40,7 @@ namespace ChatterMascot.Audio
     ///   spawn するので孤児が本当に並行して鳴り切る。ここでは voice をプールして
     ///   <b><c>Stop()</c> の効果を自分の再生ぶんに限定する</b>ことで同じ性質を作る。
     /// </summary>
-    public sealed class AudioClipPlayer
+    public sealed class AudioClipPlayer : ISpeechPlayer
     {
         /// <summary>
         /// 再生完了を待つときの余裕。
@@ -40,6 +56,15 @@ namespace ChatterMascot.Audio
         ///   二度と鳴らせない</b>。
         /// </summary>
         private const float PlaybackGraceSeconds = 5f;
+
+        /// <summary>
+        /// WAV の長さが読めなかったときの期限。
+        ///
+        /// ★ 参照実装の <c>FALLBACK_TIMEOUT_MS</c>（120秒）と同じ。1文がこれを超えることは
+        ///   実際には無いので、「長さ不明」を長さ 0 と読んで<b>全部の再生を数秒で打ち切る</b>
+        ///   事故だけを防げばよい。
+        /// </summary>
+        private const float FallbackTimeoutSeconds = 120f;
 
         /// <summary>
         /// voice がこの本数を超えたら警告する。
@@ -83,16 +108,118 @@ namespace ChatterMascot.Audio
         ///
         /// ★ <b>多voice 化で「どこから読むか」が曖昧になるのを先に潰すためにある。</b>
         ///   #17 のリップシンクは <c>GetOutputData</c> をここから読む。
+        ///
+        /// ★ <b>ただし macOS ではこの前提が成立しない。</b> 再生の実体が
+        ///   <c>AfplaySpeechPlayer</c> になり、<b>音は子プロセスの中にあって
+        ///   <c>GetOutputData</c> に相当するものが存在しない</b>。<c>MascotRunner</c> が持つのも
+        ///   <see cref="ISpeechPlayer"/> 型なので、これはインターフェース越しに届かない。
+        ///   → #17 では <b><c>Prepare</c> の時点で WAV から振幅エンベロープを作ってハンドルに
+        ///   載せる</b>方式に寄せることになる（3つの実装すべてで同じコードが使える）。
         /// </summary>
         public AudioSource Current { get; private set; }
+
+        /// <summary>今鳴っている本数（孤児を含む）。</summary>
+        public int ActiveCount
+        {
+            get
+            {
+                var count = 0;
+                foreach (var voice in _voices)
+                {
+                    if (voice.Busy) count++;
+                }
+                return count;
+            }
+        }
+
+        /// <summary>WAV を <see cref="AudioClip"/> にして、長さと一緒に包む。</summary>
+        public object Prepare(byte[] wav, string name, out string error)
+        {
+            WavHeader header;
+            if (!WavDecoder.TryReadHeader(wav, out header, out error)) return null;
+
+            // ★ 読んだヘッダを渡す。引数無しの Decode は中でもう一度 RIFF を走査する
+            var clip = WavDecoder.Decode(wav, name, header, out error);
+            if (clip == null) return null;
+
+            return new UnityAudioHandle { Clip = clip, DurationMs = header.DurationMs };
+        }
+
+        /// <summary>使い終わった（あるいは捨てる）クリップを解放する。</summary>
+        public void Discard(object audio)
+        {
+            var handle = audio as UnityAudioHandle;
+            if (handle == null || handle.Clip == null) return;
+            UnityEngine.Object.Destroy(handle.Clip);
+            handle.Clip = null;
+        }
+
+        /// <summary>
+        /// ★ <b>効くのは iOS / Android だけ</b>（→ <see cref="SuspendOutput"/>）。
+        ///   macOS では <c>AudioSettings.Mobile.StopAudioOutput</c> が no-op なので <c>false</c>。
+        /// </summary>
+        public bool CanSuspendOutput
+        {
+            get
+            {
+#if UNITY_IOS || UNITY_ANDROID
+                return true;
+#else
+                return false;
+#endif
+            }
+        }
+
+        /// <summary>
+        /// 出力を止める。<b>効くのは iOS / Android だけ。</b>
+        ///
+        /// ★ <b>macOS では何も起きない。</b> <c>AudioSettings.Mobile.StopAudioOutput</c> は
+        ///   コンパイルは通るが、実行すると Unity 自身がログに
+        ///   <c>"AudioSettings.Mobile.StopAudioOutput is implemented for iOS and Android only"</c>
+        ///   と出して<b>何もしない</b>（実測: 呼んだ後も
+        ///   <c>kAudioProcessPropertyIsRunningOutput</c> は 1 のまま）。
+        ///   だから <c>#if</c> で囲んである —— macOS ビルドに入れても警告が出るだけで無意味。
+        ///
+        /// ★ <b>macOS で他に手段は無い。</b> <c>AudioListener.pause</c> も <c>volume = 0</c> も
+        ///   DSP を止めるだけで出力ストリームは開いたまま、<c>AudioSettings.Reset()</c> は
+        ///   再初期化であって解放ではない、<c>Enable Output Suspension</c> は Editor 専用、
+        ///   <c>Disable Unity Audio</c> は静的な設定でランタイムに切り替えられない。
+        ///   → <see cref="ISpeechPlayer"/> のクラスコメント
+        /// </summary>
+        public void SuspendOutput()
+        {
+#if UNITY_IOS || UNITY_ANDROID
+            AudioSettings.Mobile.StopAudioOutput();
+#endif
+        }
+
+        /// <summary>掴み直す。<see cref="SuspendOutput"/> と同じくモバイルだけ。</summary>
+        public void ResumeOutput()
+        {
+#if UNITY_IOS || UNITY_ANDROID
+            // ★ 止まっていなければ何も起きない（べき等）
+            AudioSettings.Mobile.StartAudioOutput();
+#endif
+        }
 
         /// <summary>
         /// 鳴らし終えたら戻る。例外は投げず、失敗の理由を返す（<c>null</c> なら成功）。
         /// 呼び出し側は成功も失敗も同じ経路（<c>Played</c> / <c>PlaybackFailed</c>）へ落とす。
         /// </summary>
-        public async Task<string> PlayAsync(AudioClip clip)
+        public async Task<string> PlayAsync(object audio)
         {
+            var handle = audio as UnityAudioHandle;
+            if (handle == null) return "音声のハンドルがありません";
+
+            var clip = handle.Clip;
             if (clip == null) return "AudioClip がありません";
+
+            // ★ **これを外すと発話が黙って消える。** 出力を止めたまま Play() すると
+            //   isPlaying が即 false になり、下の完了待ちが1回目のチェックで抜ける。
+            //   timedOut は false なので**成功として返り**、Played → ack →
+            //   サーバーのキューから物理削除される。ログも出ない。
+            //   ゲートの resume は Tick 経由だと次フレームなので、ここで塞ぐ
+            ResumeOutput();
 
             var voice = Claim();
             if (voice == null) return "AudioSource がありません";
@@ -111,7 +238,9 @@ namespace ChatterMascot.Audio
                     return e.Message;
                 }
 
-                var limit = clip.length * 2f + PlaybackGraceSeconds;
+                // ★ 実長に比例させる契約はそのまま。根拠が clip.length から
+                //   WavHeader.DurationMs に変わっただけ（実装をまたいで揃えるため）
+                var limit = TimeoutSecondsFor(handle.DurationMs);
                 var deadline = Time.realtimeSinceStartupAsDouble + limit;
                 // ★ Unity の SynchronizationContext により、この継続はメインスレッドの次のフレームで走る。
                 //   AudioSource をここから触ってよいのはそのため
@@ -147,6 +276,17 @@ namespace ChatterMascot.Audio
                 voice.Source.clip = null;
             }
             Current = null;
+        }
+
+        /// <summary>
+        /// 再生を諦めるまでの秒数。参照実装の <c>playbackTimeoutMs</c> と同じ形。
+        /// </summary>
+        private static float TimeoutSecondsFor(int durationMs)
+        {
+            // ★ 0 は「長さ 0」ではなく「不明」（→ WavHeader.DurationMs）。
+            //   長さ 0 として 0 * 2 + 5 秒にすると、**すべての再生が5秒で打ち切られる**
+            if (durationMs <= 0) return FallbackTimeoutSeconds;
+            return durationMs / 1000f * 2f + PlaybackGraceSeconds;
         }
 
         /// <summary>空いている voice を掴む。無ければ増やす。</summary>

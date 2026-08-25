@@ -30,6 +30,60 @@ namespace ChatterMascot.EditorTools
     /// </summary>
     public static class BuildScript
     {
+        /// <summary>
+        /// ビルドのあいだだけ <c>Disable Unity Audio</c> を ON にする。戻す処理を返す。
+        ///
+        /// ★ <b>これが無いと省電力にならない。</b> macOS では音を外部プロセス（<c>afplay</c>）で
+        ///   鳴らすが、Unity 内蔵オーディオが有効なままだと、<c>AudioSource</c> を1つも
+        ///   鳴らさなくても<b>Unity 側が出力デバイスを掴み続ける</b>（実測: 起動から終了までずっと。
+        ///   → <c>docs/mascot.md</c>）。ON にしたビルドでは CoreAudio がプロセスを認識すらしない。
+        ///
+        /// ★ <b>プロジェクト設定はプラットフォーム別に持てない</b>ので、コミットされた値
+        ///   （<c>m_DisableAudio: 0</c>）は Android 側の要求に合わせてある。Android は
+        ///   Unity 内蔵オーディオで鳴らし、<c>AudioSettings.Mobile.StopAudioOutput()</c> で手放す。
+        ///
+        /// ★ <b>Editor の GUI からビルドすると、この切り替えは走らない。</b>
+        ///   ビルドは <c>scripts/build.sh</c> から行うこと（→ <c>SETUP.md</c>）。
+        /// </summary>
+        private static Action DisableUnityAudioDuringBuild()
+        {
+            var assets = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/AudioManager.asset");
+            if (assets == null || assets.Length == 0)
+            {
+                Debug.LogWarning("[Build] AudioManager.asset を開けません。Disable Unity Audio を切り替えません");
+                return () => { };
+            }
+
+            var serialized = new SerializedObject(assets[0]);
+            var property = serialized.FindProperty("m_DisableAudio");
+            if (property == null)
+            {
+                Debug.LogWarning("[Build] m_DisableAudio が見つかりません。切り替えません");
+                return () => { };
+            }
+
+            var previous = property.boolValue;
+            if (previous)
+            {
+                Debug.Log("[Build] Disable Unity Audio は既に ON です");
+                return () => { };
+            }
+
+            property.boolValue = true;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+            AssetDatabase.SaveAssets();
+            Debug.Log("[Build] Disable Unity Audio を ON にしました（ビルド後に戻します）");
+
+            return () =>
+            {
+                var restore = new SerializedObject(assets[0]);
+                restore.FindProperty("m_DisableAudio").boolValue = previous;
+                restore.ApplyModifiedPropertiesWithoutUndo();
+                AssetDatabase.SaveAssets();
+                Debug.Log("[Build] Disable Unity Audio を戻しました");
+            };
+        }
+
         public static void BuildMacOS()
         {
             var scene = Argument("-buildScene") ?? "Assets/Scenes/Mascot.unity";
@@ -48,7 +102,20 @@ namespace ChatterMascot.EditorTools
             };
 
             Debug.Log($"[Build] scene={scene} output={absolute}");
-            var summary = BuildPipeline.BuildPlayer(options).summary;
+
+            // ★ **EditorApplication.Exit を try の中に置かないこと。** 即座にプロセスが落ちるので
+            //   finally が走らず、Disable Unity Audio を ON にしたままリポジトリに残る
+            var restoreAudioSetting = DisableUnityAudioDuringBuild();
+            BuildSummary summary;
+            try
+            {
+                summary = BuildPipeline.BuildPlayer(options).summary;
+            }
+            finally
+            {
+                restoreAudioSetting();
+            }
+
             Debug.Log($"[Build] result={summary.result} errors={summary.totalErrors} " +
                       $"time={(int)summary.totalTime.TotalSeconds}s size={summary.totalSize}");
 

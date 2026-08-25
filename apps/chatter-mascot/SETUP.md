@@ -59,7 +59,32 @@ UniWindowController の Inspector にある「Player Settings を直す」ボタ
 | `Run In Background` | **オン** | 常駐して背面でも喋る。フォーカスを失って止まると発話が止まる |
 | `Use Mac App Store Validation` | オフ | 透過をブロックしうる |
 | `Mac App Sandbox` | オフ | 同上（Unity のビルドは entitlements を付けないので既定でオフ） |
-| `API Compatibility Level` | .NET Standard 2.1 | `System.Net.WebSockets.ClientWebSocket` を使う |
+| `API Compatibility Level` | .NET Standard 2.1 | `System.Net.WebSockets.ClientWebSocket` と `System.Diagnostics.Process` を使う（どちらも .NET Standard 2.1 で足りることを確認済み） |
+| **`Disable Unity Audio`** | **ビルド時だけオン**（コミットされた値は**オフ**） | ★ 下記 |
+
+### 音の出し方（プラットフォームで違う）
+
+| | 再生の実体 | 無音時にデバイスを手放す方法 |
+|---|---|---|
+| **macOS** | `AfplaySpeechPlayer`（1発話 = 1プロセスで `afplay`） | プロセスが消えれば OS が解放する（実測 **0.5〜1秒**） |
+| **Android / iOS** | `AudioClipPlayer`（Unity 内蔵オーディオ） | `AudioSettings.Mobile.StopAudioOutput()` |
+
+★ **なぜ macOS で `AudioSource` を使わないか。** Unity 内蔵オーディオは**無音でも出力デバイスを
+掴み続ける**（実測: `AudioSource.Play()` を一度も呼ばなくても起動から終了までずっと）。
+Bluetooth イヤホンの電池を食う。macOS には手放す API が無い（→
+[`../../docs/mascot.md`](../../docs/mascot.md)）。
+
+★ **`Disable Unity Audio` はビルド時だけオンになる。** `scripts/build.sh` から呼ばれる
+`BuildScript.BuildMacOS` が切り替えて、ビルド後に戻す。**コミットされている値はオフ**
+（Android が Unity 内蔵オーディオで鳴らすため）。プロジェクト設定はプラットフォーム別に
+持てないので、こうするしかない。
+
+★ **これが無いと省電力にならない。** 外部プロセスで鳴らしても、Unity 内蔵オーディオが
+有効なままだと Unity 側がデバイスを掴む。オンにしたビルドでは CoreAudio がプロセスを
+認識すらしない（実測）。
+
+★ **Editor（macOS）でも `afplay` 経路になる。** 本番と同じ経路を Play Mode で確かめられる。
+ただし **Android 向けの開発を macOS の Editor でするときは、Editor と実機で再生の実体が変わる**。
 
 ### URP 側
 
@@ -138,6 +163,17 @@ cd apps/chatter-mascot
 - **`epoch` が変わったら覚えていることを全部捨てる。** 重複排除の記憶、取得中の item、溜めている ack
 
 すべて [`../../docs/protocol.md`](../../docs/protocol.md) の「クライアント側の責務」にある。
+
+音まわりで踏みやすいのは別口:
+
+- ★ **Editor の GUI からビルドすると `Disable Unity Audio` が切り替わらない。** できた `.app` は
+  音は鳴るが**デバイスを掴みっぱなし**になる（＝この対応が丸ごと無効）。**ビルドは
+  `scripts/build.sh` から行うこと**
+- ★ **`AudioSettings.Mobile.StopAudioOutput()` は macOS でもコンパイルが通る。** 実行すると
+  Unity が `Player.log` に `"implemented for iOS and Android only"` と1行出して**何もしない**。
+  例外も出ないので、書いた側は効いているつもりになる
+- ★ **`.app` を終了しても `afplay` は死なない。** `MascotRunner.OnDestroy` の `StopAll()` が
+  止めている。消すとアプリを閉じた後も喋り続ける
 
 ---
 

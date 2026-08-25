@@ -55,8 +55,12 @@ namespace ChatterMascot.Tests
         }
 
         /// <summary>
-        /// キューに残っている間も手放さない。<c>Pending</c> / <c>Fetching</c> / <c>Ready</c> は
-        /// 「合成待ちで、まもなく鳴る」状態なので、ここで手放すと掴み直しが再生に間に合わない。
+        /// キューに残っている間も手放さない。ここで手放すと掴み直しが再生に間に合わない。
+        ///
+        /// ★ <b>ゲートは「何件残っているか」しか知らない。</b> <c>Pending</c> は
+        ///   「まだ取りに行っていない（すぐ拾われる）」と「503 のバックオフで停車中」の
+        ///   両方を兼ねるので、**停車中を除くのは渡す側の責任**
+        ///   （→ <c>MascotRunner.IsParked</c> / <c>MascotRunnerIsParkedTests</c>）。
         /// </summary>
         [Test]
         public void NeverSuspendsWhileItemsRemain()
@@ -76,11 +80,11 @@ namespace ChatterMascot.Tests
             gate.Tick(1000 + SuspendAfterMs, 0, 0);
             Assert.That(gate.IsSuspended, Is.True);
 
-            Assert.That(gate.NoteWorkIncoming(20000), Is.EqualTo(IdleAction.Resume));
+            Assert.That(gate.NoteWorkIncoming(), Is.EqualTo(IdleAction.Resume));
             Assert.That(gate.IsSuspended, Is.False);
 
             // 掴んでいるときに告げても何も起きない（べき等）
-            Assert.That(gate.NoteWorkIncoming(20001), Is.EqualTo(IdleAction.None));
+            Assert.That(gate.NoteWorkIncoming(), Is.EqualTo(IdleAction.None));
         }
 
         /// <summary>

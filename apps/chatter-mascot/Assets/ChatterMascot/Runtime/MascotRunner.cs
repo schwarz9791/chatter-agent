@@ -185,6 +185,20 @@ namespace ChatterMascot
             //   Update() の Tick も Dispatch も何も起こさず、**ウィンドウは出て、
             //   フレームレート上限も効いて、接続先のログすら出ない**。
             //   Player.log に埋もれたスタックトレース1本以外に手がかりが残らない
+            // ★ 測定や切り分けのためにコマンドラインから差し替えられる。繋がらない URL を渡せば
+            //   「サーバーに一度も繋がない状態」を**本番シーンのまま**作れる（→ docs/mascot.md）。
+            //   専用のシーンを複製すると、#17 で VRM が入った瞬間に本番を代表しなくなり、
+            //   **しかも失敗が見えない**（変わらずビルドでき、変わらず計測でき、
+            //   ただ別のアプリを測っているだけになる）。
+            //
+            //   open Build/ChatterMascot.app --args -serverUrl ws://127.0.0.1:9
+            var overridden = CommandLineArgument("-serverUrl");
+            if (!string.IsNullOrEmpty(overridden))
+            {
+                Debug.Log($"[Mascot] serverUrl をコマンドラインで上書きします: \"{overridden}\"");
+                serverUrl = overridden;
+            }
+
             if (!IsValidServerUrl(serverUrl))
             {
                 Debug.LogError($"[Mascot] serverUrl が不正です: \"{serverUrl}\"。" +
@@ -204,7 +218,18 @@ namespace ChatterMascot
 
             _player = SpeechPlayerFactory.Create(audioSource);
             _player.Warn += message => Debug.LogWarning("[Mascot] " + message);
-            _idleGate = new AudioIdleGate(audioIdleSuspendMs) { Enabled = audioIdleSuspendMs > 0 };
+            _idleGate = new AudioIdleGate(audioIdleSuspendMs)
+            {
+                // ★ **手放せない実装ではゲートごと止める。** 呼んでも何も起きない実装で回すと、
+                //   何も手放していないのに「手放しました」とログに出続け、次のデバッグを誤誘導する
+                Enabled = audioIdleSuspendMs > 0 && _player.CanSuspendOutput,
+            };
+            if (!_idleGate.Enabled)
+            {
+                Debug.Log(audioIdleSuspendMs > 0
+                    ? "[Mascot] このプラットフォームでは出力デバイスを手放せないので、アイドル判定は動かしません"
+                    : "[Mascot] audioIdleSuspendMs が 0 以下なのでアイドル判定は動かしません");
+            }
             // 音声は WebSocket と同じ authority から取る。サーバーは自分の到達アドレスを
             // 知らないので、フレームには相対パスしか載らない
             _fetcher = new AudioFetcher(AudioFetcher.DeriveAudioBaseUrl(serverUrl), audioFetchTimeoutMs);
@@ -361,13 +386,69 @@ namespace ChatterMascot
         }
 
         /// <summary>
-        /// キューに残っている件数。<b>孤児を含める</b> —— 採番のやり直しで
+        /// キューに残っていて<b>まもなく鳴る</b>件数。孤児を含める —— 採番のやり直しで
         /// <c>Items</c> から外れた再生中の音がそこにいる（契約1）。
+        ///
+        /// ★★ <b>時計を取り違えないこと。</b> <c>RetryAfter</c> は <see cref="Dispatch"/> と同じ
+        ///   <b>壁時計</b>（Unix epoch ミリ秒 ≈ 1.7兆）で置かれる。アイドル判定の
+        ///   <see cref="IdleNowMs"/> は<b>単調時計</b>（起動からの経過 ≈ 数万）で桁が違うので、
+        ///   そちらで比較すると<b>全 item が「停車中」に見えて常に手放し、1文目の頭が切れる</b>。
+        ///   だからここで壁時計を取る（引数で受け取らない）。
         /// </summary>
         private int InFlightCount()
         {
             if (_state == null) return 0;
-            return _state.Items.Count + _state.Orphans.Count;
+
+            var wallNow = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var count = _state.Orphans.Count;
+            foreach (var item in _state.Items.Values)
+            {
+                if (IsParked(item, wallNow)) continue;
+                count++;
+            }
+            return count;
+        }
+
+        /// <summary>
+        /// 503 のバックオフで停車中か。
+        ///
+        /// ★ <b>503 は意図的に <c>Attempts</c> を消費しない</b>（→ <c>QueueItem.RetryAfter</c>）ので、
+        ///   合成エンジンが落ちている間、item は <c>Pending</c> + <c>RetryAfter</c> のまま
+        ///   <b>永久に <c>Items</c> に残る</b>。これを「まもなく鳴る」と数えると、
+        ///   <b>無音がいちばん長く続く状況で出力デバイスを掴みっぱなしになる</b> ——
+        ///   この機能がいちばん得をするはずの場面で効かない。
+        ///
+        /// ★ <c>public static</c> なのはテストで固定するため（private では固定できない）。
+        /// </summary>
+        public static bool IsParked(QueueItem item, long wallNowMs)
+        {
+            return item != null && item.Status == ItemStatus.Pending && wallNowMs < item.RetryAfter;
+        }
+
+        /// <summary>
+        /// 起動引数を読む。<c>BuildScript.Argument()</c> と同じ形。
+        ///
+        /// ★ 取れない環境でも<b>起動を止めないこと</b>。ここで throw すると
+        ///   「動いて見える死体」ですらなく、接続先のログも出ないまま落ちる。
+        /// </summary>
+        private static string CommandLineArgument(string name)
+        {
+            string[] args;
+            try
+            {
+                args = Environment.GetCommandLineArgs();
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+            if (args == null) return null;
+
+            for (var i = 0; i < args.Length - 1; i++)
+            {
+                if (args[i] == name) return args[i + 1];
+            }
+            return null;
         }
 
         private void Dispatch(PlaybackEvent ev)
@@ -385,7 +466,7 @@ namespace ChatterMascot
                     // ★ **再生の直前ではなくここで掴み直す。** GET はサーバーに合成させるので
                     //   数百ms〜数秒かかり、先読みのぶんだけ再生よりさらに手前で走る。
                     //   デバイスの掴み直し（Bluetooth なら A2DP の張り直し）はその裏に隠れる
-                    if (_idleGate != null) ApplyIdle(_idleGate.NoteWorkIncoming(IdleNowMs()));
+                    if (_idleGate != null) ApplyIdle(_idleGate.NoteWorkIncoming());
                     _ = FetchAudioAsync(command.Epoch, command.Seq, command.Path);
                     break;
 

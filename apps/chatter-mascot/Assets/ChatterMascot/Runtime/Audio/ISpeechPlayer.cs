@@ -56,6 +56,17 @@ namespace ChatterMascot.Audio
         int ActiveCount { get; }
 
         /// <summary>
+        /// この実装が <see cref="SuspendOutput"/> で<b>本当にデバイスを手放せるか</b>。
+        ///
+        /// ★ <b><c>false</c> のときはアイドル判定ごと止めること</b>（<c>MascotRunner</c> が
+        ///   <c>AudioIdleGate.Enabled</c> に反映する）。呼んでも何も起きない実装でゲートを回すと、
+        ///   <b>何も手放していないのに「手放しました」とログに出続ける</b>。
+        ///   <c>Player.log</c> は無音の原因を診断する唯一の窓なので、
+        ///   嘘のログは次のデバッグを確実に誤誘導する。
+        /// </summary>
+        bool CanSuspendOutput { get; }
+
+        /// <summary>
         /// オーディオ出力デバイスを手放す。持たない実装は no-op でよい。
         ///
         /// ★ <b><see cref="ActiveCount"/> が 0 のときだけ呼ぶこと。</b>

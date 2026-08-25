@@ -255,6 +255,16 @@ namespace ChatterMascot.Audio
         }
 
         /// <summary>
+        /// ★ <b>常に <c>false</c>。</b> 1発話 = 1プロセスなので鳴り終われば OS が解放する ——
+        ///   <b>手放すものが残っていない</b>。これによりアイドル判定ごと止まるので、
+        ///   「手放しました」という嘘のログも出ない。
+        /// </summary>
+        public bool CanSuspendOutput
+        {
+            get { return false; }
+        }
+
+        /// <summary>
         /// ★ <b>no-op でよい。</b> 1発話 = 1プロセスなので、鳴り終われば
         ///   OS がデバイスを解放する（実測 0.5〜1秒）。掴みっぱなしになる相手がいない。
         /// </summary>

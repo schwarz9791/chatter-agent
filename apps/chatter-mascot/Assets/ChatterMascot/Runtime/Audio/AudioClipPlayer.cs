@@ -125,20 +125,14 @@ namespace ChatterMascot.Audio
             }
         }
 
-        /// <summary>
-        /// WAV を <see cref="AudioClip"/> にして、長さと一緒に包む。
-        ///
-        /// ★ ヘッダを2回舐めることになるが（<see cref="WavDecoder.TryReadHeader"/> と
-        ///   <see cref="WavDecoder.Decode"/> の中で1回ずつ）、1発話につき1回しか通らない
-        ///   数十KB の走査なので、<c>Decode</c> のシグネチャを変えて既存の呼び出しと
-        ///   テストを巻き込むより安い。
-        /// </summary>
+        /// <summary>WAV を <see cref="AudioClip"/> にして、長さと一緒に包む。</summary>
         public object Prepare(byte[] wav, string name, out string error)
         {
             WavHeader header;
             if (!WavDecoder.TryReadHeader(wav, out header, out error)) return null;
 
-            var clip = WavDecoder.Decode(wav, name, out error);
+            // ★ 読んだヘッダを渡す。引数無しの Decode は中でもう一度 RIFF を走査する
+            var clip = WavDecoder.Decode(wav, name, header, out error);
             if (clip == null) return null;
 
             return new UnityAudioHandle { Clip = clip, DurationMs = header.DurationMs };
@@ -151,6 +145,22 @@ namespace ChatterMascot.Audio
             if (handle == null || handle.Clip == null) return;
             UnityEngine.Object.Destroy(handle.Clip);
             handle.Clip = null;
+        }
+
+        /// <summary>
+        /// ★ <b>効くのは iOS / Android だけ</b>（→ <see cref="SuspendOutput"/>）。
+        ///   macOS では <c>AudioSettings.Mobile.StopAudioOutput</c> が no-op なので <c>false</c>。
+        /// </summary>
+        public bool CanSuspendOutput
+        {
+            get
+            {
+#if UNITY_IOS || UNITY_ANDROID
+                return true;
+#else
+                return false;
+#endif
+            }
         }
 
         /// <summary>

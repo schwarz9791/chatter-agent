@@ -85,9 +85,21 @@ Native Audio Plugin SDK は DSP エフェクトを挿す仕組みで、デバイ
 
 ★ **「自分が黙っていれば無音」ではない。** サーバーは1つで、**複数の Claude Code
 セッションの発話が同じキューに入る**。1回目の測定はこれで無効になった（別セッションの
-発話が Unity に流れて、実際に鳴っていた）。**繋がらない `serverUrl` を焼いたビルド**
-（`Assets/Scenes/AudioDeviceProbe.unity`）で測り直すこと。`scripts/build.sh` は
-第1引数にシーンを取れるので、本番シーンを汚さずに別 `.app` を作れる。
+発話が Unity に流れて、実際に鳴っていた）。**サーバーに繋がない状態で測ること**:
+
+```bash
+open Build/ChatterMascot.app --args -serverUrl ws://127.0.0.1:9
+```
+
+ポート 9（discard）は listen していないので絶対に繋がらない。`MascotRunner.Start()` が
+起動引数で `serverUrl` を上書きする（`IsValidServerUrl` は後段なので、不正な値を渡しても
+「動いて見える死体」にはならず `enabled = false` で止まる）。
+
+★ **測定のためにシーンを複製しないこと。** 一度やって消した。`Mascot.unity` の完全コピーで
+差分は `serverUrl` の1行だけ（797行の重複）だったが、問題は重複そのものではなく
+**失敗が見えないこと** —— #17 で VRM が入った瞬間、#16 で UniWindowController が付いた瞬間に
+複製は本番を代表しなくなるが、**変わらずビルドでき、変わらず計測でき、ただ別のアプリを
+測っているだけになる**。この設計の根拠にした CoreAudio の実測値が、そこで静かに無効化される。
 
 ★ **測定でクライアントを2台繋がないこと。** → [`docs/protocol.md`](./protocol.md) の
 クライアント側の責務6。速いクライアントの ack が、遅いクライアントのまだ喋っていない

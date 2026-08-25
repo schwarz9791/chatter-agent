@@ -61,7 +61,7 @@ namespace ChatterMascot.Audio
         ///   <c>GET /audio/…</c> はサーバーに合成させるので数百ms〜数秒かかり、
         ///   先読みのぶんだけ再生よりさらに手前で走る。
         /// </summary>
-        public IdleAction NoteWorkIncoming(long now)
+        public IdleAction NoteWorkIncoming()
         {
             _idleSince = -1;
             if (!_suspended) return IdleAction.None;

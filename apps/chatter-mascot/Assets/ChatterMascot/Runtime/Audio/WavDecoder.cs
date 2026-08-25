@@ -189,6 +189,18 @@ namespace ChatterMascot.Audio
         public static AudioClip Decode(byte[] wav, string name, out string error)
         {
             if (!TryReadHeader(wav, out var header, out error)) return null;
+            return Decode(wav, name, header, out error);
+        }
+
+        /// <summary>
+        /// <see cref="TryReadHeader"/> を済ませている呼び出し向け。<b>RIFF をもう一度走査しない。</b>
+        ///
+        /// ★ 期限の根拠にヘッダが要る実装（<c>ISpeechPlayer.Prepare</c>）は先に
+        ///   <see cref="TryReadHeader"/> を呼ぶので、引数無しの版を使うと同じ走査を2回する。
+        /// </summary>
+        public static AudioClip Decode(byte[] wav, string name, WavHeader header, out string error)
+        {
+            error = null;
 
             float[] samples;
             if (!TryReadSamples(

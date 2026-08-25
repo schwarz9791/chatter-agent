@@ -173,7 +173,12 @@ cd apps/chatter-mascot
   Unity が `Player.log` に `"implemented for iOS and Android only"` と1行出して**何もしない**。
   例外も出ないので、書いた側は効いているつもりになる
 - ★ **`.app` を終了しても `afplay` は死なない。** `MascotRunner.OnDestroy` の `StopAll()` が
-  止めている。消すとアプリを閉じた後も喋り続ける
+  止めている。消すとアプリを閉じた後も喋り続ける。
+  **実測で確認済み**（発話中に `pkill -TERM` → 3秒後に `afplay` が 0個）
+- ★ **一時ファイルは `$TMPDIR`**（`/var/folders/…/T/<company>/<product>/speech-<pid>/`）。
+  `Application.temporaryCachePath` は macOS では `~/Library/Caches` ではない。
+  **ディレクトリ名に pid が入る**のは、Editor の Play Mode とビルド済み `.app` を同時に
+  動かしたときに、後発が先行インスタンスの再生中の WAV を消さないため
 
 ---
 

@@ -102,10 +102,12 @@ namespace ChatterMascot.Audio
             var path = Path.Combine(_tmpDir, name + ".wav");
             try
             {
-                // ★ **毎回作る（べき等で安価）。** macOS はディスクが逼迫すると
-                //   `~/Library/Caches` をパージするので、実行中にディレクトリごと消えうる。
-                //   消えたあとは書き込みが全部 DirectoryNotFoundException になり、
-                //   AudioFailed → skip + ack で**プロセスが終わるまで全発話が黙って落ちる**
+                // ★ **毎回作る（べき等で安価）。** `Application.temporaryCachePath` は macOS では
+                //   `$TMPDIR`（`/var/folders/…/T/<company>/<product>`）を指し、**OS が定期的に掃除する**
+                //   （3日以上触られていないものを消す periodic / 再起動時のクリア）。
+                //   実行中にディレクトリごと消えうる。消えたあとは書き込みが全部
+                //   DirectoryNotFoundException になり、AudioFailed → skip + ack で
+                //   **プロセスが終わるまで全発話が黙って落ちる**
                 Directory.CreateDirectory(_tmpDir);
                 File.WriteAllBytes(path, wav);
             }

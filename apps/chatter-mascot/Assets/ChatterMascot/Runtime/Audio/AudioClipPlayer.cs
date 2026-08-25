@@ -197,6 +197,13 @@ namespace ChatterMascot.Audio
             var clip = handle.Clip;
             if (clip == null) return "AudioClip がありません";
 
+            // ★ **これを外すと発話が黙って消える。** 出力を止めたまま Play() すると
+            //   isPlaying が即 false になり、下の完了待ちが1回目のチェックで抜ける。
+            //   timedOut は false なので**成功として返り**、Played → ack →
+            //   サーバーのキューから物理削除される。ログも出ない。
+            //   ゲートの resume は Tick 経由だと次フレームなので、ここで塞ぐ
+            ResumeOutput();
+
             var voice = Claim();
             if (voice == null) return "AudioSource がありません";
 

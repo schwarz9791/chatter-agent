@@ -299,18 +299,51 @@ namespace ChatterMascot
             Dispatch(PlaybackEvent.Received(frame));
         }
 
+        /// <summary>
+        /// ゲートの指示を実行する。
+        ///
+        /// ★ <b>ここから例外を出さないこと。</b> <see cref="Dispatch"/> は
+        ///   <c>foreach (var command in Reduce(...)) Execute(command)</c> で、この呼び出しは
+        ///   <c>FetchAudio</c> の処理の中にいる。例外が抜けると<b>そのバッチの残りのコマンド
+        ///   （<c>Ack</c> / <c>Play</c> / <c>DiscardAudio</c>）が全部落ち</b>、
+        ///   <c>FetchAudioAsync</c> も始まらないので head が <c>Pending</c> のまま
+        ///   in-flight 無しになる —— <b>キューが恒久停止する</b>。
+        /// </summary>
         private void ApplyIdle(IdleAction action)
         {
             if (_player == null) return;
             switch (action)
             {
                 case IdleAction.Suspend:
-                    _player.SuspendOutput();
-                    Debug.Log("[Mascot] 無音が続いたのでオーディオ出力を止めました");
+                    try
+                    {
+                        _player.SuspendOutput();
+                        Debug.Log("[Mascot] 無音が続いたのでオーディオ出力を止めました");
+                    }
+                    catch (Exception e)
+                    {
+                        // ★ 手放せなかったのに「手放した」状態が残ると実態とズレる。かといって
+                        //   状態だけ戻すと**猶予のたびに失敗を繰り返してログが埋まる**ので、
+                        //   一度失敗したら機能ごと止める。掴んだままになるだけで発話は無事
+                        if (_idleGate != null) _idleGate.Enabled = false;
+                        Debug.LogWarning("[Mascot] オーディオ出力を止められませんでした。" +
+                                         "以後この機能を無効にします: " + e.Message);
+                    }
                     break;
+
                 case IdleAction.Resume:
-                    _player.ResumeOutput();
-                    Debug.Log("[Mascot] オーディオ出力を掴み直しました");
+                    try
+                    {
+                        _player.ResumeOutput();
+                        Debug.Log("[Mascot] オーディオ出力を掴み直しました");
+                    }
+                    catch (Exception e)
+                    {
+                        // ★ **握りつぶして続行する。** ゲートの _suspended は既に false へ
+                        //   倒れている（Wake() が Resume を返す前に落としている）ので、
+                        //   状態は「掴んでいる」側にある。次の発話でもう一度 resume を試す
+                        Debug.LogWarning("[Mascot] オーディオ出力を掴み直せませんでした: " + e.Message);
+                    }
                     break;
             }
         }

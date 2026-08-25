@@ -61,7 +61,15 @@ namespace ChatterMascot.Audio
 
             // ★ 起動時に作り直す。前回の残骸（異常終了で消し損ねた WAV）を溜めない。
             //   参照実装の reset() と同じ
-            _tmpDir = Path.Combine(Application.temporaryCachePath, "speech");
+            //
+            // ★ <b>ディレクトリ名にプロセス ID を混ぜること。</b> `forceSingleInstance` が防ぐのは
+            //   **同じ `.app` の二重起動だけ**で（→ docs/mascot.md）、**Editor の Play Mode と
+            //   ビルド済み `.app` の同時起動は防げない**。共通の名前にすると、後から起動した方の
+            //   下の Delete が**先行インスタンスの再生中の WAV ごと消す**。
+            //   他インスタンスの残骸は OS のキャッシュパージに任せる
+            _tmpDir = Path.Combine(
+                Application.temporaryCachePath,
+                "speech-" + Process.GetCurrentProcess().Id);
             try
             {
                 if (Directory.Exists(_tmpDir)) Directory.Delete(_tmpDir, true);
@@ -94,6 +102,11 @@ namespace ChatterMascot.Audio
             var path = Path.Combine(_tmpDir, name + ".wav");
             try
             {
+                // ★ **毎回作る（べき等で安価）。** macOS はディスクが逼迫すると
+                //   `~/Library/Caches` をパージするので、実行中にディレクトリごと消えうる。
+                //   消えたあとは書き込みが全部 DirectoryNotFoundException になり、
+                //   AudioFailed → skip + ack で**プロセスが終わるまで全発話が黙って落ちる**
+                Directory.CreateDirectory(_tmpDir);
                 File.WriteAllBytes(path, wav);
             }
             catch (Exception e)

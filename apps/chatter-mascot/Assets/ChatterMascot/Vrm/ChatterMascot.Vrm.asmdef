@@ -1,18 +1,14 @@
 {
-    "name": "ChatterMascot.Editor",
-    "rootNamespace": "ChatterMascot.EditorTools",
+    "name": "ChatterMascot.Vrm",
+    "rootNamespace": "ChatterMascot.Vrm",
     "references": [
         "ChatterMascot.Runtime",
-        "ChatterMascot.Vrm",
-        "ChatterMascot.Desktop",
         "VRM10",
         "UniGLTF",
         "UniGLTF.Utils",
-        "Unity.InputSystem"
+        "UniHumanoid"
     ],
-    "includePlatforms": [
-        "Editor"
-    ],
+    "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
     "overrideReferences": false,

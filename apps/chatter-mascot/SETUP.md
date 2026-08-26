@@ -58,7 +58,7 @@ UniWindowController の Inspector にある「Player Settings を直す」ボタ
 | `Allow Fullscreen Switch` | **オフ** | 同上 |
 | **`Default Is Native Resolution`** | **オフ** | ★ **オンだと下2行がそもそも効かない**（Inspector でもグレーアウトする） |
 | `Default Screen Width` | **250** | ★ 下記 |
-| `Default Screen Height` | **368** | 同上（★ **狙いは 400。枠なし化で +32 される**） |
+| `Default Screen Height` | **400** | 同上 |
 | `Run In Background` | **オン** | 常駐して背面でも喋る。フォーカスを失って止まると発話が止まる |
 | `Use Mac App Store Validation` | オフ | 透過をブロックしうる |
 | `Mac App Sandbox` | オフ | 同上（Unity のビルドは entitlements を付けないので既定でオフ） |
@@ -70,10 +70,12 @@ UniWindowController の Inspector にある「Player Settings を直す」ボタ
 常駐マスコットなので小さく出す。**`Default Is Native Resolution` を切るのが本命**で、
 オンのままだと `Default Screen Width/Height` は Inspector でもグレーアウトして効かない。
 
-★ **入れた高さはそのままの大きさにならない。** `UniWindowController` が枠なし化した瞬間に
-タイトルバーぶん（実測 **+32**）がコンテンツ領域へ編入されるので、**368 と入れて 400 になる**。
-`Default Screen Width` の方は横に枠が無いので入れた値のまま出る。
-**数値を仕様として扱わないこと**（→ [`../../docs/mascot.md`](../../docs/mascot.md)）。変えたら必ず実測する:
+★ **入れた値がそのまま出るのは `WindowSizeKeeper` があるからで、素では出ない。**
+`UniWindowController` が枠なし化した瞬間にタイトルバーぶん（実測 **+32**）が
+コンテンツ領域へ編入され、それが終了時に永続化されて、**起動のたびに +32 で伸びていく**
+（600x1632 はこうして育ったもの）。`Desktop/WindowSizeKeeper.cs` が起動直後の大きさへ
+戻すことで打ち消している（→ [`../../docs/mascot.md`](../../docs/mascot.md)）。
+**数値を仕様として扱わないこと。** 変えたら必ず実測する:
 
 ```bash
 defaults delete tech.sukima.chatter-mascot   # ★ 前回終了時の大きさが焼き付いている

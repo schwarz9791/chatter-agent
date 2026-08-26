@@ -119,6 +119,56 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
+--- !u!1 &573341448
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 573341450}
+  - component: {fileID: 573341449}
+  m_Layer: 0
+  m_Name: ModelAnchor
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &573341449
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 573341448}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5eb69687463dd4886b33831b6c79e19b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: ChatterMascot.Vrm::ChatterMascot.Vrm.VrmStage
+  modelAnchor: {fileID: 573341450}
+  placeholder: {fileID: 1482741621}
+  autoFrame: 1
+  headroom: 1.1
+  loadFrameRate: 120
+--- !u!4 &573341450
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 573341448}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 1482741625}
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &615255318
 GameObject:
   m_ObjectHideFlags: 0
@@ -261,6 +311,7 @@ MonoBehaviour:
   serverUrl: ws://127.0.0.1:8570
   targetFrameRate: 30
   audioSource: {fileID: 0}
+  audioIdleSuspendMs: 5000
   lookahead: 3
   speechMaxAgeMs: 0
   audioFetchTimeoutMs: 60000
@@ -770,7 +821,7 @@ Transform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 0}
+  m_Father: {fileID: 573341450}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &1482741626
 MonoBehaviour:
@@ -791,7 +842,7 @@ SceneRoots:
   m_Roots:
   - {fileID: 615255321}
   - {fileID: 824453176}
-  - {fileID: 1482741625}
   - {fileID: 1445492409}
   - {fileID: 622504113}
   - {fileID: 1431098635}
+  - {fileID: 573341450}

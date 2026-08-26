@@ -122,7 +122,11 @@ namespace ChatterMascot
             // ★ 何より先に上限を入れる。無制限のままだと Update / コルーチンが毎秒数千回回り、
             //   メインスレッドが飽和して**サーバーの ping に pong を返せなくなる**
             //   （症状は「アプリが重い」より先に「接続が繰り返し切れる」として出る）
-            if (targetFrameRate > 0) Application.targetFrameRate = targetFrameRate;
+            // ★ **Application.targetFrameRate を直接書かないこと。** VRM の読み込み中だけ
+            //   上限を上げる借り手が居る（VrmStage）ので、「戻す先」の宣言をここ1箇所に集める。
+            //   直接書くと、借り手が Awake より先に走ったときに Unity 既定の -1 を
+            //   保存して復元し、**上限が恒久的に消える**（→ FrameRateBudget）
+            FrameRateBudget.SetBaseline(targetFrameRate);
 
             if (audioSource == null) audioSource = GetComponent<AudioSource>();
             if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
@@ -192,7 +196,7 @@ namespace ChatterMascot
             //   ただ別のアプリを測っているだけになる）。
             //
             //   open Build/ChatterMascot.app --args -serverUrl ws://127.0.0.1:9
-            var overridden = CommandLineArgument("-serverUrl");
+            var overridden = CommandLine.Argument("-serverUrl");
             if (!string.IsNullOrEmpty(overridden))
             {
                 Debug.Log($"[Mascot] serverUrl をコマンドラインで上書きします: \"{overridden}\"");
@@ -423,32 +427,6 @@ namespace ChatterMascot
         public static bool IsParked(QueueItem item, long wallNowMs)
         {
             return item != null && item.Status == ItemStatus.Pending && wallNowMs < item.RetryAfter;
-        }
-
-        /// <summary>
-        /// 起動引数を読む。<c>BuildScript.Argument()</c> と同じ形。
-        ///
-        /// ★ 取れない環境でも<b>起動を止めないこと</b>。ここで throw すると
-        ///   「動いて見える死体」ですらなく、接続先のログも出ないまま落ちる。
-        /// </summary>
-        private static string CommandLineArgument(string name)
-        {
-            string[] args;
-            try
-            {
-                args = Environment.GetCommandLineArgs();
-            }
-            catch (Exception)
-            {
-                return null;
-            }
-            if (args == null) return null;
-
-            for (var i = 0; i < args.Length - 1; i++)
-            {
-                if (args[i] == name) return args[i + 1];
-            }
-            return null;
         }
 
         private void Dispatch(PlaybackEvent ev)

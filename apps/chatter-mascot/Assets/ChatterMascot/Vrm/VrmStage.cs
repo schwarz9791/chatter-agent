@@ -289,8 +289,17 @@ namespace ChatterMascot.Vrm
             collider.direction = 1;   // Y 軸
             collider.center = root.transform.InverseTransformPoint(bounds.center);
             collider.height = Mathf.Max(bounds.size.y, 0.01f);
-            // 前後左右の太い方に合わせる。細い方に合わせると腕や横向きで抜ける
-            collider.radius = Mathf.Max(Mathf.Max(bounds.extents.x, bounds.extents.z), 0.01f);
+            // ★ **奥行き（Z）に合わせる。幅（X）に合わせない。**
+            //   VRM 1.0 はレストポーズが T ポーズ必須なので、extents.x は
+            //   **広げた腕の長さ**になる。そちらを採ると半径 0.695m の太い円柱ができ、
+            //   250px のウィンドウで **202px（81%）** が「キャラの実体」として
+            //   クリックを食う —— 腕の高さ以外の左右の空白まで掴んでしまい、
+            //   クリック透過の意味がほとんど無くなる（実機で確認）。
+            //   奥行きなら胴の太さに近く、80px に収まる。
+            // ★ 引き換えに**伸ばした腕の上では掴めない**（クリックが下へ抜ける）。
+            //   #59 でアイドルモーションが入って腕が下りれば差はほぼ消える。
+            //   部位ごとの精緻化は #16。
+            collider.radius = Mathf.Max(bounds.extents.z, 0.01f);
         }
 
         private static Bounds WorldBounds(RuntimeGltfInstance instance)

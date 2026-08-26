@@ -30,7 +30,7 @@ hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公�
 | `plugin/` | Claude Code プラグイン（bash hook） | **実装済み。** 実機で動作確認している |
 | `core/` | `chatter-agent-core`（CLI + WebSocket/HTTP サーバー + 発話 CLI） | **実装済み。** `summarizer/`（AI要約、既定OFF）・**サーバー合成**（[#29](https://github.com/schwarz9791/chatter-agent/issues/29)）・**エンジンの spawn**（[#51](https://github.com/schwarz9791/chatter-agent/issues/51)）も含めて完了 |
 | `core/src/player/` | `chatter-agent-player`（WebSocket → 音声を GET → 再生 → ack） | **実装済み**（[#11](https://github.com/schwarz9791/chatter-agent/issues/11)）。**プロトコルの参照実装。捨てない** |
-| `apps/chatter-mascot/` | 表示側アプリ（**Unity + UniVRM**。macOS 常駐 + Android XR を1プロジェクトで） | **土台と発話は実装済み**（[#12](https://github.com/schwarz9791/chatter-agent/issues/12)）。WebSocket → 音声取得 → 再生 → ack の全経路と EditMode テスト112件。**macOS ビルドで透過も成立**。**無音時にオーディオデバイスを手放す**（macOS は `afplay` を1発話1プロセス + ビルド時だけ `Disable Unity Audio`、Android は `AudioSettings.Mobile.StopAudioOutput()`）。VRM 表示は [#17](https://github.com/schwarz9791/chatter-agent/issues/17) |
+| `apps/chatter-mascot/` | 表示側アプリ（**Unity + UniVRM**。macOS 常駐 + Android XR を1プロジェクトで） | **土台と発話**（[#12](https://github.com/schwarz9791/chatter-agent/issues/12)）に加え、**VRM の表示も実装済み**（[#56](https://github.com/schwarz9791/chatter-agent/issues/56)）。WebSocket → 音声取得 → 再生 → ack の全経路と EditMode テスト138件。**macOS ビルドで透過も成立**。**無音時にオーディオデバイスを手放す**（macOS は `afplay` を1発話1プロセス + ビルド時だけ `Disable Unity Audio`、Android は `AudioSettings.Mobile.StopAudioOutput()`）。表情 / リップシンク / アイドルは [#57](https://github.com/schwarz9791/chatter-agent/issues/57) / [#58](https://github.com/schwarz9791/chatter-agent/issues/58) / [#59](https://github.com/schwarz9791/chatter-agent/issues/59) |
 | `docs/` | 作業規約 | protocol / core / plugin / origin の4本 |
 | `.github/workflows/` | CI（typecheck / lint / format / bundle / test / verify） | 稼働中 |
 
@@ -38,7 +38,7 @@ hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公�
 **Phase C は Unity + UniVRM で1プロジェクト。** プラットフォーム別ではなく**レイヤーで分けてある**:
 [#11](https://github.com/schwarz9791/chatter-agent/issues/11)（Node の発話 CLI）→
 [#12](https://github.com/schwarz9791/chatter-agent/issues/12)（Unity の土台と発話）→
-[#17](https://github.com/schwarz9791/chatter-agent/issues/17)（UniVRM の表示）→
+[#17](https://github.com/schwarz9791/chatter-agent/issues/17)（UniVRM の表示。**[#56](https://github.com/schwarz9791/chatter-agent/issues/56) で表示まで完了**、表情 #57 / リップシンク #58 / アイドル #59 が残り）→
 [#16](https://github.com/schwarz9791/chatter-agent/issues/16)（デスクトップ固有）/ [#25](https://github.com/schwarz9791/chatter-agent/issues/25)（XR 固有）。
 **#11 は完了した**（`core/src/player/`）。Unity のビルドを待たずに音が出る。
 

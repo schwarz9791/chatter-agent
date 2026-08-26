@@ -127,6 +127,204 @@ batchmode はダイアログを出さないので、この失敗の仕方をし�
 ★ **Editor 経由でしかできないこと**（シーン編集、パッケージ解決、設定変更）は MCP で行う。
 そのときは **`AssetDatabase.SaveAssets()` とシーン保存を先に済ませる**。ダイアログの芽を潰しておく。
 
+### ★ ウィンドウは起動のたびに縦へ 32 伸びる（`WindowSizeKeeper` で打ち消している）
+
+「いつのまにか窓が縦長になっている」の正体。実測（macOS 26.6.2 / #56）:
+
+1. Unity が前回終了時のクライアント高さを復元する
+2. `UniWindowController` が枠なし化し、**タイトルバーぶん（32）がクライアント領域へ編入される**
+   —— ウィンドウの外形は縮まないので、クライアントは 32 大きくなる
+3. その大きくなった値が終了時に永続化される
+4. 次の起動で 1 に戻る
+
+```
+起動1: surface 250x400 → 250x432
+起動2: surface 250x432 → 250x464
+起動3: surface 250x464 → 250x496
+```
+
+**既定を 600x800 にしていた頃に 600x1632 まで育っていた。**
+
+`Desktop/WindowSizeKeeper.cs` が、**起動直後（枠なし化の前）に見えていた大きさ**へ
+戻すことで打ち消す。これを入れてから3回連続で起動して 250x400 のまま動かないことを確認した。
+
+★ **縮んだ側は追いかけないこと。** ユーザーが手で小さくしたのを戻すと操作を奪う。
+打ち消したいのは「勝手に増える」ぶんだけ。
+
+★ **見張る時間を短くしないこと**（既定5秒）。枠なし化は起動直後の数フレームで起きるが、
+VRM の読み込みでメインスレッドが詰まると実時間では後ろへずれる。長い側の害は
+「起動直後に手で広げても戻される」だけ。
+
+★ **これは対症療法。** ウィンドウの大きさ・位置・永続化の設計は
+[#16](https://github.com/schwarz9791/chatter-agent/issues/16)。
+
+### ★ `UnityWebRequest.timeout` は `file://` に効かない
+
+macOS の TCC で保護されたフォルダ（`~/Downloads` / `~/Desktop` / `~/Documents`）の
+モデルを `-vrm` で渡すと、リクエストが**返らず・エラーも出さず・`timeout` も発火しない**
+（実測。30秒に設定していたが1分待っても何も起きなかった）。
+
+**症状が凶悪**で、探索順の1段目で止まるので:
+
+- モデルが出ない
+- **`Player.log` に1行も増えない**（読み込み開始のログすら出ない）
+- **同梱モデルへのフォールバックにも落ちない**
+
+「動いて見える死体」そのもの。TCC のダイアログも出ないので、権限が原因だと気づけない。
+
+手当ては `Vrm/VrmAssetLoader.cs` の**自前の期限**（15秒）。`Task.WhenAny` で打ち切って
+`request.Abort()` し、次の候補へ進む。最悪でも同梱モデルまでは落ちる。
+ログには権限の可能性を名指しで書く。
+
+★ **`request.timeout` の方も残してある。** HTTP には効くので、両方要る。
+
+### ★ VRM 1.0 は T ポーズ必須。自動フレーミングの支配軸がそれで決まる
+
+`Camera.fieldOfView` は `m_FOVAxisMode` に関わらず**常に垂直 FOV**で、水平は
+`tan(hFov/2) = tan(vFov/2) * aspect` で決まる。**縦長のウィンドウほど横が狭い。**
+
+同梱モデル `vita.vrm` の bounds は **1.39m × 1.73m**（`VrmProbe` の実測）。
+横幅を決めているのは**広げた腕**なので、250x400（5:8）では:
+
+| | 必要距離 | |
+|---|---|---|
+| 垂直 | 1.50 | |
+| **水平** | **1.93** | ← こちらが採用される |
+
+結果、**縦の占有率は 77%** になり、上下に余白が出る。**これは想定どおり。**
+[#59](https://github.com/schwarz9791/chatter-agent/issues/59) でアイドルモーションが入って
+腕が下りれば `extents.x` が縮み、**支配軸が水平から垂直へ移って同じウィンドウのまま
+占有率が上がる**。いま bounds の比（325x400）に合わせると、#59 の後に横が余る。
+
+★ **どちらの軸で決まったかを必ずログに出すこと。** 「小さく映る」の原因が
+腕の張り出しなのか身長なのかは、これが無いと切り分けられない。
+
+★ **`Start()` の1回では足りない。** `UniWindowController` が起動直後にウィンドウを
+作り直すので、その時点の `Screen.*` は最終値ではない。`resizableWindow: 1` なので
+実行中にも変わる。**`OnRectTransformDimensionsChange` は `RectTransform` 専用**で
+3D カメラには届かず、Unity にウィンドウリサイズの通知は無いので**ポーリングが唯一の手段**。
+
+★ **`camera.aspect` に代入しないこと。** 一度代入すると `ResetAspect()` を呼ぶまで固定される。
+
+### ★ シェーダーストリッピングは「読めるのに真っ黒／ピンク」で例外を出さない
+
+`UrpVrm10MToon10MaterialImporter` は `Shader.Find` でシェーダーを引くが、
+**シーンのマテリアルから参照されないシェーダーはビルドから落ちる**ので、
+ランタイムロードでは確実に踏む。UniVRM 側に自動対策は無い。
+
+`SceneFixups.EnsureAlwaysIncludedShaders()` が `GraphicsSettings.asset` の
+`m_AlwaysIncludedShaders` に2本を冪等に足す:
+
+- `VRM10/Universal Render Pipeline/MToon10`
+- `UniGLTF/UniUnlit`
+
+★ **`Universal Render Pipeline/Lit` は絶対に入れない**（UniVRM 公式が
+「ビルド時間が過大になる」と明記）。同梱モデルは 15 マテリアル全部が MToon なので不要。
+
+★ **シェーダーは名前で引くこと**（パスではなく）。実際のパスは issue に書かれていた
+`UniUnlit/Runtime/UniUnlit.shader` ではなく **`UniUnlit/Shaders/UniUnlit.shader`** だった。
+`Shader.Find` なら Editor が AssetDatabase から引くのでパスの変更に強い。
+
+診断は2段:
+
+1. **読み込みより前**に `Shader.Find` が null かを見る（`VrmMaterialCheck.WarnIfShadersStripped`）
+2. **読み込み直後**に `RuntimeGltfInstance.Materials` を回して
+   `shader == null || !shader.isSupported || shader.name == "Hidden/InternalErrorShader"` を数える
+
+★ **予想に反してビルド時間はほとんど伸びなかった。** MToon URP の `UniversalForward` は
+`multi_compile` が13本あるので大幅に遅くなると見込んでいたが、実測は
+**Unity 自身の計測で 97秒**（UniVRM 導入前は壁時計 145秒。ただしそちらは
+初回のアセットインポートを含む）。**遅くなる前提で設計しないこと。**
+
+### ★ URP のレンダラーは Forward にする
+
+MToon10(URP) に **`UniversalGBuffer` パスが無い**（`UniversalForward` / `MToonOutline` /
+`DepthOnly` / `DepthNormals` / `ShadowCaster` / `XRMotionVectors` のみ）。
+Deferred のままだと未検証の経路に入る。UniVRM 公式の URP サンプルも Forward。
+
+| | #12 時点 | #56 で |
+|---|---|---|
+| `PC_Renderer.asset` の `m_RenderingMode` | `2`（Deferred） | **`0`（Forward）** |
+| 同 `ScreenSpaceAmbientOcclusion` | 有効 | **無効**（トゥーンの陰影と喧嘩する。常駐アプリでフルスクリーンパスが常時走るのも無駄） |
+| `Mobile_Renderer.asset` | **既に Forward で Renderer Feature も空** | そのまま |
+
+★ **`Mobile_Renderer` は最初から Forward だった。** issue #56 の表は「同上（Deferred）」と
+書いていたが実態と違う。**Mobile で要るのは Renderer Feature の追加だけ。**
+
+★ **SSAO を切ると `PC_RPAsset.asset` と `UniversalRenderPipelineGlobalSettings.asset` にも
+差分が出る。** Unity がシェーダーバリアントの prefiltering と「実行時に要る設定」の一覧を
+組み直すため（`ScreenSpaceAmbientOcclusion*Resources` が実行時リストから落ちる）。
+**手で書いた差分ではない。**
+
+★ **`MToonOutlineRenderFeature` の追加は Editor の GUI で行うこと。**
+`m_RendererFeatureMap` のハッシュをコードで組むのは脆い。`SceneFixups` は
+**検査して `LogError` するだけ**（`AssertRendererFeatures`）。
+無いとアウトラインだけ出ず、**エラーも出ない**。
+
+★ **`MToonOutlineRenderFeature` は `#if MTOON_URP` で囲まれている。** 定義しているのは
+`VRM10.MToon10.Runtime.asmdef` の `versionDefines`（`com.unity.render-pipelines.universal`）なので、
+URP が入っていれば自動で立つ。
+
+### ★ asmdef の参照は推移しない（3回踏んだ）
+
+`ChatterMascot.Editor` → `ChatterMascot.Vrm` → `VRM10` と繋がっていても、
+Editor 側が UniVRM の型を直接使うなら **Editor の asmdef にも `VRM10` を書く**必要がある。
+
+実際に踏んだ順:
+
+1. `ChatterMascot.Vrm` に `UniGLTF` はあるが **`UniGLTF.Utils` が無い** →
+   `IAwaitCaller` が「参照されていないアセンブリで定義されている」
+2. `ChatterMascot.Editor` から `VrmProbe` が `UniVRM10` / `UniGLTF` を使う → 同じエラー
+3. `Kirurobo.UniWindowController` を `ChatterMascot.Desktop` へ移したので、
+   Editor の references も **`ChatterMascot.Desktop` に差し替え**が要った
+
+### ★ `Kirurobo.UniWindowController` はデスクトップ限定。Runtime から参照しない
+
+実物の `includePlatforms` は
+`["Editor", "macOSStandalone", "WindowsStandalone32", "WindowsStandalone64"]` で
+**`Android` を含まない**。`includePlatforms` が非空のときは**ホワイトリスト**として扱われるので、
+`ChatterMascot.Runtime`（全プラットフォーム）から参照すると Android ビルドで壊れる。
+
+`ChatterMascot.Desktop` に隔離してある。★ **`includePlatforms` は4つを一字一句写すこと。**
+部分集合にすると Windows Standalone ビルドでコンパイルエラーになる。
+
+依存の向きは `Editor → Desktop → Vrm → Runtime`。
+
+### ★ デスクトップ限定アセンブリの `MonoBehaviour` をシーンに置かない
+
+シーンは `MonoBehaviour` を `m_Script` の GUID として持つだけで、
+**asmdef の `includePlatforms` と無関係に常にシリアライズされる**。
+Android ではそのアセンブリが存在しないので解決先が無く、ビルドエラーではなく
+**シーンロード時の "The referenced script on this Behaviour is missing!" が1本出るだけ**になる。
+症状は「Android で掴めない」、原因は `Player.log` の1行。
+
+`VrmDragHandleBinder` と `WindowSizeKeeper` は `MonoBehaviour` にせず、
+`[RuntimeInitializeOnLoadMethod(AfterSceneLoad)]` から自分で組み立てる。
+**Android ではアセンブリごと存在しないので属性の走査対象にすらならない** ——
+`#if` もプラットフォーム分岐も要らず、切り分けが asmdef 1箇所に閉じる。
+
+★ **購読は sticky にすること。** `AfterSceneLoad` は全 `Awake` の後・最初の `Start` の前に
+走るので `VrmStage` の読み込み開始には間に合うが、**その保証に寄りかからない**。
+`VrmStage.AddLoadedHandler` は、もう読み終わっていたら即座に呼ぶ。
+
+★ **他人のコンポーネントは移せない。** `Mascot.unity` には `UniWindowController` プレハブが
+置いてあるので、**Android ビルドでは missing script が1件出たままになる**。
+剥がすならビルド時処理で、それは [#25](https://github.com/schwarz9791/chatter-agent/issues/25)。
+
+### ★ `scripts/run.sh` の grep を通らないログは存在しないのと同じ
+
+`run.sh` は出力を
+`grep -E "^\[Fixups\]|^\[Build\]|^\[VrmProbe\]|error CS|…"` で絞る。
+**ここに無いプレフィックスは `LogError` でも画面に出ない。**
+
+★ **複数行のログは2行目以降が丸ごと消える。** `VrmProbe` の最初の実装がこれで、
+`[VrmProbe]` の1行だけ出て**中身が空に見えた**。行ごとにプレフィックスを付けること
+（`text.Replace("\n", "\n[VrmProbe] ")`）。
+
+★ **パッケージ解決の失敗も拾わない。** UniVRM を `manifest.json` に足した直後の初回解決は
+git 取得になるが、`Failed to resolve` / `Cannot perform upm operation` は既定のパターンに
+無かった。足してある。
+
 ### ★ ウィンドウの大きさは3箇所で決まる。ProjectSettings だけ見ても分からない
 
 常駐マスコットとして 250x400 に絞ったときに全部踏んだ。**効く順に**:
@@ -446,17 +644,27 @@ ack のように「送れたことを前提に手元から消す」値でこれ�
 
 `SceneFixups.EnsureBuildScenes()` が本番シーン1本に揃える。
 
-### テンプレートの残骸はリポジトリ唯一の Git-LFS 依存だった
+### Git-LFS 依存は #56 で復活した
 
-`Assets/TutorialInfo/`（`ReadmeEditor.cs` / `Readme.cs` / `Layout.wlt` / `Icons/URP.png`）と
-`Assets/Readme.asset` / `Assets/Scenes/SampleScene.unity` は、どこからも参照されていなかった。
+`Assets/StreamingAssets/vita.vrm`（19MB）と `idle_loop.vrma`（154KB）が入ったので、
+**clone と #54 の CI checkout に `git lfs` が要る**。`.gitattributes` の
+`*.vrm` / `*.vrma` 規則は #17 のために先回りで置いてあったのでそのまま発火した。
 
-外した理由は diff のノイズだけではない。`.gitattributes` の `*.png` が
-`Icons/URP.png` を LFS 送りにしていて、**`git lfs ls-files` の出力がこの1件だけ**だった。
-消したことでリポジトリの LFS オブジェクトがゼロになり、clone と #54 の CI checkout が
-LFS を要求しなくなった。
+> #12 の時点では**ゼロだった**。`Assets/TutorialInfo/`（`ReadmeEditor.cs` / `Readme.cs` /
+> `Layout.wlt` / `Icons/URP.png`）と `Assets/Readme.asset` /
+> `Assets/Scenes/SampleScene.unity` はどこからも参照されておらず、外した理由は
+> diff のノイズだけではなかった —— `.gitattributes` の `*.png` が `Icons/URP.png` を
+> LFS 送りにしていて、**`git lfs ls-files` の出力がこの1件だけ**だった。
+> 消してゼロにしたことで、一時的に LFS が要らなくなっていた。
 
-★ `.gitattributes` の `*.png` 規則は**残してある**（#17 で VRM のテクスチャが入る）。
+★ **`*.png` 規則を「VRM のテクスチャが入るから」という理由で残していたのは誤り**だった。
+VRM のテクスチャは `.vrm` の中にあるので、`.png` が単体で入ることはない。
+規則自体は他の用途（アイコンなど）で意味があるので残してあるが、根拠は上のものではない。
+
+★ **`.gitignore` は `Assets/StreamingAssets/` 以外の `*.vrm` / `*.vrma` を落とす。**
+再配布禁止のモデル（`AvatarSample_A.vrm` など）を差し替え検証のあと
+うっかりコミットする導線を塞ぐため。差し替えは `-vrm` 起動引数か
+`~/.config/chatter-agent/models/` から読ませること。
 
 ★ あわせて `com.unity.ai.assistant`（unity-mcp が使う）も外した。MCP ビルドが
 モーダルダイアログで沈黙する罠を踏んで CLI batchmode に切り替えたので、依存の理由が消えている。

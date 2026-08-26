@@ -179,14 +179,11 @@ namespace ChatterMascot.EditorTools
             EditorApplication.Exit(0);
         }
 
-        private static string Argument(string name)
-        {
-            var args = Environment.GetCommandLineArgs();
-            for (var i = 0; i < args.Length - 1; i++)
-            {
-                if (args[i] == name) return args[i + 1];
-            }
-            return null;
-        }
+        /// <summary>
+        /// 起動引数。★ <b>読み方を <see cref="ChatterMascot.CommandLine"/> に寄せてある</b> ——
+        /// ランタイム側（<c>-serverUrl</c> / <c>-vrm</c>）と規則が食い違うと、
+        /// 検証手順の書き方が2通りになる。
+        /// </summary>
+        private static string Argument(string name) => CommandLine.Argument(name);
     }
 }

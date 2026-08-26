@@ -32,8 +32,13 @@ Android XR グラス（XREAL Aura）の両方をここからビルドする。
 
 ```json
 "com.kirurobo.uniwinc": "https://github.com/kirurobo/UniWindowController.git#upm",
+"com.vrmc.gltf": "https://github.com/vrm-c/UniVRM.git?path=/Packages/UniGLTF#v0.131.2",
+"com.vrmc.vrm": "https://github.com/vrm-c/UniVRM.git?path=/Packages/VRM10#v0.131.2",
 "com.unity.nuget.newtonsoft-json": "3.2.1"
 ```
+
+★ **VRM 0.x（`com.vrmc.univrm`）は入れない。** 扱うモデルが 1.0 なので要らない。
+読み込みも `canLoadVrm0X: false` で閉じてある（失敗メッセージが具体的になる）。
 
 ★ **`JsonUtility` を使わないこと。** 契約は `audio` キーの**欠落**と `null` を区別することを
 要求している（欠落 = #29 より前のサーバー、`null` = 正常な設定）が、`JsonUtility` には
@@ -56,11 +61,39 @@ UniWindowController の Inspector にある「Player Settings を直す」ボタ
 | `Resizable Window` | オン | 同上 |
 | `Default Is Full Screen` | **オフ** | 同上 |
 | `Allow Fullscreen Switch` | **オフ** | 同上 |
+| **`Default Is Native Resolution`** | **オフ** | ★ **オンだと下2行がそもそも効かない**（Inspector でもグレーアウトする） |
+| `Default Screen Width` | **250** | ★ 下記 |
+| `Default Screen Height` | **400** | 同上 |
 | `Run In Background` | **オン** | 常駐して背面でも喋る。フォーカスを失って止まると発話が止まる |
 | `Use Mac App Store Validation` | オフ | 透過をブロックしうる |
 | `Mac App Sandbox` | オフ | 同上（Unity のビルドは entitlements を付けないので既定でオフ） |
 | `API Compatibility Level` | .NET Standard 2.1 | `System.Net.WebSockets.ClientWebSocket` と `System.Diagnostics.Process` を使う（どちらも .NET Standard 2.1 で足りることを確認済み） |
 | **`Disable Unity Audio`** | **ビルド時だけオン**（コミットされた値は**オフ**） | ★ 下記 |
+
+### ウィンドウの大きさ
+
+常駐マスコットなので小さく出す。**`Default Is Native Resolution` を切るのが本命**で、
+オンのままだと `Default Screen Width/Height` は Inspector でもグレーアウトして効かない。
+
+★ **入れた値がそのまま出るのは `WindowSizeKeeper` があるからで、素では出ない。**
+`UniWindowController` が枠なし化した瞬間にタイトルバーぶん（実測 **+32**）が
+コンテンツ領域へ編入され、それが終了時に永続化されて、**起動のたびに +32 で伸びていく**
+（600x1632 はこうして育ったもの）。`Desktop/WindowSizeKeeper.cs` が起動直後の大きさへ
+戻すことで打ち消している（→ [`../../docs/mascot.md`](../../docs/mascot.md)）。
+**数値を仕様として扱わないこと。** 変えたら必ず実測する:
+
+```bash
+defaults delete tech.sukima.chatter-mascot   # ★ 前回終了時の大きさが焼き付いている
+./scripts/build.sh
+open Build/ChatterMascot.app --args -serverUrl ws://127.0.0.1:9
+grep RecreateSurface "$HOME/Library/Logs/schwarz9791/Chatter Mascot/Player.log"
+```
+
+★ **`macRetinaSupport` は切らないこと。** 表示がぼやけるうえ、`UniWindowMoveHandle` の
+Retina 座標系の手当てが前提にしている。
+
+★ **サイズ調整の UI と位置の永続化は [#16](https://github.com/schwarz9791/chatter-agent/issues/16)。**
+ここにあるのは既定値だけ。
 
 ### 音の出し方（プラットフォームで違う）
 
@@ -93,6 +126,10 @@ Bluetooth イヤホンの電池を食う。macOS には手放す API が無い�
 | **`Supports HDR`** | **オフ** | ★ **透過の決め手はこれ1つ。** オンだと背景が黒いまま（→ [`docs/mascot.md`](../../docs/mascot.md)） |
 | `Allow Post Process Alpha Output` | オン | 今の構成（Post Processing 無効）では効かないが、**有効にした瞬間に透過が壊れる**ので保険 |
 | Camera の `Background Type` | Solid Color、**alpha 0** | 透過する背景 |
+| Renderer の `Rendering Path` | **Forward** | MToon10(URP) に `UniversalGBuffer` パスが無い |
+| Renderer の `MToon Outline Render Feature` | **追加する**（PC / Mobile とも） | ★ 無いと**アウトラインだけ出ない。エラーも出ない**。追加は Editor の GUI から |
+| Renderer の `Screen Space Ambient Occlusion` | オフ | トゥーンの陰影と喧嘩する。常駐アプリで常時走るのも無駄 |
+| Always Included Shaders | MToon10(URP) と UniUnlit | ★ 無いと**モデルは読めるのに真っ黒／ピンク**。`SceneFixups.FixAll` が入れる |
 
 シーン側にも2つ要る。どちらも**透過ではなくクリック透過（Raycast ヒットテスト）のため**で、
 欠けると毎フレーム `NullReferenceException` が出るだけで見た目には気づけない。
@@ -112,8 +149,12 @@ Bluetooth イヤホンの電池を食う。macOS には手放す API が無い�
 ## 構成
 
 ```
+Assets/StreamingAssets/
+  vita.vrm                          同梱モデル（CC0。→ ../../NOTICE）
+  idle_loop.vrma                    同梱アイドル（使うのは #59）
+
 Assets/ChatterMascot/
-  Runtime/
+  Runtime/                          ChatterMascot.Runtime — 描画に依存しない層
     Protocol/   SpeechFrame.cs      フレームのパースと検証
                 SpeechEpoch.cs      epoch / audio path の charset
     Playback/   PlaybackQueue.cs    ★ 状態機械。何をいつ取り、いつ鳴らし、いつ ack するか
@@ -122,9 +163,70 @@ Assets/ChatterMascot/
                 AudioFetcher.cs     GET /audio/<epoch>-<seq>.wav
     Audio/      WavDecoder.cs       WAV → AudioClip
                 AudioClipPlayer.cs  AudioSource で1件ずつ鳴らす
+    Vrm/        AssetPath.cs        ★ .vrm / .vrma の探索順（純粋。下の表）
+                VrmFraming.cs       ★ 画面に収まるカメラ距離（純粋）
+    CommandLine.cs                  起動引数（-serverUrl / -vrm / -buildScene が共有）
+    FrameRateBudget.cs              フレームレート上限の「戻す先」と「一時的に借りる」
     MascotRunner.cs                 ドライバ。コマンドを実行して結果をイベントで戻す
+  Vrm/                              ChatterMascot.Vrm — UniVRM に依存する層（全プラットフォーム）
+    VrmStage.cs                     読み込み・フォールバック・Collider・画角合わせ
+    VrmAssetLoader.cs               候補を順に読む（UnityWebRequest。★ 自前の期限つき）
+    VrmMaterialCheck.cs             シェーダーストリッピングの自己診断
+    AssetEnvFactory.cs              Application を触る唯一の場所
+  Desktop/                          ChatterMascot.Desktop — Editor + macOS/Windows のみ
+    DragHandles.cs                  「Collider を持つものに UniWindowMoveHandle」
+    VrmDragHandleBinder.cs          ★ MonoBehaviour にしない（下記）
+    WindowSizeKeeper.cs             ★ 枠なし化で窓が伸びるのを打ち消す
+  Editor/
+    SceneFixups.cs                  シーンとプロジェクトの修繕・検査
+    BuildScript.cs / VrmProbe.cs
   Tests/Editor/                     EditMode テスト（状態機械が主）
 ```
+
+★ **`ChatterMascot.Runtime` を「描画に依存しない層」のまま保つこと。** 契約・状態機械・
+探索順・画角の計算がすべて **EditMode だけでテストできている**のは、この層が
+`UnityEngine` の描画に依存していないから。Runtime の public API に UniVRM 型が漏れると、
+`ChatterMascot.Tests.asmdef`（`overrideReferences: true`）から届かなくなって
+**テストごと落ちる**。
+
+★ **テストの件数を文書に書かないこと。** テストを足すたびにずれるうえ、
+`grep -cE '\[Test\]'` で数えると `[UnityTest]` を取りこぼして**別の誤った数字**が出る。
+実数が要るときは `./scripts/test.sh` の `total=` を見る（それがテストランナー自身の数）。
+
+★ **asmdef の参照は推移しない。** `Editor → Desktop → Vrm → Runtime` と繋がっていても、
+Editor が UniVRM の型を直接使うなら Editor の asmdef にも `VRM10` を書く。
+
+★ **`Desktop` の `MonoBehaviour` をシーンに置かないこと。** Android では
+そのアセンブリごと存在しないので、シーンに焼くと missing script になる
+（→ [`../../docs/mascot.md`](../../docs/mascot.md)）。
+
+### モデルとアニメーションの探索順
+
+`.vrm` と `.vrma` で同じ形。**最初に読めたものを採る。**
+
+| 順 | 出どころ | `.vrm` | `.vrma` | 対象 |
+|---|---|---|---|---|
+| 1 | 起動引数 | `-vrm <path>` | `-vrma <path>` | 全 |
+| 2 | 環境変数 | `CHATTER_MASCOT_VRM` | `CHATTER_MASCOT_VRMA` | 全 |
+| 3 | `Application.persistentDataPath/` | `model.vrm` | `idle.vrma` | 全 |
+| 4 | `${XDG_CONFIG_HOME:-~/.config}/chatter-agent/` | `models/*.vrm` | `animations/*.vrma` | デスクトップのみ |
+| 5 | 同梱（`StreamingAssets/`） | `vita.vrm` | `idle_loop.vrma` | 全 |
+
+- 4 は `core/src/core/paths.ts` の `getRuntimeDir` と**同じ規則**。ユーザーから見て
+  「chatter-agent の設定はここ1箇所」を保つため。辞書順の先頭を採る
+- ★ **Android には共有ファイルシステムが無い**ので 4 は落ちる
+- ★ **`.app` を Finder から起動すると環境変数は空**（シェルを継承しない）。2 に頼らない
+- ★ **`~/Downloads` / `~/Desktop` / `~/Documents` は macOS の TCC で止められる。**
+  読み込みが返らないので、15秒で打ち切って次の候補へ進む（→ `docs/mascot.md`）
+- 全部読めなければ Cube が出たままになる。**無地の Cube は「異常事態」の可視のシグナル**
+
+★ **`AvatarSample_A.vrm` を公開物に使わないこと。** `allowRedistribution: false` /
+`modification: prohibited` / `creditNotation: required` なので、コミット・
+スクリーンショットの公開・デモに使えない。**差し替え検証で `-vrm` から読ませるだけ**にする。
+`.gitignore` が `StreamingAssets/` 以外の `.vrm` を落とすようにしてあるが、最後は人の判断。
+
+★ **設定 UI（任意のモデルに差し替え）は [#16](https://github.com/schwarz9791/chatter-agent/issues/16)。**
+ここにあるのは探索順まで。UI は後から 1〜4 に乗る。
 
 **判断は `PlaybackQueue` に集めてある。** イベントを入れるとコマンドの配列が返る純粋な関数で、
 副作用（取得・再生・ack）は `MascotRunner` が実行して結果をイベントとして戻す。

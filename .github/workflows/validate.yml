@@ -210,6 +210,11 @@ jobs:
     # Unity 内蔵オーディオごと無効 → AudioClipPlayer が鳴らない → isPlaying が即 false →
     # 全部 ack されてサーバーのキューから消える。ここが最後の砦。
     steps:
+      # ★ **lfs: true は要らない。** #56 で Assets/StreamingAssets/ に LFS 追跡の
+      # .vrm / .vrma が入ったが、このジョブが読むのは YAML の .asset だけで、
+      # LFS のポインタファイルのままでも grep は成立する。
+      # **Unity Editor を起動するジョブ（#54）を足すときは lfs: true が要る** ——
+      # ポインタファイルのままだとモデルの読み込みが必ず失敗する。
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 

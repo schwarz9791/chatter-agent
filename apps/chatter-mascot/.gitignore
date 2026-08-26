@@ -51,3 +51,13 @@ crashlytics-build.properties
 /[Aa]ssets/[Aa]ddressable[Aa]ssets[Dd]ata/*/*.bin*
 /[Aa]ssets/[Ss]treamingAssets/aa.meta
 /[Aa]ssets/[Ss]treamingAssets/aa/*
+
+# VRM / VRMA
+# ★ 同梱するのは Assets/StreamingAssets/ の下だけ。それ以外は落とす。
+#   再配布禁止のモデル（AvatarSample_A など）を差し替え検証のあと
+#   うっかりコミットする導線を塞ぐため。差し替えは -vrm 起動引数か
+#   ~/.config/chatter-agent/models/ から読ませること（→ SETUP.md）。
+*.vrm
+*.vrma
+!/[Aa]ssets/[Ss]treamingAssets/*.vrm
+!/[Aa]ssets/[Ss]treamingAssets/*.vrma

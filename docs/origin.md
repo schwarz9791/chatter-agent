@@ -110,6 +110,33 @@ hook 方式への転換で、`textFilter.ts` が**上流と要件で食い違う
 
 **上流と byte 単位で比較したいときは、ヘッダの4〜5行と上の改変行だけを無視すればよい。** 整形は上流の `printWidth: 120` と `.oxfmtrc.json` が一致しているので、`npm run format` をかけても差分は出ない。
 
+## 同梱したアセット（コードではない）
+
+上の表は `electron/` → `core/src/` のコード移植だけを扱う。**Unity 側に持ち込んだバイナリは別枠。**
+
+| 上流 | 移送先 | 大きさ | 改変 |
+|---|---|---|---|
+| `public/animations/idle_loop.vrma` | `apps/chatter-mascot/Assets/StreamingAssets/idle_loop.vrma` | 157,664 B | **無改変**（バイト単位で同一） |
+
+| | |
+|---|---|
+| 最終更新のコミット | **`7ce44bd674c0f5fc65c41b20d5344d4e358f6d5e`**（`7ce44bd` / 2026-02-08 / kazakago / ":recycle: idle_loop.vrmaアニメーションの調整"） |
+| コピー実施日 | 2026-08-26（[#56](https://github.com/schwarz9791/chatter-agent/issues/56)。使うのは [#59](https://github.com/schwarz9791/chatter-agent/issues/59)） |
+
+**これは kazakago の著作物**。冒頭の「⚠」節の判定に照らすと、上流の `main` に kazakago 名義で
+入っているので**帰属が要る側**（`public/` にあるのは自分の作業ブランチで書いたものではない）。
+
+★ **`Modified for chatter-agent.` は要らない。** 無改変なうえ、**バイナリなので
+ヘッダコメントを埋め込む場所が無い**。Apache-2.0 §4(b)（改変の告知）は改変していないので
+発生せず、§4(a)/(d)（ライセンス本文と帰属の維持）は `NOTICE` とこの表で担保する。
+
+★ **VRoid 公式の VRMA サンプル7種は BOOTH 規約で二次配布禁止**なので同梱できない。
+cc-mascot 側も再配布不可のモーションは**プライベート submodule に隔離**したうえで、
+これだけを本体に置いている。そこを取り違えないこと。
+
+同じディレクトリに置く `vita.vrm` は **cc-mascot とは無関係**（VRoid Studio 旧ベータ版の
+サンプルモデル。CC0）。→ `NOTICE`
+
 ## cc-mascot 由来でないもの
 
 同じディレクトリに並んでいるが、**帰属表示もヘッダも要らない**。

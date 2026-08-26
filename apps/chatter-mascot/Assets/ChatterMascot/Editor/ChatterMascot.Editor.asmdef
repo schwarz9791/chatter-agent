@@ -3,7 +3,11 @@
     "rootNamespace": "ChatterMascot.EditorTools",
     "references": [
         "ChatterMascot.Runtime",
-        "Kirurobo.UniWindowController",
+        "ChatterMascot.Vrm",
+        "ChatterMascot.Desktop",
+        "VRM10",
+        "UniGLTF",
+        "UniGLTF.Utils",
         "Unity.InputSystem"
     ],
     "includePlatforms": [

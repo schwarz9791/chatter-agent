@@ -127,6 +127,430 @@ batchmode はダイアログを出さないので、この失敗の仕方をし�
 ★ **Editor 経由でしかできないこと**（シーン編集、パッケージ解決、設定変更）は MCP で行う。
 そのときは **`AssetDatabase.SaveAssets()` とシーン保存を先に済ませる**。ダイアログの芽を潰しておく。
 
+### ★ `Screen.*` はバッキング px、ネイティブのウィンドウ API はポイント
+
+`macRetinaSupport: 1` なので **`Screen.width/height` は描画ピクセル**、
+`UniWindowController.windowSize`（→ `LibUniWinC.SetSize`）は **NSWindow のポイント**。
+**同じウィンドウについて別の数を返す。**
+
+実測（2026-08-26。窓を内蔵 Retina パネルへ移して戻しただけ）:
+
+```
+Metal RecreateSurface: surface size 250x400
+[Mascot] フレーミング: 250x400 aspect=0.625 bounds=(1.39, 1.73, 0.55) distance=2.39
+Metal RecreateSurface: surface size 500x800            ← 内蔵 Retina パネルへ移した
+[Mascot] フレーミング: 500x800 aspect=0.625 bounds=(1.39, 1.73, 0.55) distance=2.39
+Metal RecreateSurface: surface size 250x400            ← 外部 4K へ戻した
+```
+
+**`aspect` も `bounds` も `distance` も変わらないまま `Screen.*` だけが倍**になっている。
+
+★ **混ぜると「打ち消し」が「倍化」に変わる。** `WindowSizeKeeper` は当初
+`Screen.*` で読んで `windowSize` へそのまま書いていた。Retina 2x で起動すると
+`_intended` が (500,800) px、それをポイントとして書くので **1000x1600 px** の窓になり、
++32 どころか**起動ごとに倍**へ育つ。**scale 1 の外部ディスプレイでは px == pt なので
+この症状は出ない** —— 最初の実測をそこで取ったせいで見落とした。
+
+→ **実測した結果を書くときは、どのディスプレイで測ったかを必ず添えること。**
+
+手当ては**換算率をコントローラ自身から測る**こと（`#if UNITY_STANDALONE_OSX` も
+`Screen.dpi` も使わない）:
+
+```csharp
+var client = _controller.clientSize;                        // pt
+var scale = Mathf.Max(1f, Mathf.Round(Screen.height / client.y));
+_controller.windowSize = new Vector2(_intended.x / scale, _intended.y / scale);
+```
+
+実測（修正後）:
+
+| 起動先 | `Screen`(px) | `clientSize`(pt) | `scale` | 実ウィンドウ |
+|---|---|---|---|---|
+| 外部 4K（1x） | 250x432 | 250x432 | **1** | 250x400 pt |
+| 内蔵 Retina（2x） | 250x464 | 125x232 | **2** | 125x200 pt |
+
+どちらも3回連続で起動して**増えない**。
+
+★ **`clientSize` で「意図した大きさ」を読み直す形にはできない。**
+`UniWinCore.AttachMyWindow` は `UniWindowController.Update()` の中で、
+**枠なし化も同じ `Update()` の中**（`UpdateTargetWindow` → `SetTransparent` →
+`LibUniWinC.SetBorderless`）。だから `Start()` では `clientSize` が **(0,0)**、
+最初の `LateUpdate` では**もう膨らんでいる**。捕まえられるのは `Start()` の `Screen.*` だけ。
+
+★ **`Screen.SetResolution` に寄せない。** styleMask が戻った場合、
+`UniWindowController` は `IsActive` が立っている限り**枠を剥がし直さない**
+（再適用は `if (!IsActive)` のときだけ）。「+32 が残る」より
+「**タイトルバーが出たまま常駐**」の方が悪い。
+
+#### ★ 物理的な大きさはディスプレイのスケールで変わる（未解決。→ #16）
+
+`defaultScreenWidth/Height` も、Unity が永続化する `Screenmanager Resolution *` も
+**バッキング px**。だから:
+
+- **Retina 2x で起動すると物理的に半分**になる（250x400 px = **125x200 pt**）
+- **Retina で終了すると、次に 4K で開いたとき倍になる。** Retina 上の `Screen.*` は
+  500x800 px なので、それが永続化され、1x のディスプレイでは **500x800 pt** の窓として開く。
+  **実測で確認した**（`WindowSizeKeeper` は「起動直後の大きさ」を守るので、これは打ち消さない）
+
+`WindowSizeKeeper` が直せるのは**同じディスプレイでの累積**だけ。
+ディスプレイをまたいだときに物理サイズを保つには、**ポイントで意図した大きさを
+自前で永続化する**しかない —— それは位置の永続化・マルチモニタと同じ設計なので
+[#16](https://github.com/schwarz9791/chatter-agent/issues/16) でまとめて扱う。
+
+### ★ ウィンドウは起動のたびに縦へ 32 伸びる（`WindowSizeKeeper` で打ち消している）
+
+「いつのまにか窓が縦長になっている」の正体。実測（macOS 26.6.2 / #56）:
+
+1. Unity が前回終了時のクライアント高さを復元する
+2. `UniWindowController` が枠なし化し、**タイトルバーぶん（32）がクライアント領域へ編入される**
+   —— ウィンドウの外形は縮まないので、クライアントは 32 大きくなる
+3. その大きくなった値が終了時に永続化される
+4. 次の起動で 1 に戻る
+
+```
+起動1: surface 250x400 → 250x432
+起動2: surface 250x432 → 250x464
+起動3: surface 250x464 → 250x496
+```
+
+**既定を 600x800 にしていた頃に 600x1632 まで育っていた。**
+
+`Desktop/WindowSizeKeeper.cs` が、**起動直後（枠なし化の前）に見えていた大きさ**へ
+戻すことで打ち消す。これを入れてから3回連続で起動して 250x400 のまま動かないことを確認した。
+
+★ **縮んだ側は追いかけないこと。** ユーザーが手で小さくしたのを戻すと操作を奪う。
+打ち消したいのは「勝手に増える」ぶんだけ。
+
+★ **見張る時間を短くしないこと**（既定5秒）。枠なし化は起動直後の数フレームで起きるが、
+VRM の読み込みでメインスレッドが詰まると実時間では後ろへずれる。長い側の害は
+「起動直後に手で広げても戻される」だけ。
+
+★ **これは対症療法。** ウィンドウの大きさ・位置・永続化の設計は
+[#16](https://github.com/schwarz9791/chatter-agent/issues/16)。
+
+### ★ `UnityWebRequest.timeout` は `file://` に効かない
+
+macOS の TCC で保護されたフォルダ（`~/Downloads` / `~/Desktop` / `~/Documents`）の
+モデルを `-vrm` で渡すと、リクエストが**返らず・エラーも出さず・`timeout` も発火しない**
+（実測。30秒に設定していたが1分待っても何も起きなかった）。
+
+**症状が凶悪**で、探索順の1段目で止まるので:
+
+- モデルが出ない
+- **`Player.log` に1行も増えない**（読み込み開始のログすら出ない）
+- **同梱モデルへのフォールバックにも落ちない**
+
+「動いて見える死体」そのもの。TCC のダイアログも出ないので、権限が原因だと気づけない。
+
+手当ては `Vrm/VrmAssetLoader.cs` の**自前の期限**（15秒）。`Task.WhenAny` で打ち切って
+`request.Abort()` し、次の候補へ進む。最悪でも同梱モデルまでは落ちる。
+ログには権限の可能性を名指しで書く。
+
+★ **`request.timeout` の方も残してある。** HTTP には効くので、両方要る。
+
+### ★ ランタイムの Collider は「奥行き」に合わせる。幅に合わせない
+
+ランタイムロードしたモデルには Collider が無いので `VrmStage` が
+`CapsuleCollider` を1本起こす。**クリック透過（`hitTestType: 2` = Raycast）と
+ドラッグの両方がこれを見る**ので、大きさを間違えると窓全体がクリックを食う。
+
+★ **`bounds.extents.x` を半径に使わないこと。** VRM 1.0 はレストポーズが T ポーズ必須なので、
+これは**広げた腕の長さ**になる。実測（vita.vrm / 250x400 / 145 px/m）:
+
+| 半径の取り方 | 半径 | 画面上の直径 | ウィンドウ 250px に対して |
+|---|---|---|---|
+| `max(extents.x, extents.z)`（腕） | 0.695m | 202px | **81%** |
+| **`extents.z`（奥行き）** | 0.275m | 80px | 32% |
+
+前者だと**腕の高さ以外の左右の空白まで掴む**ので、クリック透過がほぼ意味を失う。
+「キャラのキワでクリックが抜けない」という形で出る。
+
+★ **引き換えに、伸ばした腕の上では掴めない**（クリックが下へ抜ける）。
+[#59](https://github.com/schwarz9791/chatter-agent/issues/59) でアイドルモーションが入って
+腕が下りれば差はほぼ消える。**部位ごとに Collider を分けるのは
+[#16](https://github.com/schwarz9791/chatter-agent/issues/16)。**
+
+★ **`hitTestType` を `Opacity`（ピクセルのアルファ判定）にすればシルエットと完全に一致する**が、
+公式が重いと明記している方式で、常駐アプリで毎フレーム走るコストを測り直す必要がある。
+また「掴める領域とドラッグできる領域が定義上ずれない」という現行の規律が崩れる。
+
+### ★ VRM は放っておくと背中が映る（仕様の読みで決めない）
+
+#56 の issue 本文は「モデルの glTF 座標でつま先が足首より +Z。glTF→Unity は Z 反転なので
+**Unity 上ではモデルが −Z を向く** → Main Camera は `(0,0,-4)` で +Z を見るので
+**顔がこちらを向く。180°回転は不要**」としていた。
+
+**実機では背中が映った。**
+
+手当ては `Runtime/Vrm/VrmOrientation.cs`。**仕様の読みではなくボーンの並びから
+実際の向きを出す** —— VRM 1.0 はレストポーズが T ポーズ必須なので、読み込み直後の
+上腕2本の位置から正面が求まる:
+
+```csharp
+var rightToLeft = leftUpperArm - rightUpperArm;   // 高さのぶれは落とす
+var forward = Vector3.Cross(Vector3.up, rightToLeft.normalized);
+```
+
+Unity は左手系で「+Z を向いた人物の右手が +X 側」に来るので、これで正面が出る。
+あとは `−Z`（カメラの方）との符号付き角度ぶんだけ Y 軸で回す。
+**真横を向いたモデルでも正面へ向け直せる**ので、非準拠のモデルにも耐える。
+
+★ **回すのは bounds を測る前。** `Renderer.bounds` はワールド軸に沿った箱なので、
+回したあとで測り直さないとカメラ距離がずれる。
+
+★ **照明は回さない。** シーンの Directional Light（Euler `(50, -30, 0)`）は
+光が +Z 方向へ進む向きなので、**−Z を向いた面＝カメラ側が照らされる**。
+モデルの正面をカメラへ向ければ、そのまま顔に光が当たる。
+
+### ★ VRM 1.0 は T ポーズ必須。自動フレーミングの支配軸がそれで決まる
+
+`Camera.fieldOfView` は `m_FOVAxisMode` に関わらず**常に垂直 FOV**で、水平は
+`tan(hFov/2) = tan(vFov/2) * aspect` で決まる。**縦長のウィンドウほど横が狭い。**
+
+同梱モデル `vita.vrm` の bounds は **1.39m × 1.73m**（`VrmProbe` の実測）。
+横幅を決めているのは**広げた腕**なので、250x400（5:8）では:
+
+| | 必要距離 | |
+|---|---|---|
+| 垂直 | 1.50 | |
+| **水平** | **1.93** | ← こちらが採用される |
+
+`VrmFraming.Solve` は距離に `headroom`（既定 1.1）を掛け、さらに `+ extents.z` する
+（bounds の手前面が near clip に刺さらないように）ので、実際の距離は
+`1.9260 * 1.1 + 0.275 = 2.394` —— 実行ログの `distance=2.39` と一致する。
+可視高は `2 * 2.394 * tan(30°) = 2.764m` なので、**縦の占有率は約 62%**。**これは想定どおり。**
+
+★ **`headroom` と `+extents.z` を落として手計算しないこと。** 落とすと 77% / 190px/m という
+別の数値が出て、**同じ文書の別の行（145 px/m）と食い違う**。実行ログが `distance=` を
+出しているので、必ずそちらと突き合わせること。
+[#59](https://github.com/schwarz9791/chatter-agent/issues/59) でアイドルモーションが入って
+腕が下りれば `extents.x` が縮み、**支配軸が水平から垂直へ移って同じウィンドウのまま
+占有率が上がる**。いま bounds の比（325x400）に合わせると、#59 の後に横が余る。
+
+★ **どちらの軸で決まったかを必ずログに出すこと。** 「小さく映る」の原因が
+腕の張り出しなのか身長なのかは、これが無いと切り分けられない。
+
+★ **`Start()` の1回では足りない。** `UniWindowController` が起動直後にウィンドウを
+作り直すので、その時点の `Screen.*` は最終値ではない。`resizableWindow: 1` なので
+実行中にも変わる。**`OnRectTransformDimensionsChange` は `RectTransform` 専用**で
+3D カメラには届かず、Unity にウィンドウリサイズの通知は無いので**ポーリングが唯一の手段**。
+
+★ **`camera.aspect` に代入しないこと。** 一度代入すると `ResetAspect()` を呼ぶまで固定される。
+
+### ★ シェーダーストリッピングは「読めるのに真っ黒／ピンク」で例外を出さない
+
+`UrpVrm10MToon10MaterialImporter` は `Shader.Find` でシェーダーを引くが、
+**シーンのマテリアルから参照されないシェーダーはビルドから落ちる**ので、
+ランタイムロードでは確実に踏む。UniVRM 側に自動対策は無い。
+
+`SceneFixups.EnsureAlwaysIncludedShaders()` が `GraphicsSettings.asset` の
+`m_AlwaysIncludedShaders` に2本を冪等に足す:
+
+- `VRM10/Universal Render Pipeline/MToon10`
+- `UniGLTF/UniUnlit`
+
+★ **`Universal Render Pipeline/Lit` は絶対に入れない**（UniVRM 公式が
+「ビルド時間が過大になる」と明記）。同梱モデルは 15 マテリアル全部が MToon なので不要。
+
+★ **シェーダーは名前で引くこと**（パスではなく）。実際のパスは issue に書かれていた
+`UniUnlit/Runtime/UniUnlit.shader` ではなく **`UniUnlit/Shaders/UniUnlit.shader`** だった。
+`Shader.Find` なら Editor が AssetDatabase から引くのでパスの変更に強い。
+
+診断は2段:
+
+1. **読み込みより前**に `Shader.Find` が null かを見る（`VrmMaterialCheck.WarnIfShadersStripped`）
+2. **読み込み直後**に `RuntimeGltfInstance.Materials` を回して
+   `shader == null || !shader.isSupported || shader.name == "Hidden/InternalErrorShader"` を数える
+
+★ **予想に反してビルド時間はほとんど伸びなかった。** MToon URP の `UniversalForward` は
+`multi_compile` が13本あるので大幅に遅くなると見込んでいたが、実測は
+**Unity 自身の計測で 97秒**（UniVRM 導入前は壁時計 145秒。ただしそちらは
+初回のアセットインポートを含む）。**遅くなる前提で設計しないこと。**
+
+### ★ URP のレンダラーは Forward にする
+
+MToon10(URP) に **`UniversalGBuffer` パスが無い**（`UniversalForward` / `MToonOutline` /
+`DepthOnly` / `DepthNormals` / `ShadowCaster` / `XRMotionVectors` のみ）。
+Deferred のままだと未検証の経路に入る。UniVRM 公式の URP サンプルも Forward。
+
+| | #12 時点 | #56 で |
+|---|---|---|
+| `PC_Renderer.asset` の `m_RenderingMode` | `2`（Deferred） | **`0`（Forward）** |
+| 同 `ScreenSpaceAmbientOcclusion` | 有効 | **無効**（トゥーンの陰影と喧嘩する。常駐アプリでフルスクリーンパスが常時走るのも無駄） |
+| `Mobile_Renderer.asset` | **既に Forward で Renderer Feature も空** | そのまま |
+
+★ **`Mobile_Renderer` は最初から Forward だった。** issue #56 の表は「同上（Deferred）」と
+書いていたが実態と違う。**Mobile で要るのは Renderer Feature の追加だけ。**
+
+★ **SSAO を切ると `PC_RPAsset.asset` と `UniversalRenderPipelineGlobalSettings.asset` にも
+差分が出る。** Unity がシェーダーバリアントの prefiltering と「実行時に要る設定」の一覧を
+組み直すため（`ScreenSpaceAmbientOcclusion*Resources` が実行時リストから落ちる）。
+**手で書いた差分ではない。**
+
+★ **`MToonOutlineRenderFeature` の追加は Editor の GUI で行うこと。**
+`m_RendererFeatureMap` のハッシュをコードで組むのは脆い。`SceneFixups` は
+**検査して `LogError` するだけ**（`AssertRendererFeatures`）。
+無いとアウトラインだけ出ず、**エラーも出ない**。
+
+★ **`MToonOutlineRenderFeature` は `#if MTOON_URP` で囲まれている。** 定義しているのは
+`VRM10.MToon10.Runtime.asmdef` の `versionDefines`（`com.unity.render-pipelines.universal`）なので、
+URP が入っていれば自動で立つ。
+
+### ★ アウトラインは「出ているのに見えない」ことがある
+
+`MToonOutlineRenderFeature` を追加しても**見た目が変わらなかった**。壊れているのではなく、
+**同梱モデルの線が細すぎて見えないだけ**だった。
+
+`vita.vrm` の実測:
+
+| | |
+|---|---|
+| `outlineWidthMode` | `worldCoordinates`（15 マテリアル中 **4つだけ**） |
+| `outlineWidthFactor` | **0.00075 m（0.75mm）** |
+| 付いているもの | Face / Body の SKIN、Shoes / Tops の CLOTH |
+| **付いていないもの** | **髪（HAIR 4種）**、目、眉、まつげ、口 |
+
+250x400 のウィンドウでは画面上 **約 145 px/m**（`400 / 2.764m`）なので、
+0.75mm は **約 0.11 px**。拡大しても見えない。
+**シルエットで最も目立つ髪に線が無い**のも効いている。
+
+★ **「アウトラインが出るか」を目視の合否条件にしないこと。** このモデルでは
+出ていても見えない。効いているかを確かめるには**一時的に線を太らせる**:
+
+```csharp
+foreach (var m in _gltf.Materials)
+    if (m != null && m.HasProperty("_OutlineWidth")) m.SetFloat("_OutlineWidth", 0.02f);
+```
+
+0.02（シェーダーの上限は 0.05）まで上げると顎・首・肩に黒い線がはっきり出る。
+**確認したら必ず戻すこと。**
+
+★ **プロパティ名は `_OutlineWidth`。** glTF 側のキーは `outlineWidthFactor` だが、
+シェーダーのプロパティ名は違う（`_OutlineWidthFactor` は**存在しない**）。
+`Material.HasProperty` は false を返すだけで**エラーにならない**ので、
+名前を間違えると「効いていない」と「そもそも設定できていない」の区別がつかない。
+一度これで空振りした。
+
+★ **Renderer Feature の追加は Unity Editor の GUI から。** ★ **Unity Hub で
+「プロジェクトを開く」ではなく「新規作成」してしまうと、当然この機能は出てこない** ——
+`Add Renderer Feature` の一覧に URP 標準の6つしか並ばないときは、
+**開いているプロジェクトを疑うこと**（`ps` で `-createproject` が出ていれば新規作成されている）。
+
+★ **`scripts/*.sh` のロック検査はパスの前方一致。** プロジェクトの**中に**別の Unity
+プロジェクトができていると、そちらを開いているだけで
+「Unity Editor がこのプロジェクトを開いています」と言われて何も動かせなくなる。
+
+### ★ asmdef の参照は推移しない（3回踏んだ）
+
+`ChatterMascot.Editor` → `ChatterMascot.Vrm` → `VRM10` と繋がっていても、
+Editor 側が UniVRM の型を直接使うなら **Editor の asmdef にも `VRM10` を書く**必要がある。
+
+実際に踏んだ順:
+
+1. `ChatterMascot.Vrm` に `UniGLTF` はあるが **`UniGLTF.Utils` が無い** →
+   `IAwaitCaller` が「参照されていないアセンブリで定義されている」
+2. `ChatterMascot.Editor` から `VrmProbe` が `UniVRM10` / `UniGLTF` を使う → 同じエラー
+3. `Kirurobo.UniWindowController` を `ChatterMascot.Desktop` へ移したので、
+   Editor の references も **`ChatterMascot.Desktop` に差し替え**が要った
+
+### ★ `Kirurobo.UniWindowController` はデスクトップ限定。Runtime から参照しない
+
+実物の `includePlatforms` は
+`["Editor", "macOSStandalone", "WindowsStandalone32", "WindowsStandalone64"]` で
+**`Android` を含まない**。`includePlatforms` が非空のときは**ホワイトリスト**として扱われるので、
+`ChatterMascot.Runtime`（全プラットフォーム）から参照すると Android ビルドで壊れる。
+
+`ChatterMascot.Desktop` に隔離してある。★ **`includePlatforms` は4つを一字一句写すこと。**
+部分集合にすると Windows Standalone ビルドでコンパイルエラーになる。
+
+依存の向きは `Editor → Desktop → Vrm → Runtime`。
+
+### ★ デスクトップ限定アセンブリの `MonoBehaviour` をシーンに置かない
+
+シーンは `MonoBehaviour` を `m_Script` の GUID として持つだけで、
+**asmdef の `includePlatforms` と無関係に常にシリアライズされる**。
+Android ではそのアセンブリが存在しないので解決先が無く、ビルドエラーではなく
+**シーンロード時の "The referenced script on this Behaviour is missing!" が1本出るだけ**になる。
+症状は「Android で掴めない」、原因は `Player.log` の1行。
+
+`VrmDragHandleBinder` と `WindowSizeKeeper` は `MonoBehaviour` にせず、
+`[RuntimeInitializeOnLoadMethod(AfterSceneLoad)]` から自分で組み立てる。
+**Android ではアセンブリごと存在しないので属性の走査対象にすらならない** ——
+`#if` もプラットフォーム分岐も要らず、切り分けが asmdef 1箇所に閉じる。
+
+★ **購読は sticky にすること。** `AfterSceneLoad` は全 `Awake` の後・最初の `Start` の前に
+走るので `VrmStage` の読み込み開始には間に合うが、**その保証に寄りかからない**。
+`VrmStage.AddLoadedHandler` は、もう読み終わっていたら即座に呼ぶ。
+
+★ **他人のコンポーネントは移せない。** `Mascot.unity` には `UniWindowController` プレハブが
+置いてあるので、**Android ビルドでは missing script が1件出たままになる**。
+剥がすならビルド時処理で、それは [#25](https://github.com/schwarz9791/chatter-agent/issues/25)。
+
+### ★ `scripts/run.sh` の grep を通らないログは存在しないのと同じ
+
+`run.sh` は出力を
+`grep -E "^\[Fixups\]|^\[Build\]|^\[VrmProbe\]|error CS|…"` で絞る。
+**ここに無いプレフィックスは `LogError` でも画面に出ない。**
+
+★ **複数行のログは2行目以降が丸ごと消える。** `VrmProbe` の最初の実装がこれで、
+`[VrmProbe]` の1行だけ出て**中身が空に見えた**。行ごとにプレフィックスを付けること
+（`text.Replace("\n", "\n[VrmProbe] ")`）。
+
+★ **パッケージ解決の失敗も拾わない。** UniVRM を `manifest.json` に足した直後の初回解決は
+git 取得になるが、`Failed to resolve` / `Cannot perform upm operation` は既定のパターンに
+無かった。足してある。
+
+### ★ ウィンドウの大きさは3箇所で決まる。ProjectSettings だけ見ても分からない
+
+常駐マスコットとして 250x400 に絞ったときに全部踏んだ。**効く順に**:
+
+| # | 場所 | 効き方 |
+|---|---|---|
+| 1 | `~/Library/Preferences/tech.sukima.chatter-mascot.plist` | **前回終了時の実値が最優先で復元される。** `Screenmanager Resolution Width/Height` |
+| 2 | `ProjectSettings.asset` の **`defaultIsNativeResolution`** | ★ **これが `1` の間は 3 が効かない。** Inspector でも `Default Screen Width/Height` がグレーアウトする |
+| 3 | 同 `defaultScreenWidth` / `defaultScreenHeight` | 初回起動時の大きさ |
+
+★ **1 が効いていることに気づけない。** `ProjectSettings.asset` には `600x800` と書いてあるのに
+実際のウィンドウは **600x1632** だった、という食い違いから始まって、リポジトリを
+いくら grep しても `1632` が出てこない。**`defaults read tech.sukima.chatter-mascot` を先に見ること。**
+
+```bash
+defaults delete tech.sukima.chatter-mascot   # 焼き付きを消してから測る
+```
+
+#### 実測（2026-08-26 / macOS 26.6.2 / 4K 外部ディスプレイ）
+
+`Player.log` に**大きさが決まる瞬間が2回**出る:
+
+```
+Metal RecreateSurface: surface size 250x200     ← 起動直後（= defaultScreen* のまま）
+[Mascot] server: ws://127.0.0.1:9 / ...         ← MascotRunner.Start()
+Metal RecreateSurface: surface size 250x232     ← ★ +32。UniWindowController が枠なし化した直後
+```
+
+**+32 はタイトルバーぶん**が枠なし化でコンテンツ領域へ編入されたもの。高さにだけ乗る
+（横に枠が無いので幅は入れた値のまま）。
+
+★ **上のログは `WindowSizeKeeper` を入れる前のもの。** いまは keeper が +32 を打ち消すので
+**`defaultScreenHeight` に入れた値がそのまま出る**（`ProjectSettings.asset` は **400**）。
+「368 と入れて 400 になる」は keeper 導入前の回避策で、**もう当てはまらない**。
+
+★ **当初これを「Retina で2倍されている」と読んで `200` を入れ、232 になって外した。**
+**推測で式を組まずに測ること。** ——ただし「2倍にならない」という結論も
+**scale 1 の外部ディスプレイでしか成立していなかった**（→ 下の節）。
+
+★ **`UniWindowController` は大きさを変えていない。** `_shouldFitMonitor` は既定 `false` で
+prefab にもシーンにも override が無く、`SetWindowSize` を呼ぶのは `#if UNITY_EDITOR` の
+`OnApplicationQuit` だけ。`forceWindowed` はフルスクリーンを解除するだけで大きさに触らない。
+
+★ **`resizableWindow: 1` なのでユーザーがいつでも変えられる**（そして 1 に焼き付く）。
+**大きさを前提にした描画を書かないこと** —— VRM の自動フレーミングが毎フレーム
+`Screen.width/height` の変化を見ているのはこのため（→ `Vrm/VrmStage.cs`）。
+
+★ **測るときは走っている他のインスタンスに注意。** 別 checkout の `.app` が常駐していると
+`osascript` の「名前で最初に見つかったプロセス」がそちらを掴む。**pid で引くこと**。
+`forceSingleInstance: 1` は**別パスの `.app` の同時起動を防がない**（実際に2つ動いた）。
+
 ### ★ Unity 6 の URP で透過しないのは `Supports HDR` のせい
 
 `Is Transparent` を入れても**背景が黒いまま**になる。枠なしウィンドウにはなるので、
@@ -190,8 +614,9 @@ batchmode はダイアログを出さないので、この失敗の仕方をし�
 同じ条件なので、**掴める領域とドラッグできる領域が定義上ずれない**。#17 で Cube が VRM に
 置き換わっても、クリック透過のために `Collider` を付ける以上そのまま乗る。
 
-★ **位置の永続化は入れていない**（起動のたびに中央へ戻る）。マルチモニタ・解像度変更・
-画面外からの復帰の扱いが要るので #16 でまとめて設計する。
+★ **位置の永続化を自分では入れていない。** ただし **Unity 本体が勝手に永続化している** ——
+`~/Library/Preferences/tech.sukima.chatter-mascot.plist` の `Screenmanager Window Position X/Y`。
+自分で制御していないので、マルチモニタ・解像度変更・画面外からの復帰は #16 でまとめて設計する。
 
 ### ★ シーンに `EventSystem` が無いとクリック透過が死ぬ
 
@@ -398,17 +823,27 @@ ack のように「送れたことを前提に手元から消す」値でこれ�
 
 `SceneFixups.EnsureBuildScenes()` が本番シーン1本に揃える。
 
-### テンプレートの残骸はリポジトリ唯一の Git-LFS 依存だった
+### Git-LFS 依存は #56 で復活した
 
-`Assets/TutorialInfo/`（`ReadmeEditor.cs` / `Readme.cs` / `Layout.wlt` / `Icons/URP.png`）と
-`Assets/Readme.asset` / `Assets/Scenes/SampleScene.unity` は、どこからも参照されていなかった。
+`Assets/StreamingAssets/vita.vrm`（19MB）と `idle_loop.vrma`（154KB）が入ったので、
+**clone と #54 の CI checkout に `git lfs` が要る**。`.gitattributes` の
+`*.vrm` / `*.vrma` 規則は #17 のために先回りで置いてあったのでそのまま発火した。
 
-外した理由は diff のノイズだけではない。`.gitattributes` の `*.png` が
-`Icons/URP.png` を LFS 送りにしていて、**`git lfs ls-files` の出力がこの1件だけ**だった。
-消したことでリポジトリの LFS オブジェクトがゼロになり、clone と #54 の CI checkout が
-LFS を要求しなくなった。
+> #12 の時点では**ゼロだった**。`Assets/TutorialInfo/`（`ReadmeEditor.cs` / `Readme.cs` /
+> `Layout.wlt` / `Icons/URP.png`）と `Assets/Readme.asset` /
+> `Assets/Scenes/SampleScene.unity` はどこからも参照されておらず、外した理由は
+> diff のノイズだけではなかった —— `.gitattributes` の `*.png` が `Icons/URP.png` を
+> LFS 送りにしていて、**`git lfs ls-files` の出力がこの1件だけ**だった。
+> 消してゼロにしたことで、一時的に LFS が要らなくなっていた。
 
-★ `.gitattributes` の `*.png` 規則は**残してある**（#17 で VRM のテクスチャが入る）。
+★ **`*.png` 規則を「VRM のテクスチャが入るから」という理由で残していたのは誤り**だった。
+VRM のテクスチャは `.vrm` の中にあるので、`.png` が単体で入ることはない。
+規則自体は他の用途（アイコンなど）で意味があるので残してあるが、根拠は上のものではない。
+
+★ **`.gitignore` は `Assets/StreamingAssets/` 以外の `*.vrm` / `*.vrma` を落とす。**
+再配布禁止のモデル（`AvatarSample_A.vrm` など）を差し替え検証のあと
+うっかりコミットする導線を塞ぐため。差し替えは `-vrm` 起動引数か
+`~/.config/chatter-agent/models/` から読ませること。
 
 ★ あわせて `com.unity.ai.assistant`（unity-mcp が使う）も外した。MCP ビルドが
 モーダルダイアログで沈黙する罠を踏んで CLI batchmode に切り替えたので、依存の理由が消えている。

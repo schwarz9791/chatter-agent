@@ -1,5 +1,6 @@
 using System.Collections.Generic;
-using Kirurobo;
+using ChatterMascot.Desktop;
+using ChatterMascot.Vrm;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -28,6 +29,31 @@ namespace ChatterMascot.EditorTools
         /// </summary>
         private const string ProductionScene = "Assets/Scenes/Mascot.unity";
 
+        private const string AnchorName = "ModelAnchor";
+        private const string PlaceholderName = "ModelPlaceholder";
+
+        private const string GraphicsSettingsPath = "ProjectSettings/GraphicsSettings.asset";
+
+        /// <summary>アウトラインの Renderer Feature。★ 型名で見る（型そのものは参照しない）。</summary>
+        private const string OutlineFeatureType = "MToonOutlineRenderFeature";
+
+        /// <summary>★ <b>Mobile も見ること。</b> #25 で同じ罠を再度踏まないため。</summary>
+        private static readonly string[] RendererAssets =
+        {
+            "Assets/Settings/PC_Renderer.asset",
+            "Assets/Settings/Mobile_Renderer.asset",
+        };
+
+        /// <summary>
+        /// ランタイムロードで <c>Shader.Find</c> が引くシェーダー。
+        /// UniVRM 自身のプロジェクトが Always Included に登録しているのと同じ2本。
+        /// </summary>
+        private static readonly string[] RequiredShaders =
+        {
+            VrmMaterialCheck.MToonUrpShaderName,
+            VrmMaterialCheck.UniUnlitShaderName,
+        };
+
         public static void FixAll()
         {
             var changed = 0;
@@ -45,7 +71,10 @@ namespace ChatterMascot.EditorTools
                 if (EnsureEventSystem()) fixes.Add("EventSystem");
                 if (EnsureInputModule()) fixes.Add("InputSystemUIInputModule");
                 if (EnsurePhysicsRaycaster()) fixes.Add("PhysicsRaycaster");
-                foreach (var name in EnsureDragHandles()) fixes.Add("UniWindowMoveHandle(" + name + ")");
+                // ★ VrmStage より先に足すと ModelPlaceholder が Collider を持ったまま
+                //   ModelAnchor の外に残る。順序を入れ替えないこと
+                if (path == ProductionScene) fixes.AddRange(EnsureVrmStage());
+                foreach (var name in EnsureDragHandles(scene)) fixes.Add("UniWindowMoveHandle(" + name + ")");
 
                 if (fixes.Count > 0)
                 {
@@ -61,6 +90,11 @@ namespace ChatterMascot.EditorTools
             }
 
             if (EnsureBuildScenes()) changed++;
+            if (EnsureAlwaysIncludedShaders()) changed++;
+
+            // ★ 検査系は直さない。人が読む前提で LogError するだけにして exit コードも変えない
+            AssertForwardRendering();
+            AssertRendererFeatures();
 
             Debug.Log($"[Fixups] 完了（{changed} 件を更新）");
             EditorApplication.Exit(0);
@@ -150,36 +184,219 @@ namespace ChatterMascot.EditorTools
         }
 
         /// <summary>
-        /// <b>掴める（＝クリック透過で「実体」とみなされる）ものは、ドラッグで動かせる。</b>
+        /// シーンに置かれている <c>Collider</c> 持ちにドラッグハンドルを付ける。
         ///
-        /// ★ <b>対象を名前で決め打ちにしない。</b> 判定は「<c>Collider</c> を持っているか」——
-        ///   クリック透過のヒットテストが <c>Physics.Raycast</c> で見ているのと同じ条件なので、
-        ///   <b>掴める領域とドラッグできる領域が定義上ずれない</b>。
-        ///   #17 で Cube が VRM に置き換わっても、クリック透過のために <c>Collider</c> を
-        ///   付ける以上、そのままここに乗る。
-        ///
-        /// ★ 位置の永続化は入れていない（起動のたびに中央へ戻る）。マルチモニタ・解像度変更・
-        ///   画面外からの復帰の扱いが要るので #16 でまとめて設計する。
-        ///
-        /// <c>UniWindowMoveHandle</c> は UniWindowController 同梱（MIT）。自前で書かないのは、
-        /// <b>macOS の Retina 座標系の手当てが既に入っている</b>ため
-        /// （<c>eventData.position</c> の系とウィンドウ座標系でスケールが一致しなくなる。
-        /// このプロジェクトは <c>macRetinaSupport: 1</c>）。
+        /// ★ <b>規則そのものは <see cref="DragHandles"/> にある。</b> VRM は実行時に生えるので
+        ///   ランタイム側（<c>VrmDragHandleBinder</c>）からも同じ規則を使う。
+        ///   ここで判定を書き直すと、シーンに焼いた Cube と読み込んだ VRM で
+        ///   <b>掴める条件が静かに食い違う</b>。
         /// </summary>
-        private static IEnumerable<string> EnsureDragHandles()
+        private static IEnumerable<string> EnsureDragHandles(UnityEngine.SceneManagement.Scene scene)
         {
             var added = new List<string>();
-            if (Object.FindFirstObjectByType<UniWindowController>() == null) return added;
-
-            foreach (var collider in Object.FindObjectsByType<Collider>(FindObjectsSortMode.None))
+            foreach (var root in scene.GetRootGameObjects())
             {
-                var go = collider.gameObject;
-                if (go.GetComponent<UniWindowMoveHandle>() != null) continue;
-
-                go.AddComponent<UniWindowMoveHandle>();
-                added.Add(go.name);
+                added.AddRange(DragHandles.AttachAll(root));
             }
             return added;
+        }
+
+        /// <summary>
+        /// <c>ModelAnchor</c> と <see cref="VrmStage"/> がシーンに居ることを保証する。
+        ///
+        /// <c>ModelPlaceholder</c>（Cube）は<b>消さずに <c>ModelAnchor</c> の子へ移す</b>。
+        /// 読み込みに成功したら <see cref="VrmStage"/> が <c>SetActive(false)</c> する。
+        /// ★ <b>無地の Cube が出ていること自体が可視のシグナル</b>なので、
+        ///   同梱モデルまで読めない異常事態を静かにしない。
+        /// </summary>
+        private static IEnumerable<string> EnsureVrmStage()
+        {
+            var fixes = new List<string>();
+
+            var placeholder = FindRoot(PlaceholderName)
+                              ?? FindChildOfAnchor(PlaceholderName);
+
+            var anchor = FindRoot(AnchorName);
+            if (anchor == null)
+            {
+                anchor = new GameObject(AnchorName);
+                fixes.Add(AnchorName);
+            }
+
+            if (placeholder != null && placeholder.transform.parent != anchor.transform)
+            {
+                // worldPositionStays: false —— アンカーは原点に置くので見た目は変わらないが、
+                // アンカーを動かしたときに Cube が付いてこないと意味が無い
+                placeholder.transform.SetParent(anchor.transform, false);
+                fixes.Add(AnchorName + "/" + PlaceholderName);
+            }
+
+            var stage = Object.FindFirstObjectByType<VrmStage>(FindObjectsInactive.Include);
+            if (stage == null)
+            {
+                stage = anchor.AddComponent<VrmStage>();
+                fixes.Add(nameof(VrmStage));
+            }
+
+            // ★ [SerializeField] は Inspector からしか繋がらないので、ここで繋ぐ。
+            //   名前で GameObject.Find する実装にしないための代償
+            var serialized = new SerializedObject(stage);
+            if (Assign(serialized, "modelAnchor", anchor.transform)) fixes.Add("VrmStage.modelAnchor");
+            if (placeholder != null && Assign(serialized, "placeholder", placeholder))
+            {
+                fixes.Add("VrmStage.placeholder");
+            }
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            return fixes;
+        }
+
+        private static bool Assign(SerializedObject serialized, string field, Object value)
+        {
+            var property = serialized.FindProperty(field);
+            if (property == null) return false;
+            if (property.objectReferenceValue == value) return false;
+
+            property.objectReferenceValue = value;
+            return true;
+        }
+
+        private static GameObject FindRoot(string name)
+        {
+            foreach (var root in EditorSceneManager.GetActiveScene().GetRootGameObjects())
+            {
+                if (root.name == name) return root;
+            }
+            return null;
+        }
+
+        private static GameObject FindChildOfAnchor(string name)
+        {
+            var anchor = FindRoot(AnchorName);
+            if (anchor == null) return null;
+
+            var child = anchor.transform.Find(name);
+            return child != null ? child.gameObject : null;
+        }
+
+        /// <summary>
+        /// ★ <b>ランタイムロードでは、シーンのマテリアルから参照されないシェーダーが
+        ///   ビルドから落ちる。</b> <c>UrpVrm10MToon10MaterialImporter</c> は
+        ///   <c>Shader.Find</c> で引くので、落ちていると<b>モデルは読めるのに真っ黒／ピンク</b>に
+        ///   なり、<b>例外は1つも出ない</b>。UniVRM 側に自動対策は無い。
+        ///
+        /// ★ <b><c>Universal Render Pipeline/Lit</c> は絶対に入れないこと。</b>
+        ///   UniVRM 公式が「ビルド時間が過大になる」と明記している。
+        ///   同梱モデルは 15 マテリアル全部が MToon なので不要。
+        /// </summary>
+        private static bool EnsureAlwaysIncludedShaders()
+        {
+            var wanted = new List<Shader>();
+            foreach (var name in RequiredShaders)
+            {
+                var shader = Shader.Find(name);
+                if (shader == null)
+                {
+                    Debug.LogError($"[Fixups] シェーダーが見つかりません: {name}" +
+                                   "（UniVRM が入っていない可能性があります）");
+                    continue;
+                }
+                wanted.Add(shader);
+            }
+            if (wanted.Count == 0) return false;
+
+            try
+            {
+                var assets = AssetDatabase.LoadAllAssetsAtPath(GraphicsSettingsPath);
+                if (assets == null || assets.Length == 0 || assets[0] == null)
+                {
+                    Debug.LogError($"[Fixups] {GraphicsSettingsPath} を読めませんでした");
+                    return false;
+                }
+
+                var serialized = new SerializedObject(assets[0]);
+                var list = serialized.FindProperty("m_AlwaysIncludedShaders");
+                if (list == null)
+                {
+                    Debug.LogError("[Fixups] m_AlwaysIncludedShaders が見つかりません");
+                    return false;
+                }
+
+                var present = new HashSet<Object>();
+                for (var i = 0; i < list.arraySize; i++)
+                {
+                    present.Add(list.GetArrayElementAtIndex(i).objectReferenceValue);
+                }
+
+                var added = new List<string>();
+                foreach (var shader in wanted)
+                {
+                    if (present.Contains(shader)) continue;
+
+                    list.InsertArrayElementAtIndex(list.arraySize);
+                    list.GetArrayElementAtIndex(list.arraySize - 1).objectReferenceValue = shader;
+                    added.Add(shader.name);
+                }
+
+                // 既に目的の状態なら書かない（AssetDatabase.SaveAssets の再シリアライズを減らす）
+                if (added.Count == 0) return false;
+
+                serialized.ApplyModifiedPropertiesWithoutUndo();
+                AssetDatabase.SaveAssets();
+                Debug.Log($"[Fixups] Always Included Shaders に足しました: {string.Join(", ", added)}");
+                return true;
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError("[Fixups] GraphicsSettings を操作できませんでした: " + e.Message);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// ★ <b>MToon10(URP) に <c>UniversalGBuffer</c> パスは無い。</b>
+        ///   Deferred のままだと未検証の経路に入る。UniVRM 公式の URP サンプルも Forward。
+        ///
+        /// <b>直さず報告するだけ</b>にしてあるのは、<c>.asset</c> の描画設定を
+        /// コードで書き換えると差分の意図が読めなくなるため。
+        /// </summary>
+        private static void AssertForwardRendering()
+        {
+            foreach (var path in RendererAssets)
+            {
+                var asset = AssetDatabase.LoadMainAssetAtPath(path);
+                if (asset == null) continue;
+
+                var mode = new SerializedObject(asset).FindProperty("m_RenderingMode");
+                if (mode == null || mode.intValue == 0) continue;
+
+                Debug.LogError($"[Fixups] {path} が Forward ではありません（m_RenderingMode: {mode.intValue}）。" +
+                               "MToon10(URP) に UniversalGBuffer パスは無いので Forward にしてください");
+            }
+        }
+
+        /// <summary>
+        /// ★ <b><c>MToonOutlineRenderFeature</c> が無いとアウトラインだけ出ない。</b>
+        ///   <c>MToonOutline</c> パスは Renderer Feature が <c>EnqueuePass</c> しない限り
+        ///   描画されず、<b>エラーも出ない</b>。
+        ///
+        /// ★ <b>追加は Unity Editor の GUI で行うこと。</b> <c>m_RendererFeatureMap</c> の
+        ///   ハッシュをコードで組むのは脆い。ここは<b>検査だけ</b>。
+        /// </summary>
+        private static void AssertRendererFeatures()
+        {
+            foreach (var path in RendererAssets)
+            {
+                var found = false;
+                foreach (var asset in AssetDatabase.LoadAllAssetsAtPath(path))
+                {
+                    if (asset != null && asset.GetType().Name == OutlineFeatureType) found = true;
+                }
+                if (found) continue;
+
+                Debug.LogError($"[Fixups] {path} に {OutlineFeatureType} がありません。" +
+                               "アウトラインが出ません（Inspector の Add Renderer Feature から足してください）");
+            }
         }
     }
 }

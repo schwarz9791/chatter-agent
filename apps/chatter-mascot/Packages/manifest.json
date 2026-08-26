@@ -1,6 +1,8 @@
 {
   "dependencies": {
     "com.kirurobo.uniwinc": "https://github.com/kirurobo/UniWindowController.git#upm",
+    "com.vrmc.gltf": "https://github.com/vrm-c/UniVRM.git?path=/Packages/UniGLTF#v0.131.2",
+    "com.vrmc.vrm": "https://github.com/vrm-c/UniVRM.git?path=/Packages/VRM10#v0.131.2",
     "com.unity.nuget.newtonsoft-json": "3.2.1",
     "com.unity.ai.navigation": "2.0.14",
     "com.unity.collab-proxy": "2.13.5",

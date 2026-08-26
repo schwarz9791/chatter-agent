@@ -178,6 +178,34 @@ macOS の TCC で保護されたフォルダ（`~/Downloads` / `~/Desktop` / `~/
 
 ★ **`request.timeout` の方も残してある。** HTTP には効くので、両方要る。
 
+### ★ VRM は放っておくと背中が映る（仕様の読みで決めない）
+
+#56 の issue 本文は「モデルの glTF 座標でつま先が足首より +Z。glTF→Unity は Z 反転なので
+**Unity 上ではモデルが −Z を向く** → Main Camera は `(0,0,-4)` で +Z を見るので
+**顔がこちらを向く。180°回転は不要**」としていた。
+
+**実機では背中が映った。**
+
+手当ては `Runtime/Vrm/VrmOrientation.cs`。**仕様の読みではなくボーンの並びから
+実際の向きを出す** —— VRM 1.0 はレストポーズが T ポーズ必須なので、読み込み直後の
+上腕2本の位置から正面が求まる:
+
+```csharp
+var rightToLeft = leftUpperArm - rightUpperArm;   // 高さのぶれは落とす
+var forward = Vector3.Cross(Vector3.up, rightToLeft.normalized);
+```
+
+Unity は左手系で「+Z を向いた人物の右手が +X 側」に来るので、これで正面が出る。
+あとは `−Z`（カメラの方）との符号付き角度ぶんだけ Y 軸で回す。
+**真横を向いたモデルでも正面へ向け直せる**ので、非準拠のモデルにも耐える。
+
+★ **回すのは bounds を測る前。** `Renderer.bounds` はワールド軸に沿った箱なので、
+回したあとで測り直さないとカメラ距離がずれる。
+
+★ **照明は回さない。** シーンの Directional Light（Euler `(50, -30, 0)`）は
+光が +Z 方向へ進む向きなので、**−Z を向いた面＝カメラ側が照らされる**。
+モデルの正面をカメラへ向ければ、そのまま顔に光が当たる。
+
 ### ★ VRM 1.0 は T ポーズ必須。自動フレーミングの支配軸がそれで決まる
 
 `Camera.fieldOfView` は `m_FOVAxisMode` に関わらず**常に垂直 FOV**で、水平は
@@ -264,6 +292,49 @@ Deferred のままだと未検証の経路に入る。UniVRM 公式の URP サ�
 ★ **`MToonOutlineRenderFeature` は `#if MTOON_URP` で囲まれている。** 定義しているのは
 `VRM10.MToon10.Runtime.asmdef` の `versionDefines`（`com.unity.render-pipelines.universal`）なので、
 URP が入っていれば自動で立つ。
+
+### ★ アウトラインは「出ているのに見えない」ことがある
+
+`MToonOutlineRenderFeature` を追加しても**見た目が変わらなかった**。壊れているのではなく、
+**同梱モデルの線が細すぎて見えないだけ**だった。
+
+`vita.vrm` の実測:
+
+| | |
+|---|---|
+| `outlineWidthMode` | `worldCoordinates`（15 マテリアル中 **4つだけ**） |
+| `outlineWidthFactor` | **0.00075 m（0.75mm）** |
+| 付いているもの | Face / Body の SKIN、Shoes / Tops の CLOTH |
+| **付いていないもの** | **髪（HAIR 4種）**、目、眉、まつげ、口 |
+
+250x400 のウィンドウでは画面上 **約 190 px/m** なので、0.75mm は **0.14 px**。
+拡大しても見えない。**シルエットで最も目立つ髪に線が無い**のも効いている。
+
+★ **「アウトラインが出るか」を目視の合否条件にしないこと。** このモデルでは
+出ていても見えない。効いているかを確かめるには**一時的に線を太らせる**:
+
+```csharp
+foreach (var m in _gltf.Materials)
+    if (m != null && m.HasProperty("_OutlineWidth")) m.SetFloat("_OutlineWidth", 0.02f);
+```
+
+0.02（シェーダーの上限は 0.05）まで上げると顎・首・肩に黒い線がはっきり出る。
+**確認したら必ず戻すこと。**
+
+★ **プロパティ名は `_OutlineWidth`。** glTF 側のキーは `outlineWidthFactor` だが、
+シェーダーのプロパティ名は違う（`_OutlineWidthFactor` は**存在しない**）。
+`Material.HasProperty` は false を返すだけで**エラーにならない**ので、
+名前を間違えると「効いていない」と「そもそも設定できていない」の区別がつかない。
+一度これで空振りした。
+
+★ **Renderer Feature の追加は Unity Editor の GUI から。** ★ **Unity Hub で
+「プロジェクトを開く」ではなく「新規作成」してしまうと、当然この機能は出てこない** ——
+`Add Renderer Feature` の一覧に URP 標準の6つしか並ばないときは、
+**開いているプロジェクトを疑うこと**（`ps` で `-createproject` が出ていれば新規作成されている）。
+
+★ **`scripts/*.sh` のロック検査はパスの前方一致。** プロジェクトの**中に**別の Unity
+プロジェクトができていると、そちらを開いているだけで
+「Unity Editor がこのプロジェクトを開いています」と言われて何も動かせなくなる。
 
 ### ★ asmdef の参照は推移しない（3回踏んだ）
 

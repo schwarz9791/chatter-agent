@@ -174,6 +174,10 @@ namespace ChatterMascot.Vrm
             _gltf = instance.GetComponent<RuntimeGltfInstance>();
             VrmMaterialCheck.Inspect(_gltf);
 
+            // ★ **bounds より先に回すこと。** Renderer.bounds はワールド軸に沿った箱なので、
+            //   回したあとで測り直さないとカメラ距離がずれる
+            FaceCamera(instance);
+
             _bounds = WorldBounds(_gltf);
             AttachCollider(instance.gameObject, _bounds);
 
@@ -239,6 +243,37 @@ namespace ChatterMascot.Vrm
             Debug.Log($"[Mascot] フレーミング: {Screen.width}x{Screen.height} " +
                       $"aspect={camera.aspect:F3} bounds={_bounds.size} " +
                       $"distance={distance:F2} 支配軸={(axis == FramingAxis.Horizontal ? "水平" : "垂直")}");
+        }
+
+        /// <summary>
+        /// モデルをカメラの方へ向ける。
+        ///
+        /// ★ <b>実機で背中が映った。</b> #56 の issue 本文は「glTF→Unity の Z 反転で
+        ///   モデルが −Z を向くから 180°回転は不要」としていたが、そうならなかった。
+        ///   仕様の読みに頼らず、<b>肩の並びから実際の向きを出して回す</b>
+        ///   （→ <see cref="VrmOrientation"/>）。
+        ///
+        /// ★ <b>照明は回さない。</b> シーンの Directional Light は −Z 側（カメラ側）を
+        ///   照らす向きに置いてあるので、モデルの正面をカメラへ向ければ顔に光が当たる。
+        /// </summary>
+        private static void FaceCamera(Vrm10Instance instance)
+        {
+            var animator = instance.GetComponent<Animator>();
+            if (animator == null || animator.avatar == null) return;
+
+            var left = animator.GetBoneTransform(HumanBodyBones.LeftUpperArm);
+            var right = animator.GetBoneTransform(HumanBodyBones.RightUpperArm);
+            if (left == null || right == null)
+            {
+                Debug.LogWarning("[Mascot] 上腕のボーンが無いので向きを判定できません");
+                return;
+            }
+
+            var yaw = VrmOrientation.YawToFaceCamera(left.position, right.position);
+            if (Mathf.Approximately(yaw, 0f)) return;
+
+            instance.transform.Rotate(Vector3.up, yaw, Space.World);
+            Debug.Log($"[Mascot] モデルの向きを {yaw:F0} 度回してカメラへ向けました");
         }
 
         /// <summary>

@@ -47,11 +47,43 @@ Portions of this product are derived from that work:
   - UniVRM / UniGLTF / MToon (https://github.com/vrm-c/UniVRM)
       Copyright (c) 2020 VRM Consortium
       Copyright (c) 2018 Masataka SUMI for MToon
+      Copyright (c) 2018 ousttrue
       licensed under the MIT License.
       VRM の読み込み・MToon シェーダ・spring bone・expression を担う
       （com.vrmc.gltf / com.vrmc.vrm）。
-      ★ **著作権者が2名いる。** 配布するときは両方の表示を落とさないこと。
-        パッケージ内の LICENSE.txt がそれ。
+      ★ **著作権者が3名いる。** 配布するときは3つとも表示を落とさないこと。
+      ★ **ライセンス本文が同梱されるのは com.vrmc.gltf だけ**（パッケージ内の
+        LICENSE.md。ousttrue 名義）。**com.vrmc.vrm には LICENSE ファイルが1つも入っていない** ——
+        Packages/manifest.json が `?path=/Packages/VRM10` で取得するので、
+        UniVRM リポジトリのルートにある LICENSE.txt（VRM Consortium と Masataka SUMI）が
+        降ってこないため。**下の全文が、その分の通知保持義務を果たす唯一の受け皿になる。**
+
+      --- UniVRM (VRM10 / MToon10) の MIT ライセンス全文 ---
+
+      MIT License
+
+      Copyright (c) 2020 VRM Consortium
+      Copyright (c) 2018 Masataka SUMI for MToon
+
+      Permission is hereby granted, free of charge, to any person obtaining a copy
+      of this software and associated documentation files (the "Software"), to deal
+      in the Software without restriction, including without limitation the rights
+      to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+      copies of the Software, and to permit persons to whom the Software is
+      furnished to do so, subject to the following conditions:
+
+      The above copyright notice and this permission notice shall be included in all
+      copies or substantial portions of the Software.
+
+      THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+      IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+      FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+      AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+      LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+      OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+      SOFTWARE.
+
+      --- ここまで ---
 
   - Newtonsoft.Json (com.unity.nuget.newtonsoft-json)
       Copyright (c) James Newton-King, licensed under the MIT License.

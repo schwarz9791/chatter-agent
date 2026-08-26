@@ -24,7 +24,8 @@ namespace ChatterMascot.Vrm
     }
 
     /// <summary>
-    /// <see cref="AssetPath.Enumerate"/> が並べた候補を順に読み、<b>最初に読めたもの</b>を返す。
+    /// <see cref="AssetPath.Enumerate"/> が並べた候補を<b>1件ずつ</b>読む。
+    /// <b>どれを採るかは呼び出し側が決める</b>（→ <c>VrmStage.LoadAsync</c>）。
     ///
     /// ★ <b><c>File.ReadAllBytes</c> ではなく <c>UnityWebRequest</c> を使う。</b>
     ///   Android の <c>streamingAssetsPath</c> は APK 内の <c>jar:file://…</c> で、
@@ -56,24 +57,27 @@ namespace ChatterMascot.Vrm
         /// </summary>
         private const int DeadlineMs = 15000;
 
-        public static async Task<LoadedBytes> LoadFirstAsync(
-            IReadOnlyList<AssetCandidate> candidates, CancellationToken ct)
+        /// <summary>
+        /// 候補を<b>1件だけ</b>読む。読めなければ <see cref="LoadedBytes.IsEmpty"/>。
+        ///
+        /// ★ <b>「読めた」で確定させないこと。</b> ここが返すのは<b>バイト列が取れた</b>という
+        ///   事実だけで、VRM 1.0 として解釈できるかはパースするまで分からない。
+        ///   <c>-vrm</c> に VRM 0.x や別形式を渡すと<b>読めてパースで落ちる</b>ので、
+        ///   確定は<b>パースまで通った時点</b>で呼び出し側が行う。
+        ///
+        /// ★ <b>探索順のループをここへ戻さないこと。</b> 戻すとパース（UniVRM 依存）を
+        ///   このクラスへ引き込むことになり、「読む」と「解釈する」が1つに癒着する。
+        /// </summary>
+        public static async Task<LoadedBytes> ReadAsync(AssetCandidate candidate, CancellationToken ct)
         {
-            if (candidates == null) return default;
+            ct.ThrowIfCancellationRequested();
 
-            foreach (var candidate in candidates)
-            {
-                ct.ThrowIfCancellationRequested();
+            var bytes = await TryReadAsync(candidate.Path, ct);
+            if (bytes == null || bytes.Length == 0) return default;
 
-                var bytes = await TryReadAsync(candidate.Path, ct);
-                if (bytes != null && bytes.Length > 0)
-                {
-                    Debug.Log($"[Mascot] {candidate.Source} から読みました: {candidate.Path}" +
-                              $" ({bytes.Length:N0} バイト)");
-                    return new LoadedBytes(candidate, bytes);
-                }
-            }
-            return default;
+            // ★ 「読めた」であって「採った」ではない。文言を混ぜないこと
+            Debug.Log($"[Mascot] {candidate.Source} から {bytes.Length:N0} バイト読みました: {candidate.Path}");
+            return new LoadedBytes(candidate, bytes);
         }
 
         /// <summary>
@@ -103,16 +107,38 @@ namespace ChatterMascot.Vrm
                 try
                 {
                     var send = SendAsync(request, ct);
-                    var finished = await Task.WhenAny(send, Task.Delay(DeadlineMs, ct));
-                    if (finished != send)
+
+                    // ★ **期限は linked CTS で切ること。** `Task.Delay(ms, ct)` を裸で使うと
+                    //   送信が先に終わってもタイマーが 15 秒生き残り、候補のぶんだけ積む。
+                    using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct))
                     {
-                        // ★ Abort しないと、この後もダウンロードハンドラが生きたまま残る
-                        request.Abort();
-                        Debug.LogWarning(
-                            $"[Mascot] {path} の読み込みが {DeadlineMs / 1000} 秒で返らないので諦めます。" +
-                            "macOS では ~/Downloads / ~/Desktop / ~/Documents のファイルが" +
-                            "アクセス権で止められることがあります（システム設定 > プライバシーとセキュリティ）");
-                        return null;
+                        var finished = await Task.WhenAny(send, Task.Delay(DeadlineMs, deadline.Token));
+                        // using を抜けるときに Cancel されるので、勝った方に関わらずタイマーは片付く
+                        deadline.Cancel();
+
+                        // ★ **キャンセルを期限と取り違えないこと。** `Task.Delay(ms, ct)` は
+                        //   `Cancel()` の中でその場で Canceled になるのに対し、`send` は
+                        //   `ContinueWith(..., FromCurrentSynchronizationContext())` を挟むので
+                        //   Unity のメインスレッドのポンプを1回待つ。つまり終了時は
+                        //   **必ず Delay が先に返る**。ここを見ないと、読み込み中にアプリを
+                        //   閉じただけで「アクセス権で止められている」と出て、
+                        //   **存在しない macOS の権限問題を次の担当者に追わせる**
+                        if (ct.IsCancellationRequested)
+                        {
+                            request.Abort();
+                            throw new OperationCanceledException(ct);
+                        }
+
+                        if (finished != send)
+                        {
+                            // ★ Abort しないと、この後もダウンロードハンドラが生きたまま残る
+                            request.Abort();
+                            Debug.LogWarning(
+                                $"[Mascot] {path} の読み込みが {DeadlineMs / 1000} 秒で返らないので諦めます。" +
+                                "macOS では ~/Downloads / ~/Desktop / ~/Documents のファイルが" +
+                                "アクセス権で止められることがあります（システム設定 > プライバシーとセキュリティ）");
+                            return null;
+                        }
                     }
                     await send;
                 }

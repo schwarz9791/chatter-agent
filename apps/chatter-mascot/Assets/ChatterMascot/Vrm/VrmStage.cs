@@ -60,6 +60,7 @@ namespace ChatterMascot.Vrm
         private Vrm10Instance _instance;
         private RuntimeGltfInstance _gltf;
         private Bounds _bounds;
+        private CapsuleCollider _collider;
         private bool _framePending;
         private int _framedWidth;
         private int _framedHeight;
@@ -119,36 +120,33 @@ namespace ChatterMascot.Vrm
                 var env = AssetEnvFactory.Current();
                 var candidates = AssetPath.Enumerate(env, AssetKind.Vrm);
 
-                var loaded = await VrmAssetLoader.LoadFirstAsync(candidates, ct);
-                if (loaded.IsEmpty)
+                // ★ **「読めた」ではなく「パースまで通った」で確定する。**
+                //   -vrm に VRM 0.x / 途中で切れたファイル / 素の .glb を渡すと、
+                //   バイト列は読めるのに LoadBytesAsync が throw する。そこで打ち切ると
+                //   **同梱モデルへ落ちない** —— 指定を1つ間違えただけで Cube が出る。
+                //   `git lfs` 無しの clone（vita.vrm が 130 バイトのポインタになる）も同じ形。
+                //   VrmAssetLoader が「返らない候補」を 15 秒で見切っているのと同じ趣旨を、
+                //   パースにも通す
+                foreach (var candidate in candidates)
                 {
-                    Debug.LogError("[Mascot] VRM が1つも読めませんでした。探した順:" +
-                                   VrmAssetLoader.DescribeCandidates(candidates));
+                    var loaded = await VrmAssetLoader.ReadAsync(candidate, ct);
+                    if (loaded.IsEmpty) continue;
+
+                    var instance = await ParseAsync(loaded, ct);
+                    if (instance == null) continue;
+
+                    _instance = instance;
+                    Adopt(_instance);
+                    // ★ **採った候補を出すこと。** 先頭とは限らなくなったので、
+                    //   「いまどのモデルが出ているか」がこの1行でしか分からない
+                    Debug.Log($"[Mascot] VRM の読み込み: {(int)((Time.realtimeSinceStartup - startedAt) * 1000)}ms" +
+                              $"（{loaded.Candidate}）");
                     return;
                 }
 
-                _instance = await UniVRM10.Vrm10.LoadBytesAsync(
-                    loaded.Bytes,
-                    // 1.0 だと分かっている。失敗メッセージも具体的になる
-                    canLoadVrm0X: false,
-                    // #59 の VRMA と手続き的アイドルが ControlRig を使う
-                    controlRigGenerationOption: ControlRigGenerationOption.Generate,
-                    showMeshes: true,
-                    // ★ null のままにすること。Play 中なら RuntimeOnlyAwaitCaller に自動で倒れ、
-                    //   マテリアルは RenderPipelineUtility が URP を自動判別する
-                    awaitCaller: null,
-                    materialGenerator: null,
-                    vrmMetaInformationCallback: LogMeta,
-                    ct: ct);
-
-                if (_instance == null)
-                {
-                    Debug.LogError($"[Mascot] VRM を読み込めませんでした: {loaded.Candidate.Path}");
-                    return;
-                }
-
-                Adopt(_instance);
-                Debug.Log($"[Mascot] VRM の読み込み: {(int)((Time.realtimeSinceStartup - startedAt) * 1000)}ms");
+                // ★ **候補を全部並べること。** 探索順のどこで外れたかはこれが無いと分からない
+                Debug.LogError("[Mascot] 読めて VRM として解釈できた候補が1つもありませんでした。探した順:" +
+                               VrmAssetLoader.DescribeCandidates(candidates));
             }
             catch (OperationCanceledException)
             {
@@ -167,6 +165,55 @@ namespace ChatterMascot.Vrm
             }
         }
 
+        /// <summary>
+        /// バイト列を VRM 1.0 として解釈する。<b>失敗しても投げず <c>null</c> を返す</b> ——
+        /// 「次の候補へ進む」を呼び出し側で普通の <c>continue</c> として書けるように。
+        ///
+        /// ★ <b><c>OperationCanceledException</c> だけは通すこと。</b> 握ると、終了時に
+        ///   残りの候補を舐め直したうえで「1つも読めませんでした」と
+        ///   <b>誤った <c>LogError</c> を出す</b>。
+        ///
+        /// ★ <b>失敗は <c>LogWarning</c> 止まり。</b> 探索順の途中で外れるのは正常な分岐
+        ///   （<c>VrmAssetLoader</c> が「無い」を <c>Log</c> にしているのと同じ）。
+        ///   <c>LogError</c> は全滅したときの1本だけにする。
+        ///
+        /// ★ <b><c>canLoadVrm0X: false</c> のとき UniVRM は <c>null</c> ではなく throw する</b>
+        ///   （<c>"Failed to load as VRM 1.0"</c>）。GLB でないバイト列はさらに手前で落ちる。
+        ///   両方を握ること。
+        /// </summary>
+        private static async Task<Vrm10Instance> ParseAsync(LoadedBytes loaded, CancellationToken ct)
+        {
+            try
+            {
+                var instance = await UniVRM10.Vrm10.LoadBytesAsync(
+                    loaded.Bytes,
+                    // 1.0 だと分かっている。失敗メッセージも具体的になる
+                    canLoadVrm0X: false,
+                    // #59 の VRMA と手続き的アイドルが ControlRig を使う
+                    controlRigGenerationOption: ControlRigGenerationOption.Generate,
+                    showMeshes: true,
+                    // ★ null のままにすること。Play 中なら RuntimeOnlyAwaitCaller に自動で倒れ、
+                    //   マテリアルは RenderPipelineUtility が URP を自動判別する
+                    awaitCaller: null,
+                    materialGenerator: null,
+                    vrmMetaInformationCallback: LogMeta,
+                    ct: ct);
+                if (instance != null) return instance;
+
+                Debug.LogWarning($"[Mascot] {loaded.Candidate.Path} は VRM として解釈できませんでした（null）。次の候補へ進みます");
+                return null;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Mascot] {loaded.Candidate.Path} は VRM として解釈できませんでした: {e.Message}。次の候補へ進みます");
+                return null;
+            }
+        }
+
         private void Adopt(Vrm10Instance instance)
         {
             if (modelAnchor != null) instance.transform.SetParent(modelAnchor, false);
@@ -179,7 +226,7 @@ namespace ChatterMascot.Vrm
             FaceCamera(instance);
 
             _bounds = WorldBounds(_gltf);
-            AttachCollider(instance.gameObject, _bounds);
+            _collider = AttachCollider(instance.gameObject, _bounds);
 
             if (placeholder != null) placeholder.SetActive(false);
 
@@ -201,6 +248,13 @@ namespace ChatterMascot.Vrm
                 // ★ 読み込み中に積もった deltaTime で髪が吹き飛ぶのを戻す
                 _instance?.Runtime?.SpringBone?.RestoreInitialTransform();
                 _bounds = WorldBounds(_gltf);
+                // ★ **カメラだけ測り直して Collider を置き去りにしないこと。**
+                //   ここで測り直す理由（SkinnedMeshRenderer.bounds がロード直後に
+                //   確定していない）は Collider にもそのまま当てはまる。放置すると
+                //   「見えている範囲」と「掴める範囲」がずれ、クリック透過とドラッグの
+                //   両方が静かに狂う（小さく出れば掴めず、大きく出れば窓全体が
+                //   クリックを食う ← acd981d が避けようとした失敗そのもの）
+                FitCollider(_collider, _bounds);
                 Frame();
                 return;
             }
@@ -280,52 +334,61 @@ namespace ChatterMascot.Vrm
         /// ランタイムロードしたモデルには Collider が無い。
         /// <b>クリック透過のヒットテストとドラッグの両方がこれを見る</b>ので、
         /// 見た目と当たり判定がずれないよう bounds から起こす。
+        ///
+        /// ★ <b>読み込み完了の通知より前に作ること。</b> <c>DragHandles.AttachAll</c> の判定は
+        ///   「<c>Collider</c> を持っているか」なので、無い状態で購読者が走ると
+        ///   <b>ドラッグが1つも付かない</b>。<see cref="AddLoadedHandler"/> は sticky だが
+        ///   <b>再通知はしない</b>ので、後から付けても呼び直されない。
+        ///   ＝ <b>作るのは早く、寸法を合わせるのは後</b>（<see cref="FitCollider"/>）。
+        ///
+        /// ★ <b>既に Collider があるなら何もしない（<c>null</c> を返す）。</b> 手で置いた
+        ///   当たり判定を上書きしない代わりに、<b>その Collider は測り直しの対象にもならない</b>。
         /// </summary>
-        private static void AttachCollider(GameObject root, Bounds bounds)
+        private static CapsuleCollider AttachCollider(GameObject root, Bounds bounds)
         {
-            if (root.GetComponentInChildren<Collider>() != null) return;
+            if (root.GetComponentInChildren<Collider>() != null) return null;
 
             var collider = root.AddComponent<CapsuleCollider>();
             collider.direction = 1;   // Y 軸
-            collider.center = root.transform.InverseTransformPoint(bounds.center);
+            FitCollider(collider, bounds);
+            return collider;
+        }
+
+        /// <summary>
+        /// ワールド bounds に合わせて寸法を当て直す。<b>何度呼んでもよい。</b>
+        ///
+        /// ★ <b>奥行き（Z）に合わせる。幅（X）に合わせない。</b>
+        ///   VRM 1.0 はレストポーズが T ポーズ必須なので、<c>extents.x</c> は
+        ///   <b>広げた腕の長さ</b>になる。そちらを採ると半径 0.695m の太い円柱ができ、
+        ///   250px のウィンドウで <b>202px（81%）</b> が「キャラの実体」としてクリックを食う ——
+        ///   腕の高さ以外の左右の空白まで掴んでしまい、クリック透過の意味がほとんど無くなる
+        ///   （実機で確認）。奥行きなら胴の太さに近く、80px に収まる。
+        /// ★ 引き換えに<b>伸ばした腕の上では掴めない</b>（クリックが下へ抜ける）。
+        ///   #59 でアイドルモーションが入って腕が下りれば差はほぼ消える。
+        ///   部位ごとの精緻化は #16。
+        ///
+        /// ★ <b><c>center</c> はローカル、<c>bounds</c> はワールド</b>なので
+        ///   <c>InverseTransformPoint</c> を通す。<b><c>height</c> / <c>radius</c> は
+        ///   <c>lossyScale</c> で実行時にさらに掛けられる</b>ので、<c>ModelAnchor</c> に
+        ///   等倍以外のスケールを入れると当たり判定だけ二重に拡縮される
+        ///   （現状 <c>SceneFixups</c> が等倍で作るので表面化していない）。
+        /// </summary>
+        private static void FitCollider(CapsuleCollider collider, Bounds bounds)
+        {
+            if (collider == null) return;
+
+            collider.center = collider.transform.InverseTransformPoint(bounds.center);
             collider.height = Mathf.Max(bounds.size.y, 0.01f);
-            // ★ **奥行き（Z）に合わせる。幅（X）に合わせない。**
-            //   VRM 1.0 はレストポーズが T ポーズ必須なので、extents.x は
-            //   **広げた腕の長さ**になる。そちらを採ると半径 0.695m の太い円柱ができ、
-            //   250px のウィンドウで **202px（81%）** が「キャラの実体」として
-            //   クリックを食う —— 腕の高さ以外の左右の空白まで掴んでしまい、
-            //   クリック透過の意味がほとんど無くなる（実機で確認）。
-            //   奥行きなら胴の太さに近く、80px に収まる。
-            // ★ 引き換えに**伸ばした腕の上では掴めない**（クリックが下へ抜ける）。
-            //   #59 でアイドルモーションが入って腕が下りれば差はほぼ消える。
-            //   部位ごとの精緻化は #16。
             collider.radius = Mathf.Max(bounds.extents.z, 0.01f);
         }
 
-        private static Bounds WorldBounds(RuntimeGltfInstance instance)
-        {
-            var bounds = new Bounds();
-            var first = true;
-            if (instance == null) return bounds;
-
-            foreach (var renderer in instance.Renderers)
-            {
-                if (renderer == null) continue;
-                // 空の Renderer を混ぜると原点まで bounds が伸びる
-                if (renderer.bounds.size == Vector3.zero) continue;
-
-                if (first)
-                {
-                    bounds = renderer.bounds;
-                    first = false;
-                }
-                else
-                {
-                    bounds.Encapsulate(renderer.bounds);
-                }
-            }
-            return bounds;
-        }
+        /// <summary>
+        /// ★ <b>規則は <see cref="VrmBounds"/> にある。ここに書き足さないこと。</b>
+        ///   <c>VrmProbe</c>（EditMode の実測）と食い違うと、<c>VrmFramingTests</c> の定数が
+        ///   「どちらの実装の出力か」分からなくなる。
+        /// </summary>
+        private static Bounds WorldBounds(RuntimeGltfInstance instance) =>
+            instance == null ? new Bounds() : VrmBounds.Of(instance.Renderers);
 
         /// <summary>
         /// ★ 購読者の例外をここで止める。<c>SpeechClient.SafeInvoke</c> と同じ理由 ——

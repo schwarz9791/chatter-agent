@@ -127,6 +127,76 @@ batchmode はダイアログを出さないので、この失敗の仕方をし�
 ★ **Editor 経由でしかできないこと**（シーン編集、パッケージ解決、設定変更）は MCP で行う。
 そのときは **`AssetDatabase.SaveAssets()` とシーン保存を先に済ませる**。ダイアログの芽を潰しておく。
 
+### ★ `Screen.*` はバッキング px、ネイティブのウィンドウ API はポイント
+
+`macRetinaSupport: 1` なので **`Screen.width/height` は描画ピクセル**、
+`UniWindowController.windowSize`（→ `LibUniWinC.SetSize`）は **NSWindow のポイント**。
+**同じウィンドウについて別の数を返す。**
+
+実測（2026-08-26。窓を内蔵 Retina パネルへ移して戻しただけ）:
+
+```
+Metal RecreateSurface: surface size 250x400
+[Mascot] フレーミング: 250x400 aspect=0.625 bounds=(1.39, 1.73, 0.55) distance=2.39
+Metal RecreateSurface: surface size 500x800            ← 内蔵 Retina パネルへ移した
+[Mascot] フレーミング: 500x800 aspect=0.625 bounds=(1.39, 1.73, 0.55) distance=2.39
+Metal RecreateSurface: surface size 250x400            ← 外部 4K へ戻した
+```
+
+**`aspect` も `bounds` も `distance` も変わらないまま `Screen.*` だけが倍**になっている。
+
+★ **混ぜると「打ち消し」が「倍化」に変わる。** `WindowSizeKeeper` は当初
+`Screen.*` で読んで `windowSize` へそのまま書いていた。Retina 2x で起動すると
+`_intended` が (500,800) px、それをポイントとして書くので **1000x1600 px** の窓になり、
++32 どころか**起動ごとに倍**へ育つ。**scale 1 の外部ディスプレイでは px == pt なので
+この症状は出ない** —— 最初の実測をそこで取ったせいで見落とした。
+
+→ **実測した結果を書くときは、どのディスプレイで測ったかを必ず添えること。**
+
+手当ては**換算率をコントローラ自身から測る**こと（`#if UNITY_STANDALONE_OSX` も
+`Screen.dpi` も使わない）:
+
+```csharp
+var client = _controller.clientSize;                        // pt
+var scale = Mathf.Max(1f, Mathf.Round(Screen.height / client.y));
+_controller.windowSize = new Vector2(_intended.x / scale, _intended.y / scale);
+```
+
+実測（修正後）:
+
+| 起動先 | `Screen`(px) | `clientSize`(pt) | `scale` | 実ウィンドウ |
+|---|---|---|---|---|
+| 外部 4K（1x） | 250x432 | 250x432 | **1** | 250x400 pt |
+| 内蔵 Retina（2x） | 250x464 | 125x232 | **2** | 125x200 pt |
+
+どちらも3回連続で起動して**増えない**。
+
+★ **`clientSize` で「意図した大きさ」を読み直す形にはできない。**
+`UniWinCore.AttachMyWindow` は `UniWindowController.Update()` の中で、
+**枠なし化も同じ `Update()` の中**（`UpdateTargetWindow` → `SetTransparent` →
+`LibUniWinC.SetBorderless`）。だから `Start()` では `clientSize` が **(0,0)**、
+最初の `LateUpdate` では**もう膨らんでいる**。捕まえられるのは `Start()` の `Screen.*` だけ。
+
+★ **`Screen.SetResolution` に寄せない。** styleMask が戻った場合、
+`UniWindowController` は `IsActive` が立っている限り**枠を剥がし直さない**
+（再適用は `if (!IsActive)` のときだけ）。「+32 が残る」より
+「**タイトルバーが出たまま常駐**」の方が悪い。
+
+#### ★ 物理的な大きさはディスプレイのスケールで変わる（未解決。→ #16）
+
+`defaultScreenWidth/Height` も、Unity が永続化する `Screenmanager Resolution *` も
+**バッキング px**。だから:
+
+- **Retina 2x で起動すると物理的に半分**になる（250x400 px = **125x200 pt**）
+- **Retina で終了すると、次に 4K で開いたとき倍になる。** Retina 上の `Screen.*` は
+  500x800 px なので、それが永続化され、1x のディスプレイでは **500x800 pt** の窓として開く。
+  **実測で確認した**（`WindowSizeKeeper` は「起動直後の大きさ」を守るので、これは打ち消さない）
+
+`WindowSizeKeeper` が直せるのは**同じディスプレイでの累積**だけ。
+ディスプレイをまたいだときに物理サイズを保つには、**ポイントで意図した大きさを
+自前で永続化する**しかない —— それは位置の永続化・マルチモニタと同じ設計なので
+[#16](https://github.com/schwarz9791/chatter-agent/issues/16) でまとめて扱う。
+
 ### ★ ウィンドウは起動のたびに縦へ 32 伸びる（`WindowSizeKeeper` で打ち消している）
 
 「いつのまにか窓が縦長になっている」の正体。実測（macOS 26.6.2 / #56）:
@@ -245,7 +315,14 @@ Unity は左手系で「+Z を向いた人物の右手が +X 側」に来るの�
 | 垂直 | 1.50 | |
 | **水平** | **1.93** | ← こちらが採用される |
 
-結果、**縦の占有率は 77%** になり、上下に余白が出る。**これは想定どおり。**
+`VrmFraming.Solve` は距離に `headroom`（既定 1.1）を掛け、さらに `+ extents.z` する
+（bounds の手前面が near clip に刺さらないように）ので、実際の距離は
+`1.9260 * 1.1 + 0.275 = 2.394` —— 実行ログの `distance=2.39` と一致する。
+可視高は `2 * 2.394 * tan(30°) = 2.764m` なので、**縦の占有率は約 62%**。**これは想定どおり。**
+
+★ **`headroom` と `+extents.z` を落として手計算しないこと。** 落とすと 77% / 190px/m という
+別の数値が出て、**同じ文書の別の行（145 px/m）と食い違う**。実行ログが `distance=` を
+出しているので、必ずそちらと突き合わせること。
 [#59](https://github.com/schwarz9791/chatter-agent/issues/59) でアイドルモーションが入って
 腕が下りれば `extents.x` が縮み、**支配軸が水平から垂直へ移って同じウィンドウのまま
 占有率が上がる**。いま bounds の比（325x400）に合わせると、#59 の後に横が余る。
@@ -333,8 +410,9 @@ URP が入っていれば自動で立つ。
 | 付いているもの | Face / Body の SKIN、Shoes / Tops の CLOTH |
 | **付いていないもの** | **髪（HAIR 4種）**、目、眉、まつげ、口 |
 
-250x400 のウィンドウでは画面上 **約 190 px/m** なので、0.75mm は **0.14 px**。
-拡大しても見えない。**シルエットで最も目立つ髪に線が無い**のも効いている。
+250x400 のウィンドウでは画面上 **約 145 px/m**（`400 / 2.764m`）なので、
+0.75mm は **約 0.11 px**。拡大しても見えない。
+**シルエットで最も目立つ髪に線が無い**のも効いている。
 
 ★ **「アウトラインが出るか」を目視の合否条件にしないこと。** このモデルでは
 出ていても見えない。効いているかを確かめるには**一時的に線を太らせる**:
@@ -451,11 +529,15 @@ Metal RecreateSurface: surface size 250x232     ← ★ +32。UniWindowControlle
 ```
 
 **+32 はタイトルバーぶん**が枠なし化でコンテンツ領域へ編入されたもの。高さにだけ乗る
-（横に枠が無いので幅は入れた値のまま）。だから **`defaultScreenHeight: 368` と入れて 400 になる**。
+（横に枠が無いので幅は入れた値のまま）。
 
-★ **`macRetinaSupport: 1` でも2倍にはならない。** 入れた値がそのままウィンドウの点サイズになる。
-（当初これを「Retina で2倍されている」と読んで `200` を入れ、232 になって外した。
-**推測で式を組まずに測ること。**）
+★ **上のログは `WindowSizeKeeper` を入れる前のもの。** いまは keeper が +32 を打ち消すので
+**`defaultScreenHeight` に入れた値がそのまま出る**（`ProjectSettings.asset` は **400**）。
+「368 と入れて 400 になる」は keeper 導入前の回避策で、**もう当てはまらない**。
+
+★ **当初これを「Retina で2倍されている」と読んで `200` を入れ、232 になって外した。**
+**推測で式を組まずに測ること。** ——ただし「2倍にならない」という結論も
+**scale 1 の外部ディスプレイでしか成立していなかった**（→ 下の節）。
 
 ★ **`UniWindowController` は大きさを変えていない。** `_shouldFitMonitor` は既定 `false` で
 prefab にもシーンにも override が無く、`SetWindowSize` を呼ぶのは `#if UNITY_EDITOR` の

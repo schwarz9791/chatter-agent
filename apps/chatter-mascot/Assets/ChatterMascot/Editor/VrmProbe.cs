@@ -102,7 +102,10 @@ namespace ChatterMascot.EditorTools
                 text.Append("\n  shaders: ").Append(string.Join(" / ", shaders));
                 text.Append("\n  renderers: ").Append(gltf.Renderers.Count);
 
-                var bounds = Bounds(gltf);
+                // ★ ここが出す数値は VrmStage が実行時に使うのと**同じ関数**の出力。
+                //   Tests/Editor/VrmFramingTests.cs の定数はこの出力をそのまま貼ったものなので、
+                //   別実装に分岐させると**ランタイムがもう生成しない数値**をテストが守り始める
+                var bounds = VrmBounds.Of(gltf.Renderers);
                 text.Append("\n  bounds size: ").Append(bounds.size);
                 text.Append("\n  bounds center: ").Append(bounds.center);
                 // ★ ウィンドウのアスペクトを決める材料（→ SETUP.md のウィンドウの大きさ）
@@ -149,26 +152,6 @@ namespace ChatterMascot.EditorTools
         private static void Log(string text)
         {
             Debug.Log("[VrmProbe] " + text.Replace("\n", "\n[VrmProbe] "));
-        }
-
-        private static Bounds Bounds(RuntimeGltfInstance instance)
-        {
-            var bounds = new Bounds();
-            var first = true;
-            foreach (var renderer in instance.Renderers)
-            {
-                if (renderer == null || renderer.bounds.size == Vector3.zero) continue;
-                if (first)
-                {
-                    bounds = renderer.bounds;
-                    first = false;
-                }
-                else
-                {
-                    bounds.Encapsulate(renderer.bounds);
-                }
-            }
-            return bounds;
         }
 
         /// <summary>

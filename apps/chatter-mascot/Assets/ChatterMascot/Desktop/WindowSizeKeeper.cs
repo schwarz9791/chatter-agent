@@ -80,9 +80,51 @@ namespace ChatterMascot.Desktop
                     return;
                 }
 
-                Debug.Log($"[Mascot] 枠なし化で広がったウィンドウを戻します: " +
-                          $"{Screen.width}x{Screen.height} → {_intended.x}x{_intended.y}");
-                _controller.windowSize = new Vector2(_intended.x, _intended.y);
+                // ★ **px と pt を混ぜないこと。この型で唯一の難所。**
+                //   `macRetinaSupport: 1` なので `Screen.*` は**バッキングストアの px**、
+                //   `UniWindowController.windowSize` は `LibUniWinC.SetSize` ＝ NSWindow の
+                //   フレーム＝**ポイント**。Retina 2x でそのまま渡すと**2倍のウィンドウ**になり、
+                //   打ち消すはずが 250x400 → 500x800 → 1000x1600 と**起動ごとに倍**へ育つ。
+                //   scale 1 の外部ディスプレイでは px == pt なので**この症状は出ない**
+                //   （最初の実測をそこで取ったため見落とした。→ docs/mascot.md）。
+                //
+                // ★ **`clientSize` で「意図した大きさ」を読み直す形にはできない。**
+                //   `UniWinCore.AttachMyWindow` は `UniWindowController.Update()` の中で、
+                //   枠なし化も**同じ `Update()` の中**。だから `Start()` では (0,0) で、
+                //   最初の `LateUpdate` では**もう膨らんでいる**。捕まえられるのは
+                //   `Start()` の `Screen.*` だけ。
+                //
+                // ★ **`Screen.SetResolution` に寄せない。** styleMask が戻った場合、
+                //   `UniWindowController` は `IsActive` が立っている限り**枠を剥がし直さない**
+                //   ので、タイトルバーが出たまま常駐する（+32 が残るより悪い）。
+                //
+                // ★ **換算率は決め打ちにせず、コントローラ自身から実測する。** `clientSize` は
+                //   `Screen.*` と同じ矩形を pt で返すので、比がそのまま backingScaleFactor になる。
+                //   `#if UNITY_STANDALONE_OSX` も `Screen.dpi` も要らない
+                //   （→ `VrmOrientation` と同じ「仕様を読まず実測する」形）。
+                var client = _controller.clientSize;
+
+                // ★ **測れないなら何もしない。** scale=1 で代用すると Retina で倍にする。
+                //   「+32 が残る」より「倍になる」ほうがはるかに悪い
+                if (client.x <= 0f || client.y <= 0f)
+                {
+                    Debug.LogWarning("[Mascot] ウィンドウの大きさを測れないので直しません: " +
+                                     $"Screen={Screen.width}x{Screen.height}px clientSize={client}");
+                    Destroy(gameObject);
+                    return;
+                }
+
+                // ★ **比は丸めること。** 枠なし化の直後は `Screen.*` と `clientSize` の更新が
+                //   1フレームずれて 464/200 のような半端な値が出る。macOS の
+                //   backingScaleFactor は 1 か 2 なので、丸めれば吸収できる
+                var scale = Mathf.Max(1f, Mathf.Round(Screen.height / client.y));
+
+                // ★ **生の数値を全部出すこと。** これが Retina での実測の唯一の観測点。
+                //   内蔵パネルで scale=1 と出たら「clientSize も px」＝この前提ごと間違い
+                Debug.Log("[Mascot] 枠なし化で広がったウィンドウを戻します: " +
+                          $"{Screen.width}x{Screen.height}px → {_intended.x}x{_intended.y}px " +
+                          $"(clientSize={client.x}x{client.y}pt scale={scale})");
+                _controller.windowSize = new Vector2(_intended.x / scale, _intended.y / scale);
                 Destroy(gameObject);
             }
         }

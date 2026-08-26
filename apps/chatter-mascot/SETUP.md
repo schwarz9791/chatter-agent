@@ -183,9 +183,15 @@ Assets/ChatterMascot/
   Tests/Editor/                     EditMode テスト（状態機械が主）
 ```
 
-★ **`ChatterMascot.Runtime` を「描画に依存しない層」のまま保つこと。** EditMode テスト
-138件がその性質の上に立っている（`ChatterMascot.Tests.asmdef` は
-`overrideReferences: true` なので、Runtime の public API に UniVRM 型が漏れると波及が読みにくい）。
+★ **`ChatterMascot.Runtime` を「描画に依存しない層」のまま保つこと。** 契約・状態機械・
+探索順・画角の計算がすべて **EditMode だけでテストできている**のは、この層が
+`UnityEngine` の描画に依存していないから。Runtime の public API に UniVRM 型が漏れると、
+`ChatterMascot.Tests.asmdef`（`overrideReferences: true`）から届かなくなって
+**テストごと落ちる**。
+
+★ **テストの件数を文書に書かないこと。** テストを足すたびにずれるうえ、
+`grep -cE '\[Test\]'` で数えると `[UnityTest]` を取りこぼして**別の誤った数字**が出る。
+実数が要るときは `./scripts/test.sh` の `total=` を見る（それがテストランナー自身の数）。
 
 ★ **asmdef の参照は推移しない。** `Editor → Desktop → Vrm → Runtime` と繋がっていても、
 Editor が UniVRM の型を直接使うなら Editor の asmdef にも `VRM10` を書く。

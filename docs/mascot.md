@@ -127,6 +127,53 @@ batchmode はダイアログを出さないので、この失敗の仕方をし�
 ★ **Editor 経由でしかできないこと**（シーン編集、パッケージ解決、設定変更）は MCP で行う。
 そのときは **`AssetDatabase.SaveAssets()` とシーン保存を先に済ませる**。ダイアログの芽を潰しておく。
 
+### ★ ウィンドウの大きさは3箇所で決まる。ProjectSettings だけ見ても分からない
+
+常駐マスコットとして 250x400 に絞ったときに全部踏んだ。**効く順に**:
+
+| # | 場所 | 効き方 |
+|---|---|---|
+| 1 | `~/Library/Preferences/tech.sukima.chatter-mascot.plist` | **前回終了時の実値が最優先で復元される。** `Screenmanager Resolution Width/Height` |
+| 2 | `ProjectSettings.asset` の **`defaultIsNativeResolution`** | ★ **これが `1` の間は 3 が効かない。** Inspector でも `Default Screen Width/Height` がグレーアウトする |
+| 3 | 同 `defaultScreenWidth` / `defaultScreenHeight` | 初回起動時の大きさ |
+
+★ **1 が効いていることに気づけない。** `ProjectSettings.asset` には `600x800` と書いてあるのに
+実際のウィンドウは **600x1632** だった、という食い違いから始まって、リポジトリを
+いくら grep しても `1632` が出てこない。**`defaults read tech.sukima.chatter-mascot` を先に見ること。**
+
+```bash
+defaults delete tech.sukima.chatter-mascot   # 焼き付きを消してから測る
+```
+
+#### 実測（2026-08-26 / macOS 26.6.2 / 4K 外部ディスプレイ）
+
+`Player.log` に**大きさが決まる瞬間が2回**出る:
+
+```
+Metal RecreateSurface: surface size 250x200     ← 起動直後（= defaultScreen* のまま）
+[Mascot] server: ws://127.0.0.1:9 / ...         ← MascotRunner.Start()
+Metal RecreateSurface: surface size 250x232     ← ★ +32。UniWindowController が枠なし化した直後
+```
+
+**+32 はタイトルバーぶん**が枠なし化でコンテンツ領域へ編入されたもの。高さにだけ乗る
+（横に枠が無いので幅は入れた値のまま）。だから **`defaultScreenHeight: 368` と入れて 400 になる**。
+
+★ **`macRetinaSupport: 1` でも2倍にはならない。** 入れた値がそのままウィンドウの点サイズになる。
+（当初これを「Retina で2倍されている」と読んで `200` を入れ、232 になって外した。
+**推測で式を組まずに測ること。**）
+
+★ **`UniWindowController` は大きさを変えていない。** `_shouldFitMonitor` は既定 `false` で
+prefab にもシーンにも override が無く、`SetWindowSize` を呼ぶのは `#if UNITY_EDITOR` の
+`OnApplicationQuit` だけ。`forceWindowed` はフルスクリーンを解除するだけで大きさに触らない。
+
+★ **`resizableWindow: 1` なのでユーザーがいつでも変えられる**（そして 1 に焼き付く）。
+**大きさを前提にした描画を書かないこと** —— VRM の自動フレーミングが毎フレーム
+`Screen.width/height` の変化を見ているのはこのため（→ `Vrm/VrmStage.cs`）。
+
+★ **測るときは走っている他のインスタンスに注意。** 別 checkout の `.app` が常駐していると
+`osascript` の「名前で最初に見つかったプロセス」がそちらを掴む。**pid で引くこと**。
+`forceSingleInstance: 1` は**別パスの `.app` の同時起動を防がない**（実際に2つ動いた）。
+
 ### ★ Unity 6 の URP で透過しないのは `Supports HDR` のせい
 
 `Is Transparent` を入れても**背景が黒いまま**になる。枠なしウィンドウにはなるので、
@@ -190,8 +237,9 @@ batchmode はダイアログを出さないので、この失敗の仕方をし�
 同じ条件なので、**掴める領域とドラッグできる領域が定義上ずれない**。#17 で Cube が VRM に
 置き換わっても、クリック透過のために `Collider` を付ける以上そのまま乗る。
 
-★ **位置の永続化は入れていない**（起動のたびに中央へ戻る）。マルチモニタ・解像度変更・
-画面外からの復帰の扱いが要るので #16 でまとめて設計する。
+★ **位置の永続化を自分では入れていない。** ただし **Unity 本体が勝手に永続化している** ——
+`~/Library/Preferences/tech.sukima.chatter-mascot.plist` の `Screenmanager Window Position X/Y`。
+自分で制御していないので、マルチモニタ・解像度変更・画面外からの復帰は #16 でまとめて設計する。
 
 ### ★ シーンに `EventSystem` が無いとクリック透過が死ぬ
 

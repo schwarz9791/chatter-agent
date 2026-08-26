@@ -56,11 +56,37 @@ UniWindowController の Inspector にある「Player Settings を直す」ボタ
 | `Resizable Window` | オン | 同上 |
 | `Default Is Full Screen` | **オフ** | 同上 |
 | `Allow Fullscreen Switch` | **オフ** | 同上 |
+| **`Default Is Native Resolution`** | **オフ** | ★ **オンだと下2行がそもそも効かない**（Inspector でもグレーアウトする） |
+| `Default Screen Width` | **250** | ★ 下記 |
+| `Default Screen Height` | **368** | 同上（★ **狙いは 400。枠なし化で +32 される**） |
 | `Run In Background` | **オン** | 常駐して背面でも喋る。フォーカスを失って止まると発話が止まる |
 | `Use Mac App Store Validation` | オフ | 透過をブロックしうる |
 | `Mac App Sandbox` | オフ | 同上（Unity のビルドは entitlements を付けないので既定でオフ） |
 | `API Compatibility Level` | .NET Standard 2.1 | `System.Net.WebSockets.ClientWebSocket` と `System.Diagnostics.Process` を使う（どちらも .NET Standard 2.1 で足りることを確認済み） |
 | **`Disable Unity Audio`** | **ビルド時だけオン**（コミットされた値は**オフ**） | ★ 下記 |
+
+### ウィンドウの大きさ
+
+常駐マスコットなので小さく出す。**`Default Is Native Resolution` を切るのが本命**で、
+オンのままだと `Default Screen Width/Height` は Inspector でもグレーアウトして効かない。
+
+★ **入れた高さはそのままの大きさにならない。** `UniWindowController` が枠なし化した瞬間に
+タイトルバーぶん（実測 **+32**）がコンテンツ領域へ編入されるので、**368 と入れて 400 になる**。
+`Default Screen Width` の方は横に枠が無いので入れた値のまま出る。
+**数値を仕様として扱わないこと**（→ [`../../docs/mascot.md`](../../docs/mascot.md)）。変えたら必ず実測する:
+
+```bash
+defaults delete tech.sukima.chatter-mascot   # ★ 前回終了時の大きさが焼き付いている
+./scripts/build.sh
+open Build/ChatterMascot.app --args -serverUrl ws://127.0.0.1:9
+grep RecreateSurface "$HOME/Library/Logs/schwarz9791/Chatter Mascot/Player.log"
+```
+
+★ **`macRetinaSupport` は切らないこと。** 表示がぼやけるうえ、`UniWindowMoveHandle` の
+Retina 座標系の手当てが前提にしている。
+
+★ **サイズ調整の UI と位置の永続化は [#16](https://github.com/schwarz9791/chatter-agent/issues/16)。**
+ここにあるのは既定値だけ。
 
 ### 音の出し方（プラットフォームで違う）
 

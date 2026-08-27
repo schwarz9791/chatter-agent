@@ -29,6 +29,7 @@ namespace ChatterMascot.Tests
             Assert.That(axis, Is.EqualTo(FramingAxis.Horizontal));
         }
 
+        /// <summary>★ #59 で <c>VrmBounds.OfBones</c> が入り、これが実際に起きるようになった。</summary>
         [Test]
         public void ArmsDownMakesItVertical()
         {

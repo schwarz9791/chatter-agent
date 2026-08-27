@@ -44,6 +44,16 @@ namespace ChatterMascot.Vrm
         [SerializeField] private float headroom = 1.1f;
 
         /// <summary>
+        /// ボーンから測った bounds を膨らませる余白（メートル）。
+        ///
+        /// ★ <b>髪・裾・頭頂・靴底はボーンに含まれない。</b> <see cref="MeasureBounds"/> は
+        ///   Humanoid ボーンのワールド位置だけを見るので、これらの部位のぶん
+        ///   実際の見た目より箱がわずかに小さくなる。両側に足して吸収する。
+        /// </summary>
+        [Tooltip("髪・裾・頭頂・靴底のぶん。ボーンより外側にある部分を吸収する余白（メートル）")]
+        [SerializeField] private float boneBoundsMarginMeters = 0.1f;
+
+        /// <summary>
         /// 読み込み中だけ上げるフレームレート。
         ///
         /// ★ <b><c>RuntimeOnlyAwaitCaller</c> の予算は 1ms/frame。</b> 30fps 上限のままだと
@@ -64,6 +74,38 @@ namespace ChatterMascot.Vrm
         private bool _framePending;
         private int _framedWidth;
         private int _framedHeight;
+
+        /// <summary>
+        /// この時刻（<c>Time.realtimeSinceStartup</c>）までは毎秒ボーンを測り直す。
+        ///
+        /// ★ <b>VRMA（アイドルモーション）の読み込みがいつ終わるかは <c>VrmStage</c> から
+        ///   分からない。</b> <c>VrmCharacter</c> が <c>VrmStage.AddLoadedHandler</c> の
+        ///   通知を受けてから非同期に読み込むので、<c>_framePending</c> の1回だけでは
+        ///   VRMA が反映される前（＝T ポーズのまま）の bounds を採ってしまう。
+        ///   VRMA の完了を購読する手段が無い以上、<b>読み込み後の数秒間だけ毎秒測り直して
+        ///   間接的に拾う</b>のが素直な形。
+        /// ★ <b>毎フレーム測らないこと。</b> ボーン数十個の読み取り自体は軽くても、
+        ///   常駐アプリで理由なく走らせ続けない。
+        /// ★ <b><see cref="VrmBounds.IsFramingBone"/> で腕を bounds から外した後もこの窓は残す。</b>
+        ///   初回の値がもう「肩幅」で正しくなる（ポップは消える）だけで、髪や裾の spring bone が
+        ///   落ち着くまでの微差や、ユーザーが差し替えた別の <c>.vrma</c> を拾う保険は引き続き要る。
+        /// </summary>
+        private float _boneRecheckDeadline;
+
+        /// <summary>次に測り直す時刻。<see cref="BoneRecheckIntervalSeconds"/> ごとに進む。</summary>
+        private float _nextBoneRecheckAt;
+
+        /// <summary>
+        /// 直近でログに出したフレーミングの文面。
+        /// ★ 測り直しのたびに毎秒同じ内容を出さないための重複排除（<see cref="Frame"/>）。
+        /// </summary>
+        private string _lastFramingLog;
+
+        /// <summary>読み込み後、ボーンを毎秒測り直す期間（秒）。<c>WindowSizeKeeper</c> の見張り時間と同じ考え方。</summary>
+        private const float BoneRecheckWindowSeconds = 5f;
+
+        /// <summary>測り直しの間隔（秒）。</summary>
+        private const float BoneRecheckIntervalSeconds = 1f;
 
         /// <summary>読み込めたモデルのルート。まだなら <c>null</c>。</summary>
         public GameObject Model { get; private set; }
@@ -221,11 +263,28 @@ namespace ChatterMascot.Vrm
             _gltf = instance.GetComponent<RuntimeGltfInstance>();
             VrmMaterialCheck.Inspect(_gltf);
 
-            // ★ **bounds より先に回すこと。** Renderer.bounds はワールド軸に沿った箱なので、
-            //   回したあとで測り直さないとカメラ距離がずれる
+            // ★ **回す前に ControlRig を作らせること。** Vrm10Runtime は遅延生成で、
+            //   放っておくと LateUpdate の初回アクセス（SpringBone.RestoreInitialTransform）で
+            //   ＝ FaceCamera の**後**に作られる。
+            //
+            //   Vrm10ControlBone は ControlBone を**ワールド単位回転**で作る（正規化姿勢は
+            //   ワールド軸で表される）が、_initialTargetGlobalRotation には実ボーンの
+            //   ワールド回転が入る。回した後に作ると後者にだけ 180° が乗り、
+            //   ProcessRecursively の Inverse(G) * q * G が 180° ぶん食い違って
+            //   **Z 軸まわりの回転（＝腕の上下）が反転する** —— #59 の実機で
+            //   「待機モーションで腕が真上に上がったまま」として出た。
+            //
+            //   先に作れば _initialTargetGlobalRotation は回す前の値になり、
+            //   その後 vrmRoot ごと回っても ControlRig は子として一緒に回るので整合する。
+            //   ★ UniVRM の ControlRig は「Vrm10Instance の transform が単位回転」を暗黙の
+            //     前提にしている。回すのをやめられない以上、順序で辻褄を合わせるしかない。
+            _ = instance.Runtime;
+
+            // ★ **bounds より先に回すこと。** ボーンのワールド位置から組む箱も
+            //   ワールド軸に沿うので、回したあとで測り直さないとカメラ距離がずれる
             FaceCamera(instance);
 
-            _bounds = WorldBounds(_gltf);
+            _bounds = MeasureBounds(instance);
             _collider = AttachCollider(instance.gameObject, _bounds);
 
             if (placeholder != null) placeholder.SetActive(false);
@@ -233,9 +292,14 @@ namespace ChatterMascot.Vrm
             Model = instance.gameObject;
 
             // ★ フレーミングと spring bone のリセットは**次のフレーム**でやる。
-            //   SkinnedMeshRenderer.bounds はロード直後に確定していないことがあり、
+            //   ボーンの初期姿勢はロード直後に確定していないことがあり、
             //   spring bone の Verlet はロード中の巨大な deltaTime で髪を吹き飛ばす
             _framePending = true;
+
+            // ★ VRMA はこの後 VrmCharacter が非同期に読み込む。完了を待たずに
+            //   Adopt() は終わるので、「しばらく毎秒測り直す」窓をここで開く
+            _boneRecheckDeadline = Time.realtimeSinceStartup + BoneRecheckWindowSeconds;
+            _nextBoneRecheckAt = 0f;
 
             foreach (var handler in _handlers) Invoke(handler, Model);
         }
@@ -247,16 +311,20 @@ namespace ChatterMascot.Vrm
                 _framePending = false;
                 // ★ 読み込み中に積もった deltaTime で髪が吹き飛ぶのを戻す
                 _instance?.Runtime?.SpringBone?.RestoreInitialTransform();
-                _bounds = WorldBounds(_gltf);
-                // ★ **カメラだけ測り直して Collider を置き去りにしないこと。**
-                //   ここで測り直す理由（SkinnedMeshRenderer.bounds がロード直後に
-                //   確定していない）は Collider にもそのまま当てはまる。放置すると
-                //   「見えている範囲」と「掴める範囲」がずれ、クリック透過とドラッグの
-                //   両方が静かに狂う（小さく出れば掴めず、大きく出れば窓全体が
-                //   クリックを食う ← acd981d が避けようとした失敗そのもの）
-                FitCollider(_collider, _bounds);
-                Frame();
+                Remeasure();
+                _nextBoneRecheckAt = Time.realtimeSinceStartup + BoneRecheckIntervalSeconds;
                 return;
+            }
+
+            // ★ VRMA（アイドルモーション）はここまでに非同期で読み込まれているかもしれない。
+            //   購読する手段が無いので、読み込み後しばらくは毎秒測り直して間接的に拾う
+            //   （_boneRecheckDeadline の <summary> 参照）。窓を過ぎたら何もしない
+            //   ＝ 常駐アプリで理由なく走らせ続けない。
+            if (Model != null && Time.realtimeSinceStartup < _boneRecheckDeadline &&
+                Time.realtimeSinceStartup >= _nextBoneRecheckAt)
+            {
+                _nextBoneRecheckAt = Time.realtimeSinceStartup + BoneRecheckIntervalSeconds;
+                Remeasure();
             }
 
             if (!autoFrame || Model == null) return;
@@ -270,6 +338,55 @@ namespace ChatterMascot.Vrm
             if (Screen.width == _framedWidth && Screen.height == _framedHeight) return;
             if (Screen.width <= 0 || Screen.height <= 0) return;   // 最小化。戻ったら組み直す
             Frame();
+        }
+
+        /// <summary>
+        /// ボーンから bounds を測り直し、Collider とカメラの両方に反映する。
+        ///
+        /// ★ <b>片方だけ更新しないこと。</b> <see cref="FitCollider"/> の <c>&lt;summary&gt;</c>
+        ///   にある理由と同じで、「見えている範囲」と「掴める範囲」がずれる。
+        /// </summary>
+        private void Remeasure()
+        {
+            _bounds = MeasureBounds(_instance);
+            FitCollider(_collider, _bounds);
+            Frame();
+        }
+
+        /// <summary>
+        /// Humanoid ボーンのワールド位置から bounds を測る。
+        ///
+        /// ★ <b><see cref="VrmBounds.OfBones"/> を呼ぶのはここだけにすること。</b>
+        ///   ボーンの選び方（決め打ちの一覧を持たず、取れたものをそのまま使う）を
+        ///   ここに閉じ込める。
+        /// ★ <b>決め打ちのボーン一覧を持たない。</b> <c>Chest</c> / <c>UpperChest</c> /
+        ///   <c>Toes</c> などの任意ボーンはモデルによって存在せず、<c>TryGetBoneTransform</c>
+        ///   が <c>false</c> を返す。<c>HumanBodyBones</c> を全列挙して取れたものだけを
+        ///   使えば、モデルごとに存在有無をガードする必要が無い。
+        /// </summary>
+        private Bounds MeasureBounds(Vrm10Instance instance)
+        {
+            if (instance == null) return new Bounds();
+
+            var positions = new List<Vector3>();
+            foreach (HumanBodyBones bone in Enum.GetValues(typeof(HumanBodyBones)))
+            {
+                if (!VrmBounds.IsFramingBone(bone)) continue;
+                if (instance.TryGetBoneTransform(bone, out var t) && t != null)
+                {
+                    positions.Add(t.position);
+                }
+            }
+
+            if (positions.Count == 0)
+            {
+                // ★ VRM 1.0 は Humanoid 必須（Vrm10Instance に [RequireComponent(Humanoid)]）
+                //   なので通常は起きないが、起きたときに黙って原点の点を返さないよう警告する
+                Debug.LogWarning("[Mascot] Humanoid ボーンが1つも取れないので bounds を測れませんでした");
+                return new Bounds();
+            }
+
+            return VrmBounds.OfBones(positions, boneBoundsMarginMeters);
         }
 
         private void Frame()
@@ -293,10 +410,17 @@ namespace ChatterMascot.Vrm
             _framedHeight = Screen.height;
 
             // ★ 支配軸を必ず出す。「小さく映る」の原因が腕の張り出し（T ポーズ）なのか
-            //   身長なのかは、これが無いと切り分けられない（#59 で腕が下りると反転する）
-            Debug.Log($"[Mascot] フレーミング: {Screen.width}x{Screen.height} " +
-                      $"aspect={camera.aspect:F3} bounds={_bounds.size} " +
-                      $"distance={distance:F2} 支配軸={(axis == FramingAxis.Horizontal ? "水平" : "垂直")}");
+            //   身長なのかは、これが無いと切り分けられない（#59 で腕が下りると反転する）。
+            //   ★ ただし同じ内容は出さない。読み込み後しばらく毎秒 Remeasure() が走るので、
+            //   素朴に毎回 Log すると同じ行が並ぶだけになる。文面が変わったときだけ出す
+            var message = $"[Mascot] フレーミング: {Screen.width}x{Screen.height} " +
+                          $"aspect={camera.aspect:F3} bounds={_bounds.size} " +
+                          $"distance={distance:F2} 支配軸={(axis == FramingAxis.Horizontal ? "水平" : "垂直")}";
+            if (message != _lastFramingLog)
+            {
+                Debug.Log(message);
+                _lastFramingLog = message;
+            }
         }
 
         /// <summary>
@@ -381,14 +505,6 @@ namespace ChatterMascot.Vrm
             collider.height = Mathf.Max(bounds.size.y, 0.01f);
             collider.radius = Mathf.Max(bounds.extents.z, 0.01f);
         }
-
-        /// <summary>
-        /// ★ <b>規則は <see cref="VrmBounds"/> にある。ここに書き足さないこと。</b>
-        ///   <c>VrmProbe</c>（EditMode の実測）と食い違うと、<c>VrmFramingTests</c> の定数が
-        ///   「どちらの実装の出力か」分からなくなる。
-        /// </summary>
-        private static Bounds WorldBounds(RuntimeGltfInstance instance) =>
-            instance == null ? new Bounds() : VrmBounds.Of(instance.Renderers);
 
         /// <summary>
         /// ★ 購読者の例外をここで止める。<c>SpeechClient.SafeInvoke</c> と同じ理由 ——

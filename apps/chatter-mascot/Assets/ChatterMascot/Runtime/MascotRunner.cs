@@ -80,6 +80,17 @@ namespace ChatterMascot
         private const float TickIntervalSeconds = 1f;
 
         private PlaybackState _state;
+
+        /// <summary>
+        /// #59 の <see cref="ChatterMascot.Playback.SpeakingView"/> が読む。<b>読むだけ</b>。
+        /// まだ <c>Start</c> 前なら <c>null</c>。
+        ///
+        /// ★ <b>書き込むと <see cref="PlaybackQueue"/> の状態機械が壊れる。</b>
+        ///   コマンドを増やす口ではない。
+        /// ★ <b>#58 が <c>SpeakingSet</c> を入れたら消せる。</b>
+        /// </summary>
+        public PlaybackState State => _state;
+
         private SpeechClient _client;
         private AudioFetcher _fetcher;
         private ISpeechPlayer _player;

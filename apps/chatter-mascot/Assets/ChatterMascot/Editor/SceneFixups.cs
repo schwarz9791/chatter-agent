@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using ChatterMascot;
 using ChatterMascot.Desktop;
 using ChatterMascot.Vrm;
 using UnityEditor;
@@ -31,6 +32,7 @@ namespace ChatterMascot.EditorTools
 
         private const string AnchorName = "ModelAnchor";
         private const string PlaceholderName = "ModelPlaceholder";
+        private const string GazeTargetName = "GazeTarget";
 
         private const string GraphicsSettingsPath = "ProjectSettings/GraphicsSettings.asset";
 
@@ -74,6 +76,9 @@ namespace ChatterMascot.EditorTools
                 // ★ VrmStage より先に足すと ModelPlaceholder が Collider を持ったまま
                 //   ModelAnchor の外に残る。順序を入れ替えないこと
                 if (path == ProductionScene) fixes.AddRange(EnsureVrmStage());
+                // ★ EnsureVrmStage の後であることが必要。ModelAnchor が無い状態で先に走ると
+                //   VrmCharacter の置き場所が無い
+                if (path == ProductionScene) fixes.AddRange(EnsureVrmCharacter());
                 foreach (var name in EnsureDragHandles(scene)) fixes.Add("UniWindowMoveHandle(" + name + ")");
 
                 if (fixes.Count > 0)
@@ -246,6 +251,70 @@ namespace ChatterMascot.EditorTools
             {
                 fixes.Add("VrmStage.placeholder");
             }
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            return fixes;
+        }
+
+        /// <summary>
+        /// #59: <c>ModelAnchor</c> に <see cref="VrmCharacter"/> を足し、<c>Camera.main</c> の子に
+        /// <c>GazeTarget</c> を作って結線する。
+        ///
+        /// ★ <b><see cref="EnsureVrmStage"/> より後に呼ぶこと。</b> <c>ModelAnchor</c> がまだ
+        ///   無い状態でここが先に走ると <see cref="VrmCharacter"/> の置き場所が無い。
+        /// </summary>
+        private static IEnumerable<string> EnsureVrmCharacter()
+        {
+            var fixes = new List<string>();
+
+            var anchor = FindRoot(AnchorName);
+            if (anchor == null)
+            {
+                // ★ EnsureVrmStage が必ず先に作るはずだが、呼び出し順が入れ替わったときに
+                //   静かに何もしないより、原因が分かるログを残す
+                Debug.LogWarning($"[Fixups] {AnchorName} が無いので {nameof(VrmCharacter)} を足せません" +
+                                  $"（{nameof(EnsureVrmStage)} より後に呼びましたか？）");
+                return fixes;
+            }
+
+            var character = anchor.GetComponent<VrmCharacter>();
+            if (character == null)
+            {
+                character = anchor.AddComponent<VrmCharacter>();
+                fixes.Add(nameof(VrmCharacter));
+            }
+
+            var camera = Camera.main;
+            Transform gazeTarget = null;
+            if (camera != null)
+            {
+                var existing = camera.transform.Find(GazeTargetName);
+                if (existing == null)
+                {
+                    var go = new GameObject(GazeTargetName);
+                    go.transform.SetParent(camera.transform, false);
+                    go.transform.localPosition = Vector3.zero;
+                    gazeTarget = go.transform;
+                    fixes.Add("Main Camera/" + GazeTargetName);
+                }
+                else
+                {
+                    gazeTarget = existing;
+                }
+            }
+            else
+            {
+                Debug.LogWarning("[Fixups] Camera.main が無いので GazeTarget を作れません");
+            }
+
+            var stage = Object.FindFirstObjectByType<VrmStage>(FindObjectsInactive.Include);
+            var runner = Object.FindFirstObjectByType<MascotRunner>(FindObjectsInactive.Include);
+
+            // ★ [SerializeField] は Inspector からしか繋がらないので、ここで繋ぐ
+            var serialized = new SerializedObject(character);
+            if (stage != null && Assign(serialized, "stage", stage)) fixes.Add("VrmCharacter.stage");
+            if (runner != null && Assign(serialized, "runner", runner)) fixes.Add("VrmCharacter.runner");
+            if (gazeTarget != null && Assign(serialized, "gazeTarget", gazeTarget)) fixes.Add("VrmCharacter.gazeTarget");
             serialized.ApplyModifiedPropertiesWithoutUndo();
 
             return fixes;

@@ -30,7 +30,7 @@ hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公�
 | `plugin/` | Claude Code プラグイン（bash hook） | **実装済み。** 実機で動作確認している |
 | `core/` | `chatter-agent-core`（CLI + WebSocket/HTTP サーバー + 発話 CLI） | **実装済み。** `summarizer/`（AI要約、既定OFF）・**サーバー合成**（[#29](https://github.com/schwarz9791/chatter-agent/issues/29)）・**エンジンの spawn**（[#51](https://github.com/schwarz9791/chatter-agent/issues/51)）も含めて完了 |
 | `core/src/player/` | `chatter-agent-player`（WebSocket → 音声を GET → 再生 → ack） | **実装済み**（[#11](https://github.com/schwarz9791/chatter-agent/issues/11)）。**プロトコルの参照実装。捨てない** |
-| `apps/chatter-mascot/` | 表示側アプリ（**Unity + UniVRM**。macOS 常駐 + Android XR を1プロジェクトで） | **土台と発話**（[#12](https://github.com/schwarz9791/chatter-agent/issues/12)）に加え、**VRM の表示も実装済み**（[#56](https://github.com/schwarz9791/chatter-agent/issues/56)）。WebSocket → 音声取得 → 再生 → ack の全経路を EditMode テストで固定してある（件数は `./scripts/test.sh` の `total=` を見る）。**macOS ビルドで透過も成立**。**無音時にオーディオデバイスを手放す**（macOS は `afplay` を1発話1プロセス + ビルド時だけ `Disable Unity Audio`、Android は `AudioSettings.Mobile.StopAudioOutput()`）。表情 / リップシンク / アイドルは [#57](https://github.com/schwarz9791/chatter-agent/issues/57) / [#58](https://github.com/schwarz9791/chatter-agent/issues/58) / [#59](https://github.com/schwarz9791/chatter-agent/issues/59) |
+| `apps/chatter-mascot/` | 表示側アプリ（**Unity + UniVRM**。macOS 常駐 + Android XR を1プロジェクトで） | **土台と発話**（[#12](https://github.com/schwarz9791/chatter-agent/issues/12)）に加え、**VRM の表示も実装済み**（[#56](https://github.com/schwarz9791/chatter-agent/issues/56)）。WebSocket → 音声取得 → 再生 → ack の全経路を EditMode テストで固定してある（件数は `./scripts/test.sh` の `total=` を見る）。**macOS ビルドで透過も成立**。**無音時にオーディオデバイスを手放す**（macOS は `afplay` を1発話1プロセス + ビルド時だけ `Disable Unity Audio`、Android は `AudioSettings.Mobile.StopAudioOutput()`）。**アイドルモーション・視線・`kind: "prompt"` の区別も実装済み**（[#59](https://github.com/schwarz9791/chatter-agent/issues/59)。同梱 VRMA の待機モーション、カーソル追従の視線、`prompt` を視線と姿勢で区別）。残るは表情（[#57](https://github.com/schwarz9791/chatter-agent/issues/57)）とリップシンク（[#58](https://github.com/schwarz9791/chatter-agent/issues/58)） |
 | `docs/` | 作業規約 | protocol / core / plugin / origin の4本 |
 | `.github/workflows/` | CI（typecheck / lint / format / bundle / test / verify） | 稼働中 |
 
@@ -38,7 +38,7 @@ hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公�
 **Phase C は Unity + UniVRM で1プロジェクト。** プラットフォーム別ではなく**レイヤーで分けてある**:
 [#11](https://github.com/schwarz9791/chatter-agent/issues/11)（Node の発話 CLI）→
 [#12](https://github.com/schwarz9791/chatter-agent/issues/12)（Unity の土台と発話）→
-[#17](https://github.com/schwarz9791/chatter-agent/issues/17)（UniVRM の表示。**[#56](https://github.com/schwarz9791/chatter-agent/issues/56) で表示まで完了**、表情 #57 / リップシンク #58 / アイドル #59 が残り）→
+[#17](https://github.com/schwarz9791/chatter-agent/issues/17)（UniVRM の表示。**[#56](https://github.com/schwarz9791/chatter-agent/issues/56) で表示まで完了、[#59](https://github.com/schwarz9791/chatter-agent/issues/59) でアイドル（待機モーション）も完了**、表情 #57 / リップシンク #58 が残り）→
 [#16](https://github.com/schwarz9791/chatter-agent/issues/16)（デスクトップ固有）/ [#25](https://github.com/schwarz9791/chatter-agent/issues/25)（XR 固有）。
 **#11 は完了した**（`core/src/player/`）。Unity のビルドを待たずに音が出る。
 
@@ -300,7 +300,7 @@ Aivis Cloud のレート制限下でバッチングするとき（別 Issue）�
 | [`docs/plugin.md`](./docs/plugin.md) | `plugin/` を触るとき。bash hook の制約、spool 命名、検証時の落とし穴 |
 | [`docs/origin.md`](./docs/origin.md) | cc-mascot 由来のコードを触るとき。移植の対応表、フォーク点、ライセンス義務 |
 | `docs/architecture.md` | **未作成。** 設計書が一次情報。実装で契約が動いたら分離を検討する |
-| [`docs/mascot.md`](./docs/mascot.md) | `apps/chatter-mascot/` を触るとき。**Unity 側で踏んだ罠**（フレームレートが既定で無制限 / MCP ビルドがダイアログで沈黙する / 透過に要る3設定 / Newtonsoft が `ts` を DateTime にする / `long` 超えを `BigInteger` で持つ / `SendAsync` を `_ = ` で投げると例外が `catch` を素通りする / `AudioSource` 1本では孤児の契約を守れない / **無音でも macOS の出力デバイスを掴み続ける**（Bluetooth の電力） / `EventSystem` だけではポインタイベントが配送されない / ping watchdog が作れない）。セットアップ手順は [`apps/chatter-mascot/SETUP.md`](./apps/chatter-mascot/SETUP.md) |
+| [`docs/mascot.md`](./docs/mascot.md) | `apps/chatter-mascot/` を触るとき。**Unity 側で踏んだ罠**（フレームレートが既定で無制限 / MCP ビルドがダイアログで沈黙する / 透過に要る3設定 / Newtonsoft が `ts` を DateTime にする / `long` 超えを `BigInteger` で持つ / `SendAsync` を `_ = ` で投げると例外が `catch` を素通りする / `AudioSource` 1本では孤児の契約を守れない / **無音でも macOS の出力デバイスを掴み続ける**（Bluetooth の電力） / `EventSystem` だけではポインタイベントが配送されない / ping watchdog が作れない / ControlRig は Vrm10Instance の遅延生成順序に依存する / SkinnedMeshRenderer.bounds は姿勢を反映しない / cursorPosition は bottom-up で Mouse.current は使えない / 画面空間の回転をモデル軸で回すと鏡像になる / カーソル正規化はウィンドウ幅で割ると振り切れる / LookAt は目ボーンしか動かさないので視線の中立には頭を回す必要がある / T ポーズの腕をフレーミングの箱に入れると起動直後だけ小さく映る / `StreamingAssets` はビルド後 `.app` 内のコピーを読む）。セットアップ手順は [`apps/chatter-mascot/SETUP.md`](./apps/chatter-mascot/SETUP.md) |
 
 ## 開発コマンド
 

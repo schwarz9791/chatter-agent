@@ -572,6 +572,48 @@ $ ./scripts/run.sh ChatterMascot.EditorTools.VrmProbe.Report -vrm /tmp/decoy.vrm
 （探索順4 = #64、探索順2 = その直後）。`AssetPath` の探索順の表に段を足したら、
 `ProbeEnv` も見直すこと。
 
+★ **探索順3 も、実は「消えていなかった」（PR #69 の再レビューで判明）。** `env.PersistentDataPath = "";`
+は「この段を消す」つもりの1行だったが、`AssetPath.Join` は
+
+```csharp
+private static string Join(string left, string right)
+{
+    if (string.IsNullOrEmpty(left)) return right;   // ← 左辺が空でも右辺をそのまま返していた
+    ...
+}
+```
+
+だったので、`Join("", "model.vrm")` は **`"model.vrm"`（相対パス）をそのまま返す**。`Add` は
+空文字しか弾かないので、この相対パスは探索順3の候補としてそのまま積まれる。`File.Exists("model.vrm")`
+は Unity のカレントディレクトリ（プロジェクトルート）基準で評価されるので、**同梱（探索順5）より
+上位で当たる**。つまり `PersistentDataPath = ""` は「探索順3を消す」のではなく、
+**「探索順3の基準ディレクトリをプロジェクトルートに変える」だけ**になっていた。
+
+再現（プロジェクトルートに `model.vrm` を置くだけで再現する）:
+
+```console
+$ cp Assets/StreamingAssets/vita.vrm ./model.vrm
+$ ./scripts/run.sh ChatterMascot.EditorTools.VrmProbe.Report
+[VrmProbe] 読みます: model.vrm      ← 同梱ではなくこちらを読む
+```
+
+★ **同じ穴は、`Join` の左辺が空になりうる箇所すべてに空いていた。**
+
+| 箇所 | 左辺が空になる条件 | 直す前の結果 |
+|---|---|---|
+| `Enumerate` 探索順3 | `PersistentDataPath = ""`（`ProbeEnv` が意図的にやる） | 相対 `model.vrm` |
+| `Enumerate` 探索順5 | `StreamingAssetsPath` が空 | 相対 `vita.vrm` |
+| `RuntimeDirectory`（探索順4の基準） | `HomeDirectory` が空かつ `XDG_CONFIG_HOME` 未設定 | 相対 `.config/chatter-agent` |
+| `Add` の `~/` 展開 | `HomeDirectory` が空 | `~/x.vrm` が相対 `x.vrm` になる |
+
+だから `ProbeEnv` 側で段ごとに空文字を弾く小細工を足すのではなく、**`Join` そのものに
+「空の基準からは候補を作らない（左辺が空なら `null` を返す）」を1つ入れて**、4箇所を一括で閉じた。
+
+★ **アプリ側の穴も同時に閉じた。** `AssetEnvFactory.Home()` は例外時に `""` を返す実装なので、
+`HomeDirectory` が空になる経路は probe に限らず実在する。`Join` を直したことで、
+`RuntimeDirectory`（探索順4）と `~/` 展開（起動引数・環境変数）は、アプリ側でも
+相対パスに化けなくなった。
+
 ### ★ 同じ `TryGetBoneTransform` が、同一フレーム内で実行順によって別の値を返す
 
 `VrmCharacter`（実行順 0）と `VrmPoseAccent`（11005）が**どちらも視線の原点（目ボーン）を

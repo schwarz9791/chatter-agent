@@ -191,7 +191,17 @@ namespace ChatterMascot.EditorTools
         ///   <c>Application.streamingAssetsPath</c> は Editor でも
         ///   <c>&lt;project&gt;/Assets/StreamingAssets</c> を返すので使えるが、
         ///   <c>persistentDataPath</c> は Editor 固有の場所を指す。
-        ///   ここは<b>同梱と起動引数だけ</b>見れば足りる。
+        ///   ここは<b>同梱（探索順5）と起動引数（探索順1）だけ</b>見れば足りる。
+        ///
+        /// ★ <b>「足りる」と書いたら、残り（2 / 3 / 4）を実際に全部潰すこと。</b>
+        ///   この doc は最初からこう書いてあったのに、コードが潰していたのは 3 だけだった。
+        ///   4 を <a href="https://github.com/schwarz9791/chatter-agent/issues/64">#64</a> で、
+        ///   2 をその直後に踏んだ —— <b>doc の主張とコードのズレが、そのまま2回のバグになった</b>。
+        ///   探索順（<see cref="AssetPath"/> の表）に段を足したら、ここも見直すこと。
+        ///
+        /// ★ <b>起動引数（1）は残すこと。</b> <c>-vrm &lt;path&gt;</c> は
+        ///   <b>その実行に対して明示的に渡すもの</b>で、probe を別モデルで回すための
+        ///   意図的な口。周囲の状態に左右されない点が 2〜4 と決定的に違う。
         /// </summary>
         private static AssetEnv ProbeEnv()
         {
@@ -208,6 +218,19 @@ namespace ChatterMascot.EditorTools
             //   そのままなので、~/.config/chatter-agent/models/ に置いたモデルは
             //   これまでどおりアプリが読む。
             env.HasUserConfigDirectory = false;
+            // ★ **環境変数（探索順2）も潰すこと。** #64 と同じ穴がここにも空いていた。
+            //   AssetEnvFactory.Current() は Variables = ReadEnvironment() を入れるので、
+            //   CHATTER_MASCOT_VRM が生きたままになる。scripts/run.sh は開発者のシェルから
+            //   Unity を起動するので **export しっぱなしの値をそのまま継承する**。
+            //   ★ HasUserConfigDirectory との違いは「置いたファイル」ではなく
+            //   「シェルに残った状態」だという点で、**気づきにくさはこちらが上**。
+            //   SETUP.md は「.app を Finder から起動すると環境変数は空（シェルを継承しない）」
+            //   と書いているが、**probe は Editor をシェルから起動するので効く** ——
+            //   「アプリでは効かないが probe では効く」といういちばん見つけにくい向き。
+            //   ★ Variable() は env.Variables == null で早期 return するので、これで
+            //   CHATTER_MASCOT_VRM も XDG_CONFIG_HOME も読まれなくなる（後者は
+            //   HasUserConfigDirectory = false でブロックごと通らないので、いずれにせよ無関係）。
+            env.Variables = null;
             return env;
         }
     }

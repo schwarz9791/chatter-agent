@@ -308,7 +308,20 @@ namespace ChatterMascot.EditorTools
             }
 
             var stage = Object.FindFirstObjectByType<VrmStage>(FindObjectsInactive.Include);
+            if (stage == null)
+            {
+                Debug.LogWarning($"[Fixups] {nameof(VrmStage)} が見つからないので {nameof(VrmCharacter)}.stage を結線できません");
+            }
+
             var runner = Object.FindFirstObjectByType<MascotRunner>(FindObjectsInactive.Include);
+            if (runner == null)
+            {
+                // ★ VrmCharacter.Start の FindFirstObjectByType<MascotRunner>() フォールバックが
+                //   効くので致命ではないが、両方無いと SpeakingView は常に false を返し、
+                //   kind: "prompt" の区別と発話中のゲインが丸ごと無効になる
+                Debug.LogWarning($"[Fixups] {nameof(MascotRunner)} が見つからないので {nameof(VrmCharacter)}.runner を結線できません" +
+                                  $"（{nameof(VrmCharacter)}.Start のフォールバックはあるが、両方無いと SpeakingView は常に false）");
+            }
 
             // ★ [SerializeField] は Inspector からしか繋がらないので、ここで繋ぐ
             var serialized = new SerializedObject(character);

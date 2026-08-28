@@ -153,6 +153,7 @@ MonoBehaviour:
   placeholder: {fileID: 1482741621}
   autoFrame: 1
   headroom: 1.1
+  boneBoundsMarginMeters: 0.1
   loadFrameRate: 120
 --- !u!4 &573341450
 Transform:
@@ -189,6 +190,7 @@ MonoBehaviour:
   cursorGaze: 1
   eyeSensitivity: 0.4
   headSensitivity: 0.1
+  neutralAimFraction: 0.6
 --- !u!1 &615255318
 GameObject:
   m_ObjectHideFlags: 0

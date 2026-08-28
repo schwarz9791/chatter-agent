@@ -31,9 +31,14 @@ namespace ChatterMascot.Tests
         ///   腕を入れると読み込み直後だけ幅 1.5m 級の箱になり、VRMA が効いた瞬間に
         ///   カメラが寄って<b>キャラが一段大きくなるのが見える</b>（#59 で直したポップ）。
         /// ★ <c>+0.1m</c> のマージン（<c>VrmStage.DefaultBoneBoundsMarginMeters</c>）込みの値。
+        /// ★ <b>この値は <c>VrmStage.FaceCamera</c> を通した後の箱。</b> <c>VrmStage.Adopt</c> は
+        ///   <c>FaceCamera</c> → <c>MeasureBounds</c> の順で測るので、<c>vita.vrm</c> は
+        ///   180° 回ってから測った箱になる（<c>center.z</c> が符号反転している）。
+        ///   <c>VrmProbe</c> も同じ staging（<c>VrmStage.FaceCamera</c> を先に通す）を
+        ///   するようになったので、出力はここに貼った値と一致する（PR #69 の再レビューで判明）。
         /// </summary>
         private static Bounds Vita() =>
-            new Bounds(new Vector3(0f, 0.80f, 0.02f), new Vector3(0.35f, 1.66f, 0.31f));
+            new Bounds(new Vector3(0f, 0.80f, -0.02f), new Vector3(0.35f, 1.66f, 0.31f));
 
         /// <summary>
         /// ★ <b>縦長のウィンドウでは垂直側が支配する。</b> W/H は 0.214 で、

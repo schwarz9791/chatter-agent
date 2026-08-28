@@ -486,6 +486,62 @@ W/H が 0.214 なので、ウィンドウのアスペクト（300/480 = 0.625）
 **支配軸は垂直で、ウィンドウの幅を変えてもカメラ距離は動かない**。
 ここが水平に戻ったら、箱に腕が混ざっている。
 
+★ **「同じ関数」でも「同じ箱」にはならない。入力の姿勢も揃える必要がある。**
+`MeasureBounds` を共有しても、それだけでは足りなかった。`VrmStage.Adopt` は
+`FaceCamera`（モデルをカメラへ向けて回す）→ `MeasureBounds` の順で測るのに対し、
+`VrmProbe` は**回さずに測っていた**。ボーンのワールド位置から組む箱は
+ワールド軸に沿うので、回す前と後では別の箱になる。
+
+★ **`size` の一致は証拠にならない。** 180° 回転では AABB の `size` は不変で、
+変わるのは `center` の x / z の符号だけ。`Frame` のログはこれまで `size` しか
+出していなかったので、「実機の1フレーム目が probe の出力と一致した」を
+根拠にしてしまったが、**一致した量がそもそも判別できない量だった**
+（PR #69 の再レビューで判明）。いまはログに `center` も出すようにしてある。
+
+★ **90°の倍数でないヨーでは `size` そのものが変わる。** 点群の AABB は向きに
+依存するので、90° 回るモデルでは x と z が入れ替わるだけでは済まず、
+90°の倍数でないヨーでは符号反転でも済まない。`YawToFaceCamera` は
+`SignedAngle` で任意角を返す（doc に「真横を向いているモデルでも
+正面へ向け直せる」とある）ので、これは仮定ではなく仕様の射程内。
+
+**手当て**: `VrmStage.FaceCamera` を `public static float FaceCamera(Vrm10Instance)`
+にして適用したヨーを返すようにし、`VrmProbe.Report` が `Describe` の直前に
+これを呼んで同じ staging を通してから測るようにした。
+
+`vita.vrm` の実測（staging を揃えた後の出力）:
+
+```
+  faceCamera yaw: 180 度
+  frame bounds size: (0.35, 1.66, 0.31)     ← size は不変（180° 回転のため）
+  frame bounds center: (0.00, 0.80, -0.02)  ← center.z の符号だけ反転した
+```
+
+予測どおり `size` は変わらず、`center` の z の符号だけが変わった
+（`Vita()` は `center` を `(0f, 0.80f, 0.02f)` から `(0f, 0.80f, -0.02f)` に貼り直した）。
+
+**実行時のログと突き合わせた結果**（`-vrm` で `vita.vrm` を明示して起動）:
+
+```
+probe :  frame bounds size (0.35, 1.66, 0.31)  center (0.00, 0.80, -0.02)
+実行時:        bounds (0.35, 1.66, 0.31)       center (0.00, 0.80, -0.02)
+```
+
+★ **`center` が一致したことが証拠になる。** 修正前の probe は `+0.02` を出していた。
+`size` は修正の前後どちらでも一致したので、**`size` だけを見ていた限りこの食い違いは
+永久に見えなかった**。
+
+★ **probe が読むモデルも揃えること（→ [#64](https://github.com/schwarz9791/chatter-agent/issues/64)）。**
+`VrmProbe.ProbeEnv` は `PersistentDataPath` しか潰しておらず、
+`HasUserConfigDirectory` は `OSXEditor` で `true` のままだった。つまり探索順に
+`~/.config/chatter-agent/models/*.vrm` が生きていて、**自分のモデルを置いて動作確認する**
+という普通の使い方をしているだけで、probe が同梱の `vita.vrm` ではなくそちらを測る。
+出力はテストの定数の出所なので、**マシンによって基準値が変わるのに変わったことに気づけない**。
+`ProbeEnv` で `HasUserConfigDirectory = false` も落とす。
+
+★ **潰すのは probe だけ。** アプリ側の探索順（`AssetEnvFactory.Current()`）は変えないので、
+`~/.config/chatter-agent/models/` に置いたモデルはこれまでどおりアプリが読む。
+probe だけを同梱モデルに固定したいのであって、差し替えの仕組みを塞ぎたいわけではない。
+
 ### ★ 同じ `TryGetBoneTransform` が、同一フレーム内で実行順によって別の値を返す
 
 `VrmCharacter`（実行順 0）と `VrmPoseAccent`（11005）が**どちらも視線の原点（目ボーン）を

@@ -435,8 +435,14 @@ namespace ChatterMascot.Vrm
             //   身長なのかは、これが無いと切り分けられない（#59 で腕が下りると反転する）。
             //   ★ ただし同じ内容は出さない。読み込み後しばらく毎秒 Remeasure() が走るので、
             //   素朴に毎回 Log すると同じ行が並ぶだけになる。文面が変わったときだけ出す
+            //   ★ **center も出すこと。** size だけでは、FaceCamera で回す前に測ったか
+            //   後に測ったかを判別できない —— 180° 回転では size が不変で、変わるのは
+            //   center の x / z の符号だけ（PR #69 の再レビューで判明。「実機のログが
+            //   probe の出力と一致した」を根拠にしてしまったが、一致した量が
+            //   判別できない量だった）。VrmProbe の "frame bounds center" と
+            //   突き合わせられるように、ここにも出しておく
             var message = $"[Mascot] フレーミング: {Screen.width}x{Screen.height} " +
-                          $"aspect={camera.aspect:F3} bounds={_bounds.size} " +
+                          $"aspect={camera.aspect:F3} bounds={_bounds.size} center={_bounds.center} " +
                           $"distance={distance:F2} 支配軸={(axis == FramingAxis.Horizontal ? "水平" : "垂直")}";
             if (message != _lastFramingLog)
             {
@@ -446,7 +452,8 @@ namespace ChatterMascot.Vrm
         }
 
         /// <summary>
-        /// モデルをカメラの方へ向ける。
+        /// モデルをカメラの方へ向ける。<b>適用したヨー（度）を返す。</b>回さなかった経路は
+        /// すべて <c>0f</c>。
         ///
         /// ★ <b>実機で背中が映った。</b> #56 の issue 本文は「glTF→Unity の Z 反転で
         ///   モデルが −Z を向くから 180°回転は不要」としていたが、そうならなかった。
@@ -455,25 +462,33 @@ namespace ChatterMascot.Vrm
         ///
         /// ★ <b>照明は回さない。</b> シーンの Directional Light は −Z 側（カメラ側）を
         ///   照らす向きに置いてあるので、モデルの正面をカメラへ向ければ顔に光が当たる。
+        ///
+        /// ★ <b><c>public static</c> にしてあるのは <c>VrmProbe</c>（Editor）に同じ
+        ///   staging をさせるため。</b> <see cref="MeasureBounds"/> を共有しただけでは
+        ///   足りず、<b>入力の姿勢（回した後かどうか）も揃えないと同じ箱にならない</b>
+        ///   ——ボーンのワールド位置から組む箱はワールド軸に沿うので、向きが違えば
+        ///   別の bounds になる（PR #69 の再レビューで判明）。戻り値はその
+        ///   「実際に適用したヨー」で、probe が出力に載せるためのもの。
         /// </summary>
-        private static void FaceCamera(Vrm10Instance instance)
+        public static float FaceCamera(Vrm10Instance instance)
         {
             var animator = instance.GetComponent<Animator>();
-            if (animator == null || animator.avatar == null) return;
+            if (animator == null || animator.avatar == null) return 0f;
 
             var left = animator.GetBoneTransform(HumanBodyBones.LeftUpperArm);
             var right = animator.GetBoneTransform(HumanBodyBones.RightUpperArm);
             if (left == null || right == null)
             {
                 Debug.LogWarning("[Mascot] 上腕のボーンが無いので向きを判定できません");
-                return;
+                return 0f;
             }
 
             var yaw = VrmOrientation.YawToFaceCamera(left.position, right.position);
-            if (Mathf.Approximately(yaw, 0f)) return;
+            if (Mathf.Approximately(yaw, 0f)) return 0f;
 
             instance.transform.Rotate(Vector3.up, yaw, Space.World);
             Debug.Log($"[Mascot] モデルの向きを {yaw:F0} 度回してカメラへ向けました");
+            return yaw;
         }
 
         /// <summary>

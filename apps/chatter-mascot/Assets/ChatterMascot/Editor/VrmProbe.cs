@@ -68,6 +68,19 @@ namespace ChatterMascot.EditorTools
                 return;
             }
 
+            // ★ 測る前に VrmStage.FaceCamera を通すこと。MeasureBounds を共有していても、
+            //   回す前に測れば別の箱になる——VrmStage.Adopt は FaceCamera → MeasureBounds の
+            //   順で、ここもそれに合わせないと「同じ関数」でも「同じ箱」にならない
+            //   （PR #69 の再レビューで判明）。180° では size が不変なので**気づきにくい**
+            //   （size の一致は「同じ staging を通した」ことの証拠にならない）。90° 回るモデルでは
+            //   x と z が入れ替わり、90°の倍数でないヨーでは size 自体が変わる。
+            // ★ instance.Runtime に触れて ControlRig の生成順序を固定する（Adopt がやっている
+            //   `_ = instance.Runtime;`）のはここでは不要。あれは回した後に作ると腕の上下が
+            //   反転するのを避けるためで、probe は ControlRig を駆動しないため関係ない。
+            //   **ただし probe がアニメーションを扱うようになったら Adopt と同じ順序を再現すること**
+            var yaw = VrmStage.FaceCamera(instance);
+            Debug.Log($"[VrmProbe] faceCamera yaw: {yaw:F0} 度");
+
             Describe(instance);
             EditorApplication.Exit(0);
         }
@@ -184,6 +197,17 @@ namespace ChatterMascot.EditorTools
         {
             var env = AssetEnvFactory.Current();
             env.PersistentDataPath = "";
+            // ★ **HasUserConfigDirectory も落とすこと（#64）。** AssetEnvFactory.Current() は
+            //   OSXEditor で true を立てるので、これを残すと探索順に
+            //   ~/.config/chatter-agent/models/*.vrm が生きたままになる。probe の出力は
+            //   Tests/Editor/VrmFramingTests.cs の定数の出所なので、そこに自分のモデルを
+            //   1つ置いている開発者は**マシンによって基準値が変わるのに、変わったことに
+            //   気づけない**。PR #69 の対応中に実際に踏んだ —— 事故ではなく、
+            //   **自分のモデルを置いて動作確認する**というごく普通の使い方で発火する。
+            //   ★ 潰すのは probe だけ。アプリ側の探索順（AssetEnvFactory.Current()）は
+            //   そのままなので、~/.config/chatter-agent/models/ に置いたモデルは
+            //   これまでどおりアプリが読む。
+            env.HasUserConfigDirectory = false;
             return env;
         }
     }

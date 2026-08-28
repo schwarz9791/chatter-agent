@@ -269,6 +269,13 @@ namespace ChatterMascot.Vrm
         /// ★ <b>瞬きの抑制は「緩和後の <c>happy</c>」で判定する。</b> 目が細まっているかどうかは
         ///   目標ではなく実際に適用される weight で決まる（cc-mascot も
         ///   <c>currentEmotionValues</c>＝lerp 後の値を見ている）。
+        /// ★ <b>ただし<u>始まっていない</u>瞬きだけを止める。</b> cc-mascot がやっているのは
+        ///   「happy のときは瞬きを<b>飛ばす</b>」（<c>performBlink</c> の入口で <c>return</c>）で、
+        ///   <b>進行中の瞬きを途中で切ってはいない</b>。出力を無条件に 0 にすると、
+        ///   閉じ切っている最中（<c>blink = 1.0</c>）に happy が立った瞬間に
+        ///   <b>1フレームで目が開く段差</b>が入る —— <c>Blink</c> は意図的に補間していないので
+        ///   吸収するものが無い。<c>current.Blink</c> が 0 のとき（＝まだ閉じ始めていないとき）
+        ///   だけ止めれば、始まった瞬きは最後まで走り、以後の瞬きが飛ばされる。
         /// ★ <b><see cref="FaceParams"/> を全部 0 にすると <see cref="Target"/> と一致する</b>
         ///   （<c>tau &lt;= 0</c> で <see cref="GazeAim.Smooth"/> が目標を返し、
         ///   猶予も上乗せも抑制も無効になる）。テストが恒等入力を作れるようにするため。
@@ -289,7 +296,10 @@ namespace ChatterMascot.Vrm
             var neutral = GazeAim.Smooth(current.Neutral, target.Neutral, deltaTime, tau);
 
             var blink = target.Blink;
-            if (p.BlinkSuppressAboveHappy > 0f && happy > p.BlinkSuppressAboveHappy) blink = 0f;
+            if (p.BlinkSuppressAboveHappy > 0f && happy > p.BlinkSuppressAboveHappy && current.Blink <= 0f)
+            {
+                blink = 0f;
+            }
 
             return new FaceWeights(happy, angry, sad, relaxed, surprised, neutral, target.Aa, blink);
         }

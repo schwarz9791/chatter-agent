@@ -182,6 +182,37 @@ namespace ChatterMascot.Tests
             Assert.That(w.Blink, Is.EqualTo(1f));
         }
 
+        /// <summary>
+        /// ★ cc-mascot がやっているのは「happy のときは瞬きを<b>飛ばす</b>」であって
+        /// 「進行中の瞬きを<b>切る</b>」ではない。出力を無条件に 0 にすると、閉じ切っている最中
+        /// （<c>blink = 1.0</c>）に happy が立った瞬間に1フレームで目が開く段差になる ——
+        /// <c>Blink</c> は補間していないので吸収するものが無い。
+        /// </summary>
+        [Test]
+        public void BlinkAlreadyInProgressIsNotCutOff()
+        {
+            var p = Params(lerp: 0f, blinkSuppressAboveHappy: 0.1f);
+            // 直前のフレームで既に閉じ切っている
+            var current = new FaceWeights(0f, 0f, 0f, 0f, 0f, 0f, 0f, 1f);
+
+            var w = FacePolicy.Evaluate(Input(emotion: Emotion.Happy, blink: 1f), current, 1f / 30f, p);
+
+            Assert.That(w.Happy, Is.EqualTo(1f));
+            Assert.That(w.Blink, Is.EqualTo(1f), "始まった瞬きは最後まで走る");
+        }
+
+        /// <summary>瞬きが終わって（<c>current.Blink == 0</c>）以降は、次の瞬きが飛ばされる。</summary>
+        [Test]
+        public void BlinkIsSuppressedOnceTheEyesAreOpenAgain()
+        {
+            var p = Params(lerp: 0f, blinkSuppressAboveHappy: 0.1f);
+            var current = new FaceWeights(1f, 0f, 0f, 0f, 0f, 0f, 0f, 0f);
+
+            var w = FacePolicy.Evaluate(Input(emotion: Emotion.Happy, blink: 0.2f), current, 1f / 30f, p);
+
+            Assert.That(w.Blink, Is.EqualTo(0f));
+        }
+
         [Test]
         public void BlinkIsNotSuppressedByOtherEmotions()
         {

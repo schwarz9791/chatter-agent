@@ -155,13 +155,14 @@ namespace ChatterMascot.EditorTools
                 //   （vita.vrm は glTF に preset が 14 個しか無いのに Clips は 18 個で、
                 //   lookUp / lookDown / lookLeft / lookRight が bind ゼロで生えている）。
                 //   SetWeight は通るのに何も起きないので、**空は空と書く**こと
+                // ★ **bind の判定を書き写さないこと。** VrmCharacter.HasBindings を呼ぶ
+                //   （VrmStage.MeasureBounds を public static にしてあるのと同じ理由）。
+                //   最初はここに手写ししていて、両方が同じ抜け（NodeTransformBindings を
+                //   数えていない）を持っていた —— 片方を直しても、もう片方は黙って間違ったまま
                 var keys = clips.Select(pair =>
                 {
                     var name = pair.Preset == ExpressionPreset.custom ? pair.Clip.name : pair.Preset.ToString();
-                    var binds = (pair.Clip.MorphTargetBindings?.Length ?? 0)
-                                + (pair.Clip.MaterialColorBindings?.Length ?? 0)
-                                + (pair.Clip.MaterialUVBindings?.Length ?? 0);
-                    return binds > 0 ? name : name + "(空)";
+                    return VrmCharacter.HasBindings(pair.Clip) ? name : name + "(空)";
                 });
                 text.Append("\n  expressions: ").Append(string.Join(", ", keys.OrderBy(k => k)));
 

@@ -50,5 +50,47 @@ namespace ChatterMascot
             }
             return null;
         }
+
+        /// <summary>
+        /// 真偽値のフラグ。<paramref name="name"/> が無ければ <paramref name="defaultValue"/>。
+        ///
+        /// ★ <b><c>-flag</c> を単独で渡した形（値なし）を <c>true</c> として扱うこと。</b>
+        ///   <see cref="Argument"/> は「name の<b>次に来る値</b>」を返す作りなので、
+        ///   <c>-faceLog</c> だけを渡すと <c>null</c> が返る。それを「指定されなかった」と
+        ///   同じ扱いにすると、<b>いちばん自然な渡し方で黙って無反応</b>になる ——
+        ///   切り分け中にこれを踏むと「ログが出ない＝コードが走っていない」と誤読しかねない。
+        ///
+        /// ★ <b>次のトークンが <c>-</c> で始まるときも「値なし」として扱うこと。</b>
+        ///   そうしないと <c>-faceLog -vrm /path.vrm</c> が <c>-vrm</c> を値として食い、
+        ///   <c>-vrm</c> の側は<b>解釈されないまま消える</b>。
+        ///
+        /// ★ <b>偽と読むのは <c>0</c> / <c>false</c> / <c>no</c> / <c>off</c> だけ</b>
+        ///   （大文字小文字は無視）。それ以外の値は真。
+        /// </summary>
+        public static bool Flag(string name, bool defaultValue = false) => Flag(Args(), name, defaultValue);
+
+        /// <summary>
+        /// 引数列を渡す版。<b>純粋関数</b>なのでテストで固定できる。
+        /// </summary>
+        public static bool Flag(IReadOnlyList<string> args, string name, bool defaultValue = false)
+        {
+            if (args == null || string.IsNullOrEmpty(name)) return defaultValue;
+
+            for (var i = 0; i < args.Count; i++)
+            {
+                if (args[i] != name) continue;
+
+                var value = i + 1 < args.Count ? args[i + 1] : null;
+                // 値なし（末尾、または次が別のフラグ）＝ 有効化の指定
+                if (string.IsNullOrEmpty(value) || value[0] == '-') return true;
+
+                return !(value == "0"
+                         || value.Equals("false", StringComparison.OrdinalIgnoreCase)
+                         || value.Equals("no", StringComparison.OrdinalIgnoreCase)
+                         || value.Equals("off", StringComparison.OrdinalIgnoreCase));
+            }
+
+            return defaultValue;
+        }
     }
 }

@@ -121,6 +121,31 @@ namespace ChatterMascot.Tests
             Assert.That(timer.Tick(2.5 + Close * 0.5), Is.EqualTo(0.5f).Within(1e-4f), "1秒経っていれば通る");
         }
 
+        /// <summary>
+        /// ★ <b>フェーズ進行の後で消費すること。</b> 先に消費すると、期限を過ぎているのに
+        /// まだ <c>Waiting</c> へ進んでいない古いフェーズを見て「既に瞬いている」と判定し、
+        /// <b>要求を恒久的に捨てる</b>（<c>_requested</c> はクリア済みなので再試行も無い）。
+        /// 30fps で瞬きの終端フレームに prompt が重なると、<c>Request()</c> の存在理由が失われる。
+        /// </summary>
+        [Test]
+        public void RequestSurvivesWhenItLandsOnThePhaseBoundary()
+        {
+            // ★ 1回目は**自然な**瞬きにすること。Request() 由来にするとデバウンス（1秒）が
+            //   先に効いてしまい、順序の違いを見分けられない
+            var timer = Timer(0f); // 2秒後に自然な瞬き
+            timer.Tick(0.0);
+
+            timer.Tick(2.0);    // 閉じ始め
+            timer.Tick(2.1667); // このフレームの終わりで _phase == Opening（期限は 2.19）
+
+            // 期限を跨いだ最初のフレームで要求する。**そのフレームの入口では _phase はまだ
+            // Opening のまま** —— 先に消費すると「既に瞬いている」と誤判定して捨てられる
+            timer.Request();
+            timer.Tick(2.2);
+
+            Assert.That(timer.Tick(2.25), Is.EqualTo(0.5f).Within(1e-4f), "要求が捨てられていない");
+        }
+
         [Test]
         public void RequestDuringABlinkIsDropped()
         {
@@ -176,19 +201,51 @@ namespace ChatterMascot.Tests
         }
 
         /// <summary>
-        /// ★ 長く止めていた（あるいは 0 秒フェーズが並んだ）ときに固まらないこと。
-        /// フェーズを進める回数に上限を置いてある。
+        /// ★ 0 秒フェーズが並んでも固まらないこと。フェーズを進める回数に上限を置いてある。
+        ///
+        /// ★★ <b>「範囲内に収まる」だけを見ないこと。</b> 上限が4フェーズ周期の整数倍だと、
+        ///   タイマーは毎 <c>Tick</c> で<b>同じフェーズ</b>に戻って出力が定数になる。
+        ///   それが <c>Holding</c> なら <c>Value()</c> は永久に <c>1f</c> ＝
+        ///   <b>目が閉じたまま固着する</b>のに、<c>1f</c> は [0,1] なので
+        ///   範囲だけの assert はすり抜ける。<b>目が開いた状態に戻ることまで見る。</b>
         /// </summary>
         [Test]
         public void DoesNotHangOnZeroLengthPhases()
         {
             var timer = new BlinkTimer(() => 0f, 0f, 0f, 0f, 0f, 0f);
 
+            var openedAtLeastOnce = false;
             for (var i = 0; i < 10; i++)
             {
                 var value = timer.Tick(i);
                 Assert.That(value, Is.GreaterThanOrEqualTo(0f).And.LessThanOrEqualTo(1f));
+                if (value <= 0f) openedAtLeastOnce = true;
             }
+
+            Assert.That(openedAtLeastOnce, Is.True, "目が閉じたまま固着していない");
+        }
+
+        /// <summary>
+        /// <see cref="BlinkTimer.Request"/> 由来の周期でも固着しないこと。
+        /// ★ <c>Request()</c> は <c>Closing</c> から周期を始めるので、上限で丸められる位相が
+        ///   自然な瞬きのときとずれる。<b>閉じたまま固着する経路はこちら側から到達する。</b>
+        /// </summary>
+        [Test]
+        public void DoesNotHangOnZeroLengthPhasesAfterARequest()
+        {
+            var timer = new BlinkTimer(() => 0f, 0f, 0f, 0f, 0f, 0f);
+            timer.Tick(0.0);
+            timer.Request();
+
+            var openedAtLeastOnce = false;
+            for (var i = 1; i <= 10; i++)
+            {
+                var value = timer.Tick(i);
+                Assert.That(value, Is.GreaterThanOrEqualTo(0f).And.LessThanOrEqualTo(1f));
+                if (value <= 0f) openedAtLeastOnce = true;
+            }
+
+            Assert.That(openedAtLeastOnce, Is.True, "目が閉じたまま固着していない");
         }
 
         [Test]

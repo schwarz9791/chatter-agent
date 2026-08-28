@@ -114,7 +114,7 @@ namespace ChatterMascot.Vrm
         ///   <c>SpeakingView.TryRead</c> は false のとき <c>Neutral</c> に倒す契約なので、
         ///   生の値を渡すと<b>喋り終わった瞬間に目標が Neutral になり、
         ///   <c>faceHoldSeconds</c> がまったく効かない</b>。表情には
-        ///   <c>_lastSpokenEmotion</c>（発話中に読んだ最後の値）を使う。
+        ///   <see cref="FaceLatch"/> が保つ「発話中に読んだ最後の値」を使う。
         /// </summary>
         public Emotion Emotion { get; private set; }
 
@@ -167,6 +167,19 @@ namespace ChatterMascot.Vrm
         private static readonly ExpressionKey AaKey = ExpressionKey.Aa;
         private static readonly ExpressionKey BlinkKey = ExpressionKey.Blink;
 
+        /// <summary>
+        /// このアプリが実際に weight を書く preset。<b>これ以外は 0 のまま。</b>
+        ///
+        /// ★ <see cref="WarnAboutOverrides"/> がこの集合に絞るために要る。
+        ///   <c>DefaultExpressionValidator</c> は override 率を
+        ///   <c>GetOverrideRate(clip.Override*, weight)</c> で出すので、
+        ///   <b>weight が常に 0 のクリップは寄与 0 ＝ 何もブロックできない</b>。
+        /// </summary>
+        private static readonly ExpressionKey[] DrivenKeys =
+        {
+            HappyKey, AngryKey, SadKey, RelaxedKey, SurprisedKey, NeutralKey, AaKey, BlinkKey,
+        };
+
         /// <summary>デバッグログの間引き（秒）</summary>
         private const double FaceLogIntervalSeconds = 1.0;
 
@@ -189,20 +202,16 @@ namespace ChatterMascot.Vrm
         private readonly BlinkTimer _blink = new BlinkTimer(() => UnityEngine.Random.value);
 
         private FaceWeights _faceWeights;
-        private bool _wasSpeaking;
-        private bool _wasPrompt;
 
         /// <summary>
-        /// 発話中に読んだ最後の emotion。<b>猶予（<c>faceHoldSeconds</c>）の間はこれを保つ。</b>
-        /// 理由は <see cref="Emotion"/> の doc を参照。
+        /// 「いま鳴っているもの」から「顔が使う値」への変換の記憶（ラッチと prompt のエッジ）。
+        ///
+        /// ★ <b>ここをフィールドの寄せ集めとして書かないこと。</b> <c>ChatterMascot.Tests.asmdef</c> は
+        ///   <c>ChatterMascot.Runtime</c> しか参照しないので、<c>MonoBehaviour</c> の中に書くと
+        ///   <b>テストが1行も当たらない</b> —— しかもここは「これが無いと <c>faceHoldSeconds</c> が
+        ///   1行も効かない」と分かっている場所（#57 のレビュー指摘）。
         /// </summary>
-        private Emotion _lastSpokenEmotion = ChatterMascot.Protocol.Emotion.Neutral;
-
-        /// <summary>
-        /// 直近で <see cref="Speaking"/> が false に落ちた時刻。
-        /// ★ 一度も喋っていない間は <c>-∞</c>。差が <c>+∞</c> になって猶予の外に確定する。
-        /// </summary>
-        private double _speechEndedAt = double.NegativeInfinity;
+        private readonly FaceLatch _faceLatch = new FaceLatch();
 
         private double _faceLoggedAt = double.NegativeInfinity;
 
@@ -263,10 +272,13 @@ namespace ChatterMascot.Vrm
 
             // ★ ビルドした .app からデバッグログを立てられるようにする（-serverUrl / -vrm と同じ形）。
             //   実機確認は Player.log を読む形なので、[SerializeField] だけだと再ビルドが要る
-            var faceLog = CommandLine.Argument("-faceLog");
-            if (!string.IsNullOrEmpty(faceLog))
+            // ★ Argument ではなく Flag。Argument は「name の次に来る値」しか返さないので、
+            //   -faceLog を単独で渡すと null になり、**いちばん自然な渡し方で黙って無反応**になる
+            //   （切り分け中に踏むと「ログが出ない＝コードが走っていない」と誤読しかねない）
+            var faceLog = CommandLine.Flag("-faceLog", faceDebugLog);
+            if (faceLog != faceDebugLog)
             {
-                faceDebugLog = faceLog != "0" && !faceLog.Equals("false", StringComparison.OrdinalIgnoreCase);
+                faceDebugLog = faceLog;
                 Debug.Log($"[Mascot] faceDebugLog をコマンドラインで上書きします: {faceDebugLog}");
             }
 
@@ -297,12 +309,6 @@ namespace ChatterMascot.Vrm
             var accent = model.AddComponent<VrmPoseAccent>();
             accent.Bind(_instance, this);
 
-            // ★ ここ（_instance が入った後）で出すこと。LateUpdate はフレーム1から走るが
-            //   読み込みは実測で約1.6秒かかるので、起動直後に判定するとラッチが消費されて
-            //   永久に本当の値が出ない（docs/mascot.md「起動直後にだけ成立しない状態を
-            //   『異常』として警告しない」）
-            LogExpressionDiagnostics();
-
             // ★ hips の静止位置はここでは取らない。ControlRig（Vrm10Instance.Runtime.ControlRig）は
             //   遅延生成なので、ここで確実に非 null とは限らない。UpdateProceduralIdle 側で
             //   ControlBone から遅延して取る（TryGetBoneTransform の実ボーンとは親が別なので
@@ -311,6 +317,21 @@ namespace ChatterMascot.Vrm
             // ★ 例外は VrmIdleAnimation.LoadAsync の内側で全部握る（VrmStage.Start と同じ形）
             _idle = new VrmIdleAnimation();
             _ = _idle.LoadAsync(_instance, transform, _cancellation.Token);
+
+            // ★★ 診断は**最後**に呼ぶこと。ここは VrmStage.Invoke に呼ばれていて、
+            //   あちらは購読者の例外を LogWarning で握る。途中に置くと、診断が何かで throw した瞬間に
+            //   **この下の設定（アイドルモーションの読み込み）が丸ごと走らなくなる** ——
+            //   しかも出るのは1行の警告だけで、同梱 VRMA が読まれない理由は残らない。
+            //   純粋な観測を本体の道連れにしない。
+            // ★ ここ（_instance が入った後）で出すこと自体は変えない。LateUpdate はフレーム1から
+            //   走るが読み込みは実測で約1.6秒かかるので、起動直後に判定するとラッチが消費されて
+            //   永久に本当の値が出ない（docs/mascot.md「起動直後にだけ成立しない状態を
+            //   『異常』として警告しない」）。
+            // ★ なお「Runtime の遅延生成がここで走って Head 欠落で throw する」ことは無い ——
+            //   VrmStage.Adopt が handler を呼ぶ前に `_ = instance.Runtime;` を済ませている
+            //   （ControlRig の生成順のため）。それでも順序を直すのは、道連れにする**構造**の方を
+            //   残さないため。
+            LogExpressionDiagnostics();
         }
 
         private void LateUpdate()
@@ -507,23 +528,12 @@ namespace ChatterMascot.Vrm
         /// </summary>
         private void UpdateFace(double now)
         {
-            if (Speaking)
-            {
-                // ★ ラッチが要る。理由は Emotion プロパティの doc を参照
-                _lastSpokenEmotion = Emotion;
-            }
-            else if (_wasSpeaking)
-            {
-                _speechEndedAt = now;
-            }
-            _wasSpeaking = Speaking;
-
-            // ★ kind が prompt に「変わったエッジ」で1回だけ。毎フレーム呼ぶと瞬きっぱなしになる。
+            // ★ ラッチ（emotion / kind / 発話の立ち下がり）と prompt のエッジは FaceLatch が持つ。
+            //   ここに書くとテストから見えなくなる —— 理由は _faceLatch の doc を参照
+            // ★ prompt のエッジで1回だけ Request する。毎フレーム呼ぶと瞬きっぱなしになる。
             //   prompt は1イベント単位で来る（docs/protocol.md）ので、assistant に付く
             //   「seq 連続 / messageId 同一 / ts 同値」の保証は当てにできない
-            var isPrompt = Kind == SpeechKind.Prompt;
-            if (isPrompt && !_wasPrompt) _blink.Request();
-            _wasPrompt = isPrompt;
+            if (_faceLatch.Update(Speaking, Emotion, Kind, now)) _blink.Request();
 
             _blink.Enabled = blinkEnabled;
             var blink = _blink.Tick(now);
@@ -535,13 +545,15 @@ namespace ChatterMascot.Vrm
 
             var input = new FaceInput(
                 speaking: Speaking,
-                emotion: _lastSpokenEmotion,
-                kind: Kind,
+                // ★ 生の Emotion / Kind ではなくラッチ済みを渡すこと。生のままだと
+                //   SpeakingView の「false なら既定値へ倒す」契約に当たって猶予が効かない
+                emotion: _faceLatch.Emotion,
+                kind: _faceLatch.Kind,
                 // ★ #58 のリップシンクが埋める。ここでは常に 0
                 mouth: 0f,
                 blink: blink,
                 now: now,
-                speechEndedAt: _speechEndedAt);
+                speechEndedAt: _faceLatch.SpeechEndedAt);
 
             // ★ Time.deltaTime ではなく Time.unscaledDeltaTime（UpdateGaze と同じ理由。
             //   位相を realtime で回している以上、緩和も同じ時間軸でないと timeScale = 0 で飛ぶ）
@@ -636,12 +648,33 @@ namespace ChatterMascot.Vrm
             return "×";
         }
 
-        /// <summary>bind が1つでもあるか。★ 配列は null になりうるので長さを直接足さない。</summary>
-        private static bool HasBindings(VRM10Expression clip)
+        /// <summary>
+        /// そのクリップが何かを動かせるか（bind が1つでもあるか）。
+        ///
+        /// ★ <b><c>NodeTransformBindings</c> を数え落とさないこと。</b>
+        ///   <c>VRM10Expression</c> の bind 配列は<b>4本</b>あり
+        ///   （<c>MorphTargetBindings</c> / <c>MaterialColorBindings</c> /
+        ///   <c>MaterialUVBindings</c> / <c>NodeTransformBindings</c>）、
+        ///   最後のひとつは <c>NodeTransformBindingMerger</c> が実際に適用している。
+        ///   数え落とすと、<b>眉や耳や尻尾をボーンで動かすモデルの効いている表情を「空」と誤報する</b>
+        ///   —— この診断は「顔が動かないのが正常」と「壊れて動かない」を区別するために
+        ///   あるのだから、<b>作られた目的そのものの場面で誤誘導する</b>ことになる。
+        ///
+        /// ★ <b><c>public static</c>。<c>VrmProbe</c> はこれを呼ぶこと（書き写さない）。</b>
+        ///   <c>VrmStage.MeasureBounds</c> を <c>public static</c> にしてあるのと同じ理由で、
+        ///   独立実装が2つあると<b>片方だけ直したときに黙ってズレる</b>
+        ///   （実際、この関数は最初 probe 側に手写しされていて、両方が同じ抜けを持っていた）。
+        ///
+        /// ★ 配列は <c>null</c> になりうるので長さを直接足さない。
+        /// </summary>
+        public static bool HasBindings(VRM10Expression clip)
         {
+            if (clip == null) return false;
+
             return (clip.MorphTargetBindings != null && clip.MorphTargetBindings.Length > 0)
                    || (clip.MaterialColorBindings != null && clip.MaterialColorBindings.Length > 0)
-                   || (clip.MaterialUVBindings != null && clip.MaterialUVBindings.Length > 0);
+                   || (clip.MaterialUVBindings != null && clip.MaterialUVBindings.Length > 0)
+                   || (clip.NodeTransformBindings != null && clip.NodeTransformBindings.Length > 0);
         }
 
         /// <summary>
@@ -662,6 +695,16 @@ namespace ChatterMascot.Vrm
         /// ★ <b><c>OverrideLookAt</c> も見ること。</b> ここが <c>none</c> でないモデルでは、
         ///   表情を出した瞬間に #59 のカーソル追従（<c>LookAtEyeDirection</c>）が減衰する。
         /// ★ 自分自身のチャンネルは数えない（<c>DefaultExpressionValidator.Validate</c> と同じ扱い）。
+        ///
+        /// ★★ <b>走査は <see cref="DrivenKeys"/> に絞ること。</b> override 率は
+        ///   <c>GetOverrideRate(clip.Override*, weight)</c> ＝ weight 依存なので、
+        ///   <b>このアプリが一度も weight を立てないクリップは何もブロックできない</b>。
+        ///   全クリップを見ると、<c>ih</c> / <c>ou</c> / <c>ee</c> / <c>oh</c>（使わない口の preset）や
+        ///   カスタムクリップに <c>overrideBlink</c> が付いているだけで
+        ///   <b>成立しえない条件の警告を毎起動・永久に出す</b>ことになる。
+        ///   「読み飛ばす癖がつくぶん有害」（docs/mascot.md）そのもの。
+        /// ★ <b>絞る対象はキーの集合であって、見る項目ではない。</b>
+        ///   <c>OverrideLookAt</c> を見る判断（#59 のカーソル追従が殺されるケース）は維持する。
         /// </summary>
         private void WarnAboutOverrides()
         {
@@ -678,6 +721,8 @@ namespace ChatterMascot.Vrm
                 if (clip == null) continue;
 
                 var key = asset.CreateKey(clip);
+                if (!IsDriven(key)) continue;
+
                 if (!key.IsMouth && clip.OverrideMouth != ExpressionOverrideType.none) blocksMouth = true;
                 if (!key.IsBlink && clip.OverrideBlink != ExpressionOverrideType.none) blocksBlink = true;
                 if (!key.IsLookAt && clip.OverrideLookAt != ExpressionOverrideType.none) blocksLookAt = true;
@@ -686,6 +731,16 @@ namespace ChatterMascot.Vrm
             if (blocksMouth) Debug.LogWarning("[Mascot] このモデルは表情が口をブロックします。喋っても口が動かないことがあります");
             if (blocksBlink) Debug.LogWarning("[Mascot] このモデルは表情が瞬きをブロックします。表情が強いと瞬かないことがあります");
             if (blocksLookAt) Debug.LogWarning("[Mascot] このモデルは表情が視線をブロックします。カーソル追従が効かないことがあります");
+        }
+
+        /// <summary>このアプリが weight を書く preset か。</summary>
+        private static bool IsDriven(ExpressionKey key)
+        {
+            for (var i = 0; i < DrivenKeys.Length; i++)
+            {
+                if (DrivenKeys[i].Equals(key)) return true;
+            }
+            return false;
         }
 
         /// <summary>
@@ -714,7 +769,7 @@ namespace ChatterMascot.Vrm
             _faceLoggedAt = now;
 
             var actual = expression.ActualWeights;
-            Debug.Log($"[Mascot] face: kind={Kind} emotion={_lastSpokenEmotion} speaking={Speaking}" +
+            Debug.Log($"[Mascot] face: kind={_faceLatch.Kind} emotion={_faceLatch.Emotion} speaking={Speaking}" +
                       $" | 目標 happy={_faceWeights.Happy:F2} angry={_faceWeights.Angry:F2} sad={_faceWeights.Sad:F2}" +
                       $" relaxed={_faceWeights.Relaxed:F2} surprised={_faceWeights.Surprised:F2}" +
                       $" neutral={_faceWeights.Neutral:F2} aa={_faceWeights.Aa:F2} blink={_faceWeights.Blink:F2}" +

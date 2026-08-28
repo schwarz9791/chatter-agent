@@ -32,6 +32,14 @@ namespace ChatterMascot.Vrm
     ///     ★ cc-mascot は「閉 75ms → 開 75ms、保持なし・線形」で、閉じたままの間が無いぶん
     ///     速く見える。形はサンプル側を採る</item>
     /// </list>
+    ///
+    /// ★ <b>30fps（<c>MascotRunner</c> の <c>targetFrameRate</c>）では、開きのランプは事実上見えない。</b>
+    ///   1フレームは 33.3ms で <c>openSeconds = 0.03</c> より長いので、<see cref="Tick"/> が
+    ///   開きの窓に落ちない周期のほうが多く、<c>blink</c> は 1.0 → 0.0 と一段で戻る
+    ///   （<c>holdSeconds = 0.06</c> も約2フレーム）。
+    ///   <b>数値は「上の出典どおり」であって「30fps 用に調整した値」ではない</b> ——
+    ///   もし開きの緩さが欲しくなったら、サンプル由来であることを承知のうえで
+    ///   <c>openSeconds</c> を伸ばすこと。ここを黙って変えると出典との対応が切れる。
     /// </summary>
     public sealed class BlinkTimer
     {
@@ -135,21 +143,35 @@ namespace ChatterMascot.Vrm
                 EnterWaiting(now);
             }
 
-            ConsumeRequest(now);
-
             var advances = 0;
             while (now - _phaseStartedAt >= _phaseSeconds)
             {
                 if (++advances > MaxPhaseAdvancesPerTick)
                 {
                     // 進み切らないほど長く止まっていた（あるいは 0 秒フェーズが並んでいる）。
-                    // ★ ここで now に揃えないと、次フレーム以降も毎回上限まで回り続ける
-                    _phaseStartedAt = now;
+                    //
+                    // ★★ <b>打ち切った位置のフェーズをそのまま残さないこと。</b> 上限が
+                    //   4フェーズ周期の整数倍だと、毎 Tick で**同じフェーズ**へ戻る。
+                    //   それが Closing / Holding なら Value() は永久に 1 を返し、
+                    //   **目が閉じたまま固着する** —— しかも 1 は 0..1 に収まるので
+                    //   「範囲内か」だけを見るテストはすり抜ける（#57 のレビュー指摘 J で
+                    //   テストを強めたところ、実際にこれを踏んでいた）。
+                    // ★ ここへ来るのは「設定が縮退している」か「長く止まっていた」かの
+                    //   どちらかで、いずれも**瞬いていない状態へ倒すのが正しい**
+                    //   （寝ていた間の瞬きを取り戻す必要は無い）。
+                    EnterWaiting(now);
                     break;
                 }
 
                 Advance(_phaseStartedAt + _phaseSeconds);
             }
+
+            // ★★ **フェーズを進めた後で消費すること。** 先に消費すると、
+            //   期限を過ぎているのにまだ Waiting へ進んでいない古いフェーズを見て
+            //   「既に瞬いている」と判定し、**要求を恒久的に捨てる**（_requested は
+            //   クリア済みなので再試行も無い）。30fps で瞬きの終端フレームに
+            //   prompt が重なると、`Request()` の存在理由そのものが失われる。
+            ConsumeRequest(now);
 
             return Value(now);
         }

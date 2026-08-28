@@ -1217,6 +1217,18 @@ const targetY = (mouse.y - headY) * eyeSensitivity * 2;
 - `VrmProbe` の `expressions:` は bind が 0 のクリップに `(空)` を付ける
 - `VrmCharacter` は読み込み時に1回、`使う preset: happy=○ angry=○ …（○=動く / 空=枠はあるが中身が無い / ×=無い）` を出す
 
+★★ **bind の配列は4本ある。** `MorphTargetBindings` / `MaterialColorBindings` /
+`MaterialUVBindings` / **`NodeTransformBindings`**。最後のひとつは実験扱いの名前だが
+`NodeTransformBindingMerger` が実際に適用しているので、**数え落とすと眉や耳や尻尾を
+ボーンで動かすモデルの効いている表情を「空」と誤報する** —— この診断は
+「顔が動かないのが正常」と「壊れて動かない」を区別するためにあるのだから、
+**作られた目的そのものの場面で誤誘導する**ことになる。
+
+★★ **判定は `VrmCharacter.HasBindings`（`public static`）1箇所に置き、`VrmProbe` はそれを呼ぶ。**
+最初は probe 側に手写ししていて、**両方が同じ抜け（`NodeTransformBindings`）を持っていた**
+（#57 のレビューで判明）。`VrmStage.MeasureBounds` を `public static` にしてあるのと同じ理由で、
+独立実装が2つあると片方だけ直したときに黙ってズレる。
+
 ★ **`vita.vrm` の bind 先（実測）**:
 
 ```
@@ -1257,6 +1269,15 @@ expression を持たない」と、probe の一覧に4つが載ることは矛�
 #59 のカーソル追従（`LookAtEyeDirection` が `1 - lookAtOverrideRate` 倍される）が死ぬ。
 「表情を入れたら視線が動かなくなった」の切り分けはこの警告が無いと難しい。
 
+★★ **走査するクリップは「このアプリが実際に weight を書く8つ」に絞ること。**
+override 率は `GetOverrideRate(clip.Override*, weight)` ＝ **weight 依存**なので、
+一度も weight を立てないクリップは寄与 0 で**何もブロックできない**。全クリップを見ると、
+`ih` / `ou` / `ee` / `oh`（使わない口の preset）やカスタムクリップに `overrideBlink` が
+付いているだけで、**成立しえない条件の警告を毎起動・永久に出す**ことになる
+（#57 のレビュー指摘）。上の「起動直後にだけ成立しない状態を『異常』として警告しない」と
+同じ失敗の仕方 ——「読み飛ばす癖がつくぶん有害」。
+★ **絞る対象はキーの集合であって、見る項目ではない。** `OverrideLookAt` を見る判断は維持する。
+
 ★ **実測: 同梱 `vita.vrm` は preset 14個すべて `override*: none` かつ `isBinary: false`。**
 つまり `happy` と `aa` と `blink` は互いに一切干渉しない。**このモデルでは UniVRM は何も守ってくれない**、
 と読み替えること（下の「VRoid の happy は目を細める」に効く）。
@@ -1293,6 +1314,21 @@ Neutral に落ちる**。cc-mascot は hold を持たない（`onended` で即 n
 （`SpeakingViewTests` の4本が固定している）。だから `VrmCharacter.Emotion` を素通しすると、
 **喋り終わった瞬間に目標が Neutral になり、猶予の秒数をいくら伸ばしても顔は即座に戻る**。
 `_lastSpokenEmotion`（`Speaking` が true の間だけ更新する）を渡すこと。
+
+★★ **`Kind` も一緒にラッチすること。** `Emotion` だけ直して `Kind` を生のまま渡すと、
+猶予の途中で**片方だけ崩れる** —— `promptSurpriseWeight` を 0 から開けたとき、
+emotion 由来の表情は猶予ぶん保たれるのに prompt の上乗せだけが発話終了の次フレームで抜け、
+**目に見える段差**が入る（#57 のレビュー指摘）。
+
+★★ **ただし prompt の<u>エッジ</u>は生の値で見ること。** ラッチ済みの `Kind` は猶予の間も
+（次の発話まで）`Prompt` のまま残るので、そちらでエッジを取ると
+**2回目以降の prompt でエッジが立たず、瞬きが一度も入らなくなる**。
+
+★★ **この記憶を `MonoBehaviour` のフィールドとして書かないこと。** `ChatterMascot.Tests.asmdef` は
+`ChatterMascot.Runtime` しか参照しないので、`VrmCharacter` に書いた時点で**テストが1行も当たらない**
+—— しかもここは「これが無いと猶予が1行も効かない」と分かっている場所。
+`Runtime/Vrm/FaceLatch.cs` に切り出して `FaceLatchTests` で固定してある。
+**`Runtime/` に純粋ロジックを寄せる判断は、残った glue にも最後まで適用すること。**
 
 ★ **`messageId` で束ねて解決しようとしないこと。** [`protocol.md`](./protocol.md) が
 「`messageId` の変化だけを根拠にした安全なバッチ化はできない」を3つの理由で明示的に禁じている。
@@ -1332,6 +1368,31 @@ EditMode から回せない。`AudioIdleGate` と同じ「状態は持つが時�
 `Time.realtimeSinceStartupAsDouble` は日単位まで伸びる。経過を `(float)now` から作ると、7日で
 float の刻み幅が1フレームぶんの差を上回り、**瞬きがカクつく／止まるがエラーは出ない**
 （`Oscillator.Phase` が位相を周期で畳んでいるのと同じ理由）。
+
+★★ **`Request()` の消費は、フェーズを進めた<u>後</u>に置くこと。** 先に消費すると、
+期限を過ぎているのにまだ `Waiting` へ進んでいない**古いフェーズ**を見て「既に瞬いている」と
+誤判定し、要求を恒久的に捨てる（要求フラグはクリア済みなので再試行も無い）。
+30fps で瞬きの終端フレームに prompt が重なると、`Request()` の存在理由そのものが失われる。
+
+★★ **フェーズ進行の上限で打ち切ったら、そのフェーズを残さず「目を開けた状態」へ倒すこと。**
+上限が4フェーズ周期の整数倍だと、毎 `Tick` で**同じフェーズ**へ戻る。それが `Closing` /
+`Holding` なら出力は永久に 1 ＝ **目が閉じたまま固着する**のに、1 は 0..1 に収まるので
+**「範囲内か」だけを見るテストはすり抜ける**。#57 のレビュー指摘（J）を受けて
+「有限回で 0 に戻ること」まで assert したら、実際にこれを踏んでいた。
+打ち切りに至るのは「設定が縮退している」か「長く止まっていた」かのどちらかで、
+いずれも瞬いていない状態へ倒すのが正しい（寝ていた間の瞬きを取り戻す必要は無い）。
+
+★ **30fps では開きのランプは事実上見えない。** 1フレーム 33.3ms に対して
+`openSeconds = 0.03` なので、`Tick` が開きの窓に落ちない周期のほうが多く、
+`blink` は 1.0 → 0.0 と一段で戻る（`holdSeconds = 0.06` も約2フレーム）。
+**上の表は「出典どおりの値」であって「30fps 用に調整した値」ではない** ——
+開きの緩さが欲しくなったら、出典との対応が切れることを承知のうえで伸ばすこと。
+
+★ **抑制は「始まっていない瞬きを飛ばす」であって「進行中の瞬きを切る」ではない。**
+cc-mascot も `performBlink` の入口で `return` している。出力を無条件に 0 にすると、
+閉じ切っている最中に `happy` が立った瞬間に**1フレームで目が開く段差**になる
+（`Blink` は意図的に補間していないので吸収するものが無い）。
+`FacePolicy` は「前フレームの `blink` が 0 のときだけ」止めている。
 
 ### ★ `SetWeights` ではなく `SetWeightsNonAlloc` を使う
 
@@ -1412,6 +1473,31 @@ kind=Prompt emotion=Surprised surprised=1.00 blink=0.84
 `~/dev/chatter-agent` 側のマスコットと `~/orca/workspaces/...` 側のマスコットが**同じファイルを共有する**。
 片方が起動すると相手のログが `Player-prev.log` へ回される。**実機確認の途中で「ログが消えた」ように
 見えたら、まず `Player-prev.log` を見ること**（実際に踏んだ）。
+
+### ★ 起動引数の真偽値フラグは `CommandLine.Flag` で読む（`Argument` ではない）
+
+`CommandLine.Argument` は「name の**次に来る値**」を返す作りで、**末尾の name は拾わない**
+（ループが `args.Count - 1` まで）。だから `-faceLog` を単独で渡すと `null` が返る。
+
+| 渡し方 | `Argument` | 期待 |
+|---|---|---|
+| `-faceLog 1` | `"1"` | 有効 |
+| **`-faceLog`（単独）** | **`null`** | 有効にしたい |
+| `-faceLog -vrm /path.vrm` | `"-vrm"` | 有効。かつ `-vrm` を食わない |
+
+真ん中を「指定されなかった」と同じ扱いにすると、**いちばん自然な渡し方で黙って無反応**になる。
+実機で `Player.log` を読むための口がそれだと、切り分け中に
+「ログが出ない＝コードが走っていない」と誤読しかねない（#57 のレビュー指摘）。
+
+`CommandLine.Flag(args, name, defaultValue)` が3つとも面倒を見る:
+
+- **値なし（末尾、または次のトークンが `-` で始まる）＝ `true`**
+- 偽と読むのは `0` / `false` / `no` / `off` だけ（大文字小文字は無視）。それ以外の値は真
+- name が無ければ `defaultValue`
+
+★ **規則を `MonoBehaviour` の中に書かないこと。** `CommandLine` は
+`Argument(IReadOnlyList<string>, string)` を純粋関数として持ち `CommandLineTests` で固定している。
+真偽値の規則だけ MonoBehaviour に置くと、そこだけテストで固定できなくなる。
 
 ### ★ シーンに `EventSystem` が無いとクリック透過が死ぬ
 

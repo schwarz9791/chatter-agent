@@ -102,14 +102,33 @@ namespace ChatterMascot.EditorTools
                 text.Append("\n  shaders: ").Append(string.Join(" / ", shaders));
                 text.Append("\n  renderers: ").Append(gltf.Renderers.Count);
 
-                // ★ ここが出す数値は VrmStage が実行時に使うのと**同じ関数**の出力。
-                //   Tests/Editor/VrmFramingTests.cs の定数はこの出力をそのまま貼ったものなので、
-                //   別実装に分岐させると**ランタイムがもう生成しない数値**をテストが守り始める
+                // ★ この Renderer 由来の bounds は T ポーズの静的な値で、**ランタイムの自動フレーミング
+                //   （VrmStage.MeasureBounds）はもうこれを使わない**（#59 で切り替わった）。
+                //   SkinnedMeshRenderer.bounds はメッシュに焼かれた静的な値を返すだけで姿勢を反映しないので、
+                //   アイドルモーションで腕が下りても支配軸が水平のまま縮まない（実機で確認済み。
+                //   詳細は VrmBounds.OfBones のコメント参照）。それでも出しているのは、
+                //   モデルそのものの素の大きさ（T ポーズでの寸法）を見る参考値として意味があるため
                 var bounds = VrmBounds.Of(gltf.Renderers);
                 text.Append("\n  bounds size: ").Append(bounds.size);
                 text.Append("\n  bounds center: ").Append(bounds.center);
                 // ★ ウィンドウのアスペクトを決める材料（→ SETUP.md のウィンドウの大きさ）
                 text.Append("\n  bounds W/H: ").Append((bounds.size.x / Mathf.Max(bounds.size.y, 1e-6f)).ToString("F3"));
+
+                // ★ ここが出す数値は VrmStage が実行時に使うのと**同じ関数**の出力。
+                //   Tests/Editor/VrmFramingTests.cs の定数はこの出力をそのまま貼ったものなので、
+                //   別実装に分岐させると**ランタイムがもう生成しない数値**をテストが守り始める
+                //   （#59 で VrmBounds.Of から切り替えたときに実際に起きた）。
+                // ★ **ボーンを集めるループをここに書き写さないこと。** 書き写した時点で
+                //   「同じ関数の出力」が「いまのところ同じ結果になる別実装」に変わり、
+                //   IsFramingBone の除外リストやマージンを片方だけ直したときに黙ってズレる。
+                //   VrmStage.MeasureBounds を public static にしてあるのはそのため
+                // ★ マージンは VrmStage.DefaultBoneBoundsMarginMeters を使う。probe はシーンを
+                //   経由しないので [SerializeField] の値は取れない。**シーンで既定から変えたら
+                //   この出力は実行時の箱と食い違う**（VrmStage 側のコメント参照）
+                var frameBounds = VrmStage.MeasureBounds(instance, VrmStage.DefaultBoneBoundsMarginMeters);
+                text.Append("\n  frame bounds size: ").Append(frameBounds.size);
+                text.Append("\n  frame bounds center: ").Append(frameBounds.center);
+                text.Append("\n  frame bounds W/H: ").Append((frameBounds.size.x / Mathf.Max(frameBounds.size.y, 1e-6f)).ToString("F3"));
             }
 
             if (instance.Vrm != null && instance.Vrm.Expression != null)

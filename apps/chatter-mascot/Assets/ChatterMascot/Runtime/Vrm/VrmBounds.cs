@@ -25,6 +25,16 @@ namespace ChatterMascot.Vrm
     ///   <b>片方だけ null チェックがある</b>状態が実際に発生していた。
     ///   <c>VrmFramingTests</c> の定数は <c>VrmProbe</c> の出力を貼ったものなので、
     ///   2つがズレるとテストは<b>ランタイムがもう生成しない数値</b>に対して通り続ける。
+    ///
+    /// ★ <b>この罠は1段上でも起きる。実際に再発した。</b> #59 で <c>VrmStage</c> が
+    ///   測り方を <see cref="Of"/>（<c>Renderer</c>）から <see cref="OfBones"/>（ボーン）へ
+    ///   切り替えたとき、<b>合成規則はここ1箇所のまま</b>だったのに、
+    ///   <b>どのボーンを渡すか</b>が <c>VrmStage</c> と <c>VrmProbe</c> に分かれ、
+    ///   <c>VrmProbe</c> だけが古い <see cref="Of"/> を出し続けた
+    ///   —— 上の段落が書いているのと寸分違わぬ形（PR #69 のレビューで判明）。
+    ///   いまは <c>VrmStage.MeasureBounds</c> を <c>public static</c> にして
+    ///   <b>呼び先を1つ</b>にしてある。<b>「合成規則が1箇所」だけでは足りない。
+    ///   入力の作り方も1箇所にすること。</b>
     /// </summary>
     public static class VrmBounds
     {

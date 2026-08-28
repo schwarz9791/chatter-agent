@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using UniGLTF;
+using UniGLTF.Utils;
 using UnityEngine;
 using UniVRM10;
 
@@ -51,7 +52,19 @@ namespace ChatterMascot.Vrm
         ///   実際の見た目より箱がわずかに小さくなる。両側に足して吸収する。
         /// </summary>
         [Tooltip("髪・裾・頭頂・靴底のぶん。ボーンより外側にある部分を吸収する余白（メートル）")]
-        [SerializeField] private float boneBoundsMarginMeters = 0.1f;
+        [SerializeField] private float boneBoundsMarginMeters = DefaultBoneBoundsMarginMeters;
+
+        /// <summary>
+        /// <see cref="boneBoundsMarginMeters"/> の既定値。
+        ///
+        /// ★ <b>定数として公開するのは <c>VrmProbe</c>（Editor）のため。</b> あちらはシーンを
+        ///   経由せず VRM を直接読むので、<c>[SerializeField]</c> の値を取れない。定数を共有すれば
+        ///   probe の出力と実行時の箱が既定構成で一致し、その出力を貼った
+        ///   <c>Tests/Editor/VrmFramingTests.cs</c> の定数も実行時の値と一致する。
+        /// ★ <b>シーンで <see cref="boneBoundsMarginMeters"/> を既定から変えたら、probe の出力は
+        ///   実行時の箱と食い違う。</b> テストの定数を貼り直すときは両方を見ること。
+        /// </summary>
+        public const float DefaultBoneBoundsMarginMeters = 0.1f;
 
         /// <summary>
         /// 読み込み中だけ上げるフレームレート。
@@ -284,7 +297,7 @@ namespace ChatterMascot.Vrm
             //   ワールド軸に沿うので、回したあとで測り直さないとカメラ距離がずれる
             FaceCamera(instance);
 
-            _bounds = MeasureBounds(instance);
+            _bounds = MeasureBounds(instance, boneBoundsMarginMeters);
             _collider = AttachCollider(instance.gameObject, _bounds);
 
             if (placeholder != null) placeholder.SetActive(false);
@@ -348,7 +361,7 @@ namespace ChatterMascot.Vrm
         /// </summary>
         private void Remeasure()
         {
-            _bounds = MeasureBounds(_instance);
+            _bounds = MeasureBounds(_instance, boneBoundsMarginMeters);
             FitCollider(_collider, _bounds);
             Frame();
         }
@@ -359,17 +372,26 @@ namespace ChatterMascot.Vrm
         /// ★ <b><see cref="VrmBounds.OfBones"/> を呼ぶのはここだけにすること。</b>
         ///   ボーンの選び方（決め打ちの一覧を持たず、取れたものをそのまま使う）を
         ///   ここに閉じ込める。
+        /// ★ <b><c>public static</c> にしてあるのは <c>VrmProbe</c>（Editor）に
+        ///   <b>同じ関数</b>を呼ばせるため。</b> あちらの出力は
+        ///   <c>Tests/Editor/VrmFramingTests.cs</c> の定数の出所なので、ボーンの選び方を
+        ///   別実装に分岐させると<b>ランタイムがもう生成しない数値</b>をテストが守り始める
+        ///   （#59 で <c>VrmBounds.Of</c> から切り替えたときに実際に起きた）。
+        ///   コピーして揃えるのではなく、呼び先を1つにすること。
         /// ★ <b>決め打ちのボーン一覧を持たない。</b> <c>Chest</c> / <c>UpperChest</c> /
         ///   <c>Toes</c> などの任意ボーンはモデルによって存在せず、<c>TryGetBoneTransform</c>
         ///   が <c>false</c> を返す。<c>HumanBodyBones</c> を全列挙して取れたものだけを
         ///   使えば、モデルごとに存在有無をガードする必要が無い。
+        /// ★ <b><c>Enum.GetValues</c> を直に呼ばないこと。</b> 毎回 <c>Array</c> を新規確保し、
+        ///   非ジェネリックな <c>foreach</c> なので列挙値がボックス化される。UniVRM 自身が
+        ///   <c>CachedEnum</c>（<c>VrmAnimationImporter.GetHumanMap</c>）で避けている。
         /// </summary>
-        private Bounds MeasureBounds(Vrm10Instance instance)
+        public static Bounds MeasureBounds(Vrm10Instance instance, float marginMeters)
         {
             if (instance == null) return new Bounds();
 
             var positions = new List<Vector3>();
-            foreach (HumanBodyBones bone in Enum.GetValues(typeof(HumanBodyBones)))
+            foreach (var bone in CachedEnum.GetValues<HumanBodyBones>())
             {
                 if (!VrmBounds.IsFramingBone(bone)) continue;
                 if (instance.TryGetBoneTransform(bone, out var t) && t != null)
@@ -386,7 +408,7 @@ namespace ChatterMascot.Vrm
                 return new Bounds();
             }
 
-            return VrmBounds.OfBones(positions, boneBoundsMarginMeters);
+            return VrmBounds.OfBones(positions, marginMeters);
         }
 
         private void Frame()

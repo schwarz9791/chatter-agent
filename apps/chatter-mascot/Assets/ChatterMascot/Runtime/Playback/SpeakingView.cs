@@ -14,6 +14,17 @@ namespace ChatterMascot.Playback
     ///   <c>Items</c> から外れたが鳴らし切っている音）が再生中の間はこのメソッドが <c>false</c> を
     ///   返す＝アイドルが発話中モードへ上がらない、という<b>既知の穴</b>。ここで直そうとしないこと。
     ///   #58 の <c>SpeakingSet</c> が解決する。
+    ///
+    /// ★ <b><see cref="TryRead"/> の全件走査を速くしないこと（意図して残している）。</b>
+    ///   ここは <c>VrmCharacter.LateUpdate</c> から 30回/秒 呼ばれ、毎回 <c>Items</c> を
+    ///   線形に走査する。<c>PlaybackState.HeadCache</c> を引けば O(1) にできるが、
+    ///   <b>それは <c>PlaybackQueue</c> 内部のキャッシュ不変条件への結合</b>で、
+    ///   このクラスごと #58 で捨てる以上、結合だけが残る。定常状態の <c>Items</c> は
+    ///   ack のたびに消えるので数件しかない（溜まるのは合成が詰まっているときだけ）。
+    ///   <c>Dictionary</c> の反復は、このリポジトリが電力予算のために避けている
+    ///   毎フレームの <c>FindFirstObjectByType</c>（シーングラフ全体の走査＋ネイティブ
+    ///   相互運用）とは桁が違う —— 同じ枠で語らないこと。
+    ///   <b>#58 で <c>SpeakingSet</c> に置き換えるときに、まとめて片付ける。</b>
     /// </summary>
     public static class SpeakingView
     {

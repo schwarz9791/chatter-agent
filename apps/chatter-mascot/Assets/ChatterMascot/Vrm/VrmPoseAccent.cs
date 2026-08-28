@@ -65,29 +65,32 @@ namespace ChatterMascot.Vrm
         private VrmCharacter _character;
 
         /// <summary>
-        /// カメラ空間の基準。★ <b>毎フレーム <c>Camera.main</c> を引かないこと</b>
-        /// （<c>CursorGazeSource</c> と同じ理由。タグ検索でシーン走査が走り、常駐アプリの
-        /// 電力予算に効く）。<see cref="Bind"/> で1回だけキャッシュする。
+        /// カメラ空間の基準。
+        ///
+        /// ★ <b>ここで <c>Camera.main</c> を引かないこと。</b> <see cref="VrmCharacter"/> が
+        ///   <c>Start</c> で1回だけ引いた同じカメラを <see cref="Bind"/> で受け取る —— 別々に
+        ///   引くと <c>MainCamera</c> タグの付け替えで2つのコンポーネントが違うカメラを
+        ///   掴みうる。探索も「無い」ときの警告も <see cref="VrmCharacter.Start"/> 側に一本化した。
         /// </summary>
         private Transform _camera;
 
         private float _weight;
 
+        /// <summary>
+        /// <paramref name="character"/> が <c>Start</c> で1回だけ引いた <see cref="Camera"/>
+        /// （<see cref="VrmCharacter.Camera"/>）を受け取る。
+        ///
+        /// ★ <b>ここで <c>Camera.main</c> を探し直さないこと。</b> 探索は
+        ///   <see cref="VrmCharacter.Start"/> の1箇所に寄せてある。<c>Camera.main</c> が
+        ///   無いときの警告もそちらが出す（ここで二重に出さない）。
+        ///   <c>character.Camera</c> が <c>null</c> なら <c>_camera</c> も <c>null</c> のままにし、
+        ///   <see cref="LateUpdate"/> の <c>_camera == null</c> ガードで頭の回転を丸ごと飛ばす。
+        /// </summary>
         public void Bind(Vrm10Instance instance, VrmCharacter character)
         {
             _instance = instance;
             _character = character;
-
-            var mainCamera = Camera.main;
-            if (mainCamera == null)
-            {
-                // ★ 取れないのは異常（VrmCharacter.Start の Camera.main チェックと同じ扱い）。
-                //   ワールド軸で代用しないこと —— 代用すると枠の選び方を誤った前回と同じ形の
-                //   バグに戻る。LateUpdate 側で null ガードして頭の回転を丸ごと飛ばす
-                Debug.LogWarning("[Mascot] Camera.main が無いので、視線由来の頭の回転を適用できません");
-                return;
-            }
-            _camera = mainCamera.transform;
+            _camera = character.Camera != null ? character.Camera.transform : null;
         }
 
         private void LateUpdate()
@@ -96,7 +99,11 @@ namespace ChatterMascot.Vrm
 
             var targetWeight = _character.Kind == SpeechKind.Prompt ? 1f : 0f;
             // ★ スナップさせないこと。姿勢が瞬間移動すると spring bone が跳ねる
-            _weight = GazeAim.Smooth(_weight, targetWeight, Time.deltaTime, accentLerpSeconds);
+            // ★ Time.deltaTime ではなく Time.unscaledDeltaTime を使うこと。位相
+            //   （Time.realtimeSinceStartupAsDouble）と緩和は同じ時間軸で回す必要がある。
+            //   Time.deltaTime を混ぜると Time.timeScale = 0 で緩和だけが凍り、timeScale が
+            //   戻った瞬間に姿勢が飛ぶ（spring bone を跳ねさせないために避けている失敗そのもの）。
+            _weight = GazeAim.Smooth(_weight, targetWeight, Time.unscaledDeltaTime, accentLerpSeconds);
 
             // ★ カメラが無ければ丸ごと飛ばす。ワールド軸やモデル軸で代用しないこと
             if (_camera == null) return;
@@ -110,10 +117,13 @@ namespace ChatterMascot.Vrm
             //   導く角度で、prompt / cursor の有無に関わらず常に乗る。
             //   毎フレーム計算するのは、モデルの背丈・ウィンドウの縦横比・フレーミング距離が
             //   変わっても追随させるため（固定値にしない）。
-            //   ★ 同じ点を使うことが重要なので、VrmCharacter.GazeOriginViewportY と同じ
-            //   TryGetGazeOrigin を使う（別の点を使うとカーソルの基準と頭の補正がズレる）。
+            //   ★ 自分で TryGetBoneTransform を引き直さないこと。目ボーンは頭の子なので、
+            //   ここ（実行順 11005）で引き直すと ControlRig.Process()（実行順 11000）が
+            //   書き戻した後＝アクセント抜きの位置になり、VrmCharacter.LateUpdate（実行順 0）が
+            //   測った「前フレームのアクセント込み」の位置とは別の点になる。だから
+            //   VrmCharacter が1フレームに1回だけ測ってキャッシュした値を読む。
             var neutralPitchDegrees = 0f;
-            if (_character.TryGetGazeOrigin(out var eyeWorld))
+            if (_character.TryGetCachedGazeOrigin(out var eyeWorld))
             {
                 var toEye = eyeWorld - _camera.position;
                 var horizontalDistance = Vector3.ProjectOnPlane(toEye, Vector3.up).magnitude;
@@ -136,7 +146,7 @@ namespace ChatterMascot.Vrm
                 // ★ 代入せず乗算すること。ControlRig.Process() が既に書いた値の上に重ねる。
                 // ★ HeadPitchDegrees と基準の下向きは同じ軸（right）まわりの回転なので、
                 //   角度を足し合わせてから1回の AngleAxis にまとめてよい（同じ軸まわりの回転の
-                //   合成は可換）。GazeParams.MaxHeadPitchDegrees（±25°）の clamp は cursor 由来の
+                //   合成は可換）。GazeParams.HeadPitchRangeDegrees（±25°）の clamp は cursor 由来の
                 //   HeadPitchDegrees にしか掛かっていない —— 基準の下向きはそことは別枠の値なので、
                 //   ここで合算しても cursor 側の可動域そのものを書き換えることにはならない。
                 //   ★ 合計に別途上限は置いていない。NeutralAimFraction 自体が実機で調整できる

@@ -1,6 +1,5 @@
 using System;
 using System.Threading;
-using ChatterMascot.Playback;
 using ChatterMascot.Protocol;
 using UnityEngine;
 using UniVRM10;
@@ -122,6 +121,8 @@ namespace ChatterMascot.Vrm
         private Vector3 _hipsRestLocalPosition;
         private bool _hipsRestCaptured;
         private bool _warnedNoGazeOrigin;
+        private Vector3 _gazeOriginWorld;
+        private bool _gazeOriginValid;
 
         /// <summary>
         /// ★ <b>毎フレーム <c>Camera.main</c> を引かないこと。</b>
@@ -132,6 +133,16 @@ namespace ChatterMascot.Vrm
         ///   ビューポート座標へ落とす <see cref="Camera.WorldToViewportPoint"/> が要る。
         /// </summary>
         private Camera _camera;
+
+        /// <summary>
+        /// <see cref="Start"/> で1回だけ引いた <see cref="Camera.main"/> の読み取り専用公開。
+        ///
+        /// ★ <b><see cref="VrmPoseAccent"/> が自分で <c>Camera.main</c> を引かないため。</b>
+        ///   探索は1箇所（ここ）に寄せ、<c>MainCamera</c> タグが <see cref="Start"/> と
+        ///   <c>VrmPoseAccent.Bind</c> の間で付け替わっても、2つのコンポーネントが
+        ///   別々のカメラを掴まないようにする。
+        /// </summary>
+        public Camera Camera => _camera;
 
         private void Start()
         {
@@ -201,12 +212,29 @@ namespace ChatterMascot.Vrm
             //   時計が巻き戻るとアイドルが凍る（AudioIdleGate と同じ理由）
             var now = Time.realtimeSinceStartupAsDouble;
 
-            Speaking = SpeakingView.TryRead(runner != null ? runner.State : null, out var kind, out var emotion);
-            Kind = Speaking ? kind : SpeechKind.Assistant;
+            // ★ kind / emotion を先に既定値で確定させること。runner == null のときは
+            //   && の短絡で TryGetSpeaking 自体が呼ばれず out に何も入らないので、
+            //   `out var` で受けると CS0165（未割り当てローカル変数の使用）になる。
+            // ★ false のときに既定値へ倒すのは呼ばれた側（SpeakingView.TryRead）の契約で、
+            //   ここはそれに乗っている。**この契約は SpeakingViewTests が固定している**
+            //   （ReturnsFalseWhenNothingIsPlaying / ReturnsFalseWhenOnlyOrphansArePlaying /
+            //   DoesNotThrowWhenStateIsNull / DoesNotThrowWhenThePlayingItemHasNoRecord の
+            //   4本が、false のとき Assistant / Neutral になることを検査している）。
+            //   だからここで `Speaking ? kind : 既定` と書き直す必要はない。
+            var kind = SpeechKind.Assistant;
             // ★ 完全修飾で書くこと。この型は自分自身と同名のプロパティ Emotion を持つので、
             //   ここで単に `Emotion.Neutral` と書くとプロパティ側に解決されてしまい、
             //   「インスタンス参照で static メンバーにアクセスしている」というコンパイルエラーになる
-            Emotion = Speaking ? emotion : ChatterMascot.Protocol.Emotion.Neutral;
+            var emotion = ChatterMascot.Protocol.Emotion.Neutral;
+            Speaking = runner != null && runner.TryGetSpeaking(out kind, out emotion);
+            Kind = kind;
+            Emotion = emotion;
+
+            // ★ UpdateGaze の中に置かないこと。UpdateGaze は先頭で gazeTarget == null ||
+            //   _camera == null を早期 return するので、そこに置くとカメラが無いときに
+            //   キャッシュが更新されない。「同じ点を使う」（TryGetCachedGazeOrigin の doc）を
+            //   成立させるため、1フレームに1回だけここで測る
+            _gazeOriginValid = TryGetGazeOrigin(out _gazeOriginWorld);
 
             UpdateGaze(now);
 
@@ -240,9 +268,9 @@ namespace ChatterMascot.Vrm
             //   混同しないこと（「カーソルが顔の高さ」＝「目標がカメラ」＝「見る人と目が合う」）。
             var neutralLocal = Vector3.zero;
 
-            if (TryGetGazeOrigin(out var gazeOrigin))
+            if (_gazeOriginValid)
             {
-                GazeOriginViewportY = _camera.WorldToViewportPoint(gazeOrigin).y;
+                GazeOriginViewportY = _camera.WorldToViewportPoint(_gazeOriginWorld).y;
                 HasGazeOrigin = true;
             }
             else
@@ -266,7 +294,12 @@ namespace ChatterMascot.Vrm
 
             var target = neutralLocal + new Vector3(sample.TargetLocalPosition.x, sample.TargetLocalPosition.y, 0f);
 
-            var dt = Time.deltaTime;
+            // ★ Time.deltaTime ではなく Time.unscaledDeltaTime を使うこと。位相（now）は
+            //   Time.realtimeSinceStartupAsDouble で回しているので、緩和も同じ時間軸で
+            //   回さないと Time.timeScale = 0 で緩和だけが凍り、目標値は realtime で進み続け、
+            //   timeScale が戻った瞬間に頭と前傾が飛ぶ（spring bone を跳ねさせないために
+            //   避けている失敗そのもの）。
+            var dt = Time.unscaledDeltaTime;
             var current = gazeTarget.localPosition;
             gazeTarget.localPosition = new Vector3(
                 GazeAim.Smooth(current.x, target.x, dt, gazeParams.FollowSeconds),
@@ -280,9 +313,10 @@ namespace ChatterMascot.Vrm
         /// <summary>
         /// 視線の原点（ワールド）。<b>目ボーンがあればその中点、無ければ Head</b>。
         ///
-        /// ★ <c>public</c>。<see cref="VrmPoseAccent"/> も「基準の下向き」の角度計算にこれを
-        ///   使う。<see cref="GazeOriginViewportY"/> と<b>同じ点</b>を使うことが重要
-        ///   —— 別の点を使うと、カーソルの縦の基準と頭の補正がズレる。
+        /// ★ <c>private</c>。<see cref="LateUpdate"/> が1フレームに1回だけ呼び、結果を
+        ///   <c>_gazeOriginWorld</c> にキャッシュする。<see cref="VrmPoseAccent"/> はここを
+        ///   直接呼ばず、<see cref="TryGetCachedGazeOrigin"/> でそのキャッシュを読む
+        ///   —— 理由は <see cref="TryGetCachedGazeOrigin"/> の doc を参照。
         /// ★ <c>LeftEye</c> / <c>RightEye</c> は任意ボーン。<c>vita.vrm</c> は持っているが、
         ///   持たないモデルもあるので必ず <c>Head</c> へのフォールバックを用意する。
         /// ★ <c>Head</c> フォールバックでは <c>Vrm.LookAt.OffsetFromHead</c>
@@ -291,7 +325,7 @@ namespace ChatterMascot.Vrm
         ///   <c>humanoid.Head.TransformPoint(eyeOffsetValue)</c> と同じ式）。
         ///   <c>Vrm</c> / <c>LookAt</c> は <c>null</c> のことがあるのでガードする。
         /// </summary>
-        public bool TryGetGazeOrigin(out Vector3 world)
+        private bool TryGetGazeOrigin(out Vector3 world)
         {
             world = default;
             if (_instance == null) return false;
@@ -322,6 +356,31 @@ namespace ChatterMascot.Vrm
                 : Vector3.zero;
             world = head.TransformPoint(offset);
             return true;
+        }
+
+        /// <summary>
+        /// このフレームで測った視線の原点（ワールド）。<see cref="VrmPoseAccent"/> が読む。
+        ///
+        /// ★ <b>「同じ点を使う」を成立させるために、測るのは1フレームに1回だけにすること。</b>
+        ///   目ボーンは頭の子なので、<see cref="VrmPoseAccent"/>（実行順 11005）が自分で
+        ///   <c>TryGetBoneTransform</c> を引き直すと、<c>ControlRig.Process()</c>（11000）が
+        ///   書き戻した後＝アクセント抜きの位置になり、<b>実行順 0 でここが測った
+        ///   「前フレームのアクセント込み」の位置とは別の点になる</b>。
+        ///   直す理由は挙動ではなく、<b>両方のコメントが宣言している不変条件が
+        ///   コード上は成立していなかった</b>こと —— ズレの大きさ自体は、頭ボーンから目までの
+        ///   オフセット（<c>vita.vrm</c> で約 0.06m）× 基準の下向き（既定 0.6 で約 11.4°）の
+        ///   sin なので<b>1cm ほどと見積もれる</b>（実測はしていない。体感には出ない）。
+        /// ★ このキャッシュはアクセント込みの位置なので、<see cref="VrmPoseAccent"/> が
+        ///   これを使うと弱い帰還路になる（頭が下を向く → 目が下がる → 次フレームの
+        ///   基準の下向きがわずかに小さくなる）。<b>負帰還</b>で、利得は上の 1cm を
+        ///   目とカメラの高低差（約 0.6m）で割った程度＝おおむね 0.02 と見積もれるので、
+        ///   数フレームで収束する。<b>これも見積もりであって実測ではない</b> ——
+        ///   もし視線が微振動するようなら、ここを疑うこと。
+        /// </summary>
+        public bool TryGetCachedGazeOrigin(out Vector3 world)
+        {
+            world = _gazeOriginWorld;
+            return _gazeOriginValid;
         }
 
         private void UpdateProceduralIdle(double now)
@@ -382,7 +441,7 @@ namespace ChatterMascot.Vrm
             var d = GazeParams.Default;
             return new GazeParams(
                 d.WanderSecondsX, d.WanderSecondsY, d.WanderMetersX, d.WanderMetersY,
-                eyeSensitivity, headSensitivity, d.MaxHeadPitchDegrees, d.MaxHeadYawDegrees,
+                eyeSensitivity, headSensitivity, d.HeadPitchRangeDegrees, d.HeadYawRangeDegrees,
                 d.EyeReachMeters, d.FollowSeconds);
         }
 

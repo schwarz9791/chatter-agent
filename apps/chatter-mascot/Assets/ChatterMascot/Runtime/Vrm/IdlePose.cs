@@ -1,4 +1,3 @@
-using System;
 using ChatterMascot.Protocol;
 using UnityEngine;
 
@@ -181,15 +180,15 @@ namespace ChatterMascot.Vrm
             if (kind == SpeechKind.Prompt) gain *= p.PromptDamp;
 
             // 呼吸: 腰の上下と胸の前後の傾き
-            var breathSin = Mathf.Sin(Phase(now, p.BreathSeconds));
+            var breathSin = Mathf.Sin(Oscillator.Phase(now, p.BreathSeconds));
             var hipsOffsetY = breathSin * p.BreathHipsMeters * gain;
             var chestX = breathSin * p.BreathChestDegrees * gain;
 
             // 重心移動: 周期の違う2本の sin を 0.5 ずつ足して非周期に見せる。
             // それぞれ振幅 1 の sin を 0.5 倍ずつ足すので、両方が山で重なっても
             // 合成値は ±1 を超えず、SwayDegrees 以内に収まる。
-            var swayA = Mathf.Sin(Phase(now, p.SwaySecondsA));
-            var swayB = Mathf.Sin(Phase(now, p.SwaySecondsB));
+            var swayA = Mathf.Sin(Oscillator.Phase(now, p.SwaySecondsA));
+            var swayB = Mathf.Sin(Oscillator.Phase(now, p.SwaySecondsB));
             var swayZ = (swayA * 0.5f + swayB * 0.5f) * p.SwayDegrees * gain;
 
             // 首の微動: さらに遅い成分。左右への回旋（yaw = y軸）として持たせる。
@@ -202,7 +201,7 @@ namespace ChatterMascot.Vrm
             //   ——チャンネル単体のテストでは緑になるが実際の可動域は仕様の2倍という、
             //   いちばん質の悪い壊れ方をする。
             const float NeckShare = 0.6f;
-            var neckAmplitude = Mathf.Sin(Phase(now, p.NeckSeconds)) * p.NeckDegrees * gain;
+            var neckAmplitude = Mathf.Sin(Oscillator.Phase(now, p.NeckSeconds)) * p.NeckDegrees * gain;
             var neckEuler = new Vector3(0f, neckAmplitude * NeckShare, 0f);
             var headEuler = new Vector3(0f, neckAmplitude * (1f - NeckShare), 0f);
 
@@ -234,23 +233,6 @@ namespace ChatterMascot.Vrm
                 rightUpperArmEuler,
                 leftLowerArmEuler,
                 rightLowerArmEuler);
-        }
-
-        /// <summary>
-        /// 2π t / period。周期が 0 以下なら止まっているものとして 0 を返す。
-        ///
-        /// ★ <b>float へ落とす前に周期で畳むこと。</b> このアプリは常駐するので
-        ///   <c>now</c>（<c>Time.realtimeSinceStartupAsDouble</c>）は日単位まで伸びる。
-        ///   畳まずに <c>(float)(2π·now/period)</c> とすると、7日で位相が 95万に達し、
-        ///   そこでの float の刻み幅（約 0.0625 rad ＝ 3.6°）が1フレームぶんの位相差を
-        ///   上回る。症状は「何日か点けっぱなしにすると呼吸がカクつく／止まって見える」で、
-        ///   <b>エラーは出ない</b>。
-        /// </summary>
-        private static float Phase(double now, float periodSeconds)
-        {
-            if (periodSeconds <= 0f) return 0f;
-            var wrapped = now - Math.Floor(now / periodSeconds) * periodSeconds;
-            return (float)(2.0 * Math.PI * wrapped / periodSeconds);
         }
     }
 }

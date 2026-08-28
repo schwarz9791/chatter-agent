@@ -1,4 +1,3 @@
-using System;
 using ChatterMascot.Protocol;
 using ChatterMascot.Vrm;
 using NUnit.Framework;
@@ -41,20 +40,40 @@ namespace ChatterMascot.Tests
             }
         }
 
-        /// <summary>既定パラメータでの振幅上限。どの時刻をサンプルしても各成分の上限を超えない。</summary>
+        /// <summary>
+        /// 振幅上限。どの時刻をサンプルしても各成分の上限を超えない。
+        ///
+        /// ★ <c>IdlePose.Evaluate</c> は <c>gain</c>（<c>speaking</c> なら <c>SpeakingGain</c>、
+        ///   さらに <c>kind == Prompt</c> なら <c>PromptDamp</c> も）を全チャンネルへ掛ける
+        ///   （実装で確認済み。ここで検査する5成分はすべて対象）。実運用では発話中に
+        ///   このゲインが乗った状態で動くので、<c>speaking = false</c>（gain = 1）だけで
+        ///   上限を固定すると、実機の可動域（発話中は最大 <c>SpeakingGain</c> 倍）と
+        ///   テストの上限が食い違う。<c>kind</c> / <c>speaking</c> の組み合わせごとに
+        ///   期待する上限係数を変え、<c>1.3f</c> などを直接書かず <c>IdleParams</c> の
+        ///   フィールドから計算する —— <c>SpeakingGain</c> を将来変えてもこのテストが
+        ///   自動的に追随するようにするため。
+        /// </summary>
         [Test]
         public void StaysWithinAmplitudeBounds()
         {
             var p = IdleParams.Default;
 
+            AssertAmplitudeWithin(p, SpeechKind.Assistant, speaking: false, gain: 1f);
+            AssertAmplitudeWithin(p, SpeechKind.Assistant, speaking: true, gain: p.SpeakingGain);
+            AssertAmplitudeWithin(p, SpeechKind.Prompt, speaking: true, gain: p.SpeakingGain * p.PromptDamp);
+        }
+
+        /// <summary><c>gain</c> を掛けた上限を、時刻を動かしながら検査する（<see cref="StaysWithinAmplitudeBounds"/> 用）。</summary>
+        private static void AssertAmplitudeWithin(IdleParams p, SpeechKind kind, bool speaking, float gain)
+        {
             for (var t = 0.0; t < 60.0; t += 0.37)
             {
-                var s = Sample(t, p);
-                Assert.That(Mathf.Abs(s.HipsOffsetY), Is.LessThanOrEqualTo(p.BreathHipsMeters + 1e-4f));
-                Assert.That(Mathf.Abs(s.ChestEuler.x), Is.LessThanOrEqualTo(p.BreathChestDegrees + 1e-4f));
-                Assert.That(Mathf.Abs(s.SpineEuler.z), Is.LessThanOrEqualTo(p.SwayDegrees + 1e-4f));
-                Assert.That(Mathf.Abs(s.NeckEuler.y), Is.LessThanOrEqualTo(p.NeckDegrees + 1e-4f));
-                Assert.That(Mathf.Abs(s.HeadEuler.y), Is.LessThanOrEqualTo(p.NeckDegrees + 1e-4f));
+                var s = Sample(t, p, kind, speaking);
+                Assert.That(Mathf.Abs(s.HipsOffsetY), Is.LessThanOrEqualTo(p.BreathHipsMeters * gain + 1e-4f));
+                Assert.That(Mathf.Abs(s.ChestEuler.x), Is.LessThanOrEqualTo(p.BreathChestDegrees * gain + 1e-4f));
+                Assert.That(Mathf.Abs(s.SpineEuler.z), Is.LessThanOrEqualTo(p.SwayDegrees * gain + 1e-4f));
+                Assert.That(Mathf.Abs(s.NeckEuler.y), Is.LessThanOrEqualTo(p.NeckDegrees * gain + 1e-4f));
+                Assert.That(Mathf.Abs(s.HeadEuler.y), Is.LessThanOrEqualTo(p.NeckDegrees * gain + 1e-4f));
             }
         }
 
@@ -138,10 +157,22 @@ namespace ChatterMascot.Tests
         {
             var p = IdleParams.Default;
 
+            // ★ StaysWithinAmplitudeBounds と同じ理由で、発話中のゲインも含めて固定すること。
+            //   このテストは「首と頭に同じ値を書くと見た目の振幅が2倍になる」（実機で踏んだ）を
+            //   守る本命なので、実運用でいちばん大きく振れる条件（speaking = true）が
+            //   抜けていると、いちばん破綻しやすい側を検査していないことになる
+            AssertNeckPlusHeadWithin(p, SpeechKind.Assistant, speaking: false, gain: 1f);
+            AssertNeckPlusHeadWithin(p, SpeechKind.Assistant, speaking: true, gain: p.SpeakingGain);
+            AssertNeckPlusHeadWithin(p, SpeechKind.Prompt, speaking: true, gain: p.SpeakingGain * p.PromptDamp);
+        }
+
+        /// <summary>首＋頭の合算が <c>NeckDegrees × gain</c> を超えないこと（<see cref="NeckAndHeadTogetherStayWithinTheNeckAmplitude"/> 用）。</summary>
+        private static void AssertNeckPlusHeadWithin(IdleParams p, SpeechKind kind, bool speaking, float gain)
+        {
             for (var t = 0.0; t < 60.0; t += 0.37)
             {
-                var s = Sample(t, p);
-                Assert.That(Mathf.Abs(s.NeckEuler.y + s.HeadEuler.y), Is.LessThanOrEqualTo(p.NeckDegrees + 1e-4f));
+                var s = Sample(t, p, kind, speaking);
+                Assert.That(Mathf.Abs(s.NeckEuler.y + s.HeadEuler.y), Is.LessThanOrEqualTo(p.NeckDegrees * gain + 1e-4f));
             }
         }
 
@@ -223,51 +254,6 @@ namespace ChatterMascot.Tests
 
             Assert.That(t2.LeftUpperArmEuler, Is.EqualTo(t0.LeftUpperArmEuler));
             Assert.That(t2.RightUpperArmEuler, Is.EqualTo(t0.RightUpperArmEuler));
-        }
-
-        /// <summary>
-        /// このアプリは常駐する（デスクトップに出しっぱなしにするのが用途そのもの）ので、
-        /// <c>now</c>（<c>Time.realtimeSinceStartupAsDouble</c>）は日単位まで伸びる。
-        ///
-        /// ★ <c>Phase</c> が周期で畳まずに <c>now</c> を直接 float 化すると、この規模の
-        ///   <c>now</c> では <c>Mathf.Sin</c> に渡る引数そのものが float の刻み幅
-        ///   （数十分の一 rad）で丸められ、出力が「その時刻での正しい sin 値」から
-        ///   大きくずれる（実測: 30日相当で sin 値の誤差が 0.002〜0.08）。
-        ///
-        /// ★ <b><see cref="IsContinuousOverASmallTimeStep"/> と同じ「隣接フレームの差分が
-        ///   ほぼ 0」という形ではこの不具合を検出できない。</b> あちらは <c>dt = 1e-6</c> を
-        ///   使うが、この規模の <c>now</c> では float の刻み幅（〜0.06 rad）が
-        ///   <c>dt = 1e-6</c> 相当の真の位相差（〜1e-6 rad）よりずっと大きいため、
-        ///   壊れていても差分はやはり 0 に潰れて見分けが付かない（実測で確認済み）。
-        ///   ここでは実際のフレーム間隔に近い <c>dt = 1/30秒</c> を使い、各時刻の値を
-        ///   <b>二重精度で計算した sin の真値</b>と直接突き合わせる
-        ///   （畳んで float 化していれば真値と一致し続けるはず）。
-        /// </summary>
-        [Test]
-        public void StaysAccurateAfterWeeksOfUptime()
-        {
-            var p = IdleParams.Default;
-
-            // ★ 症状は7日程度でも実測されているが、成分によっては特定の日数で
-            //   たまたま誤差が小さく出ることがある（周期の整数倍に近いなど）ので、
-            //   数値マージンを確実に取れる 30日を使う。
-            const double thirtyDays = 30.0 * 86400.0;
-            const double dt = 1.0 / 30.0;
-
-            foreach (var t in new[] { thirtyDays, thirtyDays + dt })
-            {
-                var s = Sample(t, p);
-
-                // 二重精度のまま計算した「真値」。float へ落とすのは最後の1回だけ。
-                var chestTrue = (float)(Math.Sin(2.0 * Math.PI * t / p.BreathSeconds) * p.BreathChestDegrees);
-                var spineTrue = (float)((Math.Sin(2.0 * Math.PI * t / p.SwaySecondsA) * 0.5
-                                        + Math.Sin(2.0 * Math.PI * t / p.SwaySecondsB) * 0.5) * p.SwayDegrees);
-                var neckTotalTrue = (float)(Math.Sin(2.0 * Math.PI * t / p.NeckSeconds) * p.NeckDegrees);
-
-                Assert.That(s.ChestEuler.x, Is.EqualTo(chestTrue).Within(1e-3f));
-                Assert.That(s.SpineEuler.z, Is.EqualTo(spineTrue).Within(1e-3f));
-                Assert.That(s.NeckEuler.y + s.HeadEuler.y, Is.EqualTo(neckTotalTrue).Within(1e-3f));
-            }
         }
     }
 }

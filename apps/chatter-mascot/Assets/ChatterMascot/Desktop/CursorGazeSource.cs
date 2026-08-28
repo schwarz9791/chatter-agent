@@ -119,7 +119,12 @@ namespace ChatterMascot.Desktop
 
             // ★ 毎フレーム引かないこと。TryRead は LateUpdate から 30回/秒 呼ばれる。
             //   FindFirstObjectByType はシーン全体の走査で、常駐アプリの電力予算に直接効く
-            _controller = Object.FindFirstObjectByType<UniWindowController>();
+            // ★ FindObjectsInactive.Include を落とさないこと。UniWindowController を載せた
+            //   GameObject が起動時に非アクティブだと _controller が null のまま Bind が終わり、
+            //   CursorProvider は登録されるのに TryRead が常に null を返す。TryRead は
+            //   _controller == null で早期 return するので TryLogOnce にも到達せず、
+            //   20秒警告を含めて原因を示すログが1行も残らない
+            _controller = Object.FindFirstObjectByType<UniWindowController>(FindObjectsInactive.Include);
             _character = character;
             _bindTime = Time.realtimeSinceStartup;
             character.CursorProvider = TryRead;

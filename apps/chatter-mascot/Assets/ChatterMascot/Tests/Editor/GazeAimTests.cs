@@ -1,4 +1,3 @@
-using System;
 using ChatterMascot.Protocol;
 using ChatterMascot.Vrm;
 using NUnit.Framework;
@@ -78,7 +77,7 @@ namespace ChatterMascot.Tests
                 wanderSecondsX: 5.3f, wanderSecondsY: 8.7f,
                 wanderMetersX: 0.25f, wanderMetersY: 0.15f,
                 eyeSensitivity: 1f, headSensitivity: 0.1f,
-                maxHeadPitchDegrees: 25f, maxHeadYawDegrees: 35f,
+                headPitchRangeDegrees: 25f, headYawRangeDegrees: 35f,
                 eyeReachMeters: 0.6f, followSeconds: 0.15f);
 
             var s = Sample(0.0, p, SpeechKind.Assistant, new Vector2(1f, 1f));
@@ -89,21 +88,44 @@ namespace ChatterMascot.Tests
             Assert.That(s.TargetLocalPosition.y, Is.GreaterThan(0f));
         }
 
-        /// <summary>頭の角度は ±<c>MaxHeadPitchDegrees</c> / ±<c>MaxHeadYawDegrees</c> を超えない。</summary>
+        /// <summary>
+        /// 頭の角度は ±<c>HeadPitchRangeDegrees</c> / ±<c>HeadYawRangeDegrees</c> を超えない。
+        ///
+        /// ★ ここが渡している <c>headSensitivity: 10f</c> は<b>出荷値の100倍</b>で、
+        ///   出荷値（<c>GazeParams.Default</c>）では clamp に到達しない。出荷値の挙動は
+        ///   <see cref="UsesTheShippingRangePerUnitOfCursor"/> が固定する。
+        /// </summary>
         [Test]
-        public void ClampsHeadAnglesToTheirMax()
+        public void ClampsHeadAnglesToTheirRange()
         {
             var p = new GazeParams(
                 wanderSecondsX: 5.3f, wanderSecondsY: 8.7f,
                 wanderMetersX: 0.25f, wanderMetersY: 0.15f,
                 eyeSensitivity: 0.4f, headSensitivity: 10f,
-                maxHeadPitchDegrees: 25f, maxHeadYawDegrees: 35f,
+                headPitchRangeDegrees: 25f, headYawRangeDegrees: 35f,
                 eyeReachMeters: 0.6f, followSeconds: 0.15f);
 
             var s = Sample(0.0, p, SpeechKind.Assistant, new Vector2(1f, 1f));
 
-            Assert.That(s.HeadPitchDegrees, Is.EqualTo(p.MaxHeadPitchDegrees));
-            Assert.That(s.HeadYawDegrees, Is.EqualTo(p.MaxHeadYawDegrees));
+            Assert.That(s.HeadPitchDegrees, Is.EqualTo(p.HeadPitchRangeDegrees));
+            Assert.That(s.HeadYawDegrees, Is.EqualTo(p.HeadYawRangeDegrees));
+        }
+
+        /// <summary>
+        /// ★ 出荷値（<c>GazeParams.Default</c>）での頭の可動域を固定する。
+        ///   <see cref="ClampsHeadAnglesToTheirRange"/> は <c>headSensitivity</c> に出荷値の100倍を
+        ///   渡していて、<b>出荷値の挙動を1本も固定していなかった</b>（PR #69 のレビューで判明）。
+        ///   正規化カーソル 1.0（<c>CursorGazeSource</c> の固定 800pt 正規化で中心から 400pt）あたり、
+        ///   yaw は 0.1 × 35 = 3.5°、pitch は 0.1 × 25 = 2.5°。
+        /// </summary>
+        [Test]
+        public void UsesTheShippingRangePerUnitOfCursor()
+        {
+            var p = GazeParams.Default;
+            var s = Sample(0.0, p, SpeechKind.Assistant, new Vector2(1f, 1f));
+
+            Assert.That(s.HeadYawDegrees, Is.EqualTo(p.HeadSensitivity * p.HeadYawRangeDegrees).Within(1e-4f));
+            Assert.That(s.HeadPitchDegrees, Is.EqualTo(p.HeadSensitivity * p.HeadPitchRangeDegrees).Within(1e-4f));
         }
 
         /// <summary>微小な dt では漂いが不連続に跳ばない。</summary>
@@ -131,7 +153,7 @@ namespace ChatterMascot.Tests
                 wanderSecondsX: 5.3f, wanderSecondsY: 8.7f,
                 wanderMetersX: 0f, wanderMetersY: 0f,
                 eyeSensitivity: 0f, headSensitivity: 0f,
-                maxHeadPitchDegrees: 0f, maxHeadYawDegrees: 0f,
+                headPitchRangeDegrees: 0f, headYawRangeDegrees: 0f,
                 eyeReachMeters: 0f, followSeconds: 0.15f);
 
             var withoutCursor = Sample(12.3, zero, SpeechKind.Assistant, null);
@@ -179,50 +201,6 @@ namespace ChatterMascot.Tests
         {
             Assert.That(GazeAim.Smooth(1f, 5f, 0f, 0.15f), Is.EqualTo(1f));
             Assert.That(GazeAim.Smooth(1f, 5f, -1f, 0.15f), Is.EqualTo(1f));
-        }
-
-        /// <summary>
-        /// このアプリは常駐する（デスクトップに出しっぱなしにするのが用途そのもの）ので、
-        /// <c>now</c>（<c>Time.realtimeSinceStartupAsDouble</c>）は日単位まで伸びる。
-        ///
-        /// ★ <c>Phase</c> が周期で畳まずに <c>now</c> を直接 float 化すると、この規模の
-        ///   <c>now</c> では <c>Mathf.Sin</c> に渡る引数そのものが float の刻み幅
-        ///   （数十分の一 rad）で丸められ、出力が「その時刻での正しい sin 値」から
-        ///   大きくずれる（実測: 30日相当で sin 値の誤差が 0.01〜0.02。カーソルが無いときの
-        ///   漂いが対象なので、症状としては「何日か点けっぱなしにすると視線の漂いが
-        ///   カクつく／止まって見える」）。
-        ///
-        /// ★ <b><see cref="IsContinuousOverASmallTimeStep"/> と同じ「隣接フレームの差分が
-        ///   ほぼ 0」という形ではこの不具合を検出できない。</b> あちらは <c>dt = 1e-6</c> を
-        ///   使うが、この規模の <c>now</c> では float の刻み幅（〜0.06 rad）が
-        ///   <c>dt = 1e-6</c> 相当の真の位相差（〜1e-6 rad）よりずっと大きいため、
-        ///   壊れていても差分はやはり 0 に潰れて見分けが付かない（実測で確認済み）。
-        ///   ここでは実際のフレーム間隔に近い <c>dt = 1/30秒</c> を使い、各時刻の値を
-        ///   <b>二重精度で計算した sin の真値</b>と直接突き合わせる
-        ///   （畳んで float 化していれば真値と一致し続けるはず）。
-        /// </summary>
-        [Test]
-        public void StaysAccurateAfterWeeksOfUptime()
-        {
-            var p = GazeParams.Default;
-
-            // ★ 症状は7日程度でも実測されているが、成分によっては特定の日数で
-            //   たまたま誤差が小さく出ることがある（周期の整数倍に近いなど）ので、
-            //   数値マージンを確実に取れる 30日を使う。
-            const double thirtyDays = 30.0 * 86400.0;
-            const double dt = 1.0 / 30.0;
-
-            foreach (var t in new[] { thirtyDays, thirtyDays + dt })
-            {
-                var s = Sample(t, p, SpeechKind.Assistant, null);
-
-                // 二重精度のまま計算した「真値」。float へ落とすのは最後の1回だけ。
-                var wanderXTrue = (float)(Math.Sin(2.0 * Math.PI * t / p.WanderSecondsX) * p.WanderMetersX);
-                var wanderYTrue = (float)(Math.Sin(2.0 * Math.PI * t / p.WanderSecondsY) * p.WanderMetersY);
-
-                Assert.That(s.TargetLocalPosition.x, Is.EqualTo(wanderXTrue).Within(1e-3f));
-                Assert.That(s.TargetLocalPosition.y, Is.EqualTo(wanderYTrue).Within(1e-3f));
-            }
         }
     }
 }

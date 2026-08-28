@@ -1,4 +1,3 @@
-using System;
 using ChatterMascot.Protocol;
 using UnityEngine;
 
@@ -30,11 +29,34 @@ namespace ChatterMascot.Vrm
         /// <summary>カーソル方向へ頭を向ける感度。cc-mascot の既定値（0.1）を踏襲</summary>
         public readonly float HeadSensitivity;
 
-        /// <summary>頭の上下方向の可動域上限（度）。cc-mascot の既定値（25）を踏襲</summary>
-        public readonly float MaxHeadPitchDegrees;
+        /// <summary>
+        /// 正規化カーソルの縦成分 1.0 あたり何度、頭を上下に向けるかの<b>係数</b>
+        /// （<see cref="HeadSensitivity"/> と掛け合わさる）。<b>同時に clamp の上限
+        /// （±この値）</b> でもある。cc-mascot の既定値（25）を踏襲。
+        ///
+        /// ★ <b>出荷値（<c>HeadSensitivity = 0.1</c>）では、実効の可動域を決めるのは
+        ///   clamp ではなく<b>ディスプレイの広さ</b>。</b> clamp に到達するには正規化カーソル
+        ///   <c>|c| &gt;= 10</c>（<c>CursorGazeSource</c> の固定 800pt 正規化で中心から約 4000pt）が
+        ///   要る。実測では画面の右端で <c>|c| = 8.29</c>（＝ヨー約 29°）まで届いていて
+        ///   （<c>docs/mascot.md</c>「カーソルの正規化をウィンドウの大きさで割らない」）、
+        ///   <b>clamp まで2割ほどしか余裕がない</b>。
+        /// ★ <b>だから clamp は死んでいない。</b> より広い構成（マルチディスプレイなど）では
+        ///   実際に働き、「追従」ではなく「最大まで曲げて固まる」のを防ぐ。
+        ///   <b>この値を下げると、いま追従している範囲がそのまま頭打ちになる</b>ので、
+        ///   「上限だから安全側」と考えて下げないこと。
+        /// </summary>
+        public readonly float HeadPitchRangeDegrees;
 
-        /// <summary>頭の左右方向の可動域上限（度）。cc-mascot の既定値（35）を踏襲</summary>
-        public readonly float MaxHeadYawDegrees;
+        /// <summary>
+        /// 正規化カーソルの横成分 1.0 あたり何度、頭を左右に向けるかの<b>係数</b>
+        /// （<see cref="HeadSensitivity"/> と掛け合わさる）。<b>同時に clamp の上限
+        /// （±この値）</b> でもある。cc-mascot の既定値（35）を踏襲。
+        ///
+        /// ★ <see cref="HeadPitchRangeDegrees"/> と同じく、出荷値（<c>HeadSensitivity = 0.1</c>）
+        ///   では実効の可動域を決めるのは clamp ではなくディスプレイの広さ（実測で画面右端が
+        ///   ヨー約 29°、clamp は 35°）。詳細は <see cref="HeadPitchRangeDegrees"/> の doc を参照。
+        /// </summary>
+        public readonly float HeadYawRangeDegrees;
 
         /// <summary>目標位置（<c>TargetLocalPosition</c>）の長さの上限（メートル）</summary>
         public readonly float EyeReachMeters;
@@ -49,8 +71,8 @@ namespace ChatterMascot.Vrm
             float wanderMetersY,
             float eyeSensitivity,
             float headSensitivity,
-            float maxHeadPitchDegrees,
-            float maxHeadYawDegrees,
+            float headPitchRangeDegrees,
+            float headYawRangeDegrees,
             float eyeReachMeters,
             float followSeconds)
         {
@@ -60,8 +82,8 @@ namespace ChatterMascot.Vrm
             WanderMetersY = wanderMetersY;
             EyeSensitivity = eyeSensitivity;
             HeadSensitivity = headSensitivity;
-            MaxHeadPitchDegrees = maxHeadPitchDegrees;
-            MaxHeadYawDegrees = maxHeadYawDegrees;
+            HeadPitchRangeDegrees = headPitchRangeDegrees;
+            HeadYawRangeDegrees = headYawRangeDegrees;
             EyeReachMeters = eyeReachMeters;
             FollowSeconds = followSeconds;
         }
@@ -73,8 +95,8 @@ namespace ChatterMascot.Vrm
             wanderMetersY: 0.15f,
             eyeSensitivity: 0.4f,
             headSensitivity: 0.1f,
-            maxHeadPitchDegrees: 25f,
-            maxHeadYawDegrees: 35f,
+            headPitchRangeDegrees: 25f,
+            headYawRangeDegrees: 35f,
             eyeReachMeters: 0.6f,
             followSeconds: 0.15f);
     }
@@ -119,7 +141,7 @@ namespace ChatterMascot.Vrm
     /// |---|---|---|
     /// | <c>kind == Prompt</c> | 常に <see cref="Vector3.zero"/>（cursor の有無に関わらず） | 0 / 0 |
     /// | <c>cursor == null</c> | sin 2本で漂う | 0 / 0 |
-    /// | <c>cursor != null</c> | カーソル方向。<c>EyeSensitivity</c> を掛け <c>EyeReachMeters</c> で clamp | cursor 成分 × 感度を ±Max で clamp |
+    /// | <c>cursor != null</c> | カーソル方向。<c>EyeSensitivity</c> を掛け <c>EyeReachMeters</c> で clamp | cursor 成分 × 感度 × Range を ±Range で clamp |
     /// </summary>
     public static class GazeAim
     {
@@ -143,18 +165,18 @@ namespace ChatterMascot.Vrm
                 var target = new Vector3(c.x, c.y, 0f) * p.EyeSensitivity;
                 target = Vector3.ClampMagnitude(target, p.EyeReachMeters);
 
-                var pitch = Mathf.Clamp(c.y * p.HeadSensitivity * p.MaxHeadPitchDegrees,
-                    -p.MaxHeadPitchDegrees, p.MaxHeadPitchDegrees);
-                var yaw = Mathf.Clamp(c.x * p.HeadSensitivity * p.MaxHeadYawDegrees,
-                    -p.MaxHeadYawDegrees, p.MaxHeadYawDegrees);
+                var pitch = Mathf.Clamp(c.y * p.HeadSensitivity * p.HeadPitchRangeDegrees,
+                    -p.HeadPitchRangeDegrees, p.HeadPitchRangeDegrees);
+                var yaw = Mathf.Clamp(c.x * p.HeadSensitivity * p.HeadYawRangeDegrees,
+                    -p.HeadYawRangeDegrees, p.HeadYawRangeDegrees);
 
                 return new GazeSample(target, pitch, yaw);
             }
 
             // 自律的な漂い: 周期の違う2本の sin（X/Y）を独立に動かして非周期に見せる。
             // 頭の微動は IdlePose の首（NeckEuler / HeadEuler）が持つので、ここは 0 のまま。
-            var wanderX = Mathf.Sin(Phase(now, p.WanderSecondsX)) * p.WanderMetersX;
-            var wanderY = Mathf.Sin(Phase(now, p.WanderSecondsY)) * p.WanderMetersY;
+            var wanderX = Mathf.Sin(Oscillator.Phase(now, p.WanderSecondsX)) * p.WanderMetersX;
+            var wanderY = Mathf.Sin(Oscillator.Phase(now, p.WanderSecondsY)) * p.WanderMetersY;
             return new GazeSample(new Vector3(wanderX, wanderY, 0f), 0f, 0f);
         }
 
@@ -173,23 +195,6 @@ namespace ChatterMascot.Vrm
 
             var t = 1f - Mathf.Exp(-deltaTime / tau);
             return Mathf.Lerp(current, target, t);
-        }
-
-        /// <summary>
-        /// 2π t / period。周期が 0 以下なら止まっているものとして 0 を返す。
-        ///
-        /// ★ <b>float へ落とす前に周期で畳むこと。</b> このアプリは常駐するので
-        ///   <c>now</c>（<c>Time.realtimeSinceStartupAsDouble</c>）は日単位まで伸びる。
-        ///   畳まずに <c>(float)(2π·now/period)</c> とすると、7日で位相が 95万に達し、
-        ///   そこでの float の刻み幅（約 0.0625 rad ＝ 3.6°）が1フレームぶんの位相差を
-        ///   上回る。症状は「何日か点けっぱなしにすると視線の漂いがカクつく／止まって見える」で、
-        ///   <b>エラーは出ない</b>。
-        /// </summary>
-        private static float Phase(double now, float periodSeconds)
-        {
-            if (periodSeconds <= 0f) return 0f;
-            var wrapped = now - Math.Floor(now / periodSeconds) * periodSeconds;
-            return (float)(2.0 * Math.PI * wrapped / periodSeconds);
         }
     }
 }

@@ -63,6 +63,18 @@ namespace ChatterMascot.Vrm
                         var vrma = await ParseAsync(loaded, ct);
                         if (vrma == null) continue;
 
+                        // ★ await の後にキャンセルと破棄を再確認すること。ParseAsync が返るまでの間に
+                        //   VrmCharacter.OnDisable（Cancel → Dispose → _idle = null）が走ると、
+                        //   破棄済みのつもりのインスタンスへ VRMA が組み込まれる。Dispose は _disposed で
+                        //   no-op になり、_idle は null なので所有者からも辿れず、VRMA の GameObject が
+                        //   破棄済みモデルを駆動したままリークする。
+                        // ★ ここで捨てるのは自分の責任。まだ Adopt していないので所有者が居ない
+                        if (_disposed || ct.IsCancellationRequested)
+                        {
+                            UnityEngine.Object.Destroy(vrma.gameObject);
+                            return;
+                        }
+
                         Adopt(target, parent, vrma);
                         // ★ 採った候補を出すこと。VrmStage と同じ理由 ——
                         //   「いま何が再生されているか」がこの1行でしか分からない
@@ -98,6 +110,12 @@ namespace ChatterMascot.Vrm
         /// ★ <b>Animation コンポーネントの有無も、この時点（＝ <c>target.Runtime</c> へ組み込む前）で
         ///   確認する。</b> <see cref="Adopt"/> で組み込んでから気づくと、途中まで進めた配線
         ///   （<c>VrmAnimation</c> への代入・シーンへの reparent）を巻き戻す必要が出る。
+        ///
+        /// ★ <b>引数の <paramref name="ct"/> は本体で一度も参照しない。</b> <c>awaitCaller.Run(...)</c> も
+        ///   <c>loader.LoadAsync(awaitCaller)</c> も <c>CancellationToken</c> を取らないため、
+        ///   <b>キャンセル済みでもパースは最後まで走り切るのが常態</b>である。<see cref="LoadAsync"/> が
+        ///   <c>Adopt</c> の直前で <c>_disposed</c> / キャンセルを再確認しているのは、狭い競合への
+        ///   保険ではなく、<b>読み込み中に終了すれば普通に通る経路</b>だからである。
         /// </summary>
         private static async Task<Vrm10AnimationInstance> ParseAsync(LoadedBytes loaded, CancellationToken ct)
         {

@@ -151,11 +151,20 @@ namespace ChatterMascot.Vrm
             if (env.HasUserConfigDirectory)
             {
                 var directory = Join(RuntimeDirectory(env), spec.UserDirectory);
-                var files = new List<string>(env.ListFiles(directory, spec.Pattern) ?? Array.Empty<string>());
-                // ★ Ordinal で並べること。既定の比較はカルチャ依存で、
-                //   マシンによって「どのモデルが出るか」が変わる
-                files.Sort(StringComparer.Ordinal);
-                foreach (var file in files) Add(result, AssetSource.UserConfig, env, file);
+                // ★ Join は基準が空なら null を返すようになった。ここで弾かずに
+                //   ListFiles(null, ...) を呼んでしまうと、注入された実装が null を
+                //   どう扱うかに結果が左右される（AssetEnvFactory.SafeListFiles は
+                //   Directory.Exists(null) で false になるので実害は無いが、それは
+                //   この実装の詳細であって契約ではない）。directory が無ければこの段ごと
+                //   スキップする
+                if (!string.IsNullOrEmpty(directory))
+                {
+                    var files = new List<string>(env.ListFiles(directory, spec.Pattern) ?? Array.Empty<string>());
+                    // ★ Ordinal で並べること。既定の比較はカルチャ依存で、
+                    //   マシンによって「どのモデルが出るか」が変わる
+                    files.Sort(StringComparer.Ordinal);
+                    foreach (var file in files) Add(result, AssetSource.UserConfig, env, file);
+                }
             }
 
             Add(result, AssetSource.StreamingAssets, env, Join(env.StreamingAssetsPath, spec.BundledFile));
@@ -172,6 +181,13 @@ namespace ChatterMascot.Vrm
         ///
         /// ★ <b><c>IsNullOrWhiteSpace</c> にしないこと。</b> TS 側は <c>" "</c> を通すので、
         ///   そこで bash hook / Node / C# の3実装が静かにズレる。
+        ///
+        /// ★ <b>ここは TS 側とわざと違う。</b> <c>Join</c> は基準（<c>HomeDirectory</c> など）が
+        ///   空だと <c>null</c> を返すので、<c>HomeDirectory</c> が空のときこの関数も
+        ///   <c>null</c>（または空）を返しうる。<c>getRuntimeDir</c> が同条件で何を返すかは
+        ///   ここでは断定しない —— こちら側は「相対パスを作るくらいなら候補を出さない」を選んだ、
+        ///   という意図的な差として書いてある。次に触る人が「TS に合わせる」つもりで
+        ///   相対パスを返す実装に戻さないこと。
         /// </summary>
         public static string RuntimeDirectory(AssetEnv env)
         {
@@ -199,10 +215,18 @@ namespace ChatterMascot.Vrm
         /// ★ <b><c>Path.Combine</c> を使わないこと。</b> 区切り文字が実行マシン依存になり、
         ///   EditMode テストの期待値が Windows で崩れる。Unity 自身も
         ///   <c>persistentDataPath</c> を <c>/</c> で返す。
+        ///
+        /// ★ <b>空の基準からパスを作らないこと。</b> 左辺が空のときに右辺をそのまま返すと、
+        ///   絶対パスのつもりの候補が<b>カレントディレクトリ基準の相対パス</b>に化ける。
+        ///   <c>VrmProbe.ProbeEnv</c> が段を潰すために立てる
+        ///   <c>PersistentDataPath = ""</c>（「この段を消す」つもりの1行）が、
+        ///   <b>消すどころか基準を変えるだけ</b>になっていた（PR #69 の再レビューで判明。
+        ///   プロジェクトルートに <c>model.vrm</c> を置いて再現済み）。
+        ///   <see cref="Add"/> の空文字チェックと同じ思想を、こちらの左辺にも当てる。
         /// </summary>
         private static string Join(string left, string right)
         {
-            if (string.IsNullOrEmpty(left)) return right;
+            if (string.IsNullOrEmpty(left)) return null;
             if (string.IsNullOrEmpty(right)) return left;
             return left.TrimEnd('/', '\\') + "/" + right.TrimStart('/', '\\');
         }

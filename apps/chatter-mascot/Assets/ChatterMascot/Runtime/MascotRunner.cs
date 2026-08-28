@@ -80,6 +80,29 @@ namespace ChatterMascot
         private const float TickIntervalSeconds = 1f;
 
         private PlaybackState _state;
+
+        /// <summary>
+        /// #59 の <see cref="ChatterMascot.Playback.SpeakingView"/> が読む「いま再生中の
+        /// <c>kind</c> / <c>emotion</c>」だけを返す。<b>読むだけ</b>。
+        /// まだ <c>Start</c> 前で <c>_state</c> が <c>null</c> でも、
+        /// <see cref="ChatterMascot.Playback.SpeakingView.TryRead"/> は <c>state == null</c> を
+        /// 許容するので、そのまま <c>false</c> が返る（例外にはならない）。
+        ///
+        /// ★ <b><see cref="PlaybackState"/> を丸ごと公開しないこと。</b> 以前は
+        ///   <c>public PlaybackState State</c> で公開していたが、<c>PlaybackState</c> のフィールドは
+        ///   すべて <c>public</c> で、<c>Items</c> は可変 <c>Dictionary</c>、<c>Seen</c> /
+        ///   <c>SeenOrder</c> は二重読み上げ防止の要 —— 将来の消費者が1行書き換えるだけで
+        ///   <c>CLAUDE.md</c>「絶対に守ること」6（<c>seq</c> / <c>epoch</c> の契約）を静かに破れる。
+        ///   必要な情報だけを返すメソッドにして、書き込む口を作らない。
+        /// ★ <b>書き込むと <see cref="PlaybackQueue"/> の状態機械が壊れる。</b>
+        ///   コマンドを増やす口ではない。
+        /// ★ <b>#58 が <c>SpeakingSet</c> を入れたら消せる。</b>
+        /// </summary>
+        public bool TryGetSpeaking(out SpeechKind kind, out Emotion emotion)
+        {
+            return SpeakingView.TryRead(_state, out kind, out emotion);
+        }
+
         private SpeechClient _client;
         private AudioFetcher _fetcher;
         private ISpeechPlayer _player;

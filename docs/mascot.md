@@ -39,6 +39,25 @@
 合わせる必要がある（→ #25）。VRM のリップシンクと spring bone が入ったら、
 30fps で口の動きが足りるか見直す（→ #17）。`MascotRunner` の Inspector で変えられる。
 
+### #59 時点の実測: フレームレート上限ありでの常駐 CPU
+
+冒頭の「Cube 1個で無制限なら CPU 261%」と対比できる値。**VRM 表示 + VRMA（待機モーション）+
+spring bone + 毎フレームの手続き計算（呼吸・重心移動・視線）を全部載せた状態**で、
+`targetFrameRate = 30` のとき **CPU 14.3%**（実測 n=6、9秒間隔、ウィンドウ 300x480）。
+
+★ **この値は「フレームレート上限が効いている」前提の値。** 上限を外したときにどこまで
+増えるかは測っていない。
+
+視線の中立とフレーミングを直した後に測り直すと **CPU 13.2%**（実測 n=5、9秒間隔、
+ウィンドウ 300x480、`targetFrameRate = 30`）。上の 14.3% は視線の中立とフレーミングを
+直す**前**の値なので、条件が違う2つの数字として並べて読むこと。
+
+ウィンドウの既定サイズは #59 で **250x400 → 300x480** に変更した（縦横比 5:8 は維持）。
+この文書の他の節にある「250x400」の実測値は、変更前に取った記録としてそのまま残してある。
+
+EditMode テストは #59 で件数が増えた（**具体的な件数はここには書かない**——
+件数は変わっていくので `./scripts/test.sh` の `total=` を都度確認すること）。
+
 ### ★ Unity は無音でも macOS の出力デバイスを掴み続ける
 
 常駐アプリなので、実使用時間のほとんどが「無音」になる。そのあいだ Bluetooth の
@@ -270,6 +289,14 @@ macOS の TCC で保護されたフォルダ（`~/Downloads` / `~/Desktop` / `~/
 腕が下りれば差はほぼ消える。**部位ごとに Collider を分けるのは
 [#16](https://github.com/schwarz9791/chatter-agent/issues/16)。**
 
+★ **実際に必要だったのは、Collider の計算式そのものの変更ではなく ControlRig の
+生成順序の修正だった。** #59 実装当初は VRMA を適用しても腕が実際には下りず
+（→「ControlRig は `Vrm10Instance` の transform が単位回転であることを暗黙に前提にしている」）、
+この節の予告は宙に浮いていた。その順序を直して腕が実際に下がって初めて、上の差が
+実機で解消した。半径に使う `extents.z`（奥行き）は腕の上げ下げでは変わらない軸なので、
+**`Renderer.bounds` が姿勢を反映しない問題（→「`SkinnedMeshRenderer.bounds` は姿勢を
+反映しない」）の影響は受けていない**——影響を受けたのは自動フレーミング側（上の節）だけ。
+
 ★ **`hitTestType` を `Opacity`（ピクセルのアルファ判定）にすればシルエットと完全に一致する**が、
 公式が重いと明記している方式で、常駐アプリで毎フレーム走るコストを測り直す必要がある。
 また「掴める領域とドラッグできる領域が定義上ずれない」という現行の規律が崩れる。
@@ -302,12 +329,61 @@ Unity は左手系で「+Z を向いた人物の右手が +X 側」に来るの�
 光が +Z 方向へ進む向きなので、**−Z を向いた面＝カメラ側が照らされる**。
 モデルの正面をカメラへ向ければ、そのまま顔に光が当たる。
 
+### ★ ControlRig は `Vrm10Instance` の transform が単位回転であることを暗黙に前提にしている
+
+**症状**: 待機モーション（VRMA）で**両腕が頭の上に上がったまま**固まる。T ポーズは
+解消しているので「動いている」ようには見える。
+
+**切り分け**: `idle_loop.vrma` のノード階層を直接歩いて t=0 のワールド位置を計算したところ、
+`leftHand y=82.7` < `hips y=90.4` < `leftUpperArm y=133.7` で、**ファイル側は腕を下ろした
+姿勢**だった。つまり適用側の反転。
+
+**原因**: `Vrm10Runtime` は**遅延生成**で、`Vrm10.LoadBytesAsync` も `InitializeAtRuntime` も
+`FinalizeAsync` も `Runtime` に触らない。放っておくと `VrmStage.LateUpdate` の
+`_instance?.Runtime?.SpringBone?.RestoreInitialTransform()` が初回アクセスになり、
+**`FaceCamera`（→「VRM は放っておくと背中が映る」）がモデルを 180° 回した後**に
+ControlRig が作られる。
+
+- `Vrm10ControlBone` は `ControlBone` を**ワールド単位回転**で作る（`ControlBone.position =
+  controlTarget.position` と位置だけ合わせる。`SetParent` も引数1つの overload なので
+  回転が保たれる）＝正規化姿勢は**ワールド軸**で表される
+- 一方 `_initialTargetGlobalRotation = controlTarget.rotation` には**モデルの 180° が入る**
+- `ProcessRecursively` の `Inverse(G) * ControlBone.localRotation * G` が両者を突き合わせるので
+  **Y 軸まわり 180° ぶん食い違い、Z 軸まわりの回転（＝腕の上下）が反転する**。実測した VRMA の
+  上腕は Z 軸まわり約 75°（`quat z ≈ ∓0.6`）なので症状と一致
+
+**手当て**: `VrmStage.Adopt` で `FaceCamera` の**前**に `_ = instance.Runtime;` を置いて、
+回す前に ControlRig を作らせる。
+
+★ **#56 単独では表面化せず、#59 で VRMA / ControlRig を使い始めて初めて出た。**
+`_ = instance.Runtime;` は**副作用の無い行に見えるので、消されると静かに再発する**。
+
+### ★ `SkinnedMeshRenderer.bounds` は姿勢を反映しない（T ポーズの腕幅で測り続ける）
+
+`updateWhenOffscreen == false`（既定）のとき、Unity は**メッシュに焼かれた静的な bounds**
+を transform で変換して返すだけで、**ボーンを動かしても縮まない**。VRM 1.0 はレストポーズが
+T ポーズ必須なので、その幅は**常に「広げた腕」**になる。
+
+★ **`updateWhenOffscreen = true` で直してはいけない。** 毎フレーム CPU スキニングで bounds を
+測り直すことになり、常駐アプリの電力予算を壊す（→「Unity の既定はフレームレート無制限」）。
+**Humanoid のボーン位置から測る**（`VrmBounds.OfBones`）。
+
+実測（同梱 `vita.vrm` + `idle_loop.vrma`、300x480）:
+
+```
+[Mascot] フレーミング: 300x480 aspect=0.625 bounds=(1.54, 1.66, 0.33) distance=2.51 支配軸=水平   ← VRMA 適用前 / Renderer.bounds
+[Mascot] フレーミング: 300x480 aspect=0.625 bounds=(0.62, 1.66, 0.37) distance=1.76 支配軸=垂直   ← VRMA 適用後 / ボーンから測定
+```
+
+幅 1.54m → **0.62m**、距離 2.51 → **1.76**（キャラが約3割大きく映る）、支配軸が
+**水平 → 垂直**。
+
 ### ★ VRM 1.0 は T ポーズ必須。自動フレーミングの支配軸がそれで決まる
 
 `Camera.fieldOfView` は `m_FOVAxisMode` に関わらず**常に垂直 FOV**で、水平は
 `tan(hFov/2) = tan(vFov/2) * aspect` で決まる。**縦長のウィンドウほど横が狭い。**
 
-同梱モデル `vita.vrm` の bounds は **1.39m × 1.73m**（`VrmProbe` の実測）。
+同梱モデル `vita.vrm` の `Renderer.bounds` は **1.39m × 1.73m**（`VrmProbe` の実測）。
 横幅を決めているのは**広げた腕**なので、250x400（5:8）では:
 
 | | 必要距離 | |
@@ -336,6 +412,252 @@ Unity は左手系で「+Z を向いた人物の右手が +X 側」に来るの�
 3D カメラには届かず、Unity にウィンドウリサイズの通知は無いので**ポーリングが唯一の手段**。
 
 ★ **`camera.aspect` に代入しないこと。** 一度代入すると `ResetAspect()` を呼ぶまで固定される。
+
+★ **上の予告どおりにはならなかった（#59 で確認）。** 「腕が下りれば `extents.x` が縮む」は、
+**`Renderer.bounds` が姿勢を反映しない**（→「`SkinnedMeshRenderer.bounds` は姿勢を反映
+しない」）ため外れた。VRMA を適用して実際に腕が下りても、`Renderer.bounds` は**メッシュに
+焼かれた静的な T ポーズの箱のまま**で `extents.x` は縮まない。**支配軸を水平から垂直へ
+動かすには、bounds の測り方自体を Humanoid のボーン位置ベースへ変える必要があった**
+（`VrmBounds.OfBones`）。変えて初めて、幅 1.54m → 0.62m・距離 2.51 → 1.76 で支配軸が
+水平から垂直へ反転した（実測は上の節を参照）。
+
+### ★ T ポーズの腕をフレーミングの箱に入れない（起動直後だけ小さく映るポップ）
+
+**症状**: 起動直後、キャラが小さく映ったあと、VRMA が効いて約2秒後に一段大きくなる
+（実機での指摘）。実機ログ:
+
+```
+[Mascot] フレーミング: … bounds=(1.54, 1.66, 0.33) distance=2.51 支配軸=水平   ← 読み込み直後
+[Mascot] フレーミング: … bounds=(0.62, 1.66, 0.37) distance=1.76 支配軸=垂直   ← VRMA 適用後
+```
+
+**原因**: VRM 1.0 はレストポーズが T ポーズ必須なので、読み込んだ直後（VRMA が非同期で
+効くまでの数百 ms〜数秒の間）は**腕を広げた姿勢のまま bounds を測る**。上の節でボーンベースの
+測定へ切り替えたが、**その測定自体は正しく「そのときの姿勢」を反映してしまう**ので、
+VRMA が適用されて腕が下りるまでのあいだだけ広い箱のまま——**測定方法の話ではなく、
+測定するタイミングの話**。
+
+**手当て**: **腕（`UpperArm` / `LowerArm` / `Hand` と全ての指ボーン）をフレーミングの箱から
+除外する。肩（`Shoulder`）は残す**——胴の幅を決めているのはこちら。
+
+- T ポーズでも腕が下りていても**肩幅で決まるので値がほぼ変わらない** → ポップが消える
+- 支配軸は最初から垂直になる
+- ★ **引き換えに、腕を大きく広げる VRMA を置くとフレームからはみ出しうる。**
+  余白（`boneBoundsMarginMeters`、既定 0.1m）がある程度吸収するが、限界がある
+- ★ **測り直しの窓（読み込み後5秒間・毎秒）は残すこと。** 腕を外しても、髪や裾の
+  spring bone が落ち着くまでの微差はあるし、ユーザーが別の `.vrma` を置いたときの保険になる
+
+### ★ `VrmProbe` の出力は「ランタイムと同じ関数」でなければならない
+
+`Tests/Editor/VrmFramingTests.cs` の定数 `Vita()` は **`VrmProbe.Report` の出力を貼ったもの**で、
+そのことがテスト側にもコメントで書いてある。だから**probe が出す数値の作り方が
+ランタイムからズレると、テストがランタイムのもう作らない箱を守り始める**。
+
+実際にズレていた。上の節でランタイムを `VrmBounds.Of(Renderer)` から
+`VrmBounds.OfBones(ボーン)` へ切り替えたのに、`VrmProbe` は `Of(Renderer)` のまま出し続け、
+そこには「**VrmStage が実行時に使うのと同じ関数の出力**」というコメントが付いたままだった。
+結果、`Vita()` は幅 **1.39m**（T ポーズの腕を含む Renderer bounds）を守り続け、
+`PortraitWindowIsDominatedByTheTPose` は**ランタイムが二度と生成しない箱**に対して
+支配軸＝水平を固定していた。**マージンや `IsFramingBone` の除外リストを壊しても、
+このテスト群は何も検出できない状態だった**（PR #69 のレビューで判明）。
+
+**手当て**: `VrmStage.MeasureBounds` を `public static Bounds MeasureBounds(Vrm10Instance, float)`
+にして、`VrmProbe` から**同じ関数**を呼ぶ。マージンも `VrmStage.DefaultBoneBoundsMarginMeters`
+を共有する。
+
+★ **ボーンを集めるループを probe 側に書き写して「揃える」のでは駄目。** 書き写した瞬間に
+「同じ関数の出力」が「いまのところ同じ結果になる別実装」に変わり、除外リストやマージンを
+片方だけ直したときに黙ってズレる。**probe が出す値は、テストの定数の出所であるという一点で、
+ランタイムと同一の呼び先でなければならない。**
+
+★ **probe はシーンを経由しない**ので `[SerializeField]` の値は取れない。シーンで
+`boneBoundsMarginMeters` を既定から変えたら、probe の出力は実行時の箱と食い違う。
+
+`vita.vrm` の実測（2種類とも出す）:
+
+```
+  bounds size: (1.39, 1.73, 0.55)          ← Renderer.bounds の合成。ランタイムは使わない
+  bounds W/H: 0.803
+  frame bounds size: (0.35, 1.66, 0.31)    ← VrmStage.MeasureBounds。テストに貼るのはこちら
+  frame bounds W/H: 0.214
+```
+
+W/H が 0.214 なので、ウィンドウのアスペクト（300/480 = 0.625）より細い。
+**支配軸は垂直で、ウィンドウの幅を変えてもカメラ距離は動かない**。
+ここが水平に戻ったら、箱に腕が混ざっている。
+
+★ **「同じ関数」でも「同じ箱」にはならない。入力の姿勢も揃える必要がある。**
+`MeasureBounds` を共有しても、それだけでは足りなかった。`VrmStage.Adopt` は
+`FaceCamera`（モデルをカメラへ向けて回す）→ `MeasureBounds` の順で測るのに対し、
+`VrmProbe` は**回さずに測っていた**。ボーンのワールド位置から組む箱は
+ワールド軸に沿うので、回す前と後では別の箱になる。
+
+★ **`size` の一致は証拠にならない。** 180° 回転では AABB の `size` は不変で、
+変わるのは `center` の x / z の符号だけ。`Frame` のログはこれまで `size` しか
+出していなかったので、「実機の1フレーム目が probe の出力と一致した」を
+根拠にしてしまったが、**一致した量がそもそも判別できない量だった**
+（PR #69 の再レビューで判明）。いまはログに `center` も出すようにしてある。
+
+★ **90°の倍数でないヨーでは `size` そのものが変わる。** 点群の AABB は向きに
+依存するので、90° 回るモデルでは x と z が入れ替わるだけでは済まず、
+90°の倍数でないヨーでは符号反転でも済まない。`YawToFaceCamera` は
+`SignedAngle` で任意角を返す（doc に「真横を向いているモデルでも
+正面へ向け直せる」とある）ので、これは仮定ではなく仕様の射程内。
+
+**手当て**: `VrmStage.FaceCamera` を `public static float FaceCamera(Vrm10Instance)`
+にして適用したヨーを返すようにし、`VrmProbe.Report` が `Describe` の直前に
+これを呼んで同じ staging を通してから測るようにした。
+
+`vita.vrm` の実測（staging を揃えた後の出力）:
+
+```
+  faceCamera yaw: 180 度
+  frame bounds size: (0.35, 1.66, 0.31)     ← size は不変（180° 回転のため）
+  frame bounds center: (0.00, 0.80, -0.02)  ← center.z の符号だけ反転した
+```
+
+予測どおり `size` は変わらず、`center` の z の符号だけが変わった
+（`Vita()` は `center` を `(0f, 0.80f, 0.02f)` から `(0f, 0.80f, -0.02f)` に貼り直した）。
+
+**実行時のログと突き合わせた結果**（`-vrm` で `vita.vrm` を明示して起動）:
+
+```
+probe :  frame bounds size (0.35, 1.66, 0.31)  center (0.00, 0.80, -0.02)
+実行時:        bounds (0.35, 1.66, 0.31)       center (0.00, 0.80, -0.02)
+```
+
+★ **`center` が一致したことが証拠になる。** 修正前の probe は `+0.02` を出していた。
+`size` は修正の前後どちらでも一致したので、**`size` だけを見ていた限りこの食い違いは
+永久に見えなかった**。
+
+★ **probe が読むモデルも揃えること（→ [#64](https://github.com/schwarz9791/chatter-agent/issues/64)）。**
+`VrmProbe.ProbeEnv` は `PersistentDataPath` しか潰しておらず、
+`HasUserConfigDirectory` は `OSXEditor` で `true` のままだった。つまり探索順に
+`~/.config/chatter-agent/models/*.vrm` が生きていて、**自分のモデルを置いて動作確認する**
+という普通の使い方をしているだけで、probe が同梱の `vita.vrm` ではなくそちらを測る。
+出力はテストの定数の出所なので、**マシンによって基準値が変わるのに変わったことに気づけない**。
+`ProbeEnv` で `HasUserConfigDirectory = false` も落とす。
+
+★ **潰すのは probe だけ。** アプリ側の探索順（`AssetEnvFactory.Current()`）は変えないので、
+`~/.config/chatter-agent/models/` に置いたモデルはこれまでどおりアプリが読む。
+probe だけを同梱モデルに固定したいのであって、差し替えの仕組みを塞ぎたいわけではない。
+
+★ **環境変数（探索順2）も潰すこと。同じ穴が2つ空いていた。** `AssetEnvFactory.Current()` は
+`Variables = ReadEnvironment()` を入れるので、`HasUserConfigDirectory` を落としただけでは
+`CHATTER_MASCOT_VRM` が生きたままになる。`scripts/run.sh` は開発者のシェルから Unity を
+起動するので、**`export` しっぱなしの値をそのまま継承する**。
+
+★ **こちらのほうが気づきにくい。** ユーザー設定ディレクトリは「置いたファイル」なので
+消せば直るが、環境変数は**シェルに残った状態**で、`env` を見に行くまで存在に気づけない。
+しかも [`SETUP.md`](../apps/chatter-mascot/SETUP.md) は環境変数について
+「**`.app` を Finder から起動すると環境変数は空**（シェルを継承しない）」と書いている ——
+**アプリでは効かないが probe では効く**という、いちばん見つけにくい向きの非対称。
+
+★ **起動引数（探索順1）は残す。** `-vrm <path>` は**その実行に対して明示的に渡すもの**で、
+probe を別モデルで回すための意図的な口。周囲の状態に左右されない点が 2〜4 と決定的に違う。
+
+```console
+# 環境変数は無視される（＝ 探索順2 を潰した）
+$ CHATTER_MASCOT_VRM=/tmp/decoy.vrm ./scripts/run.sh ChatterMascot.EditorTools.VrmProbe.Report
+[VrmProbe] 読みます: .../Assets/StreamingAssets/vita.vrm
+
+# 起動引数は効く（＝ 探索順1 は残す）
+$ ./scripts/run.sh ChatterMascot.EditorTools.VrmProbe.Report -vrm /tmp/decoy.vrm
+[VrmProbe] 読みます: /tmp/decoy.vrm
+```
+
+★ **根っこは「doc が主張していることをコードが実行していなかった」こと。** `ProbeEnv` の doc は
+最初から「ここは**同梱と起動引数だけ**見れば足りる」と書いていたのに、実際に潰していたのは
+`PersistentDataPath`（探索順3）だけだった。**その食い違いが、そのまま2回のバグになった**
+（探索順4 = #64、探索順2 = その直後）。`AssetPath` の探索順の表に段を足したら、
+`ProbeEnv` も見直すこと。
+
+★ **探索順3 も、実は「消えていなかった」（PR #69 の再レビューで判明）。** `env.PersistentDataPath = "";`
+は「この段を消す」つもりの1行だったが、`AssetPath.Join` は
+
+```csharp
+private static string Join(string left, string right)
+{
+    if (string.IsNullOrEmpty(left)) return right;   // ← 左辺が空でも右辺をそのまま返していた
+    ...
+}
+```
+
+だったので、`Join("", "model.vrm")` は **`"model.vrm"`（相対パス）をそのまま返す**。`Add` は
+空文字しか弾かないので、この相対パスは探索順3の候補としてそのまま積まれる。`File.Exists("model.vrm")`
+は Unity のカレントディレクトリ（プロジェクトルート）基準で評価されるので、**同梱（探索順5）より
+上位で当たる**。つまり `PersistentDataPath = ""` は「探索順3を消す」のではなく、
+**「探索順3の基準ディレクトリをプロジェクトルートに変える」だけ**になっていた。
+
+再現（プロジェクトルートに `model.vrm` を置くだけで再現する）:
+
+```console
+$ cp Assets/StreamingAssets/vita.vrm ./model.vrm
+$ ./scripts/run.sh ChatterMascot.EditorTools.VrmProbe.Report
+[VrmProbe] 読みます: model.vrm      ← 同梱ではなくこちらを読む
+```
+
+★ **同じ穴は、`Join` の左辺が空になりうる箇所すべてに空いていた。**
+
+| 箇所 | 左辺が空になる条件 | 直す前の結果 |
+|---|---|---|
+| `Enumerate` 探索順3 | `PersistentDataPath = ""`（`ProbeEnv` が意図的にやる） | 相対 `model.vrm` |
+| `Enumerate` 探索順5 | `StreamingAssetsPath` が空 | 相対 `vita.vrm` |
+| `RuntimeDirectory`（探索順4の基準） | `HomeDirectory` が空かつ `XDG_CONFIG_HOME` 未設定 | 相対 `.config/chatter-agent` |
+| `Add` の `~/` 展開 | `HomeDirectory` が空 | `~/x.vrm` が相対 `x.vrm` になる |
+
+だから `ProbeEnv` 側で段ごとに空文字を弾く小細工を足すのではなく、**`Join` そのものに
+「空の基準からは候補を作らない（左辺が空なら `null` を返す）」を1つ入れて**、4箇所を一括で閉じた。
+
+★ **アプリ側の穴も同時に閉じた。** `AssetEnvFactory.Home()` は例外時に `""` を返す実装なので、
+`HomeDirectory` が空になる経路は probe に限らず実在する。`Join` を直したことで、
+`RuntimeDirectory`（探索順4）と `~/` 展開（起動引数・環境変数）は、アプリ側でも
+相対パスに化けなくなった。
+
+### ★ 同じ `TryGetBoneTransform` が、同一フレーム内で実行順によって別の値を返す
+
+`VrmCharacter`（実行順 0）と `VrmPoseAccent`（11005）が**どちらも視線の原点（目ボーン）を
+測っていて**、両方のコメントが「同じ点を使うことが重要」と宣言していた。だが実際には
+別の点を返していた:
+
+| 呼び出し元 | 実行順 | そのとき目ボーンが持っている姿勢 |
+|---|---|---|
+| `VrmCharacter.LateUpdate` | 0 | **前フレームの** `VrmPoseAccent` が乗せた頭の回転が入ったまま |
+| `VrmPoseAccent.LateUpdate` | 11005 | `Vrm10Instance`（11000）の `ControlRig.Process()` が書き戻した後＝**アクセント抜き** |
+
+目ボーンは頭の子なので、頭の回転で位置が動く。**「同じ関数を呼んでいるから同じ点」は
+実行順を跨ぐと成立しない。**
+
+**手当て**: 測るのは1フレームに1回だけ（実行順 0 の `VrmCharacter.LateUpdate`）にして、
+`TryGetCachedGazeOrigin` でキャッシュを配る。`TryGetGazeOrigin` は `private` に戻す。
+
+★ ズレの大きさ自体は小さい（頭から目までのオフセット約 0.06m × 基準の下向き約 11.4° の sin
+＝ **1cm ほどと見積もれる**。実測はしていない）。直した理由は挙動ではなく、
+**doc が宣言している不変条件がコード上は成立していなかった**こと。
+
+★ キャッシュは「アクセント込み」の位置なので、`VrmPoseAccent` がこれを使うと弱い帰還路になる
+（頭が下を向く → 目が下がる → 次フレームの基準の下向きがわずかに小さくなる）。**負帰還**で
+利得は 0.02 程度と見積もれるので数フレームで収束する —— これも見積もりであって実測ではない。
+**視線が微振動するようならここを疑うこと。**
+
+### ★ シーンの YAML に無い `[SerializeField]` は 0 にならない（が、揃えておくこと）
+
+Unity のデシリアライズは、**シーン YAML にキーが無いフィールドについてフィールド初期化子の
+値をそのまま保つ**。0 で潰されはしない。
+
+実証: `VrmCharacter.neutralAimFraction = 0.6f` も `VrmStage.boneBoundsMarginMeters = 0.1f` も
+`Mascot.unity` に載っていなかったが、実機ビルドでどちらも効いていた（視線の中立は下がり、
+フレーミングは1フレーム目から `distance=1.74` で安定していた）。Inspector にも普通に表示され、
+そこで編集して保存した時点で初めて YAML に載る。
+
+★ **それでも揃えておくこと。** 揃っていないと、いま効いている値がシーンの側なのか初期化子の
+側なのかが YAML を見ただけでは判別できない。「フィールドを足したあとシーンを保存し直して
+いないだけ」の状態が積み上がる。
+
+★ **`SceneFixups` に「調整用の値」の復旧を足さないこと。** `Assign` は `Object` 参照専用で、
+float 版を足すと **`FixAll` を回すたびに Inspector で実機に合わせた値が既定へ戻る**。
+`neutralAimFraction` は「実機で見て調整する口」として置いたものなので、復旧処理が上書きするのは
+目的と正反対になる。**シーンに1行足すだけにする。**
 
 ### ★ シェーダーストリッピングは「読めるのに真っ黒／ピンク」で例外を出さない
 
@@ -440,7 +762,7 @@ foreach (var m in _gltf.Materials)
 プロジェクトができていると、そちらを開いているだけで
 「Unity Editor がこのプロジェクトを開いています」と言われて何も動かせなくなる。
 
-### ★ asmdef の参照は推移しない（3回踏んだ）
+### ★ asmdef の参照は推移しない（4回踏んだ）
 
 `ChatterMascot.Editor` → `ChatterMascot.Vrm` → `VRM10` と繋がっていても、
 Editor 側が UniVRM の型を直接使うなら **Editor の asmdef にも `VRM10` を書く**必要がある。
@@ -452,6 +774,17 @@ Editor 側が UniVRM の型を直接使うなら **Editor の asmdef にも `VRM
 2. `ChatterMascot.Editor` から `VrmProbe` が `UniVRM10` / `UniGLTF` を使う → 同じエラー
 3. `Kirurobo.UniWindowController` を `ChatterMascot.Desktop` へ移したので、
    Editor の references も **`ChatterMascot.Desktop` に差し替え**が要った
+4. `target.Runtime.VrmAnimation = vrma;`（`vrma` は `Vrm10AnimationInstance`）と書いたら
+   `error CS0012: The type 'ITimeControl' is defined in an assembly that is not referenced`。
+   `Vrm10AnimationInstance : MonoBehaviour, IVrm10Animation, ITimeControl` の
+   **`ITimeControl` が `Unity.Timeline`（`Unity.Timeline` アセンブリ）にあり**、
+   `ChatterMascot.Vrm.asmdef` は `VRM10` は参照していても `Unity.Timeline` は
+   参照していなかった。手当ては `references` に `"Unity.Timeline"` を足す
+
+★ **4番目はこれまでの3回と質が違う。** 1〜3は「自分が名前を書いた型」のアセンブリが
+足りないケースだったが、4番目は**自分が名前すら書いていない `ITimeControl`**
+（使っている型が実装している基底インターフェース）で落ちている。`using` を見ても、
+自分が書いた型名を見ても気づけない。**UniVRM の型を新しく1つ触るたびに再発しうる形。**
 
 ### ★ `Kirurobo.UniWindowController` はデスクトップ限定。Runtime から参照しない
 
@@ -617,6 +950,255 @@ prefab にもシーンにも override が無く、`SetWindowSize` を呼ぶの�
 ★ **位置の永続化を自分では入れていない。** ただし **Unity 本体が勝手に永続化している** ——
 `~/Library/Preferences/tech.sukima.chatter-mascot.plist` の `Screenmanager Window Position X/Y`。
 自分で制御していないので、マルチモニタ・解像度変更・画面外からの復帰は #16 でまとめて設計する。
+
+### ★ `UniWindowController.GetCursorPosition()` の Y は bottom-up
+
+**実測で確定**: `CGWarpMouseCursorPosition` で top-down (300, 200) にカーソルを置いて
+起動したところ、ログは `cursor=(300.00, 1960.00)`。メインディスプレイの高さが 2160 なので
+**2160 − 200 = 1960**、つまり**メインディスプレイの下端が原点の bottom-up**
+（macOS ネイティブの `NSWindow` / `NSEvent` の慣習）。`windowPosition` も同じ系。
+
+★ **`Mouse.current` / `Input.mousePosition` は使えない。**
+`UniWindowController.GetClientCursorPosition()` に「New Input System ではフォーカスが
+無い場合にマウス座標が取得できないため独自に計算する」というコメントがある。
+常駐マスコットは基本フォーカスを持たない。
+
+★ **正規化はポイント空間で閉じること。** `cursorPosition` / `windowPosition` / `clientSize`
+はすべて LibUniWinC 由来のポイントなので、`Screen.*`（バッキング px）を1つでも混ぜると
+Retina 2x で2倍ずれる（→「`Screen.*` はバッキング px、ネイティブのウィンドウ API はポイント」）。
+
+### ★ 画面空間の量をモデル空間の軸で回さない
+
+**症状**: カーソル追従で**上下左右すべてが鏡像**になる（カーソル右 → 頭が左、
+カーソル上 → 顎を引く）。
+
+**原因**: 頭の pitch / yaw は**カーソルの画面座標から作った画面空間の量**なのに、
+`_instance.transform.right / up`（モデルの軸）で回していた。モデルは `FaceCamera`
+（→「VRM は放っておくと背中が映る」）で 180° 回ってカメラを向いているので
+**`transform.right` はワールド −X ＝ 画面の右と逆**（`up` は +Y のまま変わらない）。
+
+**手当て**: `Camera.main.transform.right / up`（画面の軸）で回す。
+★ **`Camera.main` を毎フレーム引かないこと**（タグ検索）。
+
+★ **符号は実機のスクリーンショットで決めること。** 左手系の回転方向を頭の中で追って
+決めると間違える（このリポジトリでは実際に2回間違えた）。**カーソルを既知の位置へ動かして
+撮り比べる**のが確実。
+
+### ★ カーソルの正規化をウィンドウの大きさで割らない
+
+窓幅（250〜300pt）で割ると、3840pt の画面では正規化値が **±15** に達する。`GazeAim` は
+`c.x * HeadSensitivity(0.1) * HeadYawRangeDegrees(35)` を ±35° で clamp するので、
+**正規化値が 10 を超えた時点で振り切れ**、ウィンドウのすぐ隣から先はどこでも最大角＝
+「追従」ではなく「最大まで曲げて固まる」になる（実機で確認）。
+
+cc-mascot が**固定 800px のコンテナ**で正規化しているのと同じ趣旨で、**割る量を固定
+（800pt）にし、オフセットの基準はウィンドウ中心**にする。実測では画面の右端で
+正規化値 8.29（＝約 29°）となり、振り切れなくなった。
+
+★ **`HeadYawRangeDegrees`（35）は「上限」であると同時に「係数」でもある。** 式のとおり
+`c × 感度 × Range` を `±Range` で clamp しているので、この値を下げると
+**clamp が早く来る**だけでなく**追従の効き方そのものが弱くなる**。「上限だから安全側」と
+考えて下げないこと（名前が `MaxHead*Degrees` だったせいで、doc も表も上限としか
+書いていなかった —— PR #69 のレビューで判明し `*RangeDegrees` に改名した）。
+
+★ **実効の可動域を決めているのは clamp ではなくディスプレイの広さ。** 上の 8.29 は
+clamp の閾値 10 まで**2割ほどしか余裕がない**ので、より広い構成では実際に振り切れる。
+clamp は死んだコードではない。
+
+### ★ 視線の中立 —— 最初は「目標の位置」で直そうとして届かなかった
+
+★ **この節に書いてある対処は最終的には採用していない。** ここで行った対処は
+「視線の目標（`gazeTarget`）の中立位置をカメラの位置からキャラの目の高さへ動かす」ことだけで、
+実機ではそれでも中立が高いままだった（下画面の一番下までカーソルを下げないと正面に
+感じない）。**根本原因は「頭が見る人の方を向いていない」ことで**（確定した原因と実測は
+次の節「視線の中立が合わないのは『頭が見る人の方を向いていない』から」）、**最終的な実装は
+目標をカメラの位置（`Vector3.zero`）へ戻し、代わりに頭そのものをカメラへ向ける
+（`VrmPoseAccent` が持つ「基準の下向き」）方式に変わっている**
+（`VrmCharacter.cs` の `UpdateGaze` / `VrmPoseAccent.cs`）。
+
+★ **この節を消していないのは、外した仮説を記録する価値があるため。** 「目標の位置だけを
+動かす」対処では実機で足りなかった、という経緯は次の担当者が同じ道を辿らないための記録。
+以下は**その時点の症状・原因分析・対処**をそのまま残したもの——**規則として読まないこと。**
+
+**症状**（実機）: カーソルをキャラの顔の真横に置いても**やや上めの目線**になる。
+縦に並べた2画面構成で、マスコットは上画面の下部。**下画面までカーソルを下げて、やっと
+正面を向く**。左右は正しい。
+
+**原因は2つ重なっていた。**
+
+**1. 自動フレーミングのカメラは「体の中心」を向いている。** `Runtime/Vrm/VrmFraming.cs`:
+
+```csharp
+public static Vector3 CameraPosition(Bounds bounds, float distance) =>
+    new Vector3(bounds.center.x, bounds.center.y, bounds.center.z - distance);
+```
+
+カメラは **bounds の中心の高さ**に置かれる。実測（同梱 `vita.vrm` + `idle_loop.vrma`、
+`bounds=(0.62, 1.66, 0.35) distance=1.75`）では中心の高さが約 **0.83m**（＝腰のあたり）で、
+キャラの目は約 **1.5m**。**カメラは目線より約 0.65m 下、角度にして約 20° 下**にある。
+
+`LookAtTarget` をカメラの位置に置くと「カメラを見る」＝「**見る人より 20° 下を見る**」に
+なり、**結果として顔が上を向いて見える**。さらに `vita.vrm` は `lookAt.type = "bone"` で、
+`VRM10ObjectLookAt` の `VerticalDown` が `CurveMapper(90, 10)` ——**入力 90° を実際の目の
+回転 10° に圧縮する**ので、目もほとんど下がらない。頭も直立のままなので、ずれが
+解消されない。
+
+★ **カメラそのものを目の高さへ上げて直してはいけない。** `CameraPosition` はキャラを
+画面内に収める構図を決めていて、上げると足元がフレーム外へ出る。**動かすのは視線の
+目標（`gazeTarget`）の中立位置だけ。** 中立を「カメラと同じ x / z、キャラの目の高さ」に
+置けば、構図を変えずに正面を向く。
+
+★ **目の位置は目ボーンから取ること。** `LeftEye` / `RightEye` は任意ボーンなので、無ければ
+`Head` の位置に `VRM10ObjectLookAt.OffsetFromHead`（既定 `(0, 0.06, 0)`）を**ローカルで**
+足す（`head.TransformPoint(offset)`）。UniVRM 自身の
+`Vrm10RuntimeLookAt.InitializeLookAtOriginTransform` が同じ計算をしている。
+
+**2. カーソルの縦の基準をウィンドウ中心にすると、顔の高さで上を向く。** ウィンドウの
+中心は**キャラの腰のあたり**なので、そこを基準（0）にすると、カーソルを顔の高さに
+置いても正の値になり上を向く。
+
+cc-mascot の `src/hooks/useCursorTracking.ts` は**頭の画面上の位置を明示的に引いている**:
+
+```js
+// Calculate eye offset Y from head bone position
+// We want the face position to be the "center" of gaze
+const targetY = (mouse.y - headY) * eyeSensitivity * 2;
+```
+
+**横は補正していない**（頭は横方向には中央にあるため）。実機でも左右のずれは出なかった。
+
+★ **出力（`gazeTarget` の中立）と入力（カーソルの縦の基準）で、同じ点を使うこと。**
+別々の点を使うとまた中立がずれる。
+
+**実測での確認**（カーソルを既知の位置へ動かしてスクリーンショットを撮り比べた）:
+
+| カーソル | 直した後 |
+|---|---|
+| 画面最上部 | はっきり上を向く |
+| 顔より少し上 | わずかに上 |
+| **顔の高さ・左右中央** | **正面** |
+| 下画面の最下部 | 水平〜わずかに下 |
+
+### ★ 視線の中立が合わないのは「頭が見る人の方を向いていない」から
+
+**UniVRM のソースと同梱 `vita.vrm` の実設定値を読んで確定した。** 上の節で「目標をカメラの位置から
+キャラの目の高さへ動かす」修正を入れたが、それでもなお中立が高い（実機の追加指摘:
+「下画面の一番下にカーソルを置いたときくらいが正面に感じる」）。
+
+**確定している事実:**
+
+- **`Vrm10RuntimeLookAt` は頭を一切動かさない。** 触るのは `LookAtType.bone` のとき
+  `LeftEye` / `RightEye` ボーンだけ。`LookAtType.expression` なら `lookUp` / `lookDown` /
+  `lookLeft` / `lookRight` の weight だけ。**どちらの経路でも Head / Neck は動かない**。
+  `Vrm10Runtime.m_head` は取得されるだけで未使用
+- **`CurveMapper.Map` は線形 + クランプ**（名前に "Curve" と付くが `AnimationCurve` ではない。
+  v0.128.3 で線形マップに変わった）:
+
+  ```csharp
+  var t = Mathf.Clamp01(src / Mathf.Max(0.001f, CurveXRangeDegree));
+  return t * CurveYRangeDegree;
+  ```
+
+  2引数は `(inputMaxValue, outputScale)`。方向（Inner / Outer / Up / Down）は
+  **インスタンスが4本ある**ことで表す
+- **同梱 `vita.vrm` の実設定値**:
+
+  ```
+  rangeMapHorizontalInner: { inputMaxValue: 90, outputScale:  8.894 }
+  rangeMapHorizontalOuter: { inputMaxValue: 90, outputScale: 14.424 }
+  rangeMapVerticalDown:    { inputMaxValue: 90, outputScale: 21.060 }
+  rangeMapVerticalUp:      { inputMaxValue: 90, outputScale: 15.991 }
+  ```
+
+  → **目は目標角の 23.4%（下方向）しか動かない。** 入力 20° 下 → 実際の目の回転 **4.68°**
+
+  | 入力角 | Down (21.06) | Up (15.99) | Inner (8.894) | Outer (14.424) |
+  |---|---|---|---|---|
+  | 5° | 1.17° | 0.89° | 0.49° | 0.80° |
+  | 10° | 2.34° | 1.78° | 0.99° | 1.60° |
+  | 20° | 4.68° | 3.55° | 1.98° | 3.21° |
+  | 45° | 10.53° | 8.00° | 4.45° | 7.21° |
+  | 90°以上 | 21.06°(max) | 15.99°(max) | 8.89°(max) | 14.42°(max) |
+
+- ★ **`vita.vrm` は `lookUp` / `lookDown` / `lookLeft` / `lookRight` の expression を持たない。**
+  `type: "bone"` かつ目ボーンがあるので `bone` 経路が使われるが、**仮に expression 経路へ
+  落ちると視線が全く動かなくなる**
+- **カメラは `VrmFraming.CameraPosition` で bounds の中心（＝腰、実測で約 0.78m）に置かれる。**
+  キャラの目は約 1.38m、距離約 1.75m → **カメラは目線より約 19° 下**
+- ★ **結論: カメラが体の中心にある以上、「見る人を見る」には頭を回すしかない。**
+  目だけでは 19° × 0.234 ＝ 約 4.4° しか下がらない
+- ★ **`LookAt` の原点は Head ボーンの子**なので yaw / pitch は「いまの頭の向きからの相対」。
+  **先に頭を回せば目の角度は自動的に残差になる**ので、頭と目で二重に効かない
+
+### ★ 手続き的アイドルは腕を書かないと T ポーズのまま残る
+
+**症状**（実機のスクリーンショットで確認）: 同梱の `idle_loop.vrma` を退避して手続き的アイドルへ
+フォールバックさせると、フォールバックのログは正しく出て呼吸・重心移動も効くのに、
+**キャラは腕を真横に開いた T ポーズのまま**だった。
+
+**原因**: `IdlePose.Evaluate` が返していたのは `HipsOffsetY` / `SpineEuler` / `ChestEuler` /
+`NeckEuler` / `HeadEuler` だけで、**腕に一切触っていなかった**。ControlRig の腕の
+`localRotation` は `identity` のまま ＝ **VRM 1.0 の正規化 T ポーズ**なので、腕が開いたまま残る。
+
+★ **VRMA がある通常経路では起きない。** VRMA は 22 ボーンを持っていて腕も動かすため。
+**フォールバック経路でだけ**出る＝**同梱ファイルを消さない限り誰も気づかない**。
+#59 の見出しの目標が「T ポーズの棒立ちを解消する」だったので、これは埋めるべき穴だった。
+
+**手当て**: `IdlePose` に**腕の静止姿勢**（`RestUpperArmDegrees` 既定 70度 /
+`RestLowerArmDegrees` 既定 10度）を足し、`LeftUpperArmEuler` / `RightUpperArmEuler` /
+`LeftLowerArmEuler` / `RightLowerArmEuler` として返して `VrmCharacter` が ControlRig へ書く。
+
+★ **Z 軸まわりで、左右は符号が反転する**（ControlRig の正規化 T ポーズが左右対称に開いているため）。
+★ **符号は実測で決めた。** 最初 `右 = +RestUpperArmDegrees` で書いたところ、実機では
+**腕が万歳の向きに上がった**。反転させて体側へ下りることを確認した。**導出で書き換えないこと。**
+★ **揺れ（呼吸・重心移動）は腕には乗せていない。** 上腕・前腕は肩→肘の2ボーンチェーンで、
+独立した sin を足すと振り子のようにブラブラして見えるリスクがあるため。テスト
+`RestArmAnglesDoNotOscillateOverTime` でこの判断を固定してある。
+
+### ★ 起動直後にだけ成立しない状態を「異常」として警告しない
+
+**症状**: `VrmCharacter` が出す
+
+```
+[Mascot] 視線の原点（目 / 頭ボーン）が取れないので、GazeOriginViewportY をフォールバック値にします
+```
+
+が、**VRM が正常に読めている場合でも起動のたびに必ず1回出ていた。**
+
+**原因**: `VrmCharacter.LateUpdate` は**フレーム1から**走るが、`_instance` が入るのは
+`OnLoaded`（実測で**約1.6秒後**）。その間 `TryGetGazeOrigin` は当然 `false` を返すので、
+**ラッチされた警告がフレーム1で消費される**。
+
+つまり「VRM が読めているかどうかに関わらず毎回出る」形になっていて、**異常を知らせる役に
+立たない**。むしろ「毎回出る警告」として読み飛ばす癖がつくぶん有害。
+
+**手当て**: **モデルが読み込まれた後にだけ**警告を出す（`_instance != null` を条件に足す）。
+それ以前は黙ってフォールバック値を維持する。
+
+★ **同じ形の失敗を #59 の中で2回踏んでいる。**
+
+1. `CursorGazeSource` の1回だけのログが、`GazeOriginViewportY` が実測で埋まる前に発火して
+   **初期値 `0.5` しか記録しなかった**（この値を確かめようとして使えず、スクリーンショットで
+   測り直す羽目になった）
+2. 上の「視線の原点が取れない」警告
+
+**一般化**: **非同期の読み込みが終わるまで成立しない条件を、起動直後のフレームで判定しない。**
+ラッチ付きのログ／警告は特に危ない —— 1回しか出ないので、**成立前に消費されると永久に
+本当の値が出ない**。`_instance` のような「読み込みが終わった印」を条件に足すこと。
+
+### ★ `kind: "prompt"` の実機確認 —— サーバーは起動前に溜まったキューを捨てる
+
+**確認方法**: `XDG_CONFIG_HOME` を一時ディレクトリに向けてサーバーを隔離環境で起動し、
+**サーバー起動後に**配信キューへ `kind: "prompt"` の entry を1件手で置いた。
+
+**確認できた挙動**: **再生中だけ**視線がカーソル追従をやめて中央に固定され、上体が前傾する。
+再生が終わると通常のカーソル追従に復帰する。
+
+★ **「サーバー起動後に置く」が重要。** サーバーは**起動前に溜まっていたキューを捨てる**
+（実機ログ: `[Server] 起動前に溜まっていた 1 件を捨てました`）。先に置くと消えて確認できない。
+**これは独立した罠として書く価値がある** —— `kind: "prompt"` に限らずキュー全般に効くので、
+実機で挙動を確かめるときは必ず「サーバーを起動 → 起動できたことをログで確認 → そのあとでキューに置く」
+の順を守ること。
 
 ### ★ シーンに `EventSystem` が無いとクリック透過が死ぬ
 
@@ -813,6 +1395,43 @@ ack のように「送れたことを前提に手元から消す」値でこれ�
 `$OUTPUT` が絶対パスのとき（`BuildScript.cs` の `Path.IsPathRooted` が許容する）に
 `$PROJECT_PATH/` を前置しないことも要る。
 
+### ★ `test.sh` はコンパイル失敗時に前回の結果を表示する
+
+**実際に踏んだ（2026-08-27）。** UniVRM の型を触っていてコンパイルが通らなくなったときの出力:
+
+```
+Assets/ChatterMascot/Vrm/VrmIdleAnimation.cs(170,43): error CS0012:
+The type 'ITimeControl' is defined in an assembly that is not referenced. ...
+Aborting batchmode due to failure:
+
+total=175 passed=175 failed=0 skipped=0 duration=0.8596495s
+```
+
+**コンパイルが通っていないのに `total=175 passed=175 failed=0` と出る。** 原因は
+`Logs/test-results.xml` が**前回成功時のまま残っている**こと。集計側は
+
+```bash
+if [ -f "$RESULTS" ]; then
+  python3 - "$RESULTS" <<'PY'
+  ...
+```
+
+と**存在だけ**を見ていて、**今回の実行で書かれたものかを確かめていない**。テストが1件も
+走らずに Editor が落ちても、ファイルさえ残っていれば古い集計がそのまま出る。
+
+- **終了コードは正しく非0になる。** `STATUS=${PIPESTATUS[0]}` はコンパイル失敗を正しく拾うので、
+  **CI では検出できる。壊れているのは人が読む1行のほう**
+- `docs/mascot.md`（このファイル）も `CLAUDE.md` も「**件数は `./scripts/test.sh` の `total=` を
+  見る**」と案内している。つまり**このリポジトリが公式に案内している確認方法が、
+  コンパイル失敗を成功として表示する**
+
+直し方は `run_unity` を呼ぶ前に古い XML を消す（`rm -f "$RESULTS"`）。
+消せば集計側の `if [ -f "$RESULTS" ]` が偽になり、
+「XML が書かれなかった＝走る前に落ちた」が正しく表現される。
+
+★ **`total=` だけを見て緑と判断しないこと。** 出力の上のほう、`error CS` と
+`Aborting batchmode` を先に見る。
+
 ### ★ ビルド対象シーンは `EditorBuildSettings` にも入れる
 
 `scripts/build.sh` は `-buildScene` を明示で渡すので通るが、
@@ -822,6 +1441,16 @@ ack のように「送れたことを前提に手元から消す」値でこれ�
 出来上がる `.app` は**不透明なウィンドウが出て、何にも繋がらず、エラーも出さない**。
 
 `SceneFixups.EnsureBuildScenes()` が本番シーン1本に揃える。
+
+### ★ ビルド済みアプリが読む `StreamingAssets` は `.app` の中のコピー
+
+`Assets/StreamingAssets/` のファイルを動かしても、**ビルド済みアプリには効かない**。
+アプリが読むのは `Build/ChatterMascot.app/Contents/Resources/Data/StreamingAssets/` に
+コピーされたもの（`Player.log` に採用したパスが出る）。
+
+★ **同梱ファイルを外して手続き的フォールバックを試すときは、`.app` の中を触るか
+再ビルドすること。** リポジトリ側の `Assets/StreamingAssets/idle_loop.vrma` を退避しても、
+既にビルドされた `.app` はコピー済みのファイルをそのまま読み続ける。
 
 ### Git-LFS 依存は #56 で復活した
 
@@ -1125,6 +1754,72 @@ cd apps/chatter-mascot
 **どれも Editor を閉じてから。**
 
 耳で確認するときは `cd core && npm run start:server`（合成エンジンはサーバーが起こす）。
+
+### ★ Unity CLI
+
+`unity` コマンド（[Unity CLI](https://unity.com/ja/blog/meet-the-unity-cli)）が
+手元に入っている。実体は `/Users/schwarz/.unity/bin/unity`、実測 **`1.0.0-beta.5`**（`unity --version`）。
+`unity doctor` は `auth.loggedIn true` / `editor.0 6000.5.8f1 arm64` を認識し、`unity editors` は
+インストール済みの `6000.5.8f1`（Android, SDK & NDK Tools, OpenJDK, Web）を拾う。導入は公式の
+
+```bash
+curl -fsSL https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh | UNITY_CLI_CHANNEL=beta bash
+```
+
+`test` / `build` / `run` の各サブコマンドが `scripts/*.sh` と役割が重なる:
+
+| やること | いまの `scripts/` | Unity CLI |
+|---|---|---|
+| EditMode テスト | `./scripts/test.sh` | `unity test --mode EditMode --output Logs/test-results.xml` |
+| macOS ビルド | `./scripts/build.sh` | `unity build --execute-method ChatterMascot.EditorTools.BuildScript.BuildMacOS -o Build/ChatterMascot.app` |
+| 任意の Editor メソッド実行 | `./scripts/run.sh <Method>` | `unity run -- -quit -executeMethod <Method>`（**`--command` ではない** — そちらは事前登録が要る `unity pipeline install` 前提の別機能） |
+| Editor の一覧 / インストール | 手動（Unity Hub） | `unity editors` / `unity install` / `unity install-modules` |
+| 環境の診断 | 無し（`Player.log` を読むだけ） | `unity doctor` |
+
+★ **`-quit` の要否は `-runTests` と `-executeMethod` で逆になる。** `-runTests` に `-quit` を
+付けるとテストが走り切る前に落ちる（→ 下の1点目）が、`-executeMethod` は逆に **`-quit` を
+付けないと Editor が終了しない**（`run.sh` の実装どおり）。ここを取り違えるのが移行で
+いちばん間違えやすいところ。
+
+★ **右列は `--help` の記載から組み立てたもので、まだ実行して確かめていない。** `unity test` /
+`unity build` の実行は別 Issue（下記）に切り出してあり、ここでは対応関係だけを記録する。
+
+**いまは `scripts/*.sh` を置き換えない。** 中身には #12 / #56 で実機を踏んで積んだ知見が入っていて、
+機能追加のついでに差し替えると回帰リスクが乗る。置き換えるときに**失ってはいけない6点**:
+
+1. **`-runTests` に `-quit` を付けない**（`test.sh` のコメント参照）。付けるとテストが走り切る前に落ちる
+2. **`build.sh` の `trap restore_audio_manager EXIT INT TERM` による
+   `ProjectSettings/AudioManager.asset` の `m_DisableAudio` 復元。**
+   macOS で afplay 方式（1発話 = 1プロセス）が成立するための前提条件で、これが OFF だと
+   外部プロセスで鳴らしても Unity 本体がデバイスを掴み続ける
+   （→「無音時にオーディオ出力デバイスを掴まない」）。コミットされた値は Android 側の要求
+   （オフ）に合わせてあるので、**ビルド時だけ切り替えて戻す**必要がある
+3. **`PIPESTATUS` で終了コードを捨てないこと。** `test.sh` / `build.sh` はどちらも `| grep ...` を
+   挟むので、素の `$?` は grep の終了コードになる
+4. **NUnit XML を python3 で集計して `total= passed= failed=` を出すこと**（`test.sh`）
+5. **`unity.sh` の `pgrep -f "Unity.app/Contents/MacOS/Unity.*${PROJECT_PATH}"` による
+   「Editor が同プロジェクトを開いていたら中断」**
+6. **`run.sh` の grep フィルタ（`^\[Fixups\]|^\[Build\]|^\[VrmProbe\]|error CS|...`）に
+   無いプレフィックスのログは、`LogError` であっても画面に出ない**（`run.sh` のコメント
+   参照）。この弱点自体を引き継ぐ必要はないが、`unity run` の出力がフィルタ無しで
+   全ログを流すのか、移行時に確認すること
+
+注意点:
+
+- ★ **`unity test` が内部で `-runTests` をどう組み立てるかは確かめていない。** `--quit` 相当の
+  オプションが表に出ていないので CLI 側が引き受けている可能性はあるが、**内部で付けていない
+  保証は無い**。上の1点目は移行時に**実際に走り切ることを確かめる**まで未解決として扱う
+- ★ **`unity build` は `Disable Unity Audio` の切り替えをやってくれない。** `--execute-method`
+  を通しても `BuildScript.BuildMacOS` を呼ぶだけなので、上の2点目の trap は
+  **`BuildScript.BuildMacOS` の責務のまま**残る
+- ★ **`unity command` / `unity status` は `unity pipeline install` が要る** —
+  `Packages/manifest.json` に依存が1本増える。**今は入れていない**
+- ★ `unity editors` が `6000.5.10f1` へのアップグレードを示唆してくるが、
+  **プロジェクトは `6000.5.8f1` 固定**（`ProjectSettings/ProjectVersion.txt` と
+  `scripts/unity.sh` の `UNITY_VERSION`）
+
+`scripts/*.sh` を Unity CLI に寄せる移行そのものは
+[#67](https://github.com/schwarz9791/chatter-agent/issues/67) で追う。
 
 ## プラットフォームを絞る
 

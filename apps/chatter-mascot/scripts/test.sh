@@ -9,6 +9,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/unity.sh"
 
 RESULTS="$PROJECT_PATH/Logs/test-results.xml"
 mkdir -p "$PROJECT_PATH/Logs"
+# ★ 前回の結果を消してから走らせること。残したままだと、コンパイルが通らなかったときに
+#   古い XML がそのまま集計され、失敗が「total=… passed=… failed=0」として表示される。
+#   終了コードは正しく非0になるが、人が読む1行は緑に見える。
+rm -f "$RESULTS"
 
 # ★ -runTests は -quit を付けない（Test Runner が自分で終了する）。
 #   付けるとテストが走り切る前に落ちる

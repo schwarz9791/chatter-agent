@@ -371,6 +371,22 @@ namespace ChatterMascot.Tests
         }
 
         /// <summary>
+        /// ★★ <b><c>Aa</c> だけが 0..1 の契約を破りうる。</b> 他のチャンネルは 0..1 の目標へ
+        ///   緩和するので範囲外にならないが、<c>Aa</c> は倍率を掛けるので 1 を超えうる。
+        ///   <b>Unity 側は潰してくれない</b>（UniVRM の <c>ExpressionMerger</c> に <c>Clamp01</c> は
+        ///   無く、<c>legacyClampBlendShapeWeights</c> は 0）ので、ここで閉じる。
+        /// </summary>
+        [Test]
+        public void MouthNeverExceedsOneEvenWithAScaleAboveOne()
+        {
+            var w = FacePolicy.Evaluate(
+                Input(speaking: true, emotion: Emotion.Happy, mouth: 1f),
+                FaceWeights.Zero, 1f / 30f, Params(lerp: 0f, mouthScaleHappy: 2f));
+
+            Assert.That(w.Aa, Is.EqualTo(1f));
+        }
+
+        /// <summary>
         /// ★ 表情が立ち上がる途中では倍率も途中の値になる（段差が入らない）。
         ///   目標ではなく<b>実際に適用される weight</b> で掛けている証拠。
         /// </summary>

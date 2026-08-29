@@ -346,7 +346,15 @@ namespace ChatterMascot.Vrm
 
             // ★ 口のスケールは**緩和後の** happy / sad で掛ける（瞬きの抑制と同じ理由）。
             //   表情が立ち上がる途中では倍率もその途中の値になり、段差が入らない
-            var aa = target.Aa * MouthScale(happy, p.MouthScaleHappy) * MouthScale(sad, p.MouthScaleSad);
+            // ★★ **最後に Clamp01 すること。** MouthScale は Lerp(1, scale, w) なので、
+            //   Inspector で 1 より大きいスケールを入れると 1 を超える。そして
+            //   **Unity 側は潰してくれない** —— UniVRM の ExpressionMerger に Clamp01 は無く、
+            //   ProjectSettings の legacyClampBlendShapeWeights は 0。weight 100 超が
+            //   SetBlendShapeWeight まで届いてモーフが外挿され、**mouthScale* が防ごうとしている
+            //   「口がメッシュからはみ出る」が、その設定値自身で起きる**。
+            // ★ 不変条件はここに置くこと。VrmCharacter の [Range] は Inspector の補助でしかなく、
+            //   FaceParams はテストからもコードからも直接作れる
+            var aa = Mathf.Clamp01(target.Aa * MouthScale(happy, p.MouthScaleHappy) * MouthScale(sad, p.MouthScaleSad));
 
             return new FaceWeights(happy, angry, sad, relaxed, surprised, neutral, aa, blink);
         }

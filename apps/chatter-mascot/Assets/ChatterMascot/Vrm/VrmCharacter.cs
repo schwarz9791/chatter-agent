@@ -105,10 +105,15 @@ namespace ChatterMascot.Vrm
         [Tooltip("口を閉じる方向の減衰（毎秒）。0 で無効。★ 30fps で音素の谷ごとに口が閉じて階段に見えるのを均す")]
         [SerializeField] private float mouthReleasePerSecond = 8f;
 
+        // ★ [Range] は「定義域は [0,1]」という doc の宣言を Inspector にも書くための補助。
+        //   0..1 に閉じる不変条件そのものは FacePolicy.Evaluate 側にある（あちらは
+        //   FaceParams を直接作れるので、ここだけでは守れない）
         [Tooltip("happy が立ち切っているときの口の開きの倍率。0 で無効（1倍）。★ 笑顔で口が開きすぎてメッシュからはみ出るのを防ぐ")]
+        [Range(0f, 1f)]
         [SerializeField] private float mouthScaleHappy = 0.2f;
 
         [Tooltip("sad が立ち切っているときの口の開きの倍率。0 で無効（1倍）")]
+        [Range(0f, 1f)]
         [SerializeField] private float mouthScaleSad = 0.5f;
 
         [Tooltip("今の emotion / kind と実効 weight を1秒ごとにログへ出す。★ ビルド済みアプリでは起動引数 -faceLog 1 でも立てられる")]

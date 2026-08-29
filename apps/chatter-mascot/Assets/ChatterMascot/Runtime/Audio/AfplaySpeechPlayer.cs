@@ -9,13 +9,23 @@ using Debug = UnityEngine.Debug;
 
 namespace ChatterMascot.Audio
 {
-    /// <summary>外部プロセスで鳴らすときのハンドル。</summary>
-    public sealed class AfplayAudioHandle
+    /// <summary>
+    /// 外部プロセスで鳴らすときのハンドル。
+    ///
+    /// ★ <see cref="ILipSyncSource"/> のぶんだけ自動プロパティなのは、C# が
+    ///   インターフェースのメンバーをフィールドで実装できないため（→ <see cref="ILipSyncSource"/>）。
+    /// </summary>
+    public sealed class AfplayAudioHandle : ILipSyncSource
     {
         public string Path;
 
         /// <summary>再生時間（ミリ秒）。<b>0 は「長さ 0」ではなく「不明」</b></summary>
         public int DurationMs;
+
+        /// <summary><c>null</c> 可（口が動かないだけ。発話は落とさない）</summary>
+        public float[] Envelope { get; set; }
+
+        public int EnvelopeFrameMs { get; set; }
     }
 
     /// <summary>
@@ -51,6 +61,12 @@ namespace ChatterMascot.Audio
         private readonly string _tmpDir;
         private readonly List<Process> _running = new List<Process>();
         private bool _warnedProcessCount;
+
+        /// <summary>エンベロープを作れなかったことの警告は1回だけ（読めない WAV は同じ形が続く）</summary>
+        private bool _warnedEnvelope;
+
+        /// <summary>起動ラグの較正ログは1回だけ（→ <see cref="PlayAsync"/>）</summary>
+        private bool _measuredStartLag;
 
         public event Action<string> Warn;
 
@@ -117,7 +133,26 @@ namespace ChatterMascot.Audio
                 return null;
             }
 
-            return new AfplayAudioHandle { Path = path, DurationMs = header.DurationMs };
+            // ★ **失敗しても Prepare を失敗させないこと。** ここで null を返すと AudioFailed →
+            //   skip + ack となり、サーバーのキューから物理削除されて二度と鳴らせない
+            //   （→ LipSyncEnvelope の doc）。口が動かないだけに留める
+            string envelopeError;
+            var envelope = LipSyncEnvelope.Build(
+                wav, header, LipSyncEnvelope.DefaultFrameMs, out envelopeError);
+            if (envelope == null && !_warnedEnvelope)
+            {
+                _warnedEnvelope = true;
+                var warn = Warn;
+                if (warn != null) warn("口の動きを作れませんでした（音は鳴ります）: " + envelopeError);
+            }
+
+            return new AfplayAudioHandle
+            {
+                Path = path,
+                DurationMs = header.DurationMs,
+                Envelope = envelope,
+                EnvelopeFrameMs = LipSyncEnvelope.DefaultFrameMs,
+            };
         }
 
         public async Task<string> PlayAsync(object audio)
@@ -165,7 +200,8 @@ namespace ChatterMascot.Audio
             try
             {
                 var limit = TimeoutSecondsFor(handle.DurationMs);
-                var deadline = Time.realtimeSinceStartupAsDouble + limit;
+                var startedAt = Time.realtimeSinceStartupAsDouble;
+                var deadline = startedAt + limit;
 
                 // ★ **Process.Exited を使わないこと。** あれは ThreadPool スレッドで発火するので、
                 //   そこから PlaybackEvent を投げると Unity の API をメインスレッド外から触る。
@@ -190,6 +226,22 @@ namespace ChatterMascot.Audio
                         Debug.LogWarning("[Mascot] 再生プロセスを止められませんでした: " + e.Message);
                     }
                     return limit.ToString("F1") + " 秒で終わりませんでした";
+                }
+
+                // ★ **lipSyncOffsetMs の較正材料。1回だけ出す。**
+                //   Process.Start は音が出るより前に返るので、その起動ラグぶん口が先に動く。
+                // ★★ **これは「起動ラグ + 終了処理」の合計＝上界であって、起動ラグそのものではない。**
+                //   しかも完了の検出は上のポーリング（毎フレーム = 30fps なら 33ms 刻み）なので、
+                //   **測定誤差が測ろうとしている量と同じオーダー**。値を仕様として扱わないこと。
+                //   使い道は「桁の確認」（100ms オーダーなら設計を疑う）で、既定値は実機で目で見て決める。
+                // ★ 差だけでなく両方の生の値を出すこと。差だけだと後から切り分けられない。
+                if (!_measuredStartLag)
+                {
+                    _measuredStartLag = true;
+                    var elapsedMs = (Time.realtimeSinceStartupAsDouble - startedAt) * 1000.0;
+                    Debug.Log(
+                        $"[Mascot] afplay の実時間 {elapsedMs:F0}ms / WAV の長さ {handle.DurationMs}ms " +
+                        $"（差 {elapsedMs - handle.DurationMs:F0}ms = 起動ラグ + 終了処理 + ポーリング誤差）");
                 }
 
                 if (process.ExitCode == 0) return null;

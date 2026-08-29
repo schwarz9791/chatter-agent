@@ -22,32 +22,13 @@ namespace ChatterMascot.Tests
     [TestFixture]
     public sealed class AfplaySpeechPlayerTests
     {
-        /// <summary>16bit PCM の最小 WAV。24000Hz / 1ch なので 2400 サンプル = 100ms。</summary>
+        /// <summary>
+        /// 16bit PCM の最小 WAV（無音）。24000Hz / 1ch なので 2400 サンプル = 100ms。
+        /// ★ 組み立ては <see cref="WavBuilder"/> に寄せてある（#58）。
+        /// </summary>
         private static byte[] BuildWav(int sampleCount)
         {
-            const int sampleRate = 24000;
-            const ushort channels = 1;
-            var dataBytes = sampleCount * 2;
-            var bytes = new List<byte>();
-
-            bytes.AddRange(System.Text.Encoding.ASCII.GetBytes("RIFF"));
-            bytes.AddRange(BitConverter.GetBytes(36 + dataBytes));
-            bytes.AddRange(System.Text.Encoding.ASCII.GetBytes("WAVE"));
-
-            bytes.AddRange(System.Text.Encoding.ASCII.GetBytes("fmt "));
-            bytes.AddRange(BitConverter.GetBytes(16));
-            bytes.AddRange(BitConverter.GetBytes((ushort)1));
-            bytes.AddRange(BitConverter.GetBytes(channels));
-            bytes.AddRange(BitConverter.GetBytes(sampleRate));
-            bytes.AddRange(BitConverter.GetBytes(sampleRate * channels * 2));
-            bytes.AddRange(BitConverter.GetBytes((ushort)(channels * 2)));
-            bytes.AddRange(BitConverter.GetBytes((ushort)16));
-
-            bytes.AddRange(System.Text.Encoding.ASCII.GetBytes("data"));
-            bytes.AddRange(BitConverter.GetBytes(dataBytes));
-            bytes.AddRange(new byte[dataBytes]);
-
-            return bytes.ToArray();
+            return WavBuilder.BuildRaw(new byte[sampleCount * 2], 1, 16, 24000, 1);
         }
 
         // ---- 期限（純粋） ----
@@ -88,6 +69,49 @@ namespace ChatterMascot.Tests
             // ★ ファイル名に epoch が入っていること。seq だけだと採番のやり直しで同じ名前が戻り、
             //   孤児の afplay が読んでいる最中のファイルを truncate する
             Assert.That(Path.GetFileName(handle.Path), Is.EqualTo("speech-1-000000000042.wav"));
+
+            player.Discard(handle);
+        }
+
+        /// <summary>
+        /// ★★ <b>リップシンクの都合で発話を落とさないこと。</b> エンベロープが作れなくても
+        ///   <c>Prepare</c> は成功しなければならない —— <c>null</c> を返すと
+        ///   <c>AudioFailed</c> → skip + ack となり、<b>サーバーのキューから物理削除されて
+        ///   二度と鳴らせない</b>。口が動かないだけに留める。
+        /// ★ 材料は <c>bitsPerSample = 12</c> の PCM。<c>TryReadHeader</c> は通り、
+        ///   サンプルの読み出しだけが落ちる。
+        /// </summary>
+        [Test]
+        public void PrepareSucceedsEvenWhenTheEnvelopeCannotBeBuilt()
+        {
+            var player = new AfplaySpeechPlayer("/usr/bin/true");
+            string error;
+            var wav = WavBuilder.BuildRaw(new byte[480], 1, 12, 24000, 1);
+
+            var handle = player.Prepare(wav, "speech-1-000000000099", out error) as AfplayAudioHandle;
+
+            Assert.That(handle, Is.Not.Null, error);
+            Assert.That(error, Is.Null);
+            Assert.That(handle.Envelope, Is.Null);
+            Assert.That(File.Exists(handle.Path), Is.True);
+
+            player.Discard(handle);
+        }
+
+        /// <summary>通常の WAV では、ハンドルに口の材料が載ること。</summary>
+        [Test]
+        public void PrepareAttachesTheEnvelope()
+        {
+            var player = new AfplaySpeechPlayer("/usr/bin/true");
+            string error;
+
+            var handle = player.Prepare(BuildWav(2400), "speech-1-000000000098", out error) as AfplayAudioHandle;
+
+            Assert.That(handle, Is.Not.Null, error);
+            Assert.That(handle.EnvelopeFrameMs, Is.EqualTo(LipSyncEnvelope.DefaultFrameMs));
+            Assert.That(handle.Envelope, Is.Not.Null);
+            // 2400 サンプル = 100ms なので 20ms 刻みで 5 フレーム
+            Assert.That(handle.Envelope.Length, Is.EqualTo(5));
 
             player.Discard(handle);
         }

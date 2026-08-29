@@ -264,6 +264,8 @@ namespace ChatterMascot.Audio
                 error = DescribeUnsupported(format, bitsPerSample);
                 return false;
             }
+            // ★ 確保する前に見ること。負の length は new float[負] の OverflowException になる
+            if (!IsReadable(wav, offset, length, out error)) return false;
 
             var buffer = new float[length / stride];
             int written;
@@ -299,6 +301,7 @@ namespace ChatterMascot.Audio
                 error = DescribeUnsupported(format, bitsPerSample);
                 return false;
             }
+            if (!IsReadable(wav, offset, length, out error)) return false;
 
             var count = length / stride;
             if (dest == null || dest.Length < count)
@@ -350,11 +353,43 @@ namespace ChatterMascot.Audio
         }
 
         /// <summary>
+        /// <paramref name="wav"/> の <paramref name="offset"/> から <paramref name="length"/> バイトを
+        /// 読んでよいか。
+        ///
+        /// ★★ <b><see cref="TryReadHeader"/> を通した値だから安全、に頼らないこと。</b>
+        ///   <see cref="TryReadSamples"/> / <see cref="TryReadSamplesInto"/> は
+        ///   <c>public</c> で、<c>LipSyncEnvelope.Build</c> は <see cref="WavHeader"/> を
+        ///   <b>引数で受け取る</b>ので、ヘッダ由来であることを型では強制できない。
+        ///   ここで弾かないと <c>IndexOutOfRangeException</c> が出るが、それは
+        ///   <c>Prepare</c> → <c>FetchAudioAsync</c> の fire-and-forget で<b>未観測のまま捨てられ、
+        ///   その seq に <c>AudioReady</c> も <c>AudioFailed</c> も来ないまま head が黙って止まる</b>
+        ///   —— <see cref="TryReadHeader"/> が「宣言値が末尾を越えたら打ち切る」理由として
+        ///   長々と説明している、まさにその失敗モード。
+        /// </summary>
+        private static bool IsReadable(byte[] wav, int offset, int length, out string error)
+        {
+            error = null;
+            if (wav == null)
+            {
+                error = "WAV がありません";
+                return false;
+            }
+            // offset + length は int で溢れうるので long で見る
+            if (offset < 0 || length < 0 || (long)offset + length > wav.Length)
+            {
+                error = $"WAV の範囲外を読もうとしました (offset={offset}, length={length}, size={wav.Length})";
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>
         /// ★ <b>「フォーマットが違う」と「ビット深度が違う」を混ぜないこと。</b>
         ///   無音の原因を追うとき、<c>ttsBaseUrl</c> の向き先が別サービスだったのか
         ///   合成の設定が変わったのかで、次に見る場所が変わる。
         /// </summary>
-        private static string DescribeUnsupported(ushort format, ushort bitsPerSample)
+        /// ★ <c>internal</c> なのは <c>LipSyncEnvelope</c> が同じ文言を使うため（同一アセンブリ）。
+        internal static string DescribeUnsupported(ushort format, ushort bitsPerSample)
         {
             return format != FormatPcm
                 ? $"対応していない WAV フォーマットです (format={format}, bits={bitsPerSample})"

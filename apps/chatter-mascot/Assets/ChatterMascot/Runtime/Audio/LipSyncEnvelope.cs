@@ -54,19 +54,11 @@ namespace ChatterMascot.Audio
             var stride = WavDecoder.BytesPerSample(header.Format, header.BitsPerSample);
             if (stride == 0)
             {
-                // ★ 理由は WavDecoder 側の文言をそのまま使いたいので、空読みさせて受け取る
-                float[] unused;
-                WavDecoder.TryReadSamples(wav, header.DataOffset, 0, header.Format, header.BitsPerSample,
-                    out unused, out error);
+                // ★ 文言は WavDecoder と共有する（「対応していないフォーマット」と
+                //   「対応していないビット深度」の区別が、無音の原因を追うときに要る）
+                error = WavDecoder.DescribeUnsupported(header.Format, header.BitsPerSample);
                 return null;
             }
-
-            // ★ **チャンネルを潰す。** 1フレームのサンプル数はチャンネル数を掛けた値で、
-            //   インターリーブされたまま二乗和に入れて実要素数で割れば平均になる。
-            // ★ **24000Hz/1ch に決め打ちしないこと。** ttsBaseUrl を VOICEVOX に向ければ
-            //   別のレートになりうる（そのとき口が音に合わなくなるが、エラーは出ない）。
-            var perChannel = (int)Math.Max(1L, (long)header.SampleRate * frameMs / 1000L);
-            var frameSamples = perChannel * header.Channels;
 
             var totalSamples = header.DataLength / stride;
             if (totalSamples <= 0)
@@ -74,6 +66,22 @@ namespace ChatterMascot.Audio
                 error = "サンプルがありません";
                 return null;
             }
+
+            // ★ **チャンネルを潰す。** 1フレームのサンプル数はチャンネル数を掛けた値で、
+            //   インターリーブされたまま二乗和に入れて実要素数で割れば平均になる。
+            // ★ **24000Hz/1ch に決め打ちしないこと。** ttsBaseUrl を VOICEVOX に向ければ
+            //   別のレートになりうる（そのとき口が音に合わなくなるが、エラーは出ない）。
+            // ★★ **1フレームのサンプル数を入力の長さで頭打ちにすること。** SampleRate も
+            //   Channels も frameMs も**外から来る値**で、TryReadHeader は
+            //   `channels != 0` / `sampleRate > 0` しか見ていない。頭打ちにしないと:
+            //     - 壊れた WAV が sampleRate = 20億 を名乗るだけで **160MB をメインスレッドで確保**
+            //     - frameMs = int.MaxValue は (int) キャストで**負に折り返し**、
+            //       new float[負] が OverflowException
+            //   1フレームが発話全体より長いときフレームは1つで、読むのは totalSamples 要素だけ
+            //   なので、頭打ちにしても結果は変わらない。
+            var perChannel = Math.Max(1L, (long)header.SampleRate * frameMs / 1000L);
+            if (perChannel > totalSamples) perChannel = totalSamples;
+            var frameSamples = (int)Math.Max(1L, Math.Min(perChannel * header.Channels, (long)totalSamples));
 
             // ★ 端数のフレームも1つと数える（切り上げ）。落とすと語尾が消える
             var frames = (totalSamples + frameSamples - 1) / frameSamples;

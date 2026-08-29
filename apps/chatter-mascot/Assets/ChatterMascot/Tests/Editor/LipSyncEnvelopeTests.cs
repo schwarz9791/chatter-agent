@@ -227,7 +227,15 @@ namespace ChatterMascot.Tests
             Assert.That(Envelope(wav, -1), Is.Null);
         }
 
-        /// <summary>極端な刻みでも落ちないこと（1要素 = 1サンプル未満 / 発話より長い刻み）。</summary>
+        /// <summary>
+        /// 極端な刻みでも落ちないこと（1要素 = 1サンプル未満 / 発話より長い刻み）。
+        ///
+        /// ★★ <b><c>int.MaxValue</c> まで見ること。</b> 以前は 1 と 1000 しか見ておらず、
+        ///   <b>テスト名が実際の保証を上回っていた</b>（PR #74 のレビューの過程で判明）。
+        ///   <c>SampleRate * frameMs / 1000</c> を <c>(int)</c> にキャストすると
+        ///   24000Hz × <c>int.MaxValue</c> は <b>-24 に折り返し</b>、<c>new float[-24]</c> が
+        ///   <c>OverflowException</c> になる。
+        /// </summary>
         [Test]
         public void ExtremeFrameSizesDoNotThrow()
         {
@@ -241,6 +249,57 @@ namespace ChatterMascot.Tests
             Assert.That(coarse, Is.Not.Null);
             Assert.That(coarse.Length, Is.EqualTo(1));
             Assert.That(coarse[0], Is.EqualTo(1f).Within(1e-5f));
+
+            // 1フレームが発話全体より長い ＝ フレームは1つ
+            var huge = Envelope(wav, int.MaxValue);
+            Assert.That(huge, Is.Not.Null);
+            Assert.That(huge.Length, Is.EqualTo(1));
+            Assert.That(huge[0], Is.EqualTo(1f).Within(1e-5f));
+        }
+
+        /// <summary>
+        /// ★★ <b>ヘッダの値は外から来る。</b> <c>TryReadHeader</c> は <c>channels != 0</c> と
+        ///   <c>sampleRate &gt; 0</c> しか見ないので、壊れた WAV が 20億 Hz を名乗れる。
+        ///   1フレームのサンプル数を入力の長さで頭打ちにしていないと、
+        ///   <b>160MB をメインスレッドで確保する</b>（<c>Prepare</c> は <c>FetchAudioAsync</c> の継続）。
+        /// </summary>
+        [Test]
+        public void AbsurdHeaderValuesDoNotAllocateBeyondTheInput()
+        {
+            // 240 サンプル（480 バイト）しか無いのに 20億 Hz を名乗る WAV
+            var wav = WavBuilder.BuildRaw(new byte[480], 1, 16, 2000000000, 1);
+
+            var envelope = Envelope(wav);
+
+            Assert.That(envelope, Is.Not.Null);
+            Assert.That(envelope.Length, Is.EqualTo(1));
+        }
+
+        /// <summary>
+        /// ★ <c>WavDecoder.TryReadSamples</c> / <c>TryReadSamplesInto</c> は <c>public</c> なので、
+        ///   <c>TryReadHeader</c> を通していない範囲を渡されうる。<c>IndexOutOfRangeException</c> は
+        ///   <c>Prepare</c> → <c>FetchAudioAsync</c> の fire-and-forget で<b>未観測のまま捨てられ、
+        ///   head が黙って止まる</b>ので、<c>error</c> で返すこと。
+        /// </summary>
+        [Test]
+        public void OutOfRangeReadsAreRejectedWithAReason()
+        {
+            var wav = WavBuilder.Build(Constant(16, 1f), WavBuilder.Encoding.Float32);
+
+            float[] samples;
+            string error;
+
+            Assert.That(WavDecoder.TryReadSamples(wav, 0, wav.Length + 8, 3, 32, out samples, out error), Is.False);
+            Assert.That(error, Is.Not.Null);
+
+            Assert.That(WavDecoder.TryReadSamples(wav, -1, 4, 3, 32, out samples, out error), Is.False);
+            Assert.That(error, Is.Not.Null);
+
+            Assert.That(WavDecoder.TryReadSamples(wav, 0, -4, 3, 32, out samples, out error), Is.False);
+            Assert.That(error, Is.Not.Null);
+
+            Assert.That(WavDecoder.TryReadSamples(null, 0, 4, 3, 32, out samples, out error), Is.False);
+            Assert.That(error, Is.Not.Null);
         }
     }
 }

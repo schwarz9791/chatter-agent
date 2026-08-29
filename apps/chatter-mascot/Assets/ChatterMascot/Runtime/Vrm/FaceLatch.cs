@@ -5,9 +5,9 @@ namespace ChatterMascot.Vrm
     /// <summary>
     /// 「いま鳴っているもの」から「顔が使う値」へ変換するときの記憶。<b>時計は引数で受け取る。</b>
     ///
-    /// ★ <b>ラッチが要る理由。</b> <c>SpeakingView.TryRead</c> は再生中の item が無いとき
+    /// ★ <b>ラッチが要る理由。</b> <c>SpeakingSet.TryGetFace</c> は鳴っているものが無いとき
     ///   <c>kind = Assistant</c> / <c>emotion = Neutral</c> に<b>倒す契約</b>
-    ///   （<c>SpeakingViewTests</c> の4本が固定している）。生の値をそのまま
+    ///   （<c>SpeakingSetTests</c> が固定している）。生の値をそのまま
     ///   <see cref="FacePolicy"/> へ渡すと、<b>喋り終わった瞬間に目標が Neutral になり、
     ///   <c>FaceParams.HoldSeconds</c> をいくら伸ばしても顔は即座に戻る</b>。
     ///

@@ -317,10 +317,10 @@ namespace ChatterMascot.EditorTools
             if (runner == null)
             {
                 // ★ VrmCharacter.Start の FindFirstObjectByType<MascotRunner>() フォールバックが
-                //   効くので致命ではないが、両方無いと SpeakingView は常に false を返し、
-                //   kind: "prompt" の区別と発話中のゲインが丸ごと無効になる
+                //   効くので致命ではないが、両方無いと「喋っている」が常に false になり、
+                //   kind: "prompt" の区別と発話中のゲイン、それに口の動き（#58）が丸ごと無効になる
                 Debug.LogWarning($"[Fixups] {nameof(MascotRunner)} が見つからないので {nameof(VrmCharacter)}.runner を結線できません" +
-                                  $"（{nameof(VrmCharacter)}.Start のフォールバックはあるが、両方無いと SpeakingView は常に false）");
+                                  $"（{nameof(VrmCharacter)}.Start のフォールバックはあるが、両方無いと発話が一切観測できない）");
             }
 
             // ★ [SerializeField] は Inspector からしか繋がらないので、ここで繋ぐ

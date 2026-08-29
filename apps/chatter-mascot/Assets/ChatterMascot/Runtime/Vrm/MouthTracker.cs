@@ -25,6 +25,26 @@ namespace ChatterMascot.Vrm
     /// </summary>
     public sealed class MouthTracker
     {
+        /// <summary>
+        /// <see cref="From"/> が返す区間の上限（秒）。
+        ///
+        /// ★ <b>これは緩和策ではなく不変条件の回復。</b> <c>SpeakingSet.Mouth</c> の doc が言う区間は
+        ///   「前の<b>表示</b>フレームから今まで」であって「前に描画した時刻から今まで」ではない。
+        ///   ハング・Editor の Pause・GameObject の非アクティブ化・オクルージョンによる間引きでは
+        ///   <see cref="_prevSampledAt"/> が秒単位で取り残され、復帰フレームで<b>数秒ぶんの
+        ///   エンベロープの最大</b>（＝実際の振幅と無関係に ~1.0）を返してしまう。
+        ///
+        /// ★ <b>0.2 秒の根拠は両側から挟んで決めた。</b> 下限側は実フレーム間隔
+        ///   （30fps で 33.3ms。GC ヒッチで 2〜3 倍は普通）、上限側は「区間の最大が音節をまたいで
+        ///   口が開きっぱなしに寄る」こと（日本語は 7〜8 モーラ/秒 ≒ 130ms/モーラ）。
+        ///   0.1 だと 10fps で余裕が消える。
+        /// ★★ <b><c>targetFrameRate</c> を 5fps 近くまで下げるならここも上げること。</b>
+        ///   1フレーム間隔がこれを超えると、区間が切られて<b>エンベロープを読み飛ばす</b>。
+        /// ★ <b><c>deltaTime</c> から動的に導かないこと。</b> <c>Time.unscaledDeltaTime</c> が
+        ///   <c>Time.maximumDeltaTime</c> でクランプされるかは Unity のバージョンに依存する。
+        /// </summary>
+        public const double MaxSpanSeconds = 0.2;
+
         /// <summary>前回サンプルした時刻。<b>まだ一度も読んでいなければ <c>NaN</c>。</b></summary>
         private double _prevSampledAt = double.NaN;
 
@@ -38,14 +58,20 @@ namespace ChatterMascot.Vrm
 
         /// <summary>
         /// 区間の始まり。<b>初回は <paramref name="now"/> と同値</b>（＝点サンプル1回だけ）。
+        /// 前回から <see cref="MaxSpanSeconds"/> 以上空いていたら、そこまで切り上げる。
         ///
         /// ★★ <b><c>double.NegativeInfinity</c> で初期化しないこと。</b>
         ///   <c>Mouth(-∞, now)</c> は<b>エンベロープ全体を走査して全体最大を返す</b>ので、
         ///   最初のフレームで口が全開に飛ぶ。1フレームぶんの点サンプルなら実害ゼロ。
+        /// ★ <b>上限はその失敗と同じ根を塞ぐ。</b> 初回だけでなく、フレームが来なかった後の
+        ///   復帰フレームでも同じことが起きる（→ <see cref="MaxSpanSeconds"/>）。
         /// </summary>
         public double From(double now)
         {
-            return double.IsNaN(_prevSampledAt) ? now : _prevSampledAt;
+            if (double.IsNaN(_prevSampledAt)) return now;
+
+            var oldest = now - MaxSpanSeconds;
+            return _prevSampledAt < oldest ? oldest : _prevSampledAt;
         }
 
         /// <summary>

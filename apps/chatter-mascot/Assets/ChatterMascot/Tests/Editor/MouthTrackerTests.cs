@@ -39,6 +39,32 @@ namespace ChatterMascot.Tests
             Assert.That(tracker.From(100.033), Is.EqualTo(100.0).Within(1e-9));
         }
 
+        /// <summary>
+        /// ★★ <b>フレームが来なかった後は区間を切ること。</b> 切らないと、復帰フレームで
+        ///   数秒ぶんのエンベロープの最大（＝実際の振幅と無関係に ~1.0）を取り、
+        ///   <c>release</c> で閉じるまで約 125ms 口が開きっぱなしになる。
+        ///   <c>-∞</c> で初期化してはいけないのと同じ根。
+        /// </summary>
+        [Test]
+        public void SpanIsCappedAfterALongGap()
+        {
+            var tracker = new MouthTracker();
+            tracker.Tick(0f, 100.0, Gain, Release, 1f / 30f);
+
+            // 10 秒ハングした後の復帰フレーム
+            Assert.That(tracker.From(110.0), Is.EqualTo(110.0 - MouthTracker.MaxSpanSeconds).Within(1e-9));
+        }
+
+        /// <summary>通常のフレーム間隔では上限に触れない（区間が切られると読み飛ばす）。</summary>
+        [Test]
+        public void NormalFramesAreNotCapped()
+        {
+            var tracker = new MouthTracker();
+            tracker.Tick(0f, 100.0, Gain, Release, 1f / 30f);
+
+            Assert.That(tracker.From(100.0 + 1.0 / 30.0), Is.EqualTo(100.0).Within(1e-9));
+        }
+
         /// <summary>★ 立ち上がりは鈍らせない。鈍らせると口の応答が音より遅れる。</summary>
         [Test]
         public void AttackIsImmediate()

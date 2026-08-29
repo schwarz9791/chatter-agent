@@ -191,6 +191,13 @@ MonoBehaviour:
   eyeSensitivity: 0.4
   headSensitivity: 0.1
   neutralAimFraction: 0.6
+  expressionLerpSeconds: 0.15
+  faceHoldSeconds: 1.5
+  promptSurpriseWeight: 0
+  blinkSuppressAboveHappy: 0.1
+  useNeutralExpression: 0
+  blinkEnabled: 1
+  faceDebugLog: 0
 --- !u!1 &615255318
 GameObject:
   m_ObjectHideFlags: 0

@@ -147,12 +147,46 @@ namespace ChatterMascot.EditorTools
             if (instance.Vrm != null && instance.Vrm.Expression != null)
             {
                 // ★ Clips は (Preset, Clip) のタプル列。Clip が null の枠も混ざる
-                var keys = instance.Vrm.Expression.Clips
+                var clips = instance.Vrm.Expression.Clips
                     .Where(pair => pair.Clip != null)
-                    .Select(pair => pair.Preset == ExpressionPreset.custom
-                        ? pair.Clip.name
-                        : pair.Preset.ToString());
+                    .ToList();
+                // ★ **「一覧に載っている」＝「顔が動く」ではない。** UniVRM の importer は、
+                //   モデルが宣言していない preset にも**中身が空のクリップを作る**
+                //   （vita.vrm は glTF に preset が 14 個しか無いのに Clips は 18 個で、
+                //   lookUp / lookDown / lookLeft / lookRight が bind ゼロで生えている）。
+                //   SetWeight は通るのに何も起きないので、**空は空と書く**こと
+                // ★ **bind の判定を書き写さないこと。** VrmCharacter.HasBindings を呼ぶ
+                //   （VrmStage.MeasureBounds を public static にしてあるのと同じ理由）。
+                //   最初はここに手写ししていて、両方が同じ抜け（NodeTransformBindings を
+                //   数えていない）を持っていた —— 片方を直しても、もう片方は黙って間違ったまま
+                var keys = clips.Select(pair =>
+                {
+                    var name = pair.Preset == ExpressionPreset.custom ? pair.Clip.name : pair.Preset.ToString();
+                    return VrmCharacter.HasBindings(pair.Clip) ? name : name + "(空)";
+                });
                 text.Append("\n  expressions: ").Append(string.Join(", ", keys.OrderBy(k => k)));
+
+                // ★ #57: 表情が瞬き / 口 / 視線をブロックするか、二値かは**この静的な定義**で決まる。
+                //   ランタイムの BlinkOverrideRate / MouthOverrideRate / LookAtOverrideRate は
+                //   「いま立てている weight」に依存する動的な値で、neutral が支配的なこのアプリでは
+                //   実質いつも 0 になるので判定には使えない（→ VrmCharacter.WarnAboutOverrides）。
+                //   同梱 vita.vrm は preset 14個すべて isBinary=false / override=none。
+                var quirks = clips
+                    .Where(pair => pair.Clip.IsBinary
+                                   || pair.Clip.OverrideBlink != ExpressionOverrideType.none
+                                   || pair.Clip.OverrideLookAt != ExpressionOverrideType.none
+                                   || pair.Clip.OverrideMouth != ExpressionOverrideType.none)
+                    .Select(pair => (pair.Preset == ExpressionPreset.custom ? pair.Clip.name : pair.Preset.ToString())
+                                    + $"(binary={pair.Clip.IsBinary}"
+                                    + $" blink={pair.Clip.OverrideBlink}"
+                                    + $" lookAt={pair.Clip.OverrideLookAt}"
+                                    + $" mouth={pair.Clip.OverrideMouth})")
+                    .OrderBy(k => k)
+                    .ToList();
+                text.Append("\n  expression の特記: ")
+                    .Append(quirks.Count == 0
+                        ? "なし（全部 isBinary=false / override=none）"
+                        : string.Join(", ", quirks));
             }
 
             var animator = instance.GetComponent<Animator>();

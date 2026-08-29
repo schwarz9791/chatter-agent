@@ -1200,6 +1200,305 @@ const targetY = (mouse.y - headY) * eyeSensitivity * 2;
 実機で挙動を確かめるときは必ず「サーバーを起動 → 起動できたことをログで確認 → そのあとでキューに置く」
 の順を守ること。
 
+### ★ `SetWeight` は黙って無視される。しかも「一覧に載っている」＝「顔が動く」ではない
+
+**2段構えで空振りする。** どちらもエラーにならない。
+
+1. **`Vrm10RuntimeExpression.SetWeight` / `SetWeights` は `_inputWeights.ContainsKey(key)` で弾く。**
+   モデルが持たない preset を渡しても**例外もログも出ない**。「表情が変わらない」だけが起きる
+2. ★ **UniVRM の importer は、モデルが宣言していない preset にも「中身が空のクリップ」を作る。**
+   実測（同梱 `vita.vrm`、v0.131.2）: **glTF の `VRMC_vrm.expressions.preset` は 14 個**しか無いのに、
+   `Vrm.Expression.Clips` は **18 個**ある。増えているのは `lookUp` / `lookDown` / `lookLeft` /
+   `lookRight` の4つで、**`morphTargetBinds` が 0 件**。つまり `SetWeight` は通り、
+   `ExpressionKeys` にも載り、それでも顔は 1mm も動かない
+
+**だから「キーがあるか」だけを見る診断は、いちばん見たいケースで嘘をつく。** bind の数まで見ること。
+
+- `VrmProbe` の `expressions:` は bind が 0 のクリップに `(空)` を付ける
+- `VrmCharacter` は読み込み時に1回、`使う preset: happy=○ angry=○ …（○=動く / 空=枠はあるが中身が無い / ×=無い）` を出す
+
+★★ **bind の配列は4本ある。** `MorphTargetBindings` / `MaterialColorBindings` /
+`MaterialUVBindings` / **`NodeTransformBindings`**。最後のひとつは実験扱いの名前だが
+`NodeTransformBindingMerger` が実際に適用しているので、**数え落とすと眉や耳や尻尾を
+ボーンで動かすモデルの効いている表情を「空」と誤報する** —— この診断は
+「顔が動かないのが正常」と「壊れて動かない」を区別するためにあるのだから、
+**作られた目的そのものの場面で誤誘導する**ことになる。
+
+★★ **判定は `VrmCharacter.HasBindings`（`public static`）1箇所に置き、`VrmProbe` はそれを呼ぶ。**
+最初は probe 側に手写ししていて、**両方が同じ抜け（`NodeTransformBindings`）を持っていた**
+（#57 のレビューで判明）。`VrmStage.MeasureBounds` を `public static` にしてあるのと同じ理由で、
+独立実装が2つあると片方だけ直したときに黙ってズレる。
+
+★ **`vita.vrm` の bind 先（実測）**:
+
+```
+happy → Fcl_ALL_Joy      angry → Fcl_ALL_Angry      sad → Fcl_ALL_Sorrow
+relaxed → Fcl_ALL_Fun    surprised → Fcl_ALL_Surprised
+blink → Fcl_EYE_Close    aa → Fcl_MTH_A             neutral → Fcl_ALL_Neutral（w=1.0）
+```
+
+★ **上の「視線の中立」の節にある「`vita.vrm` は `lookUp` / `lookDown` / `lookLeft` / `lookRight` の
+expression を持たない」と、probe の一覧に4つが載ることは矛盾していない。** **枠はあって中身が無い。**
+この2つの記述が食い違って見えたら、ここを思い出すこと。
+
+### ★ expression の weight は自動でゼロに戻らない
+
+`_inputWeights` は次に上書きされるまで保持され続ける。**アニメーションではなく状態**なので、
+「もう出さない」を表すには**明示的に 0 を書く**必要がある。
+
+いちばん刺さるのは口で、**喋り終わっても `aa` が開いたまま固まる**。`FacePolicy` は
+`Speaking` が false になったフレームで `aa` を**猶予なしで即 0** にしている（表情には猶予があるのと対照的）。
+★ **#58（リップシンク）が口を入れる前に、この経路だけ先に作ってある。** 後付けにすると必ず一度踏む。
+
+### ★ override の判定は「モデルの静的な定義」で行う。ランタイムの `*OverrideRate` では検出できない
+
+`Vrm10RuntimeExpression` は `BlinkOverrideRate` / `MouthOverrideRate` / `LookAtOverrideRate` を
+公開しているが、**これを異常検知に使わないこと。** 2つ理由がある。
+
+1. **いま立てている weight に依存する動的な値。** `DefaultExpressionValidator` は
+   `block` なら weight>0 で 1、`blend` なら weight そのものを足して clamp01 する。実運用では
+   `neutral` が支配的（`ruleBasedEmotionClassifier` がコード説明文を `neutral` に倒すよう明示的に
+   チューニングされている）なので、**ほとんどの時間 0 のまま＝警告が一度も出ない**
+2. **更新されるのは `Vrm10Runtime.Process()`（実行順 11000）の中。** 実行順 0 の
+   `VrmCharacter` から読むと**前フレームの値**になる
+
+**静的な `Vrm.Expression.Clips` の `OverrideBlink` / `OverrideMouth` / `OverrideLookAt` は
+読み込み直後に確定していて weight に依存しない。** こちらを1回走査して警告する。
+
+★ **`OverrideLookAt` も見ること。** ここが `none` でないモデルは、表情を出した瞬間に
+#59 のカーソル追従（`LookAtEyeDirection` が `1 - lookAtOverrideRate` 倍される）が死ぬ。
+「表情を入れたら視線が動かなくなった」の切り分けはこの警告が無いと難しい。
+
+★★ **走査するクリップは「このアプリが実際に weight を書く8つ」に絞ること。**
+override 率は `GetOverrideRate(clip.Override*, weight)` ＝ **weight 依存**なので、
+一度も weight を立てないクリップは寄与 0 で**何もブロックできない**。全クリップを見ると、
+`ih` / `ou` / `ee` / `oh`（使わない口の preset）やカスタムクリップに `overrideBlink` が
+付いているだけで、**成立しえない条件の警告を毎起動・永久に出す**ことになる
+（#57 のレビュー指摘）。上の「起動直後にだけ成立しない状態を『異常』として警告しない」と
+同じ失敗の仕方 ——「読み飛ばす癖がつくぶん有害」。
+★ **絞る対象はキーの集合であって、見る項目ではない。** `OverrideLookAt` を見る判断は維持する。
+
+★ **実測: 同梱 `vita.vrm` は preset 14個すべて `override*: none` かつ `isBinary: false`。**
+つまり `happy` と `aa` と `blink` は互いに一切干渉しない。**このモデルでは UniVRM は何も守ってくれない**、
+と読み替えること（下の「VRoid の happy は目を細める」に効く）。
+
+### ★ 表情を「体を止める条件」で止めない（`LateUpdate` の早期 return）
+
+`VrmCharacter.LateUpdate` は下3つで早期 return する。
+
+```csharp
+if (_instance == null) return;
+if (_idle != null && _idle.IsPlaying) return;   // ← VRMA が読めている＝通常の状態
+if (!proceduralIdle) return;
+```
+
+**表情の適用をこの後ろに置くと、同梱 `idle_loop.vrma` が読めている通常状態で一度も走らない。**
+2番目は「手続き的アイドルと VRMA が `ControlRig` を奪い合わないため」の条件で、
+**顔とは何の関係も無い**。顔は `Kind` / `Emotion` を確定させた直後、早期 return より前で適用する。
+
+★ 一般化: **`LateUpdate` に早期 return がある関数へ新しいチャンネルを足すときは、
+その return が何を止めるための条件かを読むこと。** ここは「体」を止める条件だった。
+
+### ★ 発話は文の切れ目で必ず途切れる。だから表情に猶予が要る
+
+**1文＝1レコード＝1音声ファイル。** `PlaybackQueue` は再生完了で head を `Done` にして削除し、
+次を `Playing` にする。つまり**文の切れ目では必ず `Playing` が 0 件になる瞬間がある** ——
+先読み（`Lookahead = 3`）が効いていれば数フレーム、合成が詰まっていれば秒単位。
+
+`SpeakingView.TryRead` はそこで `false` を返すので、**猶予が無いとメッセージの途中で毎文
+Neutral に落ちる**。cc-mascot は hold を持たない（`onended` で即 neutral）ので実際にそうなっている。
+`faceHoldSeconds`（既定 **1.5秒**）は「余韻」ではなく**この分断を埋めるためのもの**。短くしないこと。
+
+★★ **猶予だけでは足りない。emotion をラッチしないと1行も効かない。**
+`SpeakingView.TryRead` は false のとき `kind = Assistant` / `emotion = Neutral` に**倒す契約**
+（`SpeakingViewTests` の4本が固定している）。だから `VrmCharacter.Emotion` を素通しすると、
+**喋り終わった瞬間に目標が Neutral になり、猶予の秒数をいくら伸ばしても顔は即座に戻る**。
+`_lastSpokenEmotion`（`Speaking` が true の間だけ更新する）を渡すこと。
+
+★★ **`Kind` も一緒にラッチすること。** `Emotion` だけ直して `Kind` を生のまま渡すと、
+猶予の途中で**片方だけ崩れる** —— `promptSurpriseWeight` を 0 から開けたとき、
+emotion 由来の表情は猶予ぶん保たれるのに prompt の上乗せだけが発話終了の次フレームで抜け、
+**目に見える段差**が入る（#57 のレビュー指摘）。
+
+★★ **ただし prompt の<u>エッジ</u>は生の値で見ること。** ラッチ済みの `Kind` は猶予の間も
+（次の発話まで）`Prompt` のまま残るので、そちらでエッジを取ると
+**2回目以降の prompt でエッジが立たず、瞬きが一度も入らなくなる**。
+
+★★ **この記憶を `MonoBehaviour` のフィールドとして書かないこと。** `ChatterMascot.Tests.asmdef` は
+`ChatterMascot.Runtime` しか参照しないので、`VrmCharacter` に書いた時点で**テストが1行も当たらない**
+—— しかもここは「これが無いと猶予が1行も効かない」と分かっている場所。
+`Runtime/Vrm/FaceLatch.cs` に切り出して `FaceLatchTests` で固定してある。
+**`Runtime/` に純粋ロジックを寄せる判断は、残った glue にも最後まで適用すること。**
+
+★ **`messageId` で束ねて解決しようとしないこと。** [`protocol.md`](./protocol.md) が
+「`messageId` の変化だけを根拠にした安全なバッチ化はできない」を3つの理由で明示的に禁じている。
+
+### ★ VRoid の `happy` は目を細める。`override` が `none` なら瞬きと素で加算される
+
+`vita.vrm` の `happy` は `Fcl_ALL_Joy` に bind されていて、VRoid の Joy は**目を細める形を含む**。
+`blink` は `Fcl_EYE_Close`。両方 `overrideBlink: none` なので、**UniVRM は減衰させず素で足す**。
+
+cc-mascot が実測で入れているガード（`useBlink.ts` の `HAPPY_EXPRESSION_THRESHOLD = 0.1`）を
+踏襲して、`happy` の緩和後の weight が閾値を超えている間は瞬きを止める
+（`blinkSuppressAboveHappy`、既定 0.1。0 で無効）。
+
+★ **判定は「目標」ではなく「緩和後の値」で行う。** 目が細まっているかは、実際に適用される
+weight で決まる（cc-mascot も lerp 後の `currentEmotionValues` を見ている）。
+
+★ **#58 への申し送り。** cc-mascot は同じ理由で**口も抑えている** ——
+`aa` を `happy` で **0.2倍**、`sad` で **0.5倍**にスケールする（`useVRM.ts` の `setMouthOpen`。
+「笑顔時や悲しいときに口が開きすぎてメッシュからはみ出るのを防ぐ」）。
+#57 では `Mouth` が常に 0 で目視確認できないので入れていない。**#58 で再発見しなくて済むよう
+ここに書いておく。**
+
+### ★ 瞬きの間隔は cc-mascot、形は UniVRM サンプル
+
+`Samples~/VRM10Viewer/VRM10Blinker.cs` は Package Manager から明示的にインポートしない限り
+Unity が読まないので、**自前で書く**（数値を参考にしただけなので `NOTICE` の義務は増えない）。
+
+| | 採用 | 出どころ | 採らなかった側 |
+|---|---|---|---|
+| 間隔 | **U(2秒, 6秒)** | cc-mascot `useBlink.ts` | `VRM10Blinker` は `Random.value * 5f` ＝ **U(0, 5秒)** で下限が無く、0秒近い間隔が出て連続瞬きに見える |
+| 形 | **閉 0.1 / 保持 0.06 / 開 0.03 秒** | `VRM10Blinker` | cc-mascot は閉 75ms → 開 75ms で**保持なし**。閉じたままの間が無いぶん速く見える |
+
+★ **コルーチンにしないこと。** サンプルは `StartCoroutine` + `WaitForSeconds` だが、それだと
+EditMode から回せない。`AudioIdleGate` と同じ「状態は持つが時計は引数で受け取る」形にする。
+
+★ **状態は `double` の期限で持ち、`float` へ落とすのは「期限との差」だけにする。** 常駐アプリなので
+`Time.realtimeSinceStartupAsDouble` は日単位まで伸びる。経過を `(float)now` から作ると、7日で
+float の刻み幅が1フレームぶんの差を上回り、**瞬きがカクつく／止まるがエラーは出ない**
+（`Oscillator.Phase` が位相を周期で畳んでいるのと同じ理由）。
+
+★★ **`Request()` の消費は、フェーズを進めた<u>後</u>に置くこと。** 先に消費すると、
+期限を過ぎているのにまだ `Waiting` へ進んでいない**古いフェーズ**を見て「既に瞬いている」と
+誤判定し、要求を恒久的に捨てる（要求フラグはクリア済みなので再試行も無い）。
+30fps で瞬きの終端フレームに prompt が重なると、`Request()` の存在理由そのものが失われる。
+
+★★ **フェーズ進行の上限で打ち切ったら、そのフェーズを残さず「目を開けた状態」へ倒すこと。**
+上限が4フェーズ周期の整数倍だと、毎 `Tick` で**同じフェーズ**へ戻る。それが `Closing` /
+`Holding` なら出力は永久に 1 ＝ **目が閉じたまま固着する**のに、1 は 0..1 に収まるので
+**「範囲内か」だけを見るテストはすり抜ける**。#57 のレビュー指摘（J）を受けて
+「有限回で 0 に戻ること」まで assert したら、実際にこれを踏んでいた。
+打ち切りに至るのは「設定が縮退している」か「長く止まっていた」かのどちらかで、
+いずれも瞬いていない状態へ倒すのが正しい（寝ていた間の瞬きを取り戻す必要は無い）。
+
+★ **30fps では開きのランプは事実上見えない。** 1フレーム 33.3ms に対して
+`openSeconds = 0.03` なので、`Tick` が開きの窓に落ちない周期のほうが多く、
+`blink` は 1.0 → 0.0 と一段で戻る（`holdSeconds = 0.06` も約2フレーム）。
+**上の表は「出典どおりの値」であって「30fps 用に調整した値」ではない** ——
+開きの緩さが欲しくなったら、出典との対応が切れることを承知のうえで伸ばすこと。
+
+★ **抑制は「始まっていない瞬きを飛ばす」であって「進行中の瞬きを切る」ではない。**
+cc-mascot も `performBlink` の入口で `return` している。出力を無条件に 0 にすると、
+閉じ切っている最中に `happy` が立った瞬間に**1フレームで目が開く段差**になる
+（`Blink` は意図的に補間していないので吸収するものが無い）。
+`FacePolicy` は「前フレームの `blink` が 0 のときだけ」止めている。
+
+### ★ `SetWeights` ではなく `SetWeightsNonAlloc` を使う
+
+`Vrm10RuntimeExpression` は両方持っている。`SetWeights(IEnumerable<KeyValuePair<…>>)` は
+`Dictionary` を渡しても**インターフェース越しに列挙するので列挙子がボックス化する**。
+毎フレーム（30回/秒）書く場所なので、`Dictionary` を1本使い回して `SetWeightsNonAlloc` に渡す。
+
+### ★ 「顔が動かないのが正常」と「壊れて動かない」はログでしか区別できない
+
+`ruleBasedEmotionClassifier` は Claude Code のコード説明文が `neutral` に倒れるよう明示的に
+チューニングされている（`applyHeuristics` がコードブロック・ファイルパス・技術用語で `neutral` に
+最大 +12 まで加点するのに対し、感情側は文末パターン1本が +2）。**実運用では `neutral` が支配的**で、
+顔はほとんど動かないのが正しい。
+
+しかも #59 でアイドルと視線が動いているので、**体が動いているのを見て「動いているから大丈夫」と
+流しやすい**。だから `VrmCharacter` に「今の emotion / kind と**実効** weight を1秒ごとに出す」
+デバッグフラグを付けてある（`faceDebugLog`、ビルド済みアプリでは `-faceLog 1`）。
+
+- ★ **「実効」は `Runtime.Expression.ActualWeights` から読むこと。** 自前で計算した値を出しても、
+  `SetWeight` が空振りしたケース（上の節）を検出できない。**目標と実効を両方出す**のはそのため
+- ★ **実効は1フレーム古い。** `ActualWeights` を埋めるのは `Vrm10Runtime.Process()`（11000）の中で、
+  実行順 0 のここはその手前。**切り替わりの最中に目標と実効がずれて見えるのは正常**
+- ★ **同じ文面を間引かないこと。** `neutral` のまま動かないのが正常なので、重複を抑えると
+  **「正常」のときだけ何も出なくなり、目的と正反対**になる。時間で間引くだけにする
+
+#### #57 の実機実測（2026-08-28 / macOS ビルド / `AvatarSample_A.vrm`）
+
+`XDG_CONFIG_HOME` を一時ディレクトリに向けたサーバー（`CHATTER_AGENT_PORT=8571`）へ
+`-serverUrl ws://127.0.0.1:8571 -faceLog 1` で繋ぎ、**サーバー起動後に**キューへ手で置いた。
+
+読み込み時（1回だけ出る）:
+
+```
+[Mascot] expression: aa, angry, blink, blinkLeft, blinkRight, ee, happy, ih, lookDown, lookLeft,
+         lookRight, lookUp, neutral, oh, ou, relaxed, sad, surprised（18 件）
+[Mascot] 使う preset: happy=○ angry=○ sad=○ relaxed=○ surprised=○ neutral=○ blink=○ aa=○
+[Mascot] VRMA の ExpressionMap: 0 件
+```
+
+6つの emotion を順に流したときの `目標`（0 のチャンネルは省いた）:
+
+```
+emotion=Happy      happy=0.98 → happy=1.00
+emotion=Angry      happy=0.09 angry=0.91 → angry=1.00
+emotion=Sad        angry=0.64 sad=0.36   → sad=1.00
+emotion=Relaxed    sad=0.03 relaxed=0.97 → relaxed=1.00
+emotion=Surprised  relaxed=0.16 surprised=0.84 → surprised=1.00
+emotion=Neutral    surprised=0.01 → （全部 0）
+```
+
+★ **クロスフェードの中間値がそのまま観測できる。** 前の emotion が残ったまま次が立ち上がっていて、
+どこにも段差が無い。**「パタパタしない」はこの中間値の存在で確かめられる**（目で見るより確実）。
+
+★ **`ExpressionMap: 0 件` の VRMA が回っている状態で emotion が効いた** ——
+#59 から引き継いだ宿題（表情が VRMA に奪われていないこと）はこれで閉じた。
+
+`kind: "prompt"` の瞬き（`Request()` のエッジで1回）:
+
+```
+kind=Prompt emotion=Surprised surprised=0.67 blink=1.00   ← prompt へ移り始めた直後
+kind=Prompt emotion=Surprised surprised=1.00 blink=0.84
+```
+
+★ **`surprised` が 0.67 ＝ 遷移が始まって 0.17 秒ほどの時点で blink が 1.00 に達している。**
+自然な瞬き（2〜6秒間隔）がその一瞬に偶然重なる確率は低いので、これは `Request()` 由来と読める。
+
+★ **`blink` は 1秒に1回しかログに出ない一方、瞬きは 0.19 秒で終わる。**
+だから **`blink=0.00` の行が並んでいても「瞬いていない」証拠にはならない**（捕捉率は2割ほど）。
+瞬きの有無をログで確かめたいときは、prompt を何回か挟んでエッジを増やすこと。
+
+★ **`happy=1.00` の行では `blink` が常に 0**（`blinkSuppressAboveHappy` が効いている）のに対し、
+**`angry=1.00` の行には `blink=1.00` が出る** —— 抑制が `happy` だけに掛かっていることも読める。
+
+★ **実効（`ActualWeights`）は目標と一致した。** 差が出たのは遷移の最中だけで（例: 目標 `blink=1.00` /
+実効 `blink=0.75`）、これは実行順による1フレームの遅れ。上の節のとおり正常。
+
+★ **ログの取り違えに注意。** `Player.log` は**バンドル ID ごと**なので、
+`~/dev/chatter-agent` 側のマスコットと `~/orca/workspaces/...` 側のマスコットが**同じファイルを共有する**。
+片方が起動すると相手のログが `Player-prev.log` へ回される。**実機確認の途中で「ログが消えた」ように
+見えたら、まず `Player-prev.log` を見ること**（実際に踏んだ）。
+
+### ★ 起動引数の真偽値フラグは `CommandLine.Flag` で読む（`Argument` ではない）
+
+`CommandLine.Argument` は「name の**次に来る値**」を返す作りで、**末尾の name は拾わない**
+（ループが `args.Count - 1` まで）。だから `-faceLog` を単独で渡すと `null` が返る。
+
+| 渡し方 | `Argument` | 期待 |
+|---|---|---|
+| `-faceLog 1` | `"1"` | 有効 |
+| **`-faceLog`（単独）** | **`null`** | 有効にしたい |
+| `-faceLog -vrm /path.vrm` | `"-vrm"` | 有効。かつ `-vrm` を食わない |
+
+真ん中を「指定されなかった」と同じ扱いにすると、**いちばん自然な渡し方で黙って無反応**になる。
+実機で `Player.log` を読むための口がそれだと、切り分け中に
+「ログが出ない＝コードが走っていない」と誤読しかねない（#57 のレビュー指摘）。
+
+`CommandLine.Flag(args, name, defaultValue)` が3つとも面倒を見る:
+
+- **値なし（末尾、または次のトークンが `-` で始まる）＝ `true`**
+- 偽と読むのは `0` / `false` / `no` / `off` だけ（大文字小文字は無視）。それ以外の値は真
+- name が無ければ `defaultValue`
+
+★ **規則を `MonoBehaviour` の中に書かないこと。** `CommandLine` は
+`Argument(IReadOnlyList<string>, string)` を純粋関数として持ち `CommandLineTests` で固定している。
+真偽値の規則だけ MonoBehaviour に置くと、そこだけテストで固定できなくなる。
+
 ### ★ シーンに `EventSystem` が無いとクリック透過が死ぬ
 
 `UniWindowController` の Raycast ヒットテストは `EventSystem.current.RaycastAll` を呼ぶ。

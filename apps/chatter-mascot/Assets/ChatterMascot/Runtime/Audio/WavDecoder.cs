@@ -387,8 +387,9 @@ namespace ChatterMascot.Audio
         /// ★ <b>「フォーマットが違う」と「ビット深度が違う」を混ぜないこと。</b>
         ///   無音の原因を追うとき、<c>ttsBaseUrl</c> の向き先が別サービスだったのか
         ///   合成の設定が変わったのかで、次に見る場所が変わる。
-        /// </summary>
+        ///
         /// ★ <c>internal</c> なのは <c>LipSyncEnvelope</c> が同じ文言を使うため（同一アセンブリ）。
+        /// </summary>
         internal static string DescribeUnsupported(ushort format, ushort bitsPerSample)
         {
             return format != FormatPcm

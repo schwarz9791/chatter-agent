@@ -36,8 +36,10 @@
 確実に効く（透過ウィンドウで VSync が効くかも確かめていない）。
 
 ★ **既定の 30fps はデスクトップ限定。** Android XR ではヘッドセットのリフレッシュレートに
-合わせる必要がある（→ #25）。VRM のリップシンクと spring bone が入ったら、
-30fps で口の動きが足りるか見直す（→ #17）。`MascotRunner` の Inspector で変えられる。
+合わせる必要がある（→ #25）。`MascotRunner` の Inspector で変えられる。
+
+★ **「リップシンクが入ったら 30fps で足りるか見直す」という宿題は #58 で閉じた。
+結論は 30fps 据え置き。** → 下の「30fps で口が足りるかの決着（#58）」
 
 ### #59 時点の実測: フレームレート上限ありでの常駐 CPU
 
@@ -1345,11 +1347,17 @@ cc-mascot が実測で入れているガード（`useBlink.ts` の `HAPPY_EXPRES
 ★ **判定は「目標」ではなく「緩和後の値」で行う。** 目が細まっているかは、実際に適用される
 weight で決まる（cc-mascot も lerp 後の `currentEmotionValues` を見ている）。
 
-★ **#58 への申し送り。** cc-mascot は同じ理由で**口も抑えている** ——
+★ **#58 で入れた。** cc-mascot は同じ理由で**口も抑えている** ——
 `aa` を `happy` で **0.2倍**、`sad` で **0.5倍**にスケールする（`useVRM.ts` の `setMouthOpen`。
 「笑顔時や悲しいときに口が開きすぎてメッシュからはみ出るのを防ぐ」）。
-#57 では `Mouth` が常に 0 で目視確認できないので入れていない。**#58 で再発見しなくて済むよう
-ここに書いておく。**
+#57 では `Mouth` が常に 0 で目視確認できなかったので見送っていたが、#58 で口が動くように
+なったので `FaceParams.MouthScaleHappy` / `MouthScaleSad` として同じ値で入れてある。
+
+★ **判定は瞬きの抑制と同じく「緩和後の weight」。** 表情が立ち上がる途中では倍率も途中の値に
+なるので段差が入らない。
+★ **`0` は「口を閉じる」ではなく「掛けない」。** `FaceParams` の他の値と同じ「0 = 無効」の
+語彙に揃えてある —— そうしないと `FacePolicyTests.AllZeroParamsMakeEvaluateEqualTarget` が
+固定している「全部 0 なら `Evaluate` は `Target` と一致する」が壊れる。
 
 ### ★ 瞬きの間隔は cc-mascot、形は UniVRM サンプル
 
@@ -1826,14 +1834,16 @@ voice をプールして **`Stop()` の効果を自分の再生ぶんに限定�
 - **上限は設けず、閾値を超えたら警告する。** voice が積むのは
   「採番のやり直しが、音が鳴り終わる前に繰り返されている」ときだけなので、
   **本数そのものが原因を指す材料**になる
-- **`Current`（最後に鳴らし始めた voice）を公開している。** #17 のリップシンクが
-  `GetOutputData` を読む先を1つに決めるため。
-  ★ **ただし macOS ではこの前提が成立しない。** 再生の実体が `AfplaySpeechPlayer` になり、
-  **音は `afplay` 子プロセスの中にあって `GetOutputData` に相当するものが存在しない**。
-  `MascotRunner._player` も `ISpeechPlayer` 型なので、`Current` はインターフェース越しに届かない。
-  → #17 では **`Prepare` の時点で WAV から振幅エンベロープ（20ms ごとの RMS）を作って
-  ハンドルに載せる**方式に寄せることになる。`WavDecoder.TryReadHeader` で既にサンプル位置と
-  フォーマットが分かるので追加のパースは要らず、**3つの実装すべてで同じコードが使える**
+- **`Current`（最後に鳴らし始めた voice）を公開している。** もともと #17 のリップシンクが
+  `GetOutputData` を読む先を1つに決めるためだったが、**macOS でこの前提が成立しなかった** ——
+  再生の実体が `AfplaySpeechPlayer` になり、**音は `afplay` 子プロセスの中にあって
+  `GetOutputData` に相当するものが存在しない**。`MascotRunner._player` も `ISpeechPlayer` 型なので、
+  `Current` はインターフェース越しに届かない。
+  → #58 は **`Prepare` の時点で WAV から振幅エンベロープ（20ms ごとの RMS）を作って
+  ハンドルに載せる**方式で入れた（`ILipSyncSource` / `LipSyncEnvelope`）。`WavDecoder` が既に
+  サンプル位置とフォーマットを読めるので追加のパースは要らず、**3つの実装すべてで同じコードが使える**。
+  ★ **いま `Current` を読んでいる消費者は居ない**（リップシンクはハンドルから読む）。
+  消しても口は動く
 - **設定の写し取り（`CopySettings`）を増やしたらここにも書くこと。**
   #17 でミキサーや 3D 配置を入れて写し漏らすと、症状は「**孤児だけ音量が違う**」のような、
   再現条件が採番のやり直しに縛られた形になる
@@ -1956,6 +1966,189 @@ Unity がアセット全体を再シリアライズしてテンプレートに�
 
 ★ **resume に失敗しても「掴んでいる」側に倒すこと。** suspend したままのフラグが残ると
 **二度と resume を試さず恒久的に無音になる**。無音より二重 resume の方が軽い。
+
+### ★ 口は「再生中の音を測る」のではなく「`Prepare` の時点で作っておく」（#58）
+
+cc-mascot は `AudioSource.GetOutputData()` の RMS を毎フレーム読んで `aa` に流している。
+**この方式が macOS で成立しない**（→ 上の「`AudioSource` 1本では孤児の契約を守れない」）ので、
+**`ISpeechPlayer.Prepare` の時点で WAV から振幅エンベロープ（20ms ごとの RMS）を作って
+ハンドルに載せる**。ハンドルが `ILipSyncSource` を実装し、`MascotRunner` が
+`audio as ILipSyncSource` で読む。
+
+```
+Prepare(wav) → ILipSyncSource を実装したハンドル → SpeakingSet → MouthTracker → FacePolicy → aa
+   (3実装で共通)      (macOS / Unity 内蔵で別型)      (純粋)      (純粋)      (純粋)
+```
+
+★ **`ISpeechPlayer` も `PlaybackQueue` も変更していない。** 状態機械から見ればハンドルは
+依然 `object` のままで、`AudioIdleGate`（#55）と同じ「`Items` を読むだけ」の流儀。
+コマンドを増やすと EditMode テストのコマンド列比較が全部壊れる。
+
+#### ★ エンベロープが作れなくても `Prepare` を失敗させない
+
+**リップシンクの都合で発話を落とすのは本末転倒。** `Prepare` が `null` を返すと
+`AudioFailed` → skip + ack となり、**サーバーのキューから物理削除されて二度と鳴らせない**。
+`Envelope = null` に倒して1回だけ警告する。
+
+回帰テスト: `AfplaySpeechPlayerTests.PrepareSucceedsEvenWhenTheEnvelopeCannotBeBuilt`。
+材料は **`bitsPerSample = 12` の PCM** —— `TryReadHeader` は通り、サンプルの読み出しだけが落ちる。
+
+#### ★ 20ms のエンベロープを 33.3ms で「点サンプリング」しない
+
+エンベロープの刻み（20ms）と表示（30fps = 33.3ms）は割り切れない。33.3ms 刻みで点を取ると
+**フレーム 2 / 4 / 7 / 9 … に一度も当たらず、4割を読み飛ばす**（＝立ち上がりが落ちて口が鈍る）。
+`SpeakingSet.Mouth(from, to, offsetMs)` は**前フレームからの区間の最大値**を返す。
+
+★ **区間の始点を `MascotRunner` に持たせないこと。** `Mouth()` が冪等でなくなる（呼び出し元の
+数に依存する API になる）うえ、`MascotRunner.Update` は `VrmCharacter.LateUpdate` より前の
+位相なので区間が半フレームずれる。始点は `MouthTracker`（`Runtime/Vrm/`）が持つ。
+
+★★ **始点を `double.NegativeInfinity` で初期化しないこと。** `Mouth(-∞, now)` は
+**エンベロープ全体を走査して全体最大を返す**ので、**最初のフレームで口が全開に飛ぶ**。
+未サンプルは `NaN` で表し、`from = to` の点サンプル1回に倒す。
+
+#### ★★ ラグの補正で「負のインデックスを 0 にクランプ」しない
+
+`afplay` は `Process.Start` が音より前に返るので、その起動ラグぶん口が先に動く。
+`lipSyncOffsetMs` を引いて索引するのだが、**`index = max(0, index)` と書くと
+offset ぶんの先行区間で `envelope[0]` を返す＝音より先に口が動く**ので、補正の意味が消える。
+正しいのは**区間 `[lo, hi]` 全体が音より前（`hi < 0`）なら 0（口を閉じたまま）**。
+
+回帰テスト: `SpeakingSetTests.OffsetKeepsTheMouthClosedBeforeTheSoundStarts`。
+
+#### ★ 端数フレームは実サンプル数で割る
+
+`LipSyncEnvelope.Build` の末尾のフレームはフレーム長に満たない。ゼロ埋めしてフレーム長で
+割ると最後だけ小さくなり、**語尾で口が閉じる**。半フレームぶんの直流 1.0 はゼロ埋め実装だと
+0.707 になるので、`LipSyncEnvelopeTests.TrailingPartialFrameIsNotDiluted` の1本で確実に捕まる。
+
+★ **24000Hz / 1ch に決め打ちしないこと。** `ttsBaseUrl` を VOICEVOX に向ければ別のレートに
+なりうる（そのとき口が音に合わなくなるが、**エラーは出ない**）。
+
+#### ★ サンプルの読み出しは `WavDecoder` を再利用する（ただしバッファは渡す）
+
+8/16/24/32bit PCM と IEEE float32 の分岐（特に **24bit の符号拡張**）を書き写さないこと。
+独立実装が2つあると片方だけ直したときに黙ってズレる（`VrmCharacter.HasBindings` /
+`VrmStage.MeasureBounds` を `public static` にしてあるのと同じ理由）。
+
+★ **ただし `TryReadSamples`（`float[]` を確保して返す版）をそのまま使わないこと。**
+`AfplaySpeechPlayer.Prepare` は**もともとサンプルをデコードしていない**ので、24kHz mono 5秒で
+**480KB の使い捨てゴミが丸ごと新規に**乗る（しかもメインスレッド）。`TryReadSamplesInto`
+（呼び出し側のバッファに詰める版）を足して、`Build` は 20ms 分（約 2KB）を使い回す。
+**分岐は1箇所のままなので、再利用の趣旨は損なわれていない。**
+
+★ `AudioClipPlayer` 側は `AudioClip` 用とエンベロープ用で**サンプルを二度デコードする**。
+消すには `Decode` から `float[]` を貰う形にする必要があるが、数百 KB を一度余分になめるだけ
+（約 1ms）なので今はやっていない。この実装が主役になるのは Android（#25）。
+
+#### ★ ゲインと減衰は `FacePolicy` ではなく `MouthTracker` に置く
+
+`FaceParams` は「**0 = 無効**」で統一されている（`PromptSurpriseWeight` も
+`BlinkSuppressAboveHappy` も）。**ゲインはこの語彙に乗らない** —— 入れると
+`FacePolicyTests.AllZeroParamsMakeEvaluateEqualTarget` が固定している
+「`FaceParams` を全部 0 にすると `Evaluate` は `Target` と一致する」が壊れる（`gain = 0` で
+口が常に閉じる）。だから `mouthGain`（cc-mascot の `rms * 4`）と `mouthReleasePerSecond` は
+`VrmCharacter` の `[SerializeField]` → `MouthTracker` の引数で渡す。
+
+★ **口のスケール（happy / sad）だけは `FacePolicy` にしか書けない。** 緩和後の weight に
+依存するので、上流の `MouthTracker` からは見えない。
+
+★ **attack は即時 / release だけ減衰**（`w = max(target, w - release * dt)`）。
+非対称なので指数緩和（`GazeAim.Smooth`）ではないが、`* dt` があるのでフレームレート
+非依存性は保たれる（`MouthTrackerTests.ReleaseIsFrameRateIndependent` が 30fps と 60fps で
+同じ値になることを固定している）。
+
+★ **`FacePolicy` の2つの宣言はそのまま生きている。** 「`Aa` は補間しない」（整形は上流で
+済んでいる）と「`Speaking` が false なら猶予なしで 0」（口を確実に閉じる**最後の砦**）。
+release が効くのは**発話中の音素の谷**だけ。
+
+#### ★★ `SpeakingSet` が `SpeakingView` を置き換えた（孤児の穴が閉じた）
+
+`SpeakingView` は `PlaybackState.Items` の `Status == Playing` を走査していたが、
+採番のやり直しで `Orphans` へ移った発話は**音声ハンドルしか持たず `SpeechFrame`（`Record`）を
+持たない**ので、**孤児が鳴っている間ずっと `false`（＝喋っていない）と答えていた**。
+
+`SpeakingSet` は**再生を始めた時点で emotion / kind を写し取る**ので、`Items` から消えた後も
+答えられる。結果として、孤児が鳴っている間も口・表情・体の動き（`IdlePose` の `SpeakingGain`）が
+続くようになった。
+
+- **口の開きは全発話の `max`。** 口は1つでスピーカーも1つなので、「今いちばん大きく鳴っている音」に
+  合わせるのが物理的に正しい
+- **`TryGetFace` は最後に始まったもの。** 表情は「今の話題」に従うべきで、消えゆく旧エポックではない
+- ★ **`false` のとき `Assistant` / `Neutral` に倒す契約は `SpeakingView` から移送した。**
+  `VrmCharacter.LateUpdate` がこれに寄りかかっていて、呼び出し側で `Speaking ? kind : 既定` と
+  書き直していない（`SpeakingSetTests.TryGetFaceFallsBackToAssistantNeutral`）
+
+★ **`Begin` は `Execute` の `Play` の直前、`End` は `PlayAsync` の `finally`。**
+`PlayAsync` は同期完了する経路（「音声のハンドルがありません」など）があり、そこから
+`Dispatch` がコマンドループへ再入する。また `_ = PlayAsync(...)` の fire-and-forget なので、
+実装が例外を投げるとその例外は**未観測のまま捨てられる** —— `finally` でないと
+**口が開きっぱなしのまま永久に固まる**。
+
+#### ★ 30fps で口が足りるかの決着（#58）— 据え置き
+
+`Application.targetFrameRate = 30` のままで足りる。逃げ道（`speakingFrameRate`）は用意したが
+**既定 0（＝変えない）**。
+
+**実測**（2026-08-29 / macOS 26.6.2 / ウィンドウ 300x480 / `AvatarSample_A.vrm` +
+同梱 `idle_loop.vrma` / 1〜30 の数え上げを連続再生 / `ps -o %cpu` を6秒間隔で n=6）:
+
+| | 発話中の CPU |
+|---|---|
+| **30fps**（`speakingFrameRate: 0`） | 13.9 / 17.5 / 17.9 / 14.2 / 18.8 / 18.0 → **中央値 17.7%** |
+| 60fps（`speakingFrameRate: 60`） | 34.3 / 36.0 / 37.5 / 37.8 / 37.8 / 38.5 → **中央値 37.7%** |
+
+**60fps はおよそ 2.1 倍。** 常駐アプリの電力設計（#55）に対してこの差は大きい。
+#59 時点の**無音時**の実測（同条件で 13.2%）と並べると、30fps では発話が乗っても +4.5 ポイントで済む。
+
+★ **口の応答は 30fps でも落ちていない。** 20ms 刻みのエンベロープを 33.3ms 間隔で読むと
+4割のフレームを読み飛ばすが、`SpeakingSet.Mouth` が**区間の最大**を取るので拾い切る。
+実測（`-faceLog 1 -faceLogMs 100`、発話中の `目標 aa` を 86 行）:
+
+```
+min=0.00 p25=0.00 p50=0.40 p75=0.73 max=1.00 平均=0.40
+飽和(1.00) 10.5% / ゼロ(0.00) 30.2%
+```
+
+同じ WAV をオフラインで 20ms ごとに RMS へ落として `gain = 4` を掛けた予測は
+「飽和 9.6% / 平均開度 0.35」なので、**実機の分布が予測とほぼ一致している**
+（＝区間最大が読み飛ばしを埋めている）。★ **`gain = 4`（cc-mascot の `rms * 4`）はそのまま使えた。**
+AivisSpeech の出力は 44100Hz mono で、エンベロープの中央値 0.063 / p90 0.240 / 最大 0.392。
+
+★ **`speakingFrameRate` を「念のため」常時 60 にしないこと。** 上の 2.1 倍がそのまま乗る。
+
+#### ★ `afplay` の起動ラグは 116ms。較正ログの「差」をそのまま入れない
+
+`lipSyncOffsetMs` の既定 **120** は実測値（2026-08-29 / macOS 26.6.2 / **内蔵スピーカー**）。
+
+★★ **`PlayAsync` の較正ログが出す「実時間 − WAV の長さ」は約 470ms だが、これをそのまま
+`lipSyncOffsetMs` に入れてはいけない。** 内訳は **起動ラグ 116ms + 終了処理 357ms** で、
+欲しいのは前者だけ。後者まで足すと口が音より **0.35 秒遅れる**。
+
+内訳は CoreAudio の `kAudioDevicePropertyDeviceIsRunningSomewhere` を 2ms 間隔でポーリングして
+直接測った（`Process.Start` → 出力デバイスが動き出すまで）:
+
+```
+起動 → 音が出るまで:            中央値 116ms  (100, 106, 116, 125, 134)
+音の開始 → プロセス終了 − 長さ: 中央値 357ms  (352, 357, 357, 366, 368)
+```
+
+★ **`afplay` 単体の総オーバーヘッドは 400〜900ms とばらつく**（0.05秒 / 0.5秒 / 3.0秒の
+サイン波で n=5）。デバイスの開閉が効いているとみられ、**総時間から起動ラグを推定するのは無理**。
+だから較正ログは「桁の確認」（100ms オーダーか、それとも桁が違うか）にだけ使う。
+
+★ **Bluetooth ではもっと大きい。** 上は内蔵スピーカーでの値で、A2DP の遅延はデバイス側で
+さらに乗る。**秒数を仕様として扱わないこと。**
+
+★ 測定は他のアプリが音を出していると成立しない（`IsRunningSomewhere` はシステム全体の値）。
+プロセス単位で見たいときは `kAudioProcessPropertyIsRunningOutput`（→ 上の「無音でも出力デバイスを
+掴み続ける」の測り方）。
+
+#### ★ `-faceLogMs` は実機確認専用（既定の1秒を縮めない）
+
+`faceDebugLog` のログは既定 1秒間隔。**孤児が重なっている間も口が止まらないこと**を
+`aa=` の連続で判定するには粗すぎるので、起動引数 `-faceLogMs 100` で縮められるようにした。
+**常用では縮めないこと** —— `Player.log` が流れて他の診断が読めなくなる。
 
 ### ★ 再生の期限は `WavHeader.DurationMs` から出す（`AudioClip.length` ではない）
 

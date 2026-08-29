@@ -171,6 +171,48 @@ namespace ChatterMascot.Tests
             Assert.That(envelope.Length, Is.EqualTo(3));
         }
 
+        // ---- 刻みの厳密さ（レビュー8。現行構成では発火しないことをテストで固定する） ----
+
+        /// <summary>
+        /// ★★ <b>1要素の実時間は <c>floor(SampleRate * frameMs / 1000) / SampleRate</c> なのに、
+        ///   ハンドルに載るのは公称の <c>frameMs</c>。</b> 割り切れないレートでは口が音からずれる
+        ///   （11025Hz なら 0.23%、30秒の発話で約 70ms）。
+        ///
+        /// ★ <b>いま出会うレートはすべて割り切れるので発火しない。</b> このテストは
+        ///   <b>その前提が崩れた瞬間に赤くする</b>ためにある —— 合成エンジンを差し替えたり
+        ///   <c>DefaultFrameMs</c> を変えたりしたら、ここで気づく。
+        /// </summary>
+        [Test]
+        public void EveryRateWeActuallyMeetDividesEvenly()
+        {
+            foreach (var rate in new[] { 16000, 22050, 24000, 44100, 48000 })
+            {
+                Assert.That(
+                    (long)rate * LipSyncEnvelope.DefaultFrameMs % 1000L, Is.EqualTo(0L),
+                    $"{rate}Hz が {LipSyncEnvelope.DefaultFrameMs}ms を割り切らない");
+            }
+        }
+
+        /// <summary>
+        /// ★ <b>割り切れないレートでの逸脱を、既知の限界として値ごと固定する。</b>
+        ///   11025Hz の 20ms は 220.5 サンプルで、実装は floor して <b>220 サンプル
+        ///   （＝19.955ms）</b>を1要素にする。0.2 秒 = 2205 サンプルなので <b>11 フレーム</b>
+        ///   （厳密に 20ms なら 10 フレーム）。
+        /// ★ <b>ずれる向きは安全側。</b> 実フレームが公称より短い → エンベロープが公称より速く進む
+        ///   → 索引が小さくなる → <b>口が音より遅れる</b>。<c>lipSyncOffsetMs</c> の doc が
+        ///   「口が音より先に動くより、遅れるほうが自然に見える」と書いている、その向き。
+        /// </summary>
+        [Test]
+        public void FrameLengthIsFlooredToWholeSamples()
+        {
+            const int rate = 11025;
+
+            var envelope = Envelope(WavBuilder.Build(
+                Constant(rate / 5, 0.5f), WavBuilder.Encoding.Float32, rate));
+
+            Assert.That(envelope.Length, Is.EqualTo(11));
+        }
+
         /// <summary>
         /// ★★ <b>#58 が守りたい経路そのもの。</b> ヘッダは読めるがサンプルが読めない WAV。
         ///   <c>Prepare</c> はこれでも成功しなければならない（→ <c>AfplaySpeechPlayerTests</c>）。

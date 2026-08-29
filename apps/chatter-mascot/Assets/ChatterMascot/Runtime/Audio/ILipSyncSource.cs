@@ -31,7 +31,18 @@ namespace ChatterMascot.Audio
         /// </summary>
         float[] Envelope { get; }
 
-        /// <summary>1要素あたりの長さ（ミリ秒）。→ <see cref="LipSyncEnvelope.DefaultFrameMs"/></summary>
+        /// <summary>
+        /// 1要素あたりの長さ（ミリ秒）。→ <see cref="LipSyncEnvelope.DefaultFrameMs"/>
+        ///
+        /// ★ <b>これは公称値。</b> 実フレームは
+        /// <c>floor(SampleRate * frameMs / 1000)</c> サンプルなので、
+        /// <c>SampleRate * frameMs % 1000 == 0</c> のときだけ厳密に一致する。
+        /// 割り切れないレート（11025Hz など）では実フレームが公称より<b>短く</b>なり、
+        /// エンベロープが公称より速く進む＝<b>口は音より遅れる側にずれる</b>
+        /// （<c>lipSyncOffsetMs</c> の doc が好ましいとする向き。11025Hz で 0.23%）。
+        /// ★ 実運用のレート（16000 / 22050 / 24000 / 44100 / 48000）はすべて割り切れる。
+        /// <c>LipSyncEnvelopeTests.EveryRateWeActuallyMeetDividesEvenly</c> がそれを固定している。
+        /// </summary>
         int EnvelopeFrameMs { get; }
     }
 }

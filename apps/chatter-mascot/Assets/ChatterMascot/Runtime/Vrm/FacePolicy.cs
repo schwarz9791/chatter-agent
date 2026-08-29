@@ -365,6 +365,13 @@ namespace ChatterMascot.Vrm
         /// ★ この「0 = 無効」があるので、<see cref="FaceParams"/> を全部 0 にすると
         ///   <see cref="Evaluate"/> は <see cref="Target"/> と一致したままになる。
         /// </summary>
+        /// ★★ <b>2つの倍率は掛け合わせる（<c>min</c> ではない）。</b> 上流 cc-mascot の
+        ///   <c>useVRM.ts</c> の <c>setMouthOpen</c> が <c>happyScale * sadScale</c> と積を使っており、
+        ///   そこから逐語で移植した形。<see cref="Target"/> が emotion を one-hot で立てるので
+        ///   happy と sad は<b>相補的に</b>動き、クロスフェード中の倍率は 0.2 と 0.5 の間を
+        ///   滑らかに掃くだけになる。<c>min</c> に変えると上流から乖離するうえ、
+        ///   切り替わる瞬間に倍率の微分が折れる。
+        ///   固定しているのは <c>FacePolicyTests.MouthScalesComposeAsAProduct</c>。
         private static float MouthScale(float weight, float scale)
         {
             if (scale <= 0f) return 1f;

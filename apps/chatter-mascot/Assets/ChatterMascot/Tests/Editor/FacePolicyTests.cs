@@ -387,6 +387,34 @@ namespace ChatterMascot.Tests
         }
 
         /// <summary>
+        /// ★★ <b>happy と sad が同時に立っているときの合成規則を固定する。</b>
+        ///   倍率は<b>積</b>（`Lerp(1,0.2,0.5) * Lerp(1,0.5,0.5) = 0.6 * 0.75 = 0.45`）。
+        ///
+        /// ★ <b>上流と同じ形。</b> cc-mascot の <c>useVRM.ts</c> の <c>setMouthOpen</c> は
+        ///   <c>happyScale * sadScale</c>（<c>1.0 - happy*0.8</c> × <c>1.0 - sad*0.5</c>、
+        ///   それぞれ <c>Lerp(1, 0.2, happy)</c> / <c>Lerp(1, 0.5, sad)</c> と厳密に同一）。
+        ///   <b><c>min</c> に変えないこと</b> —— PR #74 のレビューが一度そう提案して取り下げている。
+        ///
+        /// ★ <b>0.45 は「sad 単独の下限 0.5 を割った」のではない。</b> <see cref="FacePolicy.Target"/> は
+        ///   emotion を one-hot で立てるので、happy と sad は同じ時定数で<b>相補的に</b>動く。
+        ///   クロスフェード中を <c>h = u, s = 1-u</c> と置くと倍率は <c>0.5(1 + 0.2u − 0.8u²)</c> で、
+        ///   <b>0.2 から 0.5 へ滑らかに掃くだけ</b>。0.45 はその道の途中の1点にすぎない。
+        /// </summary>
+        [Test]
+        public void MouthScalesComposeAsAProduct()
+        {
+            var both = new FaceWeights(0.5f, 0f, 0.5f, 0f, 0f, 0f, 0f, 0f);
+
+            var w = FacePolicy.Evaluate(
+                Input(speaking: true, emotion: Emotion.Happy, mouth: 1f),
+                both, 0f, Params(lerp: 10f, mouthScaleHappy: 0.2f, mouthScaleSad: 0.5f));
+
+            Assert.That(w.Happy, Is.EqualTo(0.5f).Within(1e-4f));
+            Assert.That(w.Sad, Is.EqualTo(0.5f).Within(1e-4f));
+            Assert.That(w.Aa, Is.EqualTo(0.45f).Within(1e-4f));
+        }
+
+        /// <summary>
         /// ★ 表情が立ち上がる途中では倍率も途中の値になる（段差が入らない）。
         ///   目標ではなく<b>実際に適用される weight</b> で掛けている証拠。
         /// </summary>

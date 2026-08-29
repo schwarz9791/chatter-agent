@@ -2117,6 +2117,33 @@ AivisSpeech の出力は 44100Hz mono で、エンベロープの中央値 0.063
 
 ★ **`speakingFrameRate` を「念のため」常時 60 にしないこと。** 上の 2.1 倍がそのまま乗る。
 
+#### 目視でも確認した（2026-08-29）
+
+上の実測はすべて `Player.log` からの機械判定で、**「口が階段状に見えないか」「音と口が
+ずれて見えないか」「笑顔で口がはみ出ないか」は目で見ないと決まらない**。実機の
+macOS ビルドで確認し、いずれも問題なしと判断した。
+
+- **音と口のタイミング**（`lipSyncOffsetMs: 120`）— ずれて見えない
+- **30fps で階段状に見えない**（`speakingFrameRate: 0` のまま）
+- **`happy` / `sad` で口がメッシュからはみ出ない**（`mouthScaleHappy: 0.2` / `mouthScaleSad: 0.5`）
+
+★ **確認はウィンドウを一時的に 2 倍（600x960）にして行った。** 既定の 300x480 では
+**キャラクターが小さくて口の粗が判別できない**。大きさは起動引数だけで変えられる:
+
+```bash
+open Build/ChatterMascot.app --args -screen-width 600 -screen-height 960
+```
+
+★ **確認のあと `~/Library/Preferences/tech.sukima.chatter-mascot.plist` を戻すこと。**
+Unity は終了時にそのときの大きさを焼き付けるので（→ 上の「ウィンドウの大きさは3箇所で
+決まる」の 1）、放っておくと**次回から 600x960 で開く**。しかもバンドル ID は
+チェックアウトを跨いで共通なので、**別 worktree のマスコットまで大きくなる**。
+
+```bash
+defaults write tech.sukima.chatter-mascot "Screenmanager Resolution Width" -int 300
+defaults write tech.sukima.chatter-mascot "Screenmanager Resolution Height" -int 480
+```
+
 #### ★ `afplay` の起動ラグは 116ms。較正ログの「差」をそのまま入れない
 
 `lipSyncOffsetMs` の既定 **120** は実測値（2026-08-29 / macOS 26.6.2 / **内蔵スピーカー**）。

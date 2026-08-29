@@ -1307,15 +1307,21 @@ if (!proceduralIdle) return;
 次を `Playing` にする。つまり**文の切れ目では必ず `Playing` が 0 件になる瞬間がある** ——
 先読み（`Lookahead = 3`）が効いていれば数フレーム、合成が詰まっていれば秒単位。
 
-`SpeakingView.TryRead` はそこで `false` を返すので、**猶予が無いとメッセージの途中で毎文
-Neutral に落ちる**。cc-mascot は hold を持たない（`onended` で即 neutral）ので実際にそうなっている。
+`SpeakingSet` はそこで空になる（`TryGetFace` が `false` を返す）ので、**猶予が無いと
+メッセージの途中で毎文 Neutral に落ちる**。cc-mascot は hold を持たない（`onended` で即 neutral）ので実際にそうなっている。
 `faceHoldSeconds`（既定 **1.5秒**）は「余韻」ではなく**この分断を埋めるためのもの**。短くしないこと。
 
 ★★ **猶予だけでは足りない。emotion をラッチしないと1行も効かない。**
-`SpeakingView.TryRead` は false のとき `kind = Assistant` / `emotion = Neutral` に**倒す契約**
-（`SpeakingViewTests` の4本が固定している）。だから `VrmCharacter.Emotion` を素通しすると、
-**喋り終わった瞬間に目標が Neutral になり、猶予の秒数をいくら伸ばしても顔は即座に戻る**。
-`_lastSpokenEmotion`（`Speaking` が true の間だけ更新する）を渡すこと。
+`SpeakingSet.TryGetFace` は false のとき `kind = Assistant` / `emotion = Neutral` に**倒す契約**
+（`SpeakingSetTests.TryGetFaceFallsBackToAssistantNeutral` が固定している）。だから
+`VrmCharacter.Emotion` を素通しすると、**喋り終わった瞬間に目標が Neutral になり、
+猶予の秒数をいくら伸ばしても顔は即座に戻る**。`FaceLatch`（`Speaking` が true の間だけ
+更新する）が保つ値を渡すこと。
+
+> ★ **この節は #57 の時点では `SpeakingView` について書かれていた。** #58 が
+> `SpeakingSet` に置き換えて `SpeakingView` ごと消したので、名前を差し替えてある
+> （同じ内容を書いている `FaceLatch.cs` と `SceneFixups.cs` は #58 の中で直っていたのに、
+> **ここだけ取り残されていた** —— PR #74 のレビューの過程で気づいた）。
 
 ★★ **`Kind` も一緒にラッチすること。** `Emotion` だけ直して `Kind` を生のまま渡すと、
 猶予の途中で**片方だけ崩れる** —— `promptSurpriseWeight` を 0 から開けたとき、

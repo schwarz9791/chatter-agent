@@ -61,6 +61,42 @@ namespace ChatterMascot
         [Tooltip("無音がこれだけ続いたら出力デバイスを手放す（ミリ秒）。0 以下で無効")]
         [SerializeField] private int audioIdleSuspendMs = 5000;
 
+        /// <summary>
+        /// 再生の開始が実際に音になるまでのラグ。エンベロープの索引をこのぶん戻す。
+        ///
+        /// ★ <b>これは macOS（<c>afplay</c>）用の値。</b> <c>Process.Start</c> は音が出るより前に
+        ///   返るので、補正しないと<b>口が音より先に動く</b>。Unity 内蔵オーディオの実装
+        ///   （<c>AudioClipPlayer</c>）では 0 が正しい —— 原理的には発話ごとに持つべきだが、
+        ///   <c>MascotRunner</c> は <see cref="ISpeechPlayer"/> 型しか持たない。
+        ///   Android を入れるとき（#25）に <c>ILipSyncSource</c> へ移す。
+        ///
+        /// ★ <b>負の側へ倒さないこと。</b> 口が音より先に動くより、遅れるほうが自然に見える。
+        ///
+        /// ★ <b>既定 120 は実測値</b>（2026-08-29 / macOS 26.6.2 / 内蔵スピーカー）。
+        ///   CoreAudio の <c>kAudioDevicePropertyDeviceIsRunningSomewhere</c> を 2ms 間隔で
+        ///   ポーリングして、<c>Process.Start</c> から出力デバイスが動き出すまでを直接測ると
+        ///   <b>中央値 116ms</b>（n=5、100〜134ms）だった。
+        /// ★★ <b><c>PlayAsync</c> の較正ログ（実時間 − WAV の長さ）をそのまま入れないこと。</b>
+        ///   あれは <b>約 470ms</b> を示すが、内訳は<b>起動ラグ 116ms + 終了処理 357ms</b>で、
+        ///   欲しいのは前者だけ。後者を足すと口が音より 0.35 秒**遅れる**。
+        /// ★ <b>Bluetooth ではもっと大きい。</b> 上の実測は内蔵スピーカー。A2DP の遅延は
+        ///   デバイス側で更に乗るので、そこが気になったら Inspector で上げる。
+        ///   <b>秒数を仕様として扱わないこと。</b>
+        /// </summary>
+        [Tooltip("再生開始から実際に音が出るまでのラグ（ミリ秒）。macOS の afplay 用。0 で補正しない")]
+        [SerializeField] private int lipSyncOffsetMs = 120;
+
+        /// <summary>
+        /// 発話中だけフレームレートを上げる逃げ道。<b>既定 0（変えない）。</b>
+        ///
+        /// ★ <b>常時上げないこと。</b> 常駐アプリの電力設計（#55）を壊す。エンベロープの刻み
+        ///   （20ms）は表示（30fps = 33.3ms）と割り切れないが、<c>SpeakingSet.Mouth</c> が
+        ///   <b>区間の最大</b>を取るので 30fps でも立ち上がりは落ちない。ここを開けるのは
+        ///   「それでも口が階段状に見える」と実機で判断したときだけ。
+        /// </summary>
+        [Tooltip("発話中だけのフレームレート上限。0 以下なら変えない（常駐アプリの電力設計に直接効く）")]
+        [SerializeField] private int speakingFrameRate = 0;
+
         [Header("キュー")]
         [Tooltip("再生中の1件を含めて、いくつ先まで音声を取りに行くか")]
         [SerializeField] private int lookahead = 3;
@@ -82,11 +118,13 @@ namespace ChatterMascot
         private PlaybackState _state;
 
         /// <summary>
-        /// #59 の <see cref="ChatterMascot.Playback.SpeakingView"/> が読む「いま再生中の
-        /// <c>kind</c> / <c>emotion</c>」だけを返す。<b>読むだけ</b>。
-        /// まだ <c>Start</c> 前で <c>_state</c> が <c>null</c> でも、
-        /// <see cref="ChatterMascot.Playback.SpeakingView.TryRead"/> は <c>state == null</c> を
-        /// 許容するので、そのまま <c>false</c> が返る（例外にはならない）。
+        /// いま鳴っている発話の <c>kind</c> / <c>emotion</c>。<b>読むだけ</b>。
+        /// <see cref="_speaking"/> はフィールド初期化子で作るので、<c>Start</c> 前でも
+        /// <c>null</c> にならない（そのまま <c>false</c> が返る）。
+        ///
+        /// ★ <b><c>false</c> のとき <c>Assistant</c> / <c>Neutral</c> に倒すのは
+        ///   <see cref="SpeakingSet.TryGetFace"/> 側の契約</b>で、<c>VrmCharacter.LateUpdate</c> が
+        ///   それに乗っている（呼び出し側で <c>Speaking ? kind : 既定</c> と書き直していない）。
         ///
         /// ★ <b><see cref="PlaybackState"/> を丸ごと公開しないこと。</b> 以前は
         ///   <c>public PlaybackState State</c> で公開していたが、<c>PlaybackState</c> のフィールドは
@@ -96,17 +134,53 @@ namespace ChatterMascot
         ///   必要な情報だけを返すメソッドにして、書き込む口を作らない。
         /// ★ <b>書き込むと <see cref="PlaybackQueue"/> の状態機械が壊れる。</b>
         ///   コマンドを増やす口ではない。
-        /// ★ <b>#58 が <c>SpeakingSet</c> を入れたら消せる。</b>
+        ///
+        /// ★★ <b>#58 で <c>SpeakingView</c> から移した。</b> あちらは <c>PlaybackState.Items</c> を
+        ///   走査していたが、<c>Orphans</c> は音声ハンドルしか持たず <c>Record</c> を持たないので、
+        ///   <b>孤児が鳴っている間は常に <c>false</c></b> だった。<see cref="SpeakingSet"/> は
+        ///   再生開始時に写し取るので、その穴が閉じている。
         /// </summary>
         public bool TryGetSpeaking(out SpeechKind kind, out Emotion emotion)
         {
-            return SpeakingView.TryRead(_state, out kind, out emotion);
+            // ★ 引数の順が逆（TryGetFace は emotion が先）。呼び出し側の並びは
+            //   VrmCharacter が使っているものなので、こちらで受け替える
+            return _speaking.TryGetFace(out emotion, out kind);
+        }
+
+        /// <summary>
+        /// 区間 <c>[from, to]</c>（<c>Time.realtimeSinceStartupAsDouble</c> の秒）における
+        /// 口の開きの元になる値（<b>生の RMS。ゲイン前</b>）。
+        ///
+        /// ★ <b>点ではなく区間で問い合わせること。</b> エンベロープの刻み（20ms）は
+        ///   表示（30fps = 33.3ms）と割り切れないので、点サンプリングすると
+        ///   <b>4割のフレームを読み飛ばす</b>。<c>from</c> を持つのは呼び出し側
+        ///   （<c>MouthTracker</c>）—— ここに持たせると<b>このメソッドが冪等でなくなる</b>。
+        /// </summary>
+        public float Mouth(double from, double to)
+        {
+            return _speaking.Mouth(from, to, lipSyncOffsetMs);
         }
 
         private SpeechClient _client;
         private AudioFetcher _fetcher;
         private ISpeechPlayer _player;
         private AudioIdleGate _idleGate;
+
+        /// <summary>
+        /// いま鳴っている発話。<b>フィールド初期化子で作ること</b> —— <c>VrmCharacter</c> は
+        /// フレーム1から <see cref="TryGetSpeaking"/> / <see cref="Mouth"/> を呼ぶので、
+        /// <c>Start()</c> を待つと呼び出し側に null チェックが要る。
+        /// </summary>
+        private readonly SpeakingSet _speaking = new SpeakingSet();
+
+        /// <summary>
+        /// <see cref="speakingFrameRate"/> の借用。<b>1本だけ取り回す。</b>
+        ///
+        /// ★ <b>発話ごとに借りて返す形にしないこと。</b> <c>FrameRateBudget</c> は深さで
+        ///   数えるので動きはするが、返し忘れが1回でもあると<b>恒久的に上げたままになり、
+        ///   常駐アプリの電力設計（#55）が黙って死ぬ</b>。
+        /// </summary>
+        private IDisposable _speakingBoost;
 
         /// <summary>
         /// 取得済みの音声。キーは <c>"{epoch}:{seq}"</c>。
@@ -287,9 +361,59 @@ namespace ChatterMascot
                 ApplyIdle(_idleGate.Tick(IdleNowMs(), _player == null ? 0 : _player.ActiveCount, InFlightCount()));
             }
 
+            // ★ アイドル判定と同じ理由で毎フレーム見る（比較1回）。ここを間引くと
+            //   発話の頭で上げ損ねる
+            UpdateSpeakingFrameRate();
+
             if (Time.realtimeSinceStartup < _nextTickAt) return;
             _nextTickAt = Time.realtimeSinceStartup + TickIntervalSeconds;
             Dispatch(PlaybackEvent.Tick());
+        }
+
+        /// <summary>
+        /// 発話中だけフレームレートを上げる（<see cref="speakingFrameRate"/> が 0 以下なら何もしない）。
+        ///
+        /// ★ <c>FrameRateBudget.Boost</c> は「baseline 以下の上げ方」を借りたことにしないので、
+        ///   既定 0 では <c>Handle.NoOp</c> が返るだけ。分岐を足す必要は無い。
+        /// ★ <b><c>Application.targetFrameRate</c> を直接書かないこと</b>（→ <c>FrameRateBudget</c>）。
+        /// </summary>
+        private void UpdateSpeakingFrameRate()
+        {
+            var speaking = _speaking.Count > 0;
+            if (speaking)
+            {
+                if (_speakingBoost == null) _speakingBoost = FrameRateBudget.Boost(speakingFrameRate);
+                return;
+            }
+
+            ReleaseSpeakingFrameRate();
+        }
+
+        /// <summary>
+        /// 借りているフレームレートを返す。
+        ///
+        /// ★★ <b>ここに <c>StopAll</c> / <c>EndAll</c> / <c>Discard</c> を降ろさないこと。</b>
+        ///   <see cref="OnDisable"/> は GameObject の非アクティブ化でも走るので、<b>音を止めてしまう</b>。
+        ///   後始末の本体は <see cref="OnDestroy"/> のまま。
+        ///
+        /// ★ <b>返却を <see cref="OnDestroy"/> だけに任せないこと</b>（<c>VrmStage.OnDisable</c> が先例）。
+        ///   <c>speakingFrameRate</c> を開けた状態で発話中にコンポーネントを無効化 / GameObject を
+        ///   非アクティブ化すると、<see cref="Update"/> が止まって
+        ///   <see cref="UpdateSpeakingFrameRate"/> が返却できず、<see cref="OnDestroy"/> も走らない。
+        ///   <c>FrameRateBudget</c> の深さが増えたままになり、<b>恒久的に上げたままで
+        ///   常駐アプリの電力設計（#55）が黙って死ぬ</b>。
+        /// ★ <c>Handle.Dispose</c> は冪等なので <see cref="OnDestroy"/> 側は残してよい。
+        /// </summary>
+        private void OnDisable()
+        {
+            ReleaseSpeakingFrameRate();
+        }
+
+        private void ReleaseSpeakingFrameRate()
+        {
+            if (_speakingBoost == null) return;
+            _speakingBoost.Dispose();
+            _speakingBoost = null;
         }
 
         /// <summary>
@@ -304,6 +428,10 @@ namespace ChatterMascot
             Application.wantsToQuit -= OnWantsToQuit;
             _shuttingDown = true;
             _player?.StopAll();
+            // ★ StopAll の直後に落とすこと。残すと VrmCharacter から「まだ喋っている」に見え、
+            //   口が開いたままシーンが破棄される
+            _speaking.EndAll();
+            ReleaseSpeakingFrameRate();
             foreach (var handle in _handles.Values)
             {
                 _player?.Discard(handle);
@@ -452,6 +580,42 @@ namespace ChatterMascot
             return item != null && item.Status == ItemStatus.Pending && wallNowMs < item.RetryAfter;
         }
 
+        /// <summary>
+        /// キューから、その <paramref name="seq"/> の発話の表情を読む。
+        /// <b>読めなければ <c>Assistant</c> / <c>Neutral</c> に倒す。</b>
+        ///
+        /// ★★ <b>戻り値を <c>bool</c> にしないこと。</b> <c>void</c> なら
+        ///   <b>呼び出し側が「読めなかったから登録を飛ばす」と書けない</b>（分岐材料が存在しない）。
+        ///   「登録そのものを飛ばさないこと」というルールを、テストではなく<b>型で</b>固定している ——
+        ///   飛ばすと <c>SpeakingSet</c> に載らず、<b>鳴っているのに喋っていない</b>状態になって
+        ///   口も表情も体の動きも止まる。<see cref="IsParked"/> が <c>bool</c> を返すのは
+        ///   分岐が目的だから、という対比で覚えること。<b><c>TryReadFace</c> に「改善」しないこと。</b>
+        ///
+        /// ★ <b>引数を <see cref="QueueItem"/> にしないこと。</b> <c>Items.TryGetValue</c> を
+        ///   呼び出し側に残すと、<c>state == null</c> と「未知の <c>seq</c>」の2分岐がまた
+        ///   private へ戻り、テストが届かなくなる。
+        ///
+        /// ★ <b><c>seq</c> だけで引けるのは「<c>Play</c> と同じ tick で読む」から。</b>
+        ///   <c>PlaybackQueue.StartPlayback</c> は <c>state.Epoch</c> と <c>head.Record.Seq</c> を
+        ///   同じ tick で組にして <c>Play</c> を積み、<see cref="Execute"/> は同期で回るので、
+        ///   <c>Items[seq]</c> は必ずその head。<b><c>Play</c> を遅延実行に変えた瞬間に静かに壊れる</b>。
+        ///
+        /// ★ <c>public static</c> なのはテストで固定するため（<see cref="IsParked"/> と同じ扱い）。
+        /// </summary>
+        public static void ReadFace(PlaybackState state, long seq, out SpeechKind kind, out Emotion emotion)
+        {
+            kind = SpeechKind.Assistant;
+            emotion = Emotion.Neutral;
+
+            QueueItem item;
+            if (state == null) return;
+            if (!state.Items.TryGetValue(seq, out item)) return;
+            if (item == null || item.Record == null) return;
+
+            kind = item.Record.Kind;
+            emotion = item.Record.Emotion;
+        }
+
         private void Dispatch(PlaybackEvent ev)
         {
             if (_state == null) return;
@@ -472,6 +636,10 @@ namespace ChatterMascot
                     break;
 
                 case PlaybackCommandKind.Play:
+                    // ★ **PlayAsync の中ではなくここで Begin する。** PlayAsync は同期完了する
+                    //   経路（「音声のハンドルがありません」など）があり、そこから Dispatch が
+                    //   このコマンドループへ再入する。入れ子の順序を読めなくしない
+                    BeginSpeaking(command.Epoch, command.Seq, command.Audio);
                     _ = PlayAsync(command.Epoch, command.Seq, command.Audio);
                     break;
 
@@ -541,9 +709,48 @@ namespace ChatterMascot
             Dispatch(PlaybackEvent.AudioReady(epoch, seq, handle));
         }
 
+        /// <summary>
+        /// 「いま鳴っているもの」に登録する。<b>emotion / kind はここで写し取る。</b>
+        ///
+        /// ★ <b>写し取るのが要点。</b> 採番のやり直し（<c>ResetEpoch</c>）は再生中の item を
+        ///   <c>Orphans</c> へ移すが、そこに残るのは<b>音声ハンドルだけで <c>Record</c> は捨てられる</b>。
+        ///   参照で持つと孤児になった瞬間に表情が読めなくなる（<c>SpeakingView</c> の既知の穴）。
+        /// ★ <c>Play</c> が出る時点で item は <c>Status = Playing</c> で <c>Items</c> に残っている
+        ///   （<c>ConsumeHead</c> は <c>Done</c> しか消さず、<c>MarkStale</c> は <c>Playing</c> を飛ばす）。
+        ///   それでも <c>Record</c> が無い場合は既定値で登録する —— <b>登録そのものを飛ばさないこと</b>。
+        ///   飛ばすと「鳴っているのに喋っていない」状態になり、口も表情も体の動きも止まる。
+        ///   <b>この規則は <see cref="ReadFace"/> が <c>void</c> であることで型に落としてある。</b>
+        /// </summary>
+        private void BeginSpeaking(int epoch, long seq, object audio)
+        {
+            SpeechKind kind;
+            Emotion emotion;
+            ReadFace(_state, seq, out kind, out emotion);
+
+            var source = audio as ILipSyncSource;
+            _speaking.Begin(
+                epoch, seq, emotion, kind,
+                source == null ? null : source.Envelope,
+                source == null ? LipSyncEnvelope.DefaultFrameMs : source.EnvelopeFrameMs,
+                Time.realtimeSinceStartupAsDouble);
+        }
+
         private async Task PlayAsync(int epoch, long seq, object audio)
         {
-            var error = await _player.PlayAsync(audio);
+            string error;
+            try
+            {
+                error = await _player.PlayAsync(audio);
+            }
+            finally
+            {
+                // ★ **finally で落とすこと。** _shuttingDown の早期 return より手前で落とさないと
+                //   終了経路でエントリが残る。さらに PlayAsync は `_ = ` の fire-and-forget なので、
+                //   実装が例外を投げたときその例外は**未観測のまま捨てられる** ——
+                //   その経路で End を落とすと、**口が開きっぱなしのまま永久に固まる**
+                _speaking.End(epoch, seq);
+            }
+
             if (_shuttingDown) return;
 
             Dispatch(error == null

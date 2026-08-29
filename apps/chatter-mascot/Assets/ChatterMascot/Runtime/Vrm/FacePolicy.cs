@@ -73,18 +73,41 @@ namespace ChatterMascot.Vrm
         /// </summary>
         public readonly bool UseNeutralExpression;
 
+        /// <summary>
+        /// <c>happy</c> が立ち切っているときの口の開きの倍率。<b>0 以下で無効（1倍）。</b>
+        ///
+        /// ★ <b>モデル側は守ってくれない。</b> 笑顔（<c>Fcl_ALL_Joy</c>）と <c>aa</c>
+        ///   （<c>Fcl_MTH_A</c>）は別のモーフで、同梱 <c>vita.vrm</c> は preset 14個すべて
+        ///   <c>overrideMouth: none</c> なので素で加算される。cc-mascot が
+        ///   <c>useVRM.ts</c> の <c>setMouthOpen</c> で入れているガード
+        ///   （「笑顔時や悲しいときに口が開きすぎてメッシュからはみ出るのを防ぐ」）と同じ値・同じ趣旨。
+        /// ★ <b>「0 = 無効」の語彙に揃えてあるので、0 は「口を閉じる」ではなく「掛けない」。</b>
+        ///   これで <see cref="FacePolicy.Evaluate"/> の「全部 0 なら <see cref="FacePolicy.Target"/> と
+        ///   一致する」が保たれる。
+        /// ★ 判定は<b>緩和後の weight</b>（<see cref="BlinkSuppressAboveHappy"/> と同じ理由。
+        ///   口がはみ出るかどうかは、実際に適用される weight で決まる）。
+        /// </summary>
+        public readonly float MouthScaleHappy;
+
+        /// <summary><c>sad</c> 側。→ <see cref="MouthScaleHappy"/></summary>
+        public readonly float MouthScaleSad;
+
         public FaceParams(
             float expressionLerpSeconds,
             float holdSeconds,
             float promptSurpriseWeight,
             float blinkSuppressAboveHappy,
-            bool useNeutralExpression)
+            bool useNeutralExpression,
+            float mouthScaleHappy = 0f,
+            float mouthScaleSad = 0f)
         {
             ExpressionLerpSeconds = expressionLerpSeconds;
             HoldSeconds = holdSeconds;
             PromptSurpriseWeight = promptSurpriseWeight;
             BlinkSuppressAboveHappy = blinkSuppressAboveHappy;
             UseNeutralExpression = useNeutralExpression;
+            MouthScaleHappy = mouthScaleHappy;
+            MouthScaleSad = mouthScaleSad;
         }
 
         public static FaceParams Default => new FaceParams(
@@ -92,7 +115,10 @@ namespace ChatterMascot.Vrm
             holdSeconds: 1.5f,
             promptSurpriseWeight: 0f,
             blinkSuppressAboveHappy: 0.1f,
-            useNeutralExpression: false);
+            useNeutralExpression: false,
+            // cc-mascot の useVRM.ts と同じ値
+            mouthScaleHappy: 0.2f,
+            mouthScaleSad: 0.5f);
     }
 
     /// <summary>
@@ -100,15 +126,22 @@ namespace ChatterMascot.Vrm
     /// </summary>
     public readonly struct FaceInput
     {
-        /// <summary>いま音が鳴っているか（<c>SpeakingView.TryRead</c> の返り値）</summary>
+        /// <summary>
+        /// いま音が鳴っているか（<c>MascotRunner.TryGetSpeaking</c> の返り値）。
+        ///
+        /// ★ <b>孤児（採番のやり直しで <c>Items</c> から外れたが鳴らし切っている音）も含む</b>
+        ///   —— <c>SpeakingSet</c> が再生開始時に emotion / kind を写し取るようになったため
+        ///   （#58）。以前の <c>SpeakingView</c> は <c>Orphans</c> に <c>Record</c> が無いので
+        ///   孤児の間ずっと <c>false</c> を返していた。
+        /// </summary>
         public readonly bool Speaking;
 
         /// <summary>
         /// 表情に使う emotion。
         ///
         /// ★ <b>発話中に読んだ最後の値をラッチして渡すこと。</b>
-        ///   <c>SpeakingView.TryRead</c> は false のとき <c>Neutral</c> に倒す契約なので
-        ///   （<c>SpeakingViewTests</c> の4本が固定している）、生の値をそのまま渡すと
+        ///   <c>SpeakingSet.TryGetFace</c> は false のとき <c>Neutral</c> に倒す契約なので
+        ///   （<c>SpeakingSetTests</c> が固定している）、生の値をそのまま渡すと
         ///   <b>喋り終わった瞬間に目標が Neutral になり、<see cref="FaceParams.HoldSeconds"/> が
         ///   まったく機能しない</b>。ラッチは <c>VrmCharacter</c> の側で持つ。
         /// </summary>
@@ -117,7 +150,12 @@ namespace ChatterMascot.Vrm
         /// <summary>発話の種別。<c>prompt</c> の上乗せ（既定 0）にだけ使う</summary>
         public readonly SpeechKind Kind;
 
-        /// <summary>口の開き（0..1）。<b>#58 のリップシンクが埋める。ここでは常に 0。</b></summary>
+        /// <summary>
+        /// 口の開き（0..1）。<b><c>MouthTracker.Tick</c> の出力（整形済み）。</b>
+        ///
+        /// ★ <b>ここへ生の RMS を渡さないこと。</b> ゲイン（cc-mascot の <c>rms * 4</c>）と
+        ///   attack/release は <c>MouthTracker</c> が済ませている。二重に掛けない。
+        /// </summary>
         public readonly float Mouth;
 
         /// <summary>瞬き（0..1）。<see cref="BlinkTimer.Tick"/> の出力</summary>
@@ -215,7 +253,9 @@ namespace ChatterMascot.Vrm
         ///   使わない —— <c>SpeechRecord.emotion</c> は名前しか運ばない（<c>docs/protocol.md</c>）。
         /// ★ <b><c>Neutral</c> は「全部 0」で表す。</b> 理由は
         ///   <see cref="FaceParams.UseNeutralExpression"/> を参照。
-        /// ★ <b><c>Aa</c> は喋っていなければ即 0。</b> UniVRM の weight は自動でゼロに戻らない
+        /// ★ <b><c>Aa</c> は喋っていなければ即 0。</b> <c>MouthTracker</c> の release 減衰は
+        ///   <b>発話中の音素の谷</b>を埋めるためのもので、発話の終わりはここが猶予なしで閉じる
+        ///   —— <b>口を確実に閉じる最後の砦</b>。UniVRM の weight は自動でゼロに戻らない
         ///   （<c>Vrm10RuntimeExpression._inputWeights</c> は保持され続ける）ので、
         ///   放置すると<b>喋り終わっても口が開きっぱなしになる</b>。
         /// </summary>
@@ -263,6 +303,9 @@ namespace ChatterMascot.Vrm
         /// <summary>
         /// <paramref name="current"/> から <see cref="Target"/> へ片道の指数緩和をかけた結果。
         ///
+        /// ★ <b>口のスケール（<see cref="FaceParams.MouthScaleHappy"/> / <see cref="FaceParams.MouthScaleSad"/>）は
+        ///   ここでしか書けない。</b> 緩和後の <c>happy</c> / <c>sad</c> の weight に依存するので、
+        ///   上流の <c>MouthTracker</c> からは見えない（あちらが持つのはゲインと attack/release だけ）。
         /// ★ <b><c>Aa</c> と <c>Blink</c> は補間しない。</b> <c>Aa</c> を鈍らせると口の応答が遅れ、
         ///   <c>Blink</c> は <see cref="BlinkTimer"/> が既に閉→保持→開の曲線を作っているので、
         ///   重ねて緩和すると瞬きが潰れる。
@@ -301,7 +344,39 @@ namespace ChatterMascot.Vrm
                 blink = 0f;
             }
 
-            return new FaceWeights(happy, angry, sad, relaxed, surprised, neutral, target.Aa, blink);
+            // ★ 口のスケールは**緩和後の** happy / sad で掛ける（瞬きの抑制と同じ理由）。
+            //   表情が立ち上がる途中では倍率もその途中の値になり、段差が入らない
+            // ★★ **最後に Clamp01 すること。** MouthScale は Lerp(1, scale, w) なので、
+            //   Inspector で 1 より大きいスケールを入れると 1 を超える。そして
+            //   **Unity 側は潰してくれない** —— UniVRM の ExpressionMerger に Clamp01 は無く、
+            //   ProjectSettings の legacyClampBlendShapeWeights は 0。weight 100 超が
+            //   SetBlendShapeWeight まで届いてモーフが外挿され、**mouthScale* が防ごうとしている
+            //   「口がメッシュからはみ出る」が、その設定値自身で起きる**。
+            // ★ 不変条件はここに置くこと。VrmCharacter の [Range] は Inspector の補助でしかなく、
+            //   FaceParams はテストからもコードからも直接作れる
+            var aa = Mathf.Clamp01(target.Aa * MouthScale(happy, p.MouthScaleHappy) * MouthScale(sad, p.MouthScaleSad));
+
+            return new FaceWeights(happy, angry, sad, relaxed, surprised, neutral, aa, blink);
+        }
+
+        /// <summary>
+        /// 表情の weight に応じた口の倍率。<b><paramref name="scale"/> が 0 以下なら 1 倍（無効）。</b>
+        ///
+        /// ★ この「0 = 無効」があるので、<see cref="FaceParams"/> を全部 0 にすると
+        ///   <see cref="Evaluate"/> は <see cref="Target"/> と一致したままになる。
+        ///
+        /// ★★ <b>2つの倍率は掛け合わせる（<c>min</c> ではない）。</b> 上流 cc-mascot の
+        ///   <c>useVRM.ts</c> の <c>setMouthOpen</c> が <c>happyScale * sadScale</c> と積を使っており、
+        ///   そこから逐語で移植した形。<see cref="Target"/> が emotion を one-hot で立てるので
+        ///   happy と sad は<b>相補的に</b>動き、クロスフェード中の倍率は 0.2 と 0.5 の間を
+        ///   滑らかに掃くだけになる。<c>min</c> に変えると上流から乖離するうえ、
+        ///   切り替わる瞬間に倍率の微分が折れる。
+        ///   固定しているのは <c>FacePolicyTests.MouthScalesComposeAsAProduct</c>。
+        /// </summary>
+        private static float MouthScale(float weight, float scale)
+        {
+            if (scale <= 0f) return 1f;
+            return Mathf.Lerp(1f, scale, Mathf.Clamp01(weight));
         }
     }
 }

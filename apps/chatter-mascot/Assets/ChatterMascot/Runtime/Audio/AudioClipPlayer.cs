@@ -13,12 +13,23 @@ namespace ChatterMascot.Audio
     ///   揃える</b>ため。どれも <see cref="WavHeader.DurationMs"/>（fmt の byteRate 由来、
     ///   参照実装の <c>wavDurationMs</c> と同じ式）を見る。
     /// </summary>
-    public sealed class UnityAudioHandle
+    public sealed class UnityAudioHandle : ILipSyncSource
     {
         public AudioClip Clip;
 
         /// <summary>再生時間（ミリ秒）。<b>0 は「長さ 0」ではなく「不明」</b></summary>
         public int DurationMs;
+
+        /// <summary>
+        /// <c>null</c> 可（口が動かないだけ。発話は落とさない）。
+        ///
+        /// ★ <b><c>AudioSource.GetOutputData</c> を読む形にしないこと。</b> この実装だけ別の
+        ///   出どころにすると、macOS（<c>AfplaySpeechPlayer</c>）とタイミングの性質が変わる。
+        ///   → <see cref="ILipSyncSource"/>
+        /// </summary>
+        public float[] Envelope { get; set; }
+
+        public int EnvelopeFrameMs { get; set; }
     }
 
     /// <summary>
@@ -96,6 +107,9 @@ namespace ChatterMascot.Audio
         private readonly List<Voice> _voices = new List<Voice>();
         private bool _warnedVoiceCount;
 
+        /// <summary>エンベロープを作れなかったことの警告は1回だけ（読めない WAV は同じ形が続く）</summary>
+        private bool _warnedEnvelope;
+
         /// <param name="template">1本目の voice であり、増やすときの設定の写し元。</param>
         public AudioClipPlayer(AudioSource template)
         {
@@ -103,20 +117,13 @@ namespace ChatterMascot.Audio
             if (template != null) _voices.Add(new Voice { Source = template });
         }
 
-        /// <summary>
-        /// 最後に鳴らし始めた <see cref="AudioSource"/>。鳴っていなければ <c>null</c>。
-        ///
-        /// ★ <b>多voice 化で「どこから読むか」が曖昧になるのを先に潰すためにある。</b>
-        ///   #17 のリップシンクは <c>GetOutputData</c> をここから読む。
-        ///
-        /// ★ <b>ただし macOS ではこの前提が成立しない。</b> 再生の実体が
-        ///   <c>AfplaySpeechPlayer</c> になり、<b>音は子プロセスの中にあって
-        ///   <c>GetOutputData</c> に相当するものが存在しない</b>。<c>MascotRunner</c> が持つのも
-        ///   <see cref="ISpeechPlayer"/> 型なので、これはインターフェース越しに届かない。
-        ///   → #17 では <b><c>Prepare</c> の時点で WAV から振幅エンベロープを作ってハンドルに
-        ///   載せる</b>方式に寄せることになる（3つの実装すべてで同じコードが使える）。
-        /// </summary>
-        public AudioSource Current { get; private set; }
+        // ★ かつてここに `Current`（最後に鳴らし始めた AudioSource）があった。#17 のリップシンクが
+        //   GetOutputData をどこから読むかを1つに決めるためだったが、**macOS ではその前提が
+        //   成立しない**（再生の実体が AfplaySpeechPlayer で、音は子プロセスの中にある）。
+        //   #58 は Prepare の時点で WAV から振幅エンベロープを作ってハンドルに載せる方式に寄せ、
+        //   このプロパティは**読み手が1つも無いまま**残っていた。
+        //   消費者ゼロのために voice プールを跨いだ正しさを保ち続ける必要は無いので、削除した。
+        //   → ILipSyncSource / LipSyncEnvelope
 
         /// <summary>今鳴っている本数（孤児を含む）。</summary>
         public int ActiveCount
@@ -142,7 +149,19 @@ namespace ChatterMascot.Audio
             var clip = WavDecoder.Decode(wav, name, header, out error);
             if (clip == null) return null;
 
-            return new UnityAudioHandle { Clip = clip, DurationMs = header.DurationMs };
+            return new UnityAudioHandle
+            {
+                Clip = clip,
+                DurationMs = header.DurationMs,
+                // ★ **作れなくても Prepare は成功させる**（→ LipSyncEnvelope.BuildOrWarn）。
+                // ★ ここは AudioClip 用とエンベロープ用で**サンプルを二度デコードしている**。
+                //   消すには Decode から float[] を貰う形にする必要があるが、1発話あたり
+                //   数百 KB を一度余分になめるだけ（約 1ms）なので今はやらない。
+                //   この実装が主役になるのは Android（#25）なので、そのときに測って判断する
+                Envelope = LipSyncEnvelope.BuildOrWarn(
+                    wav, header, LipSyncEnvelope.DefaultFrameMs, ref _warnedEnvelope, Warn),
+                EnvelopeFrameMs = LipSyncEnvelope.DefaultFrameMs,
+            };
         }
 
         /// <summary>使い終わった（あるいは捨てる）クリップを解放する。</summary>
@@ -231,7 +250,6 @@ namespace ChatterMascot.Audio
                 {
                     source.clip = clip;
                     source.Play();
-                    Current = source;
                 }
                 catch (Exception e)
                 {
@@ -256,7 +274,6 @@ namespace ChatterMascot.Audio
                 //   期限切れの孤児が**別の文の再生を止める**
                 source.Stop();
                 source.clip = null;
-                if (Current == source) Current = null;
 
                 return timedOut ? $"{limit:F1} 秒で終わりませんでした" : null;
             }
@@ -275,7 +292,6 @@ namespace ChatterMascot.Audio
                 voice.Source.Stop();
                 voice.Source.clip = null;
             }
-            Current = null;
         }
 
         /// <summary>

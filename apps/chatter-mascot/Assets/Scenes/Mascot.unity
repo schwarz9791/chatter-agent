@@ -197,6 +197,10 @@ MonoBehaviour:
   blinkSuppressAboveHappy: 0.1
   useNeutralExpression: 0
   blinkEnabled: 1
+  mouthGain: 4
+  mouthReleasePerSecond: 8
+  mouthScaleHappy: 0.2
+  mouthScaleSad: 0.5
   faceDebugLog: 0
 --- !u!1 &615255318
 GameObject:
@@ -342,6 +346,8 @@ MonoBehaviour:
   targetFrameRate: 30
   audioSource: {fileID: 0}
   audioIdleSuspendMs: 5000
+  lipSyncOffsetMs: 120
+  speakingFrameRate: 0
   lookahead: 3
   speechMaxAgeMs: 0
   audioFetchTimeoutMs: 60000

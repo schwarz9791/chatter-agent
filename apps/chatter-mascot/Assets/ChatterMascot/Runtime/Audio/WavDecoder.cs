@@ -223,74 +223,178 @@ namespace ChatterMascot.Audio
             return clip;
         }
 
-        private static bool TryReadSamples(
+        /// <summary>
+        /// このフォーマットの1サンプルあたりのバイト数。<b>対応していなければ 0</b>。
+        ///
+        /// ★ <see cref="LipSyncEnvelope"/> が「1フレームぶんだけ読む」ためのスクラッチを
+        ///   確保するのに使う。<b>ここと <see cref="TryReadSamplesInto"/> の分岐は
+        ///   同じ表を見ていること</b>（片方だけ増やすと、読めるのに確保しない・
+        ///   確保したのに読めない、のどちらかで静かにずれる）。
+        /// </summary>
+        public static int BytesPerSample(ushort format, ushort bitsPerSample)
+        {
+            if (format == FormatIeeeFloat) return bitsPerSample == 32 ? 4 : 0;
+            if (format != FormatPcm) return 0;
+            switch (bitsPerSample)
+            {
+                case 8: return 1;
+                case 16: return 2;
+                case 24: return 3;
+                case 32: return 4;
+                default: return 0;
+            }
+        }
+
+        /// <summary>
+        /// サンプルを <c>float</c>（-1..1）にして返す。<b>チャンネルはインターリーブされたまま。</b>
+        ///
+        /// ★ <c>public</c> なのは <see cref="LipSyncEnvelope"/> が再利用するため。
+        ///   <b>ビット深度の分岐（特に 24bit の符号拡張）を書き写さないこと</b> ——
+        ///   独立実装が2つあると、片方だけ直したときに黙ってズレる。
+        /// </summary>
+        public static bool TryReadSamples(
             byte[] wav, int offset, int length, ushort format, ushort bitsPerSample,
             out float[] samples, out string error)
         {
             samples = null;
-            error = null;
 
-            if (format == FormatIeeeFloat && bitsPerSample == 32)
+            var stride = BytesPerSample(format, bitsPerSample);
+            if (stride == 0)
             {
-                var count = length / 4;
-                samples = new float[count];
-                for (var i = 0; i < count; i++) samples[i] = BitConverter.ToSingle(wav, offset + i * 4);
-                return true;
+                error = DescribeUnsupported(format, bitsPerSample);
+                return false;
+            }
+            // ★ 確保する前に見ること。負の length は new float[負] の OverflowException になる
+            if (!IsReadable(wav, offset, length, out error)) return false;
+
+            var buffer = new float[length / stride];
+            int written;
+            if (!TryReadSamplesInto(wav, offset, length, format, bitsPerSample, buffer, out written, out error))
+            {
+                return false;
             }
 
-            if (format != FormatPcm)
+            samples = buffer;
+            return true;
+        }
+
+        /// <summary>
+        /// <see cref="TryReadSamples"/> と同じものを、<b>呼び出し側のバッファへ</b>書く。
+        /// 書いた要素数を <paramref name="written"/> に返す。
+        ///
+        /// ★ <b>これがあるおかげで、エンベロープ生成が発話ぜんぶぶんの <c>float[]</c> を
+        ///   確保しなくて済む</b>（24kHz mono 5秒で 480KB。<c>AfplaySpeechPlayer.Prepare</c> は
+        ///   もともとサンプルをデコードしていないので、そのまま作ると<b>丸ごと新規のゴミ</b>に
+        ///   なる）。<see cref="LipSyncEnvelope"/> は 20ms 分（約 2KB）を使い回す。
+        /// ★ <paramref name="dest"/> が足りなければ<b>何も書かずに false</b>。
+        /// </summary>
+        public static bool TryReadSamplesInto(
+            byte[] wav, int offset, int length, ushort format, ushort bitsPerSample,
+            float[] dest, out int written, out string error)
+        {
+            written = 0;
+            error = null;
+
+            var stride = BytesPerSample(format, bitsPerSample);
+            if (stride == 0)
             {
-                error = $"対応していない WAV フォーマットです (format={format}, bits={bitsPerSample})";
+                error = DescribeUnsupported(format, bitsPerSample);
                 return false;
+            }
+            if (!IsReadable(wav, offset, length, out error)) return false;
+
+            var count = length / stride;
+            if (dest == null || dest.Length < count)
+            {
+                error = $"サンプル用のバッファが足りません ({count} 要素必要)";
+                return false;
+            }
+
+            if (format == FormatIeeeFloat)
+            {
+                for (var i = 0; i < count; i++) dest[i] = BitConverter.ToSingle(wav, offset + i * 4);
+                written = count;
+                return true;
             }
 
             switch (bitsPerSample)
             {
                 case 8:
-                {
                     // 8bit PCM は符号なし（0..255、128 が無音）
-                    samples = new float[length];
-                    for (var i = 0; i < length; i++) samples[i] = (wav[offset + i] - 128) / 128f;
-                    return true;
-                }
+                    for (var i = 0; i < count; i++) dest[i] = (wav[offset + i] - 128) / 128f;
+                    break;
                 case 16:
-                {
-                    var count = length / 2;
-                    samples = new float[count];
                     for (var i = 0; i < count; i++)
                     {
-                        samples[i] = BitConverter.ToInt16(wav, offset + i * 2) / 32768f;
+                        dest[i] = BitConverter.ToInt16(wav, offset + i * 2) / 32768f;
                     }
-                    return true;
-                }
+                    break;
                 case 24:
-                {
-                    var count = length / 3;
-                    samples = new float[count];
                     for (var i = 0; i < count; i++)
                     {
                         var at = offset + i * 3;
                         var value = wav[at] | (wav[at + 1] << 8) | (wav[at + 2] << 16);
                         // 24bit の符号拡張
                         if ((value & 0x800000) != 0) value = (int)(value | 0xFF000000);
-                        samples[i] = value / 8388608f;
+                        dest[i] = value / 8388608f;
                     }
-                    return true;
-                }
-                case 32:
-                {
-                    var count = length / 4;
-                    samples = new float[count];
+                    break;
+                default:
+                    // BytesPerSample が通したのは 8 / 16 / 24 / 32 だけ
                     for (var i = 0; i < count; i++)
                     {
-                        samples[i] = BitConverter.ToInt32(wav, offset + i * 4) / 2147483648f;
+                        dest[i] = BitConverter.ToInt32(wav, offset + i * 4) / 2147483648f;
                     }
-                    return true;
-                }
-                default:
-                    error = $"対応していないビット深度です ({bitsPerSample}bit)";
-                    return false;
+                    break;
             }
+
+            written = count;
+            return true;
+        }
+
+        /// <summary>
+        /// <paramref name="wav"/> の <paramref name="offset"/> から <paramref name="length"/> バイトを
+        /// 読んでよいか。
+        ///
+        /// ★★ <b><see cref="TryReadHeader"/> を通した値だから安全、に頼らないこと。</b>
+        ///   <see cref="TryReadSamples"/> / <see cref="TryReadSamplesInto"/> は
+        ///   <c>public</c> で、<c>LipSyncEnvelope.Build</c> は <see cref="WavHeader"/> を
+        ///   <b>引数で受け取る</b>ので、ヘッダ由来であることを型では強制できない。
+        ///   ここで弾かないと <c>IndexOutOfRangeException</c> が出るが、それは
+        ///   <c>Prepare</c> → <c>FetchAudioAsync</c> の fire-and-forget で<b>未観測のまま捨てられ、
+        ///   その seq に <c>AudioReady</c> も <c>AudioFailed</c> も来ないまま head が黙って止まる</b>
+        ///   —— <see cref="TryReadHeader"/> が「宣言値が末尾を越えたら打ち切る」理由として
+        ///   長々と説明している、まさにその失敗モード。
+        /// </summary>
+        private static bool IsReadable(byte[] wav, int offset, int length, out string error)
+        {
+            error = null;
+            if (wav == null)
+            {
+                error = "WAV がありません";
+                return false;
+            }
+            // offset + length は int で溢れうるので long で見る
+            if (offset < 0 || length < 0 || (long)offset + length > wav.Length)
+            {
+                error = $"WAV の範囲外を読もうとしました (offset={offset}, length={length}, size={wav.Length})";
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// ★ <b>「フォーマットが違う」と「ビット深度が違う」を混ぜないこと。</b>
+        ///   無音の原因を追うとき、<c>ttsBaseUrl</c> の向き先が別サービスだったのか
+        ///   合成の設定が変わったのかで、次に見る場所が変わる。
+        ///
+        /// ★ <c>internal</c> なのは <c>LipSyncEnvelope</c> が同じ文言を使うため（同一アセンブリ）。
+        /// </summary>
+        internal static string DescribeUnsupported(ushort format, ushort bitsPerSample)
+        {
+            return format != FormatPcm
+                ? $"対応していない WAV フォーマットです (format={format}, bits={bitsPerSample})"
+                : $"対応していないビット深度です ({bitsPerSample}bit)";
         }
 
         private static bool Matches(byte[] data, int offset, string tag)

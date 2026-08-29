@@ -18,9 +18,13 @@ namespace ChatterMascot.Tests
             float hold = 1.5f,
             float promptSurprise = 0f,
             float blinkSuppressAboveHappy = 0.1f,
-            bool useNeutralExpression = false)
+            bool useNeutralExpression = false,
+            float mouthScaleHappy = 0f,
+            float mouthScaleSad = 0f)
         {
-            return new FaceParams(lerp, hold, promptSurprise, blinkSuppressAboveHappy, useNeutralExpression);
+            return new FaceParams(
+                lerp, hold, promptSurprise, blinkSuppressAboveHappy, useNeutralExpression,
+                mouthScaleHappy, mouthScaleSad);
         }
 
         private static FaceInput Input(
@@ -320,5 +324,115 @@ namespace ChatterMascot.Tests
             Assert.That(w.Aa, Is.EqualTo(1f));
             Assert.That(w.Blink, Is.EqualTo(0f));
         }
+
+        // ---- 口のスケール（#58） ----
+
+        /// <summary>
+        /// ★ <b>モデル側は守ってくれない。</b> 笑顔（<c>Fcl_ALL_Joy</c>）と <c>aa</c>
+        ///   （<c>Fcl_MTH_A</c>）は別のモーフで、同梱 <c>vita.vrm</c> は preset 14個すべて
+        ///   <c>overrideMouth: none</c> なので素で加算される。cc-mascot の
+        ///   <c>useVRM.ts</c> の <c>setMouthOpen</c> と同じ倍率。
+        /// ★ <b>判定は緩和後の weight</b>（<c>lerp = 0</c> にして <c>happy</c> を立て切らせている）。
+        /// </summary>
+        [Test]
+        public void MouthIsScaledDownWhileHappy()
+        {
+            var w = FacePolicy.Evaluate(
+                Input(speaking: true, emotion: Emotion.Happy, mouth: 1f),
+                FaceWeights.Zero, 1f / 30f, Params(lerp: 0f, mouthScaleHappy: 0.2f));
+
+            Assert.That(w.Happy, Is.EqualTo(1f).Within(1e-5f));
+            Assert.That(w.Aa, Is.EqualTo(0.2f).Within(1e-5f));
+        }
+
+        [Test]
+        public void MouthIsScaledDownWhileSad()
+        {
+            var w = FacePolicy.Evaluate(
+                Input(speaking: true, emotion: Emotion.Sad, mouth: 1f),
+                FaceWeights.Zero, 1f / 30f, Params(lerp: 0f, mouthScaleSad: 0.5f));
+
+            Assert.That(w.Aa, Is.EqualTo(0.5f).Within(1e-5f));
+        }
+
+        /// <summary>
+        /// ★ <b>0 は「口を閉じる」ではなく「掛けない」。</b> <see cref="FaceParams"/> の
+        ///   他の値と同じ「0 = 無効」の語彙に揃えてある —— これで
+        ///   <see cref="AllZeroParamsMakeEvaluateEqualTarget"/> が保たれる。
+        /// </summary>
+        [Test]
+        public void ZeroMouthScaleLeavesTheMouthAlone()
+        {
+            var w = FacePolicy.Evaluate(
+                Input(speaking: true, emotion: Emotion.Happy, mouth: 1f),
+                FaceWeights.Zero, 1f / 30f, Params(lerp: 0f, mouthScaleHappy: 0f, mouthScaleSad: 0f));
+
+            Assert.That(w.Aa, Is.EqualTo(1f).Within(1e-5f));
+        }
+
+        /// <summary>
+        /// ★★ <b><c>Aa</c> だけが 0..1 の契約を破りうる。</b> 他のチャンネルは 0..1 の目標へ
+        ///   緩和するので範囲外にならないが、<c>Aa</c> は倍率を掛けるので 1 を超えうる。
+        ///   <b>Unity 側は潰してくれない</b>（UniVRM の <c>ExpressionMerger</c> に <c>Clamp01</c> は
+        ///   無く、<c>legacyClampBlendShapeWeights</c> は 0）ので、ここで閉じる。
+        /// </summary>
+        [Test]
+        public void MouthNeverExceedsOneEvenWithAScaleAboveOne()
+        {
+            var w = FacePolicy.Evaluate(
+                Input(speaking: true, emotion: Emotion.Happy, mouth: 1f),
+                FaceWeights.Zero, 1f / 30f, Params(lerp: 0f, mouthScaleHappy: 2f));
+
+            Assert.That(w.Aa, Is.EqualTo(1f));
+        }
+
+        /// <summary>
+        /// ★★ <b>happy と sad が同時に立っているときの合成規則を固定する。</b>
+        ///   倍率は<b>積</b>（`Lerp(1,0.2,0.5) * Lerp(1,0.5,0.5) = 0.6 * 0.75 = 0.45`）。
+        ///
+        /// ★ <b>上流と同じ形。</b> cc-mascot の <c>useVRM.ts</c> の <c>setMouthOpen</c> は
+        ///   <c>happyScale * sadScale</c>（<c>1.0 - happy*0.8</c> × <c>1.0 - sad*0.5</c>、
+        ///   それぞれ <c>Lerp(1, 0.2, happy)</c> / <c>Lerp(1, 0.5, sad)</c> と厳密に同一）。
+        ///   <b><c>min</c> に変えないこと</b> —— PR #74 のレビューが一度そう提案して取り下げている。
+        ///
+        /// ★ <b>0.45 は「sad 単独の下限 0.5 を割った」のではない。</b> <see cref="FacePolicy.Target"/> は
+        ///   emotion を one-hot で立てるので、happy と sad は同じ時定数で<b>相補的に</b>動く。
+        ///   クロスフェード中を <c>h = u, s = 1-u</c> と置くと倍率は <c>0.5(1 + 0.2u − 0.8u²)</c> で、
+        ///   <b>0.2 から 0.5 へ滑らかに掃くだけ</b>。0.45 はその道の途中の1点にすぎない。
+        /// </summary>
+        [Test]
+        public void MouthScalesComposeAsAProduct()
+        {
+            var both = new FaceWeights(0.5f, 0f, 0.5f, 0f, 0f, 0f, 0f, 0f);
+
+            var w = FacePolicy.Evaluate(
+                Input(speaking: true, emotion: Emotion.Happy, mouth: 1f),
+                both, 0f, Params(lerp: 10f, mouthScaleHappy: 0.2f, mouthScaleSad: 0.5f));
+
+            Assert.That(w.Happy, Is.EqualTo(0.5f).Within(1e-4f));
+            Assert.That(w.Sad, Is.EqualTo(0.5f).Within(1e-4f));
+            Assert.That(w.Aa, Is.EqualTo(0.45f).Within(1e-4f));
+        }
+
+        /// <summary>
+        /// ★ 表情が立ち上がる途中では倍率も途中の値になる（段差が入らない）。
+        ///   目標ではなく<b>実際に適用される weight</b> で掛けている証拠。
+        /// </summary>
+        [Test]
+        public void MouthScaleFollowsTheEasedWeight()
+        {
+            var half = new FaceWeights(0.5f, 0f, 0f, 0f, 0f, 0f, 0f, 0f);
+
+            // lerp を 0 にすると happy が即 1.0 になってしまうので、前フレームの値を
+            // そのまま採る（tau が十分大きければ 1フレームではほとんど動かない）
+            var w = FacePolicy.Evaluate(
+                Input(speaking: true, emotion: Emotion.Happy, mouth: 1f),
+                half, 0f, Params(lerp: 10f, mouthScaleHappy: 0.2f));
+
+            Assert.That(w.Happy, Is.EqualTo(0.5f).Within(1e-4f));
+            // Lerp(1, 0.2, 0.5) = 0.6
+            Assert.That(w.Aa, Is.EqualTo(0.6f).Within(1e-4f));
+        }
+
     }
 }

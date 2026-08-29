@@ -19,7 +19,7 @@ namespace ChatterMascot.Tests
 
         private static bool Silent(FaceLatch latch, double now)
         {
-            // ★ 喋っていないとき SpeakingView が返すのは既定値（Assistant / Neutral）。
+            // ★ 喋っていないとき SpeakingSet が返すのは既定値（Assistant / Neutral）。
             //   ラッチの意味はここで壊れないことにある
             return latch.Update(speaking: false, emotion: Emotion.Neutral, kind: SpeechKind.Assistant, now: now);
         }
@@ -35,7 +35,7 @@ namespace ChatterMascot.Tests
         }
 
         /// <summary>
-        /// ★ <b>これが無いと猶予が1行も効かない。</b> <c>SpeakingView.TryRead</c> は
+        /// ★ <b>これが無いと猶予が1行も効かない。</b> <c>SpeakingSet.TryGetFace</c> は
         /// 再生中の item が無いとき <c>Neutral</c> に倒すので、素通しすると
         /// 喋り終わった瞬間に目標が Neutral になる。
         /// </summary>

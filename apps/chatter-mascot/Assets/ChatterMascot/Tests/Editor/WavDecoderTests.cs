@@ -8,30 +8,13 @@ namespace ChatterMascot.Tests
     [TestFixture]
     public sealed class WavDecoderTests
     {
-        /// <summary>16bit PCM の WAV を組み立てる（合成エンジンが返すのと同じ形）。</summary>
+        /// <summary>
+        /// 16bit PCM の WAV を組み立てる（合成エンジンが返すのと同じ形）。
+        /// ★ 実体は <see cref="WavBuilder"/>。<b>ここに書き写さないこと</b>（#58 で1箇所に寄せた）。
+        /// </summary>
         private static byte[] BuildWav(short[] samples, int sampleRate = 24000, ushort channels = 1)
         {
-            var dataBytes = samples.Length * 2;
-            var bytes = new List<byte>();
-
-            bytes.AddRange(System.Text.Encoding.ASCII.GetBytes("RIFF"));
-            bytes.AddRange(BitConverter.GetBytes(36 + dataBytes));
-            bytes.AddRange(System.Text.Encoding.ASCII.GetBytes("WAVE"));
-
-            bytes.AddRange(System.Text.Encoding.ASCII.GetBytes("fmt "));
-            bytes.AddRange(BitConverter.GetBytes(16));
-            bytes.AddRange(BitConverter.GetBytes((ushort)1));          // PCM
-            bytes.AddRange(BitConverter.GetBytes(channels));
-            bytes.AddRange(BitConverter.GetBytes(sampleRate));
-            bytes.AddRange(BitConverter.GetBytes(sampleRate * channels * 2));
-            bytes.AddRange(BitConverter.GetBytes((ushort)(channels * 2)));
-            bytes.AddRange(BitConverter.GetBytes((ushort)16));
-
-            bytes.AddRange(System.Text.Encoding.ASCII.GetBytes("data"));
-            bytes.AddRange(BitConverter.GetBytes(dataBytes));
-            foreach (var sample in samples) bytes.AddRange(BitConverter.GetBytes(sample));
-
-            return bytes.ToArray();
+            return WavBuilder.Build(samples, sampleRate, channels);
         }
 
         [Test]

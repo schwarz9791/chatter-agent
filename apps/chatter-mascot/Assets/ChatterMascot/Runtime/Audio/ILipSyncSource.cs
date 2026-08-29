@@ -12,8 +12,8 @@ namespace ChatterMascot.Audio
     /// ★ <b>なぜ <c>AudioSource.GetOutputData</c> ではないか。</b> macOS の再生の実体は
     ///   <c>AfplaySpeechPlayer</c>（1発話 = 1つの <c>afplay</c> 子プロセス）で、
     ///   <b>音は子プロセスの中にあり <c>GetOutputData</c> に相当するものが存在しない</b>。
-    ///   <c>MascotRunner._player</c> も <see cref="ISpeechPlayer"/> 型なので
-    ///   <c>AudioClipPlayer.Current</c> はインターフェース越しに届かない。
+    ///   <c>MascotRunner._player</c> も <see cref="ISpeechPlayer"/> 型なので、
+    ///   <c>AudioClipPlayer</c> が内部で持つ <c>AudioSource</c> はインターフェース越しに届かない。
     ///   <b><c>Prepare</c> の時点で WAV から作っておけば、3つの実装すべてで同じコードが使える。</b>
     ///
     /// ★ <b>プロパティであってフィールドではない。</b> C# はインターフェースのメンバーを

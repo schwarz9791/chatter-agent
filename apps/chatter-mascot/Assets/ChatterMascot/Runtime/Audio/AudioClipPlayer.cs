@@ -117,21 +117,13 @@ namespace ChatterMascot.Audio
             if (template != null) _voices.Add(new Voice { Source = template });
         }
 
-        /// <summary>
-        /// 最後に鳴らし始めた <see cref="AudioSource"/>。鳴っていなければ <c>null</c>。
-        ///
-        /// ★ <b>多voice 化で「どこから読むか」が曖昧になるのを先に潰すためにある。</b>
-        ///   #17 のリップシンクは <c>GetOutputData</c> をここから読む。
-        ///
-        /// ★ <b>ただし macOS ではこの前提が成立しない。</b> 再生の実体が
-        ///   <c>AfplaySpeechPlayer</c> になり、<b>音は子プロセスの中にあって
-        ///   <c>GetOutputData</c> に相当するものが存在しない</b>。<c>MascotRunner</c> が持つのも
-        ///   <see cref="ISpeechPlayer"/> 型なので、これはインターフェース越しに届かない。
-        ///   → #58 で <b><c>Prepare</c> の時点で WAV から振幅エンベロープを作ってハンドルに
-        ///   載せる</b>方式に寄せた（→ <see cref="ILipSyncSource"/> / <c>LipSyncEnvelope</c>）。
-        ///   <b>リップシンクはこのプロパティを読んでいない</b>ので、消しても口は動く。
-        /// </summary>
-        public AudioSource Current { get; private set; }
+        // ★ かつてここに `Current`（最後に鳴らし始めた AudioSource）があった。#17 のリップシンクが
+        //   GetOutputData をどこから読むかを1つに決めるためだったが、**macOS ではその前提が
+        //   成立しない**（再生の実体が AfplaySpeechPlayer で、音は子プロセスの中にある）。
+        //   #58 は Prepare の時点で WAV から振幅エンベロープを作ってハンドルに載せる方式に寄せ、
+        //   このプロパティは**読み手が1つも無いまま**残っていた。
+        //   消費者ゼロのために voice プールを跨いだ正しさを保ち続ける必要は無いので、削除した。
+        //   → ILipSyncSource / LipSyncEnvelope
 
         /// <summary>今鳴っている本数（孤児を含む）。</summary>
         public int ActiveCount
@@ -258,7 +250,6 @@ namespace ChatterMascot.Audio
                 {
                     source.clip = clip;
                     source.Play();
-                    Current = source;
                 }
                 catch (Exception e)
                 {
@@ -283,7 +274,6 @@ namespace ChatterMascot.Audio
                 //   期限切れの孤児が**別の文の再生を止める**
                 source.Stop();
                 source.clip = null;
-                if (Current == source) Current = null;
 
                 return timedOut ? $"{limit:F1} 秒で終わりませんでした" : null;
             }
@@ -302,7 +292,6 @@ namespace ChatterMascot.Audio
                 voice.Source.Stop();
                 voice.Source.clip = null;
             }
-            Current = null;
         }
 
         /// <summary>

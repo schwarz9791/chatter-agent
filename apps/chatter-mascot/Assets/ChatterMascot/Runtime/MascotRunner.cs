@@ -559,6 +559,42 @@ namespace ChatterMascot
             return item != null && item.Status == ItemStatus.Pending && wallNowMs < item.RetryAfter;
         }
 
+        /// <summary>
+        /// キューから、その <paramref name="seq"/> の発話の表情を読む。
+        /// <b>読めなければ <c>Assistant</c> / <c>Neutral</c> に倒す。</b>
+        ///
+        /// ★★ <b>戻り値を <c>bool</c> にしないこと。</b> <c>void</c> なら
+        ///   <b>呼び出し側が「読めなかったから登録を飛ばす」と書けない</b>（分岐材料が存在しない）。
+        ///   「登録そのものを飛ばさないこと」というルールを、テストではなく<b>型で</b>固定している ——
+        ///   飛ばすと <c>SpeakingSet</c> に載らず、<b>鳴っているのに喋っていない</b>状態になって
+        ///   口も表情も体の動きも止まる。<see cref="IsParked"/> が <c>bool</c> を返すのは
+        ///   分岐が目的だから、という対比で覚えること。<b><c>TryReadFace</c> に「改善」しないこと。</b>
+        ///
+        /// ★ <b>引数を <see cref="QueueItem"/> にしないこと。</b> <c>Items.TryGetValue</c> を
+        ///   呼び出し側に残すと、<c>state == null</c> と「未知の <c>seq</c>」の2分岐がまた
+        ///   private へ戻り、テストが届かなくなる。
+        ///
+        /// ★ <b><c>seq</c> だけで引けるのは「<c>Play</c> と同じ tick で読む」から。</b>
+        ///   <c>PlaybackQueue.StartPlayback</c> は <c>state.Epoch</c> と <c>head.Record.Seq</c> を
+        ///   同じ tick で組にして <c>Play</c> を積み、<see cref="Execute"/> は同期で回るので、
+        ///   <c>Items[seq]</c> は必ずその head。<b><c>Play</c> を遅延実行に変えた瞬間に静かに壊れる</b>。
+        ///
+        /// ★ <c>public static</c> なのはテストで固定するため（<see cref="IsParked"/> と同じ扱い）。
+        /// </summary>
+        public static void ReadFace(PlaybackState state, long seq, out SpeechKind kind, out Emotion emotion)
+        {
+            kind = SpeechKind.Assistant;
+            emotion = Emotion.Neutral;
+
+            QueueItem item;
+            if (state == null) return;
+            if (!state.Items.TryGetValue(seq, out item)) return;
+            if (item == null || item.Record == null) return;
+
+            kind = item.Record.Kind;
+            emotion = item.Record.Emotion;
+        }
+
         private void Dispatch(PlaybackEvent ev)
         {
             if (_state == null) return;
@@ -662,18 +698,13 @@ namespace ChatterMascot
         ///   （<c>ConsumeHead</c> は <c>Done</c> しか消さず、<c>MarkStale</c> は <c>Playing</c> を飛ばす）。
         ///   それでも <c>Record</c> が無い場合は既定値で登録する —— <b>登録そのものを飛ばさないこと</b>。
         ///   飛ばすと「鳴っているのに喋っていない」状態になり、口も表情も体の動きも止まる。
+        ///   <b>この規則は <see cref="ReadFace"/> が <c>void</c> であることで型に落としてある。</b>
         /// </summary>
         private void BeginSpeaking(int epoch, long seq, object audio)
         {
-            var kind = SpeechKind.Assistant;
-            var emotion = Emotion.Neutral;
-
-            QueueItem item;
-            if (_state != null && _state.Items.TryGetValue(seq, out item) && item != null && item.Record != null)
-            {
-                kind = item.Record.Kind;
-                emotion = item.Record.Emotion;
-            }
+            SpeechKind kind;
+            Emotion emotion;
+            ReadFace(_state, seq, out kind, out emotion);
 
             var source = audio as ILipSyncSource;
             _speaking.Begin(

@@ -93,6 +93,24 @@ namespace ChatterMascot.Vrm
         [Tooltip("自動まばたきを回すか")]
         [SerializeField] private bool blinkEnabled = true;
 
+        /// <summary>
+        /// RMS を口の開きへ写すときの倍率。cc-mascot の <c>min(1.0, rms * 4)</c> と同じ。
+        ///
+        /// ★ <b>0 にすると口が動かない。</b> 他の調整値と違って「0 = 無効」ではない
+        ///   （→ <see cref="MouthTracker.Tick"/>）。
+        /// </summary>
+        [Tooltip("RMS → 口の開きの倍率（cc-mascot の rms * 4 と同じ）。★ 0 にすると口が動かない")]
+        [SerializeField] private float mouthGain = 4f;
+
+        [Tooltip("口を閉じる方向の減衰（毎秒）。0 で無効。★ 30fps で音素の谷ごとに口が閉じて階段に見えるのを均す")]
+        [SerializeField] private float mouthReleasePerSecond = 8f;
+
+        [Tooltip("happy が立ち切っているときの口の開きの倍率。0 で無効（1倍）。★ 笑顔で口が開きすぎてメッシュからはみ出るのを防ぐ")]
+        [SerializeField] private float mouthScaleHappy = 0.2f;
+
+        [Tooltip("sad が立ち切っているときの口の開きの倍率。0 で無効（1倍）")]
+        [SerializeField] private float mouthScaleSad = 0.5f;
+
         [Tooltip("今の emotion / kind と実効 weight を1秒ごとにログへ出す。★ ビルド済みアプリでは起動引数 -faceLog 1 でも立てられる")]
         [SerializeField] private bool faceDebugLog;
 
@@ -111,7 +129,7 @@ namespace ChatterMascot.Vrm
         /// いま再生中の発話に載っていた emotion。<b>喋っていない間は <c>Neutral</c>。</b>
         ///
         /// ★ <b>これをそのまま <see cref="FacePolicy"/> へ渡さないこと。</b>
-        ///   <c>SpeakingView.TryRead</c> は false のとき <c>Neutral</c> に倒す契約なので、
+        ///   <c>SpeakingSet.TryGetFace</c> は false のとき <c>Neutral</c> に倒す契約なので、
         ///   生の値を渡すと<b>喋り終わった瞬間に目標が Neutral になり、
         ///   <c>faceHoldSeconds</c> がまったく効かない</b>。表情には
         ///   <see cref="FaceLatch"/> が保つ「発話中に読んだ最後の値」を使う。
@@ -181,7 +199,19 @@ namespace ChatterMascot.Vrm
         };
 
         /// <summary>デバッグログの間引き（秒）</summary>
-        private const double FaceLogIntervalSeconds = 1.0;
+        private const double DefaultFaceLogIntervalSeconds = 1.0;
+
+        /// <summary>
+        /// <see cref="LogFace"/> の間引き。<b>起動引数 <c>-faceLogMs</c> で縮められる。</b>
+        ///
+        /// ★ <b>既定 1秒を縮めないこと。</b> 常用のデバッグログなので、細かくすると
+        ///   <c>Player.log</c> が流れて他の診断が読めなくなる。
+        /// ★ <b>縮めたくなるのは実機確認のときだけ。</b> #58 の「孤児が重なっている間も
+        ///   口が止まらないこと」は <c>aa=</c> の連続で判定するが、1秒間隔では
+        ///   <b>サンプルが粗すぎて判定にならない</b>（瞬きが 0.19 秒で終わるのに
+        ///   捕捉率が2割しかない、というのと同じ問題）。
+        /// </summary>
+        private double _faceLogIntervalSeconds = DefaultFaceLogIntervalSeconds;
 
         private Vrm10Instance _instance;
         private VrmIdleAnimation _idle;
@@ -212,6 +242,14 @@ namespace ChatterMascot.Vrm
         ///   1行も効かない」と分かっている場所（#57 のレビュー指摘）。
         /// </summary>
         private readonly FaceLatch _faceLatch = new FaceLatch();
+
+        /// <summary>
+        /// 口の開きの整形（区間の始点・ゲイン・attack/release）。
+        ///
+        /// ★ <see cref="_faceLatch"/> と同じ理由で <c>Runtime/</c> 側の純粋クラスに出してある。
+        ///   <b>ここをフィールドの寄せ集めに戻さないこと</b> —— テストが1行も当たらなくなる。
+        /// </summary>
+        private readonly MouthTracker _mouth = new MouthTracker();
 
         private double _faceLoggedAt = double.NegativeInfinity;
 
@@ -282,6 +320,18 @@ namespace ChatterMascot.Vrm
                 Debug.Log($"[Mascot] faceDebugLog をコマンドラインで上書きします: {faceDebugLog}");
             }
 
+            // ★ こちらは値を取るので Flag ではなく Argument（-faceLogMs 100）。
+            //   読めない値は黙って無視する —— 実機確認の道具なので、打ち間違いで
+            //   アプリが止まるほうが困る
+            var faceLogMs = CommandLine.Argument("-faceLogMs");
+            int faceLogMsValue;
+            if (!string.IsNullOrEmpty(faceLogMs) &&
+                int.TryParse(faceLogMs, out faceLogMsValue) && faceLogMsValue > 0)
+            {
+                _faceLogIntervalSeconds = faceLogMsValue / 1000.0;
+                Debug.Log($"[Mascot] face ログの間隔をコマンドラインで上書きします: {faceLogMsValue}ms");
+            }
+
             // ★ sticky なので購読と読み込みの前後関係に依存しない（VrmStage.AddLoadedHandler）
             if (stage != null)
             {
@@ -343,12 +393,11 @@ namespace ChatterMascot.Vrm
             // ★ kind / emotion を先に既定値で確定させること。runner == null のときは
             //   && の短絡で TryGetSpeaking 自体が呼ばれず out に何も入らないので、
             //   `out var` で受けると CS0165（未割り当てローカル変数の使用）になる。
-            // ★ false のときに既定値へ倒すのは呼ばれた側（SpeakingView.TryRead）の契約で、
-            //   ここはそれに乗っている。**この契約は SpeakingViewTests が固定している**
-            //   （ReturnsFalseWhenNothingIsPlaying / ReturnsFalseWhenOnlyOrphansArePlaying /
-            //   DoesNotThrowWhenStateIsNull / DoesNotThrowWhenThePlayingItemHasNoRecord の
-            //   4本が、false のとき Assistant / Neutral になることを検査している）。
+            // ★ false のときに既定値へ倒すのは呼ばれた側（SpeakingSet.TryGetFace）の契約で、
+            //   ここはそれに乗っている。**この契約は SpeakingSetTests が固定している**。
             //   だからここで `Speaking ? kind : 既定` と書き直す必要はない。
+            // ★ #58 以降、Speaking は**孤児（採番のやり直しで鳴らし切っている音）も含む**。
+            //   以前の SpeakingView は Orphans に Record が無いので孤児の間 false を返していた。
             var kind = SpeechKind.Assistant;
             // ★ 完全修飾で書くこと。この型は自分自身と同名のプロパティ Emotion を持つので、
             //   ここで単に `Emotion.Neutral` と書くとプロパティ側に解決されてしまい、
@@ -522,7 +571,7 @@ namespace ChatterMascot.Vrm
         ///
         /// ★ <b><see cref="LateUpdate"/> の早期 return より前で呼ぶこと</b>（呼び出し側のコメント参照）。
         /// ★ <b>読み取りを新しく書かないこと。</b> <c>Speaking</c> / <c>Kind</c> / <c>Emotion</c> は
-        ///   <see cref="LateUpdate"/> が <c>SpeakingView</c> 経由で確定済み。ここは使うだけ。
+        ///   <see cref="LateUpdate"/> が <c>MascotRunner.TryGetSpeaking</c> 経由で確定済み。ここは使うだけ。
         /// ★ <b>瞬きは <c>_instance</c> が無くても回す。</b> 適用先が無いだけで、時間は進める
         ///   （読み込み中に待ちがリセットされ続けると、読み込み直後に必ず瞬くことになる）。
         /// </summary>
@@ -538,6 +587,15 @@ namespace ChatterMascot.Vrm
             _blink.Enabled = blinkEnabled;
             var blink = _blink.Tick(now);
 
+            // ★★ 口も **_instance の早期 return より前**で進めること（瞬きと同じ理由）。
+            //   後ろに置くと、VRM の読み込み中（実測 約1.6秒）ずっと区間の始点が更新されず、
+            //   モデルが出た最初のフレームで**数秒ぶんの最大値**を取って口が全開に飛ぶ。
+            // ★ 区間 [前フレーム, いま] の最大を取る。点サンプリングにすると、20ms 刻みの
+            //   エンベロープを 33.3ms 間隔で読むことになり **4割のフレームを読み飛ばす**
+            var rawMouth = runner != null ? runner.Mouth(_mouth.From(now), now) : 0f;
+            // ★ Time.deltaTime ではなく unscaledDeltaTime（下の緩和と同じ理由）
+            var mouth = _mouth.Tick(rawMouth, now, mouthGain, mouthReleasePerSecond, Time.unscaledDeltaTime);
+
             if (_instance == null) return;
             var runtime = _instance.Runtime;
             var expression = runtime != null ? runtime.Expression : null;
@@ -546,11 +604,12 @@ namespace ChatterMascot.Vrm
             var input = new FaceInput(
                 speaking: Speaking,
                 // ★ 生の Emotion / Kind ではなくラッチ済みを渡すこと。生のままだと
-                //   SpeakingView の「false なら既定値へ倒す」契約に当たって猶予が効かない
+                //   SpeakingSet の「false なら既定値へ倒す」契約に当たって猶予が効かない
                 emotion: _faceLatch.Emotion,
                 kind: _faceLatch.Kind,
-                // ★ #58 のリップシンクが埋める。ここでは常に 0
-                mouth: 0f,
+                // ★ 整形済みの値を渡すこと（ゲインと release は MouthTracker が済ませている）。
+                //   Speaking が false のときに 0 へ倒すのは FacePolicy.Target 側の契約
+                mouth: mouth,
                 blink: blink,
                 now: now,
                 speechEndedAt: _faceLatch.SpeechEndedAt);
@@ -584,7 +643,9 @@ namespace ChatterMascot.Vrm
                 faceHoldSeconds,
                 promptSurpriseWeight,
                 blinkSuppressAboveHappy,
-                useNeutralExpression);
+                useNeutralExpression,
+                mouthScaleHappy,
+                mouthScaleSad);
         }
 
         /// <summary>
@@ -765,7 +826,7 @@ namespace ChatterMascot.Vrm
         /// </summary>
         private void LogFace(double now, Vrm10RuntimeExpression expression)
         {
-            if (now - _faceLoggedAt < FaceLogIntervalSeconds) return;
+            if (now - _faceLoggedAt < _faceLogIntervalSeconds) return;
             _faceLoggedAt = now;
 
             var actual = expression.ActualWeights;

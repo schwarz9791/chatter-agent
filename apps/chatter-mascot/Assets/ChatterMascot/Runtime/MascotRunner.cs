@@ -386,6 +386,31 @@ namespace ChatterMascot
                 return;
             }
 
+            ReleaseSpeakingFrameRate();
+        }
+
+        /// <summary>
+        /// 借りているフレームレートを返す。
+        ///
+        /// ★★ <b>ここに <c>StopAll</c> / <c>EndAll</c> / <c>Discard</c> を降ろさないこと。</b>
+        ///   <see cref="OnDisable"/> は GameObject の非アクティブ化でも走るので、<b>音を止めてしまう</b>。
+        ///   後始末の本体は <see cref="OnDestroy"/> のまま。
+        ///
+        /// ★ <b>返却を <see cref="OnDestroy"/> だけに任せないこと</b>（<c>VrmStage.OnDisable</c> が先例）。
+        ///   <c>speakingFrameRate</c> を開けた状態で発話中にコンポーネントを無効化 / GameObject を
+        ///   非アクティブ化すると、<see cref="Update"/> が止まって
+        ///   <see cref="UpdateSpeakingFrameRate"/> が返却できず、<see cref="OnDestroy"/> も走らない。
+        ///   <c>FrameRateBudget</c> の深さが増えたままになり、<b>恒久的に上げたままで
+        ///   常駐アプリの電力設計（#55）が黙って死ぬ</b>。
+        /// ★ <c>Handle.Dispose</c> は冪等なので <see cref="OnDestroy"/> 側は残してよい。
+        /// </summary>
+        private void OnDisable()
+        {
+            ReleaseSpeakingFrameRate();
+        }
+
+        private void ReleaseSpeakingFrameRate()
+        {
             if (_speakingBoost == null) return;
             _speakingBoost.Dispose();
             _speakingBoost = null;
@@ -406,11 +431,7 @@ namespace ChatterMascot
             // ★ StopAll の直後に落とすこと。残すと VrmCharacter から「まだ喋っている」に見え、
             //   口が開いたままシーンが破棄される
             _speaking.EndAll();
-            if (_speakingBoost != null)
-            {
-                _speakingBoost.Dispose();
-                _speakingBoost = null;
-            }
+            ReleaseSpeakingFrameRate();
             foreach (var handle in _handles.Values)
             {
                 _player?.Discard(handle);

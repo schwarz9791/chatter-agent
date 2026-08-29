@@ -28,6 +28,47 @@ namespace ChatterMascot.Audio
         public const int DefaultFrameMs = 20;
 
         /// <summary>
+        /// 作れなかったときの警告の文面。
+        ///
+        /// ★ <b>呼び出し側に書き写さないこと。</b> 逐語コピーの実体は文字列なので、
+        ///   ここを畳まないと <see cref="BuildOrWarn"/> にまとめた意味が半分になる。
+        /// </summary>
+        private const string BuildFailedMessage = "口の動きを作れませんでした（音は鳴ります）: ";
+
+        /// <summary>
+        /// <see cref="Build"/> して、<b>作れなかったら1回だけ</b>警告する。
+        /// 各 <c>ISpeechPlayer.Prepare</c> の唯一の入り口。
+        ///
+        /// ★★ <b>戻り値が <c>null</c> でも <c>Prepare</c> を失敗させないこと。</b>
+        ///   <c>Prepare</c> が <c>null</c> を返すと <c>AudioFailed</c> → skip + ack で、
+        ///   <b>サーバーのキューから物理削除されて二度と鳴らせない</b>。口が動かないだけに留める。
+        ///
+        /// ★ <b>2実装に書き写さないこと</b>（#58 のレビュー指摘）。同じ <see cref="Build"/> 呼び出し・
+        ///   同じ <c>null</c> 判定・同じラッチ・同じ文面が <c>AfplaySpeechPlayer</c> と
+        ///   <c>AudioClipPlayer</c> に逐語コピーされていた。しかも「<c>Prepare</c> を落とさない」を
+        ///   守るテストは <c>#if UNITY_EDITOR_OSX</c> の Afplay 側にしか無く、
+        ///   <b>2つの実装のうち1つが CI で1行も踏まれていなかった</b>。ここへ寄せると
+        ///   その経路がプラットフォーム非依存にテストできる。
+        ///
+        /// ★ <paramref name="frameMs"/> を引数に残してあるのは、落とすと呼び出し側に
+        ///   <c>EnvelopeFrameMs = DefaultFrameMs</c> という<b>もう1本の重複行</b>だけが残り、
+        ///   ここが使う刻みとの対応が暗黙になるから。
+        /// </summary>
+        /// <param name="warned">警告済みのラッチ。読めない WAV は同じ形が続くので洪水にしない</param>
+        /// <param name="warn">診断の出口（<c>ISpeechPlayer.Warn</c>）。<c>null</c> 可</param>
+        public static float[] BuildOrWarn(
+            byte[] wav, in WavHeader header, int frameMs, ref bool warned, Action<string> warn)
+        {
+            string error;
+            var envelope = Build(wav, header, frameMs, out error);
+            if (envelope != null || warned) return envelope;
+
+            warned = true;
+            if (warn != null) warn(BuildFailedMessage + error);
+            return null;
+        }
+
+        /// <summary>
         /// 読めたら 1要素 = <paramref name="frameMs"/> の RMS 列。<b>読めなければ <c>null</c></b>。
         /// </summary>
         /// <param name="header"><see cref="WavDecoder.TryReadHeader"/> 済みのもの（もう一度走査しない）</param>

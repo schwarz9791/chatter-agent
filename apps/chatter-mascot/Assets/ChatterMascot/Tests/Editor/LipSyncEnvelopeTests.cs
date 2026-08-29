@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using ChatterMascot.Audio;
 using NUnit.Framework;
 
@@ -273,6 +274,69 @@ namespace ChatterMascot.Tests
 
             Assert.That(envelope, Is.Not.Null);
             Assert.That(envelope.Length, Is.EqualTo(1));
+        }
+
+        // ---- BuildOrWarn（両方の ISpeechPlayer 実装が通る唯一の入り口） ----
+
+        /// <summary>
+        /// ★★ <b>この2本が、#58 が「絶対に守る」と宣言した規則を<u>プラットフォーム非依存に</u>
+        ///   踏む唯一のテスト。</b> 以前は同じロジックが2実装に逐語コピーされていて、
+        ///   「作れなくても <c>Prepare</c> を落とさない」を守るテストは
+        ///   <c>#if UNITY_EDITOR_OSX</c> の Afplay 側にしか無かった（Linux CI では
+        ///   <c>AudioClipPlayer</c> 側が1行も踏まれない）。
+        /// ★ 警告は1回だけ。読めない WAV は<b>同じ形が続く</b>ので、毎回出すとログが洪水になり、
+        ///   無音の原因を追う窓が埋まる。
+        /// </summary>
+        [Test]
+        public void BuildOrWarnWarnsOnceForRepeatedFailures()
+        {
+            var wav = WavBuilder.BuildRaw(new byte[480], 1, 12, SampleRate, 1);
+            WavHeader header;
+            string headerError;
+            Assert.That(WavDecoder.TryReadHeader(wav, out header, out headerError), Is.True, headerError);
+
+            var messages = new List<string>();
+            var warned = false;
+
+            Assert.That(LipSyncEnvelope.BuildOrWarn(wav, header, FrameMs, ref warned, messages.Add), Is.Null);
+            Assert.That(LipSyncEnvelope.BuildOrWarn(wav, header, FrameMs, ref warned, messages.Add), Is.Null);
+
+            Assert.That(warned, Is.True);
+            Assert.That(messages.Count, Is.EqualTo(1));
+            // 理由（ビット深度）が残っていること。ここが消えると無音の原因が読めなくなる
+            Assert.That(messages[0], Does.Contain("12"));
+        }
+
+        [Test]
+        public void BuildOrWarnDoesNotWarnOnSuccess()
+        {
+            var wav = WavBuilder.Build(Constant(FrameSamples, 1f), WavBuilder.Encoding.Float32);
+            WavHeader header;
+            string headerError;
+            Assert.That(WavDecoder.TryReadHeader(wav, out header, out headerError), Is.True, headerError);
+
+            var messages = new List<string>();
+            var warned = false;
+
+            var envelope = LipSyncEnvelope.BuildOrWarn(wav, header, FrameMs, ref warned, messages.Add);
+
+            Assert.That(envelope, Is.Not.Null);
+            Assert.That(warned, Is.False);
+            Assert.That(messages, Is.Empty);
+        }
+
+        /// <summary>★ <c>Warn</c> は誰も購読していないことがある（<c>MascotRunner.Start</c> の前）。</summary>
+        [Test]
+        public void BuildOrWarnDoesNotThrowWithoutASink()
+        {
+            var wav = WavBuilder.BuildRaw(new byte[480], 1, 12, SampleRate, 1);
+            WavHeader header;
+            string headerError;
+            Assert.That(WavDecoder.TryReadHeader(wav, out header, out headerError), Is.True, headerError);
+
+            var warned = false;
+            Assert.That(LipSyncEnvelope.BuildOrWarn(wav, header, FrameMs, ref warned, null), Is.Null);
+            Assert.That(warned, Is.True);
         }
 
         /// <summary>

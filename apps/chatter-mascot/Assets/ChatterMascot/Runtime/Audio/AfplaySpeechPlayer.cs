@@ -133,24 +133,14 @@ namespace ChatterMascot.Audio
                 return null;
             }
 
-            // ★ **失敗しても Prepare を失敗させないこと。** ここで null を返すと AudioFailed →
-            //   skip + ack となり、サーバーのキューから物理削除されて二度と鳴らせない
-            //   （→ LipSyncEnvelope の doc）。口が動かないだけに留める
-            string envelopeError;
-            var envelope = LipSyncEnvelope.Build(
-                wav, header, LipSyncEnvelope.DefaultFrameMs, out envelopeError);
-            if (envelope == null && !_warnedEnvelope)
-            {
-                _warnedEnvelope = true;
-                var warn = Warn;
-                if (warn != null) warn("口の動きを作れませんでした（音は鳴ります）: " + envelopeError);
-            }
-
             return new AfplayAudioHandle
             {
                 Path = path,
                 DurationMs = header.DurationMs,
-                Envelope = envelope,
+                // ★ **作れなくても Prepare は成功させる**（→ LipSyncEnvelope.BuildOrWarn）。
+                //   null を返すと AudioFailed → skip + ack で、サーバーのキューから物理削除される
+                Envelope = LipSyncEnvelope.BuildOrWarn(
+                    wav, header, LipSyncEnvelope.DefaultFrameMs, ref _warnedEnvelope, Warn),
                 EnvelopeFrameMs = LipSyncEnvelope.DefaultFrameMs,
             };
         }

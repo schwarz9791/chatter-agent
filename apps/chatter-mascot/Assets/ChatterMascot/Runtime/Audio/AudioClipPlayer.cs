@@ -157,27 +157,17 @@ namespace ChatterMascot.Audio
             var clip = WavDecoder.Decode(wav, name, header, out error);
             if (clip == null) return null;
 
-            // ★ **失敗しても Prepare を失敗させないこと**（→ LipSyncEnvelope の doc）。
-            //   null を返すと AudioFailed → skip + ack で、サーバーのキューから物理削除される
-            // ★ ここは AudioClip 用とエンベロープ用で**サンプルを二度デコードしている**。
-            //   消すには Decode から float[] を貰う形にする必要があるが、1発話あたり
-            //   数百 KB を一度余分になめるだけ（約 1ms）なので今はやらない。
-            //   この実装が主役になるのは Android（#25）なので、そのときに測って判断する
-            string envelopeError;
-            var envelope = LipSyncEnvelope.Build(
-                wav, header, LipSyncEnvelope.DefaultFrameMs, out envelopeError);
-            if (envelope == null && !_warnedEnvelope)
-            {
-                _warnedEnvelope = true;
-                var warn = Warn;
-                if (warn != null) warn("口の動きを作れませんでした（音は鳴ります）: " + envelopeError);
-            }
-
             return new UnityAudioHandle
             {
                 Clip = clip,
                 DurationMs = header.DurationMs,
-                Envelope = envelope,
+                // ★ **作れなくても Prepare は成功させる**（→ LipSyncEnvelope.BuildOrWarn）。
+                // ★ ここは AudioClip 用とエンベロープ用で**サンプルを二度デコードしている**。
+                //   消すには Decode から float[] を貰う形にする必要があるが、1発話あたり
+                //   数百 KB を一度余分になめるだけ（約 1ms）なので今はやらない。
+                //   この実装が主役になるのは Android（#25）なので、そのときに測って判断する
+                Envelope = LipSyncEnvelope.BuildOrWarn(
+                    wav, header, LipSyncEnvelope.DefaultFrameMs, ref _warnedEnvelope, Warn),
                 EnvelopeFrameMs = LipSyncEnvelope.DefaultFrameMs,
             };
         }

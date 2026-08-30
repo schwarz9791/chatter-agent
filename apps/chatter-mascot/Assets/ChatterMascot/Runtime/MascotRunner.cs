@@ -201,9 +201,44 @@ namespace ChatterMascot
         /// </summary>
         private const int ShutdownBudgetMs = 3000;
 
+        /// <summary>
+        /// <c>Application.Quit()</c> を呼び直す上限と間隔。
+        ///
+        /// ★ <b>「効かないこと」を観測するための仕組み。</b>
+        ///   <a href="https://github.com/schwarz9791/chatter-agent/issues/68">#68</a> の仮説
+        ///   （<c>wantsToQuit</c> で <c>false</c> を返した後の <c>Quit()</c> が macOS で
+        ///   無視されている）が当たっているかは、<b>再試行のログが出るかどうかでしか分からない</b>。
+        ///   当たっていれば手当てはネイティブ側
+        ///   （<a href="https://github.com/schwarz9791/chatter-agent/issues/75">#75</a> の
+        ///   <c>replyToApplicationShouldTerminate:</c>）になるが、
+        ///   <b>原因が確定する前にネイティブを足すと、効いた理由が分からなくなる</b>。
+        /// </summary>
+        private const int QuitMaxAttempts = 3;
+        private const double QuitRetryIntervalSeconds = 2;
+
         private float _nextTickAt;
         private bool _shuttingDown;
         private bool _quitRequested;
+
+        /// <summary>後始末が終わり、あとは <c>Application.Quit()</c> を呼ぶだけの状態。</summary>
+        private bool _quitPending;
+
+        /// <summary>
+        /// <b>実機確認専用。</b> 最初の終了要求を1回だけ強制的に保留する（<c>-quitProbe</c>）。
+        ///
+        /// ★ <b>この経路は、これが無いと確かめられない。</b> 保留が起きるのは未 ack が
+        ///   残っている数十 ms の窓（<c>AckFlushMs</c> 20ms + <c>Tick</c> の1フレーム）だけで、
+        ///   <b>サーバーと実際の発話が無いと再現できない</b>。
+        ///   <a href="https://github.com/schwarz9791/chatter-agent/issues/68">#68</a> の仮説
+        ///   （<c>wantsToQuit</c> で <c>false</c> を返した後の <c>Quit()</c> が効かない）が
+        ///   <b>長いあいだ未検証のまま残っていたのはこのため</b>。
+        ///
+        /// ★ <b>既定では絶対に立てないこと。</b> 立てると未 ack が無くても終了が1フレーム遅れる。
+        /// </summary>
+        private bool _quitProbe;
+        private int _quitAttempts;
+        private double _lastQuitAttemptAt;
+        private bool _quitGaveUp;
 
         /// <summary>
         /// 接続ごとに1回で足りる警告のラッチ。
@@ -230,6 +265,10 @@ namespace ChatterMascot
             audioSource.playOnAwake = false;
 
             Application.wantsToQuit += OnWantsToQuit;
+
+            // ★ Awake で読むこと。Start は serverUrl が不正だと最後まで走らない
+            _quitProbe = CommandLine.Flag("-quitProbe");
+            if (_quitProbe) Debug.Log("[Mascot] -quitProbe: 最初の終了要求を1回だけ強制的に保留します");
         }
 
         /// <summary>
@@ -249,10 +288,68 @@ namespace ChatterMascot
         /// </summary>
         private bool OnWantsToQuit()
         {
-            if (_quitRequested) return true;
+            var pending = _client != null && _client.HasPendingWork;
+            if (_quitProbe)
+            {
+                // 1回だけ。2周目まで残すと ShouldDefer の「必ず通す」が試せない
+                _quitProbe = false;
+                pending = true;
+            }
+            var defer = ShutdownPolicy.ShouldDefer(pending, _quitRequested);
+
+            // ★ **必ず1行残すこと。** 保留したのか素通りしたのかは、ここでしか分からない。
+            //   #68 の切り分けはこの行から始まる
+            Debug.Log($"[Mascot] 終了要求: 未 ack={(pending ? "あり" : "なし")} " +
+                      $"2周目={_quitRequested} → {(defer ? "保留します" : "通します")}");
+
             _quitRequested = true;
+            if (!defer) return true;
+
             _ = ShutdownThenQuitAsync();
             return false;
+        }
+
+        /// <summary>
+        /// 後始末が終わったら <c>Application.Quit()</c> を呼ぶ。効かなければ呼び直す。
+        ///
+        /// ★ <b><c>wantsToQuit</c> の継続からその場で呼ばないこと。</b>
+        ///   <c>applicationShouldTerminate</c> に <c>NSTerminateCancel</c> を返した直後の
+        ///   AppKit の状態とぶつかりうる、というのが #68 の仮説。フレームを1つ跨ぐ。
+        /// </summary>
+        private void PumpQuit()
+        {
+            if (!_quitPending) return;
+
+            var now = Time.realtimeSinceStartupAsDouble;
+            if (_quitAttempts == 0)
+            {
+                CallQuit(now);
+                return;
+            }
+
+            if (ShutdownPolicy.ShouldRetryQuit(
+                    now, _lastQuitAttemptAt, _quitAttempts, QuitMaxAttempts, QuitRetryIntervalSeconds))
+            {
+                CallQuit(now);
+                return;
+            }
+
+            // ★ 撃ち止め。無限に呼び直すとログが洪水になり、別の原因（そもそも Quit() に
+            //   到達していない）を隠してしまう
+            if (_quitAttempts >= QuitMaxAttempts && !_quitGaveUp)
+            {
+                _quitGaveUp = true;
+                Debug.LogError($"[Mascot] Application.Quit() を {QuitMaxAttempts} 回呼んでも終了しません。" +
+                               "終了要求が OS 側で無視されている可能性があります (#68)");
+            }
+        }
+
+        private void CallQuit(double now)
+        {
+            _quitAttempts++;
+            _lastQuitAttemptAt = now;
+            Debug.Log($"[Mascot] Application.Quit() を呼びました (試行 {_quitAttempts})");
+            Application.Quit();
         }
 
         private async Task ShutdownThenQuitAsync()
@@ -263,10 +360,23 @@ namespace ChatterMascot
             _client = null;
             if (client != null)
             {
+                var startedAt = Time.realtimeSinceStartupAsDouble;
+                Debug.Log("[Mascot] 終了処理: 接続を閉じます");
                 try
                 {
                     // 予算内で閉じ切る。返らない相手のためにアプリを終了させないことはしない
-                    await Task.WhenAny(client.CloseAsync(), Task.Delay(ShutdownBudgetMs));
+                    var closing = client.CloseAsync();
+                    var finished = await Task.WhenAny(closing, Task.Delay(ShutdownBudgetMs));
+                    var ms = (int)((Time.realtimeSinceStartupAsDouble - startedAt) * 1000);
+                    if (ReferenceEquals(finished, closing))
+                    {
+                        Debug.Log($"[Mascot] 終了処理: 接続を閉じました ({ms}ms)");
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"[Mascot] 終了処理: {ShutdownBudgetMs}ms の予算を使い切りました。" +
+                                         "閉じ切らずに進みます");
+                    }
                 }
                 catch (Exception e)
                 {
@@ -274,7 +384,8 @@ namespace ChatterMascot
                 }
             }
 
-            Application.Quit();
+            // ★ **ここで Application.Quit() を直接呼ばない**（→ <see cref="PumpQuit"/>）
+            _quitPending = true;
         }
 
         private void Start()
@@ -349,6 +460,10 @@ namespace ChatterMascot
 
         private void Update()
         {
+            // ★ **_shuttingDown の早期 return より手前に置くこと。** 後始末が終わってから
+            //   Application.Quit() を呼び直す経路なので、下に置くと1回も走らない
+            PumpQuit();
+
             if (_shuttingDown) return;
 
             // ack の間引き送出と、無受信 watchdog

@@ -203,7 +203,7 @@ _controller.windowSize = new Vector2(_intended.x / scale, _intended.y / scale);
 （再適用は `if (!IsActive)` のときだけ）。「+32 が残る」より
 「**タイトルバーが出たまま常駐**」の方が悪い。
 
-#### ★ 物理的な大きさはディスプレイのスケールで変わる（未解決。→ #16）
+#### ★ 物理的な大きさはディスプレイのスケールで変わる（#16 で解決）
 
 `defaultScreenWidth/Height` も、Unity が永続化する `Screenmanager Resolution *` も
 **バッキング px**。だから:
@@ -213,12 +213,56 @@ _controller.windowSize = new Vector2(_intended.x / scale, _intended.y / scale);
   500x800 px なので、それが永続化され、1x のディスプレイでは **500x800 pt** の窓として開く。
   **実測で確認した**（`WindowSizeKeeper` は「起動直後の大きさ」を守るので、これは打ち消さない）
 
-`WindowSizeKeeper` が直せるのは**同じディスプレイでの累積**だけ。
-ディスプレイをまたいだときに物理サイズを保つには、**ポイントで意図した大きさを
-自前で永続化する**しかない —— それは位置の永続化・マルチモニタと同じ設計なので
-[#16](https://github.com/schwarz9791/chatter-agent/issues/16) でまとめて扱う。
+当時の `WindowSizeKeeper` が直せるのは**同じディスプレイでの累積**だけだった。
 
-### ★ ウィンドウは起動のたびに縦へ 32 伸びる（`WindowSizeKeeper` で打ち消している）
+**手当ては「ポイントで意図した大きさを自前で永続化する」こと**（#16 の
+`Desktop/WindowGeometry.cs`）。`windowPosition` / `windowSize` / `GetMonitorRect` は
+**すべてポイント**なので、**そこで閉じれば px↔pt の換算が production から1箇所も無くなる**。
+（だから `WindowSizeKeeper` にあった「換算率をコントローラ自身から測る」コードも消えた。
+測り方そのものは上の実測として残してある。）
+
+### ★ ウィンドウの座標系は bottom-up・左下基準。モニタ矩形は「作業領域」
+
+**実測**（2026-08-30 / macOS 26.6.2 / 外部 4K(1x) + 内蔵 Retina。`Desktop/WindowGeometry.cs` の
+`-windowProbe`）:
+
+```
+[Mascot] 窓の実測(settled): monitors=2 [0]=(0,0 3840,2130) [1]=(1041,-1111 1800,1072)
+         window=(1770,1598 300,480)pt client=300,480pt screen=300x480px scale=1.00 cursor=2306,-23
+[Mascot] 窓の実測: 画面外(freePositioning=false) へ 3780,2070 を入れます
+[Mascot] 窓の実測(画面外(freePositioning=false)の後): … window=(3780,2070 300,480)pt …
+```
+
+| | |
+|---|---|
+| `windowPosition` | **窓の左下（最小コーナー）** |
+| 原点 | メインディスプレイの**フルフレームの左下**（bottom-up）。`(3540,1650)` を入れた窓が画面の**右上**（top-down で y=30..510）に着いた |
+| `GetMonitorRect(i)` | **同じ空間**。ただし **visible frame（作業領域）** —— メインが `(0,0 3840x2130)` で、**2160 ではなく 2130**（メニューバーの 30pt を除いてある） |
+| 並び | `[0]` がメインディスプレイ（`NSScreen.screens[0]` = メニューバーのある画面） |
+
+★ **作業領域の和集合には隙間がある。** メニューバーや Dock の帯はどのモニタ矩形にも入らない。
+実測でも**カーソルが `y=-23`**（モニタ0 の下端 `0` と モニタ1 の上端 `-39` の間）に居た。
+**「どのモニタ矩形にも入らない＝画面外」と判定しないこと。**
+
+★ **プログラムからの移動は引き戻されない。** `(3780,2070)`（右へ 240pt・上へ 420pt はみ出す位置）を
+入れても**そのまま読み戻る** —— **`isFreePositioningEnabled` が false のままでも**。
+macOS の `constrainFrameRect` は `setFrameOrigin:` の経路には効かない。
+→ **[#16](https://github.com/schwarz9791/chatter-agent/issues/16) のコメント1
+「はみ出た分だけ画面内に戻される」は、`SetPosition` が引き戻された結果ではない。**
+別の原因（ドラッグ終了の取りこぼし → 下の節）を先に見ること。
+
+★ **`isFreePositioningEnabled` は attach 後なら実行時に立てられる。**
+`UniWindowController.SetFreePositioning` は `_uniWinCore == null`（= attach 前）だと
+**何もせずシリアライズ値も更新しない**ので「シーンに焼くしかない」ように見えるが、
+**attach を待ってから代入すれば効く**（実測で読み戻し `True`）。
+いまは**立てていない** —— 上のとおり引き戻しが観測されないので、立てる根拠がない。
+
+★ **attach の瞬間には、枠なし化の +32 が既に乗っている。** 実測では
+`client=300,512pt` に対し `Screen` はまだ `300x480px`（更新が1フレームずれる）。
+**「意図した大きさ」をランタイムから復元することはできない** ——
+起動時の権威は**自前の永続化（pt）**に持つしかない。
+
+### ★ ウィンドウは起動のたびに縦へ 32 伸びる（自前の永続化で消えた）
 
 「いつのまにか窓が縦長になっている」の正体。実測（macOS 26.6.2 / #56）:
 
@@ -236,18 +280,23 @@ _controller.windowSize = new Vector2(_intended.x / scale, _intended.y / scale);
 
 **既定を 600x800 にしていた頃に 600x1632 まで育っていた。**
 
-`Desktop/WindowSizeKeeper.cs` が、**起動直後（枠なし化の前）に見えていた大きさ**へ
-戻すことで打ち消す。これを入れてから3回連続で起動して 250x400 のまま動かないことを確認した。
+**いまは `Desktop/WindowGeometry.cs` が、意図した大きさを自分で持っているので育たない**
+（#16）。上の 1〜4 のループは「Unity が復元した px の値」を出発点にしているが、
+**出発点を自前の pt の永続化（`~/.config/chatter-agent/mascot/window.json`）に差し替えると
+ループそのものが成立しなくなる。**
 
-★ **縮んだ側は追いかけないこと。** ユーザーが手で小さくしたのを戻すと操作を奪う。
-打ち消したいのは「勝手に増える」ぶんだけ。
+> ★ **以前は `Desktop/WindowSizeKeeper.cs` が「起動直後に見えていた大きさ」へ戻す
+> 対症療法で打ち消していた。** [#66](https://github.com/schwarz9791/chatter-agent/issues/66) が
+> 指摘していた2点（`_intended` を捕まえる Start 順序が未保証 /
+> 補正が最初の1回で打ち切り）は、**権威を移したことで構造的に消えた**ので、
+> keeper は削除した。**2人が `windowSize` を書く状態を作らないこと。**
 
-★ **見張る時間を短くしないこと**（既定5秒）。枠なし化は起動直後の数フレームで起きるが、
-VRM の読み込みでメインスレッドが詰まると実時間では後ろへずれる。長い側の害は
-「起動直後に手で広げても戻される」だけ。
+★ **縮んだ側も追いかけない、という区別が要らなくなった。** keeper は「勝手に増えるぶんだけ」を
+打ち消す必要があったが、いまは**ユーザーが変えた大きさがそのまま次回の意図**になる。
 
-★ **これは対症療法。** ウィンドウの大きさ・位置・永続化の設計は
-[#16](https://github.com/schwarz9791/chatter-agent/issues/16)。
+★ **書いた値が効いたかを見張るのはやめないこと**（既定5秒 / 最大5回）。枠なし化は
+起動直後の数フレームで起きるが、VRM の読み込みでメインスレッドが詰まると実時間では
+後ろへずれるし、**`Metal RecreateSurface` は起動ごとに2回出る**（＝膨らむ機会が2回ある）。
 
 ### ★ `UnityWebRequest.timeout` は `file://` に効かない
 
@@ -867,7 +916,7 @@ Metal RecreateSurface: surface size 250x232     ← ★ +32。UniWindowControlle
 （横に枠が無いので幅は入れた値のまま）。
 
 ★ **上のログは `WindowSizeKeeper` を入れる前のもの。** いまは keeper が +32 を打ち消すので
-**`defaultScreenHeight` に入れた値がそのまま出る**（`ProjectSettings.asset` は **400**）。
+**`defaultScreenHeight` に入れた値がそのまま出る**（`ProjectSettings.asset` は **480**。上の実測を取った #56 当時は 400 だった）。
 「368 と入れて 400 になる」は keeper 導入前の回避策で、**もう当てはまらない**。
 
 ★ **当初これを「Retina で2倍されている」と読んで `200` を入れ、232 になって外した。**
@@ -952,6 +1001,51 @@ prefab にもシーンにも override が無く、`SetWindowSize` を呼ぶの�
 ★ **位置の永続化を自分では入れていない。** ただし **Unity 本体が勝手に永続化している** ——
 `~/Library/Preferences/tech.sukima.chatter-mascot.plist` の `Screenmanager Window Position X/Y`。
 自分で制御していないので、マルチモニタ・解像度変更・画面外からの復帰は #16 でまとめて設計する。
+
+### ★★ `UniWindowMoveHandle` はドラッグ終了を取りこぼすと、クリック透過を殺したまま残す
+
+`UniWindowMoveHandle` はドラッグ中だけヒットテストを切る:
+
+```csharp
+// OnBeginDrag
+_isHitTestEnabled = _uniwinc.isHitTestEnabled;
+_uniwinc.isHitTestEnabled = false;
+_uniwinc.isClickThrough = false;
+// EndDragging —— 戻すのはここだけ
+if (_isDragging) _uniwinc.isHitTestEnabled = _isHitTestEnabled;
+```
+
+`UniWindowController.UpdateClickThrough()` は**先頭で `if (!isHitTestEnabled …) return;`** する。
+つまり **`EndDragging` が呼ばれないと、クリック透過は二度と復活しない。**
+
+上流にもコメントアウトされた懸念が残っている:
+
+```csharp
+// Macの場合、マルチモニター間を移動するとEventSystemのOnEndDragが正しく呼ばれないため、マウスボタンを常に監視
+```
+
+★ **これが [#16](https://github.com/schwarz9791/chatter-agent/issues/16) のコメント1
+（画面外へドラッグするとクリック透過が効かなくなる）の第一容疑者。**
+`Desktop/DragStateGuard.cs` が、**左ボタンが離れているのにヒットテストが切れたまま2秒続いたら**
+戻して警告を1本出す。
+
+★ **この警告が出るかどうかが、そのまま切り分けになる。** 出れば上流のバグ（こちらが救っている）。
+**出ないのにクリック透過が効かないなら別の原因。**
+
+★ **`isClickThrough` は自分で書かないこと。** `isHitTestEnabled` さえ戻れば
+`UpdateClickThrough` が次フレームで正しい値にする。両方書くと二重に書き合う
+（上流が `isHitTestEnabled` だけ戻しているのは正しい）。
+
+★ **猶予を 0 にしないこと。** 「ボタンは離れたが `EndDragging` はまだ」という
+1〜2フレームの窓は正常系にもある。0 にすると普通のドラッグのたびに警告が出る。
+
+★ **上流をフォークしないこと。** 外から状態を見て戻すだけなら、パッケージを上げても壊れない。
+`UniWindowMoveHandle` には macOS の Retina 座標系の手当てが入っており、
+自前実装に置き換える方が高くつく（→ 上の節）。
+
+> **もう一つの容疑者は否定された。** 「macOS が窓を画面内へ引き戻している」という見立ては
+> **実測で外れた** —— `SetPosition` で画面外へ出しても引き戻されない
+> （→「ウィンドウの座標系は bottom-up・左下基準」）。
 
 ### ★ `UniWindowController.GetCursorPosition()` の Y は bottom-up
 
@@ -1641,6 +1735,45 @@ ack のように「送れたことを前提に手元から消す」値でこれ�
 ```
 
 送れなかった側（`Warn`）は**次回起動での二重発話に直結する**ので、これは恒久の診断として残してある。
+
+### ★★ `wantsToQuit` の継続からその場で呼ぶ `Application.Quit()` は無視される
+
+**[#68](https://github.com/schwarz9791/chatter-agent/issues/68)（Dock からの「終了」を2回選ぶ必要がある）の正体。**
+`wantsToQuit` で `false` を返して保留したあと、非同期の後始末が終わってから
+**その継続の中で `Application.Quit()` を呼んでも、macOS では何も起きない。**
+
+A/B で確かめた（2026-08-30 / macOS 26.6.2。`-quitProbe` で保留を強制し、
+`osascript -e 'tell application "Chatter Mascot" to quit'` を**1回だけ**送る）:
+
+| 呼ぶ場所 | 結果 |
+|---|---|
+| **継続からその場で**（旧） | `Application.Quit()` のログは出るが、**15秒待っても終了しない。** `wantsToQuit` の2周目すら来ない |
+| **`Update` の先頭から**（新） | `試行 1` だけで**約1秒で終了** |
+
+**フレームを1つ跨ぐだけで効く。** だから `ShutdownThenQuitAsync` は `_quitPending = true` を
+立てるだけにして、`MascotRunner.Update()` の先頭の `PumpQuit()` が呼ぶ。
+
+★ **`Update` の `if (_shuttingDown) return;` より手前に置くこと。** 後ろだと1回も走らない。
+
+★ **1回目の終了要求は、OS から見ると「拒否された」ことになる。** `osascript` の返りが
+`-128 ユーザによってキャンセルされました`（= `NSTerminateCancel`）。**保留する以上これは避けられない**
+ので、「拒否されても、こちらから終了し直せる」ことが成立の条件になる。
+
+★ **保留そのものを消して直さないこと。** 消すと終了時 ack が落ちて次回起動で二重発話する（上の節）。
+手当ては**2つで1組**:
+
+1. **未 ack が無ければ保留しない**（`ShutdownPolicy.ShouldDefer`）。
+   実測では未 ack が無い経路も**毎回保留していた**ので、**普段の終了がこれで1回で終わるようになる**
+2. **保留したときは `Update` から `Quit()` を呼ぶ**（上記）。ack を投げ切る経路はこちらでしか直らない
+
+★ **保留経路は起動引数 `-quitProbe` でしか確かめられない。** 保留が起きるのは未 ack が残っている
+数十 ms の窓（`AckFlushMs` 20ms + `Tick` の1フレーム）だけで、**サーバーと実際の発話が無いと
+再現できない**。#68 が長いあいだ未検証で残っていたのはこれが理由。
+`-quitProbe` は最初の終了要求を1回だけ強制的に保留する**実機確認専用**のフラグ
+（`-faceLogMs` と同じ扱い。**既定では絶対に立てない**）。
+
+★ **再試行（2秒間隔・最大3回）は残してある。** いまは1回で通るが、
+「効かなくなったこと」がログ（`試行 2` / `LogError`）で分かる形にしておく。
 
 ### ★ ストリーミングで書かれた WAV は `data` のサイズが 0 のことがある
 

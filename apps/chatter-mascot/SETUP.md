@@ -62,8 +62,8 @@ UniWindowController の Inspector にある「Player Settings を直す」ボタ
 | `Default Is Full Screen` | **オフ** | 同上 |
 | `Allow Fullscreen Switch` | **オフ** | 同上 |
 | **`Default Is Native Resolution`** | **オフ** | ★ **オンだと下2行がそもそも効かない**（Inspector でもグレーアウトする） |
-| `Default Screen Width` | **250** | ★ 下記 |
-| `Default Screen Height` | **400** | 同上 |
+| `Default Screen Width` | **300** | ★ 下記 |
+| `Default Screen Height` | **480** | 同上 |
 | `Run In Background` | **オン** | 常駐して背面でも喋る。フォーカスを失って止まると発話が止まる |
 | `Use Mac App Store Validation` | オフ | 透過をブロックしうる |
 | `Mac App Sandbox` | オフ | 同上（Unity のビルドは entitlements を付けないので既定でオフ） |
@@ -75,11 +75,17 @@ UniWindowController の Inspector にある「Player Settings を直す」ボタ
 常駐マスコットなので小さく出す。**`Default Is Native Resolution` を切るのが本命**で、
 オンのままだと `Default Screen Width/Height` は Inspector でもグレーアウトして効かない。
 
-★ **入れた値がそのまま出るのは `WindowSizeKeeper` があるからで、素では出ない。**
-`UniWindowController` が枠なし化した瞬間にタイトルバーぶん（実測 **+32**）が
-コンテンツ領域へ編入され、それが終了時に永続化されて、**起動のたびに +32 で伸びていく**
-（600x1632 はこうして育ったもの）。`Desktop/WindowSizeKeeper.cs` が起動直後の大きさへ
-戻すことで打ち消している（→ [`../../docs/mascot.md`](../../docs/mascot.md)）。
+★ **ここの値が効くのは、ウィンドウを掴むまでの最初の数フレームだけ。**
+そのあとは `Desktop/WindowGeometry.cs` が
+**ポイントで持った既定（`DefaultWidthPoints` / `DefaultHeightPoints`）と、
+自前の永続化 `~/.config/chatter-agent/mascot/window.json`** で置き直す。
+**`Default Screen Width/Height` だけを変えても、窓の大きさは変わらない**
+（食い違うと `SceneFixups` が `LogError` で教える）。
+
+> ★ **以前は `WindowSizeKeeper` が枠なし化の +32 を打ち消していた。** いまは意図した
+> 大きさを自前で持っているので、その累積そのものが起きない
+> （→ [`../../docs/mascot.md`](../../docs/mascot.md)）。
+
 **数値を仕様として扱わないこと。** 変えたら必ず実測する:
 
 ```bash
@@ -92,7 +98,13 @@ grep RecreateSurface "$HOME/Library/Logs/schwarz9791/Chatter Mascot/Player.log"
 ★ **`macRetinaSupport` は切らないこと。** 表示がぼやけるうえ、`UniWindowMoveHandle` の
 Retina 座標系の手当てが前提にしている。
 
-★ **サイズ調整の UI と位置の永続化は [#16](https://github.com/schwarz9791/chatter-agent/issues/16)。**
+★ **位置と大きさは `~/.config/chatter-agent/mascot/window.json` に
+ポイントで永続化される**（#16）。**`PlayerPrefs` は使っていない** ——
+macOS では `tech.sukima.chatter-mascot.plist` に書かれるので、上の
+`defaults delete`（焼き付き消し）が自前の永続化ごと消してしまう。
+**Unity が px を焼く場所と、我々が pt を書く場所を物理的に分けてある。**
+
+★ **サイズ調整の UI は [#76](https://github.com/schwarz9791/chatter-agent/issues/76)。**
 ここにあるのは既定値だけ。
 
 ### 音の出し方（プラットフォームで違う）
@@ -176,7 +188,10 @@ Assets/ChatterMascot/
   Desktop/                          ChatterMascot.Desktop — Editor + macOS/Windows のみ
     DragHandles.cs                  「Collider を持つものに UniWindowMoveHandle」
     VrmDragHandleBinder.cs          ★ MonoBehaviour にしない（下記）
-    WindowSizeKeeper.cs             ★ 枠なし化で窓が伸びるのを打ち消す
+    CursorGazeSource.cs             OS カーソル座標 → 視線（すべてポイントで閉じる）
+    WindowGeometry.cs               ★ 位置と大きさをポイントで復元・永続化
+    DragStateGuard.cs               ★ ドラッグ終了の取りこぼしでクリック透過が死ぬのを救う
+    WindowProbe.cs                  座標系の実測（`-windowProbe` のときだけ動く）
   Editor/
     SceneFixups.cs                  シーンとプロジェクトの修繕・検査
     BuildScript.cs / VrmProbe.cs

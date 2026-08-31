@@ -115,6 +115,27 @@ namespace ChatterMascot.Window
             return WithPosition(bounds.X + (bounds.Width - Width) * 0.5f, bounds.Y);
         }
 
+        /// <summary>
+        /// 丸めの差を無視して同じ矩形とみなす許容。
+        ///
+        /// ★ <b>厳密比較にしないこと。</b> ウィンドウの大きさを書いた直後に読み戻すと、
+        ///   端数の扱いで1ポイント未満ずれることがある。厳密に比べると
+        ///   <b>「直す」と「読み戻す」が延々と往復する</b>。
+        /// </summary>
+        public const float MatchEpsilon = 1f;
+
+        /// <summary>
+        /// <see cref="MatchEpsilon"/> の範囲で同じ矩形か。
+        ///
+        /// ★ <see cref="Equals(PointRect)"/>（厳密比較）と使い分けること。
+        ///   実測値どうしの比較はこちら、テストの期待値はあちら。
+        /// </summary>
+        public bool Matches(PointRect other) =>
+            Math.Abs(X - other.X) < MatchEpsilon &&
+            Math.Abs(Y - other.Y) < MatchEpsilon &&
+            Math.Abs(Width - other.Width) < MatchEpsilon &&
+            Math.Abs(Height - other.Height) < MatchEpsilon;
+
         public bool Equals(PointRect other) =>
             X.Equals(other.X) && Y.Equals(other.Y) && Width.Equals(other.Width) && Height.Equals(other.Height);
 

@@ -28,5 +28,17 @@ namespace ChatterMascot.Window
 
         /// <summary>保存が無い（または読めなかった）状態。<c>Rect.IsValid</c> が false になる。</summary>
         public static WindowState None => default;
+
+        /// <summary>
+        /// 書き直す必要が無いほど同じか。
+        ///
+        /// ★ <b>矩形だけで比べないこと。</b> 窓が動かないまま構成だけ変わることがある
+        ///   （マスコットを置いていない側のディスプレイを抜き差しする、など）。矩形だけで短絡すると
+        ///   <b>古い構成の指紋が残り続け</b>、次の起動で「構成が変わった」と読まれて
+        ///   <b>ユーザーが端に寄せた窓が押し戻される</b>。しかも理由はログに出ない。
+        /// </summary>
+        public bool SameAs(WindowState other) =>
+            string.Equals(DisplaySignature, other.DisplaySignature, System.StringComparison.Ordinal)
+            && Rect.Matches(other.Rect);
     }
 }

@@ -125,19 +125,33 @@ namespace ChatterMascot.Desktop
             private const float ApplyWatchSeconds = 5f;
             private const int MaxCorrections = 5;
 
-            /// <summary>ズレとみなす閾値（ポイント）。丸めの1pt を追いかけない。</summary>
-            private const float Epsilon = 1f;
-
             /// <summary>
             /// <c>Watching</c> で位置を読む間隔と、保存までの落ち着き待ち。
             ///
             /// ★ <b>毎フレーム読まないこと。</b> <c>windowPosition</c> / <c>windowSize</c> は
             ///   どちらも P/Invoke で、常駐アプリの電力予算に効く。
             /// ★ <b>デバウンスがドラッグ中の保存も兼ねる。</b> ドラッグ中は矩形が動き続けるので
-            ///   期限が延び続け、離してから保存される（<c>IsDragging</c> を見る必要が無い）。
+            ///   期限が延び続け、離してから保存される（ドラッグ中かどうかを見る必要が無い）。
             /// </summary>
             private const float PollIntervalSeconds = 0.25f;
             private const float SaveDebounceSeconds = 0.5f;
+
+            /// <summary>
+            /// 保存に失敗したあと、次に試すまでの間隔と、諦めるまでの回数。
+            ///
+            /// ★ <b>間隔を置かないと毎フレーム書き込みを試すことになる</b>（保存先が
+            ///   読み取り専用、ディスク満杯など）。★ <b>上限を置かないと永遠に鳴り続ける。</b>
+            /// </summary>
+            private const float SaveRetrySeconds = 5f;
+            private const int MaxSaveFailures = 3;
+
+            /// <summary>
+            /// ディスプレイ構成が変わったという通知を受けてから、置き直すまでの落ち着き待ち。
+            ///
+            /// ★ <b>通知は連発する</b>（スリープ復帰・解像度変更・抜き差し）。そのつど読み直して
+            ///   書き直すと、<b>いちばん不安定な瞬間に最も多く窓を書く</b>ことになる。
+            /// </summary>
+            private const float MonitorSettleSeconds = 1f;
 
             private UniWindowController _controller;
             private WindowStateStore _store;
@@ -147,15 +161,30 @@ namespace ChatterMascot.Desktop
             private float _deadline;
             private WindowState _saved;
 
+            /// <summary>
+            /// いまのディスプレイ構成の指紋。
+            ///
+            /// ★ <b>保存のたびに読み直さないこと。</b> 変わる契機は「掴み取り」と「構成変更」だけで、
+            ///   <b>どちらも置き直しを通る</b>ので、そこで控えれば陳腐化しない。
+            ///   保存のたびに読むと、モニタ数ぶんの P/Invoke が保存のたびに走る。
+            /// </summary>
+            private string _signature = string.Empty;
+
             private PointRect _wanted;
             private int _corrections;
             private float _applyDeadline;
 
             private PointRect _lastSeen;
-            private PointRect _lastPersisted;
+            private WindowState _lastPersisted;
             private bool _dirty;
             private float _saveAt;
             private float _nextPollAt;
+            private int _saveFailures;
+            private bool _gaveUpSaving;
+
+            /// <summary>置き直しの予約。0 未満なら予約なし。</summary>
+            private float _reapplyAt = -1f;
+            private PointRect _reapplyFrom;
 
             private void Start()
             {
@@ -164,23 +193,48 @@ namespace ChatterMascot.Desktop
                 _store = new WindowStateStore(ReadState, WriteState, message => Debug.LogWarning("[Mascot] " + message));
                 _saved = _store.Load();
                 _deadline = Time.realtimeSinceStartup + AttachTimeoutSeconds;
-            }
 
-            private void OnEnable()
-            {
-                // ★ ディスプレイ構成が変わったら置き直す。抜いたディスプレイに窓を残さない
+                // ★ **購読は Start でしか張れない。** `OnEnable` は `AddComponent` の中で
+                //   **Awake と一緒に同期的に**呼ばれるので、そこではまだ相手を引けていない。
+                //   しかもこの GameObject は無効化されないので、OnEnable は二度と来ない。
+                //   —— それで**構成変化の追従が丸ごと動いていなかった**（レビュー指摘）。
+                // ★ 取りこぼしは無い: 通知の発火元はどれも最初の Start より後に走る。
                 if (_controller != null) _controller.OnMonitorChanged += OnMonitorChanged;
             }
 
-            private void OnDisable()
+            private void OnApplicationQuit()
             {
-                if (_controller != null) _controller.OnMonitorChanged -= OnMonitorChanged;
+                // ★ **ここが「全員がまだ生きている」ことを当てにできる唯一のフック。**
+                //   OnDestroy は破棄順が未規定なうえ、下の自壊経路で先に消えていることもある
+                SaveNow();
             }
 
             private void OnDestroy()
             {
-                // ★ 溜めていた変更を投げ切る。終了時にしか動かさなかった人の位置が落ちる
-                if (_dirty) Persist(Current());
+                if (_controller != null) _controller.OnMonitorChanged -= OnMonitorChanged;
+
+                // 終了以外の経路（自壊・シーンの破棄）で溜めていた変更を投げ切る。
+                // 二重に呼ばれても保存の判断が弾く
+                SaveNow();
+            }
+
+            /// <summary>
+            /// 溜めている変更を、いま書けるだけ書く。
+            ///
+            /// ★ <b>初期化前に呼ばれうる。</b> 以前は「保留があるときだけ」という条件が
+            ///   偶然その盾を兼ねていたので、条件を外すなら<b>保存先が用意できているか</b>を
+            ///   自分で見る必要がある。
+            /// ★ <b>矩形が無効かどうかの判断は持たない</b>（→ <see cref="SavePolicy"/>）。
+            ///   両方に置くと、片方が「もう一方が見ているから」と消される。
+            /// </summary>
+            private void SaveNow()
+            {
+                if (_store == null) return;
+
+                var rect = _controller != null ? Current() : default;
+                // ★ 終了時は再試行の待ちを飛ばす。直前に失敗していても、
+                //   原因（権限・空き容量）が解消していればここで書けることがある
+                Persist(rect.IsValid ? rect : _lastSeen, immediate: true);
             }
 
             private void LateUpdate()
@@ -190,6 +244,8 @@ namespace ChatterMascot.Desktop
                     Destroy(gameObject);
                     return;
                 }
+
+                PumpReapply();
 
                 switch (_phase)
                 {
@@ -232,6 +288,11 @@ namespace ChatterMascot.Desktop
                 var layout = ReadLayout();
                 var placement = WindowPlacement.Resolve(from, layout, Limits);
 
+                // ★ **モニタが1枚も取れないフレームでは指紋を上書きしない。** 空の指紋を焼くと、
+                //   次の起動で「構成が変わった」と読まれて厳しい方の閾値が使われ、
+                //   ユーザーが端に寄せた窓が押し戻される
+                if (layout.HasMonitors) _signature = layout.Signature;
+
                 Debug.Log($"[Mascot] ウィンドウ: {placement.Reason} monitor={placement.MonitorIndex} " +
                           $"rect={placement.Rect} 保存={(from.Rect.IsValid ? from.Rect.ToString() : "なし")} " +
                           $"displays={layout.Signature}");
@@ -246,7 +307,7 @@ namespace ChatterMascot.Desktop
             private void Applying()
             {
                 var actual = Current();
-                if (Matches(actual, _wanted))
+                if (actual.Matches(_wanted))
                 {
                     _phase = Phase.Watching;
                     _lastSeen = actual;
@@ -263,7 +324,10 @@ namespace ChatterMascot.Desktop
                                      "そのまま使います");
                     _phase = Phase.Watching;
                     _lastSeen = actual;
-                    _lastPersisted = actual;
+                    // ★ 諦めた矩形を「保存済み」として覚える。**書きはしない** ——
+                    //   届かなかった位置で、ユーザーが選んだ保存値を上書きしないため。
+                    //   次の起動でもう一度その位置を目指す
+                    _lastPersisted = new WindowState(actual, _signature);
                     _nextPollAt = Time.realtimeSinceStartup + PollIntervalSeconds;
                     return;
                 }
@@ -283,7 +347,7 @@ namespace ChatterMascot.Desktop
                 {
                     _nextPollAt = now + PollIntervalSeconds;
                     var actual = Current();
-                    if (!Matches(actual, _lastSeen))
+                    if (!actual.Matches(_lastSeen))
                     {
                         _lastSeen = actual;
                         _dirty = true;
@@ -294,15 +358,38 @@ namespace ChatterMascot.Desktop
                 if (_dirty && now >= _saveAt) Persist(_lastSeen);
             }
 
+            /// <summary>
+            /// ディスプレイ構成が変わった。<b>ここでは予約するだけ。</b>
+            ///
+            /// ★ <b>その場で置き直さないこと。</b> 通知は連発するので、そのつど読み直して
+            ///   書き直すと<b>いちばん不安定な瞬間に最も多く窓を書く</b>ことになる。
+            ///
+            /// ★ <b>置き直しの入力に「いまの矩形」を使わないこと。</b> OS は
+            ///   <b>通知より前に窓を動かしている</b>。いまの矩形を拾うと、
+            ///   <b>OS がずらした後の位置を保存して、ユーザーが選んだ位置を上書きする</b>。
+            ///   だから<b>予約した瞬間に、直前のポーリング値を入力として確定させる</b>。
+            /// </summary>
             private void OnMonitorChanged()
             {
                 if (_phase == Phase.Attaching) return;
 
-                // ★ 「いまの矩形」を、**前の構成の指紋つきで**投げ直す。
-                //   指紋が食い違うことが、そのまま「厳しい方の閾値を使う」条件になる
-                var current = Current();
-                Debug.Log($"[Mascot] ディスプレイ構成が変わりました。ウィンドウを置き直します（いま {current}）");
-                BeginApplying(new WindowState(current, _saved.DisplaySignature));
+                if (_reapplyAt < 0f)
+                {
+                    _reapplyFrom = _lastSeen.IsValid ? _lastSeen : _saved.Rect;
+                }
+                _reapplyAt = Time.realtimeSinceStartup + MonitorSettleSeconds;
+            }
+
+            private void PumpReapply()
+            {
+                if (_reapplyAt < 0f || Time.realtimeSinceStartup < _reapplyAt) return;
+                _reapplyAt = -1f;
+
+                // ★ 指紋は「その位置を選んだときの構成」のまま渡す。食い違うことが、
+                //   そのまま「厳しい方の閾値を使う」条件になる
+                Debug.Log("[Mascot] ディスプレイ構成が変わりました。ウィンドウを置き直します" +
+                          $"（{_reapplyFrom}）");
+                BeginApplying(new WindowState(_reapplyFrom, _saved.DisplaySignature));
             }
 
             // ── I/O ───────────────────────────────────────────────────
@@ -322,16 +409,45 @@ namespace ChatterMascot.Desktop
                 _controller.windowPosition = new Vector2(rect.X, rect.Y);
             }
 
-            private void Persist(PointRect rect)
+            /// <summary>
+            /// 書けるなら書く。<b>失敗しても保留は落とさない</b>（→ <see cref="SavePolicy"/>）。
+            /// </summary>
+            private void Persist(PointRect rect, bool immediate = false)
             {
-                _dirty = false;
-                if (!rect.IsValid) return;
-                if (Matches(rect, _lastPersisted)) return;
+                var now = Time.realtimeSinceStartup;
+                var candidate = new WindowState(rect, _signature);
+                var retryAt = immediate ? now : _saveAt;
 
-                var state = new WindowState(rect, ReadLayout().Signature);
-                if (!_store.Save(state)) return;
-                _lastPersisted = rect;
-                _saved = state;
+                switch (SavePolicy.Decide(candidate, _lastPersisted, _saveFailures, MaxSaveFailures,
+                                          now, retryAt))
+                {
+                    case SaveAction.Skip:
+                        _dirty = false;
+                        return;
+                    case SaveAction.WaitForRetry:
+                        return;
+                }
+
+                if (_store.Save(candidate))
+                {
+                    _lastPersisted = candidate;
+                    _saved = candidate;
+                    _saveFailures = 0;
+                    _dirty = false;
+                    return;
+                }
+
+                // ★ 保留は落とさない。ただし**必ず待たせる** ——
+                //   落とさないだけだと毎フレーム書き込みを試すことになる
+                _saveFailures++;
+                _saveAt = now + SaveRetrySeconds;
+
+                if (_saveFailures >= MaxSaveFailures && !_gaveUpSaving)
+                {
+                    _gaveUpSaving = true;
+                    Debug.LogWarning("[Mascot] ウィンドウの保存に繰り返し失敗したので、以後あきらめます。" +
+                                     "次の起動では前回の位置に戻ります");
+                }
             }
 
             private DisplayLayout ReadLayout()
@@ -345,10 +461,6 @@ namespace ChatterMascot.Desktop
                 }
                 return DisplayLayout.Of(monitors);
             }
-
-            private static bool Matches(PointRect a, PointRect b) =>
-                Math.Abs(a.X - b.X) < Epsilon && Math.Abs(a.Y - b.Y) < Epsilon &&
-                Math.Abs(a.Width - b.Width) < Epsilon && Math.Abs(a.Height - b.Height) < Epsilon;
 
             private string ReadState()
             {

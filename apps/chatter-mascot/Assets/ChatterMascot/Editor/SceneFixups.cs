@@ -437,13 +437,6 @@ namespace ChatterMascot.EditorTools
         }
 
         /// <summary>
-        /// ★ <b>MToon10(URP) に <c>UniversalGBuffer</c> パスは無い。</b>
-        ///   Deferred のままだと未検証の経路に入る。UniVRM 公式の URP サンプルも Forward。
-        ///
-        /// <b>直さず報告するだけ</b>にしてあるのは、<c>.asset</c> の描画設定を
-        /// コードで書き換えると差分の意図が読めなくなるため。
-        /// </summary>
-        /// <summary>
         /// ★ <b><c>Default Screen Width/Height</c> だけを変えても、窓の大きさは変わらない。</b>
         ///
         /// 起動時の大きさを決めるのは <see cref="ChatterMascot.Desktop.WindowGeometry"/> で、
@@ -471,6 +464,13 @@ namespace ChatterMascot.EditorTools
                 "ProjectSettings だけ変えても窓の大きさは変わりません");
         }
 
+        /// <summary>
+        /// ★ <b>MToon10(URP) に <c>UniversalGBuffer</c> パスは無い。</b>
+        ///   Deferred のままだと未検証の経路に入る。UniVRM 公式の URP サンプルも Forward。
+        ///
+        /// <b>直さず報告するだけ</b>にしてあるのは、<c>.asset</c> の描画設定を
+        /// コードで書き換えると差分の意図が読めなくなるため。
+        /// </summary>
         private static void AssertForwardRendering()
         {
             foreach (var path in RendererAssets)

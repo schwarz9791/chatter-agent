@@ -289,17 +289,20 @@ namespace ChatterMascot
         private bool OnWantsToQuit()
         {
             var pending = _client != null && _client.HasPendingWork;
-            if (_quitProbe)
-            {
-                // 1回だけ。2周目まで残すと ShouldDefer の「必ず通す」が試せない
-                _quitProbe = false;
-                pending = true;
-            }
-            var defer = ShutdownPolicy.ShouldDefer(pending, _quitRequested);
+
+            // ★ **実際の未 ack と、probe による強制を混ぜないこと。** 保留経路は probe でしか
+            //   通らないので、混ぜると**この経路を通る実行はすべてログが嘘**になり、
+            //   後から読む人が本物の未 ack と区別できない
+            var forced = _quitProbe;
+            // 1回だけ。2周目まで残すと ShouldDefer の「必ず通す」が試せない
+            _quitProbe = false;
+
+            var defer = ShutdownPolicy.ShouldDefer(pending || forced, _quitRequested);
 
             // ★ **必ず1行残すこと。** 保留したのか素通りしたのかは、ここでしか分からない。
             //   #68 の切り分けはこの行から始まる
-            Debug.Log($"[Mascot] 終了要求: 未 ack={(pending ? "あり" : "なし")} " +
+            Debug.Log($"[Mascot] 終了要求: 未 ack={(pending ? "あり" : "なし")}" +
+                      $"{(forced ? "（probe による強制）" : "")} " +
                       $"2周目={_quitRequested} → {(defer ? "保留します" : "通します")}");
 
             _quitRequested = true;
@@ -361,6 +364,9 @@ namespace ChatterMascot
             if (client != null)
             {
                 var startedAt = Time.realtimeSinceStartupAsDouble;
+                // ★ **この詳細は保留した経路でしか出ない。** 通常経路は投げ切るものが無いので
+                //   閉じる過程を残す意味が無い。切り分けの入口（上の「終了要求」）は
+                //   **両方の経路で出る**
                 Debug.Log("[Mascot] 終了処理: 接続を閉じます");
                 try
                 {

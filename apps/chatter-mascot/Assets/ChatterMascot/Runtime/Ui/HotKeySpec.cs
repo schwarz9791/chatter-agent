@@ -20,6 +20,20 @@ namespace ChatterMascot.Ui
     /// ★ <b>修飾キー無しは受け付けない。</b> 単独のキーを登録すると、そのキーが
     ///   <b>どのアプリでも入力できなくなる</b>。ネイティブ側（<c>CM_HotKeyRegister</c>）でも
     ///   弾いているが、ここで弾けば理由をユーザーに返せる。
+    ///
+    /// ★★ <b>既定に <c>⌥</c> 単体と <c>⌘⌥</c> を選ばないこと（実測で潰した）。</b>
+    ///   <c>RegisterEventHotKey</c> は<b>他アプリの排他登録しか見ない</b>ので、
+    ///   どちらも「登録できた」と言ってくる。実害はその先にある:
+    ///   <list type="bullet">
+    ///     <item><c>⌥</c> 単体は<b>文字を入力する</b>。<c>UCKeyTranslate</c> に聞くと
+    ///       ABC 配列で <c>⌥M</c> = <c>µ</c>(U+00B5)、<c>⌥H</c> = <c>˙</c>(U+02D9)。
+    ///       登録すると<b>マスコットが起動している間、全アプリでその文字が打てなくなる</b></item>
+    ///     <item><c>⌘⌥</c> は<b>macOS の標準ショートカットと衝突する</b>。
+    ///       Finder のメニューを引くと <c>⌘⌥H</c> =「ほかを非表示」、
+    ///       <c>⌘⌥M</c> =「すべてをしまう」。前者はアプリメニューにあるので<b>全アプリ共通</b></item>
+    ///     <item><c>⌃⌥</c> はどちらでもない。既定はこれ（→ <see cref="Default"/>）</item>
+    ///   </list>
+    ///   <b>ユーザーが設定で選ぶぶんには止めない</b> —— 既定として押しつけないだけ。
     /// </summary>
     public readonly struct HotKeySpec : IEquatable<HotKeySpec>
     {
@@ -29,8 +43,11 @@ namespace ChatterMascot.Ui
         public const uint ModifierOption = 0x0800;
         public const uint ModifierControl = 0x1000;
 
-        /// <summary>指定が無いときの既定（→ #75）</summary>
-        public const string Default = "opt+m";
+        /// <summary>ミュートの既定（→ #75）</summary>
+        public const string Default = "ctrl+opt+m";
+
+        /// <summary>キャラクターの表示切り替えの既定（→ #75）</summary>
+        public const string DefaultHide = "ctrl+opt+h";
 
         /// <summary>
         /// 名前 → Carbon の仮想キーコード。

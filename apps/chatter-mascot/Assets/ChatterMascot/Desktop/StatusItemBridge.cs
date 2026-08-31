@@ -32,8 +32,13 @@ namespace ChatterMascot.Desktop
         private const string Icon1xFile = "trayTemplate.png";
         private const string Icon2xFile = "trayTemplate@2x.png";
 
-        /// <summary>ミュートのショートカットに割り当てる id（ネイティブには数値しか渡さない）</summary>
+        /// <summary>
+        /// ショートカットに割り当てる id（ネイティブには数値しか渡さない）。
+        /// ★ <b>id → 意味の対応を持つのは C# 側だけ</b>（ObjC にキーを書かない規律を hotkey にも通す）。
+        /// </summary>
         private const int MuteHotKeyId = 1;
+
+        private const int HideHotKeyId = 2;
 
         /// <summary>
         /// ★ <b><c>static readonly</c> で保持すること。</b>
@@ -115,8 +120,10 @@ namespace ChatterMascot.Desktop
             private SettingsStore _store;
             private string _settingsPath;
             private MascotSettings _settings = MascotSettings.Defaults;
-            private HotKeySpec _hotKey;
-            private bool _hotKeyRegistered;
+            private HotKeySpec _muteHotKey;
+            private HotKeySpec _hideHotKey;
+            private bool _muteHotKeyRegistered;
+            private bool _hideHotKeyRegistered;
 
             private MascotRunner _runner;
             private Camera _camera;
@@ -156,7 +163,7 @@ namespace ChatterMascot.Desktop
 
                 // ★ メニューより先に登録すること。 ラベルにショートカットの表記が乗るので、
                 //   後にすると初回のメニューだけ表記が抜ける
-                RegisterHotKey();
+                RegisterHotKeys();
 
                 _shown = ChatterMascotNative.CM_StatusItemShow(MenuJson.Write(BuildMenu()));
                 if (!_shown) Debug.LogWarning("[Native] ステータスバーに出せませんでした");
@@ -178,11 +185,7 @@ namespace ChatterMascot.Desktop
                 //   もう生きていない Mono ドメインを叩く
                 ChatterMascotNative.CM_SetEventCallback(null);
 
-                if (_hotKeyRegistered)
-                {
-                    ChatterMascotNative.CM_HotKeyUnregister(MuteHotKeyId);
-                    _hotKeyRegistered = false;
-                }
+                UnregisterHotKeys();
                 ChatterMascotNative.CM_Shutdown();
             }
 
@@ -208,6 +211,7 @@ namespace ChatterMascot.Desktop
                         case MenuEventKind.HotKey:
                             // ★ id → 意味の対応は C# が持つ（ネイティブにキーを書かないため）
                             if (value.HotKeyId == MuteHotKeyId) Invoke(MenuKeys.Mute);
+                            else if (value.HotKeyId == HideHotKeyId) Invoke(MenuKeys.Hide);
                             break;
 
                         case MenuEventKind.Log:
@@ -347,13 +351,15 @@ namespace ChatterMascot.Desktop
 
                 if (!_store.Refresh()) return;
 
-                var previousHotKey = _settings.MuteHotKey;
+                var previousMute = _settings.MuteHotKey;
+                var previousHide = _settings.HideHotKey;
                 _settings = _store.Current;
 
                 ApplyMuteToRunner();
-                if (!string.Equals(previousHotKey, _settings.MuteHotKey, StringComparison.Ordinal))
+                if (!string.Equals(previousMute, _settings.MuteHotKey, StringComparison.Ordinal) ||
+                    !string.Equals(previousHide, _settings.HideHotKey, StringComparison.Ordinal))
                 {
-                    RegisterHotKey();
+                    RegisterHotKeys();
                 }
                 UpdateMenu();
             }
@@ -368,42 +374,86 @@ namespace ChatterMascot.Desktop
                 ChatterMascotNative.CM_SetActivationPolicy(1);
             }
 
-            private void RegisterHotKey()
+            /// <summary>
+            /// ショートカットを登録し直す。<b>全部いったん外してから入れる</b>（冪等）。
+            ///
+            /// ★ <b>重複はこちらで弾くこと。</b> 同じ組み合わせを2つに割り当てると
+            ///   2つ目が <c>eventHotKeyExistsErr</c>（-9878）で失敗するが、
+            ///   その番号は「<b>他のアプリが取っている</b>」ときと同じなので、
+            ///   ネイティブからの戻り値だけでは<b>原因を取り違える</b>。
+            /// </summary>
+            private void RegisterHotKeys()
             {
-                if (_hotKeyRegistered)
-                {
-                    ChatterMascotNative.CM_HotKeyUnregister(MuteHotKeyId);
-                    _hotKeyRegistered = false;
-                }
+                UnregisterHotKeys();
 
-                // ★ 先に忘れること。 登録に失敗したまま古い表記がメニューに残ると、
-                //   効かないショートカットを案内することになる（→ MascotMenu は
-                //   IsValid でない指定なら表記を出さない）
-                _hotKey = default(HotKeySpec);
+                _muteHotKey = Register(MuteHotKeyId, _settings.MuteHotKey, "ミュート",
+                    out _muteHotKeyRegistered);
 
-                HotKeySpec spec;
-                string error;
-                if (!HotKeySpec.TryParse(_settings.MuteHotKey, out spec, out error))
+                var hide = Parse(_settings.HideHotKey, "キャラクターの表示切り替え");
+                if (hide.IsValid && hide.Equals(_muteHotKey))
                 {
-                    // SettingsJson が弾いているので通常ここには来ない
-                    Debug.LogWarning("[Mascot] ミュートのショートカットを登録できません: " + error);
+                    Debug.LogWarning(
+                        $"[Mascot] 同じショートカット（{hide.FormatSymbols()}）を2つに割り当てています。" +
+                        "キャラクターの表示切り替えは登録しません");
                     return;
                 }
 
-                var status = ChatterMascotNative.CM_HotKeyRegister(
-                    MuteHotKeyId, spec.KeyCode, spec.ModifierMask);
+                _hideHotKey = Register(HideHotKeyId, _settings.HideHotKey, "キャラクターの表示切り替え",
+                    out _hideHotKeyRegistered);
+            }
+
+            private void UnregisterHotKeys()
+            {
+                if (_muteHotKeyRegistered)
+                {
+                    ChatterMascotNative.CM_HotKeyUnregister(MuteHotKeyId);
+                    _muteHotKeyRegistered = false;
+                }
+                if (_hideHotKeyRegistered)
+                {
+                    ChatterMascotNative.CM_HotKeyUnregister(HideHotKeyId);
+                    _hideHotKeyRegistered = false;
+                }
+
+                // ★ 忘れること。 登録できていないのにメニューへ表記が残ると、
+                //   効かないショートカットを案内することになる（→ MascotMenu は
+                //   IsValid でない指定なら表記を出さない）
+                _muteHotKey = default(HotKeySpec);
+                _hideHotKey = default(HotKeySpec);
+            }
+
+            private static HotKeySpec Parse(string text, string label)
+            {
+                HotKeySpec spec;
+                string error;
+                if (HotKeySpec.TryParse(text, out spec, out error)) return spec;
+
+                // SettingsJson が弾いているので通常ここには来ない
+                Debug.LogWarning($"[Mascot] {label}のショートカットを登録できません: {error}");
+                return default(HotKeySpec);
+            }
+
+            /// <summary>登録できたら、その指定を返す。できなければ既定値（＝表記を出さない）。</summary>
+            private static HotKeySpec Register(int id, string text, string label, out bool registered)
+            {
+                registered = false;
+
+                var spec = Parse(text, label);
+                if (!spec.IsValid) return spec;
+
+                var status = ChatterMascotNative.CM_HotKeyRegister(id, spec.KeyCode, spec.ModifierMask);
                 if (status != 0)
                 {
-                    // -9878 = eventHotKeyExistsErr
+                    // -9878 = eventHotKeyExistsErr。重複は上で弾いてあるので、ここは他アプリ
                     Debug.LogWarning(
                         $"[Native] ショートカット \"{spec.Format()}\" を登録できませんでした (status={status})。" +
                         "他のアプリが同じ組み合わせを取っている可能性があります");
-                    return;
+                    return default(HotKeySpec);
                 }
 
-                _hotKey = spec;
-                _hotKeyRegistered = true;
-                Debug.Log($"[Mascot] ミュートのショートカット: {spec.FormatSymbols()}");
+                registered = true;
+                Debug.Log($"[Mascot] {label}のショートカット: {spec.FormatSymbols()}");
+                return spec;
             }
 
             private void ApplyMuteToRunner()
@@ -424,7 +474,8 @@ namespace ChatterMascot.Desktop
                 return MascotMenu.Build(new MenuState(
                     muted: _settings.Muted,
                     hidden: _hidden,
-                    muteHotKey: _hotKey,
+                    muteHotKey: _muteHotKey,
+                    hideHotKey: _hideHotKey,
                     productName: Application.productName,
                     version: Application.version,
                     pid: _pid,

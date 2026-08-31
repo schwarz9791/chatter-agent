@@ -348,6 +348,24 @@ cd apps/chatter-mascot
 
 #### 常駐まわり（#75）
 
+設定は `~/.config/chatter-agent/mascot/settings.json`（`window.json` と同じディレクトリ）。
+
+```json
+{
+  "version": 1,
+  "audio": { "mute": false, "muteHotKey": "ctrl+opt+m" },
+  "ui": { "hideHotKey": "ctrl+opt+h" }
+}
+```
+
+★ **既定に `⌥` 単体や `⌘⌥` を選ばないこと。** `⌥M` は `µ` を、`⌥H` は `˙` を**実際に入力する**ので
+全アプリからその文字を奪い、`⌘⌥M` / `⌘⌥H` は macOS 標準の「すべてをしまう」「ほかを非表示」と衝突する。
+`RegisterEventHotKey` はどちらも「登録できた」と言ってくる（→ [`../../docs/mascot.md`](../../docs/mascot.md)）。
+
+★ **アイコンが出ないときはログを見る。** `[Native] ステータスバー: item=あり …` が出ていれば
+こちら側は仕事を終えていて、**メニューバーが混んでいて OS が画面外に置いている**。
+
+
 ★ **`.app` の中の `.bundle` を手で差し替えない。** コード署名が壊れて `open` から
 起動できなくなる（`Player.log` が空のまま終了する）。ネイティブだけ直したときも
 `./scripts/build.sh` を通すこと（2回目以降は5秒で終わる）。

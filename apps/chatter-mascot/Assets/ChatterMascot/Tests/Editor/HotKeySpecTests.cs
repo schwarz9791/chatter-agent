@@ -25,12 +25,38 @@ namespace ChatterMascot.Tests
         }
 
         [Test]
-        public void ParsesTheDefault()
+        public void ParsesTheDefaults()
         {
-            var spec = Parse(HotKeySpec.Default);
-            Assert.That(spec.Key, Is.EqualTo("m"));
-            Assert.That(spec.KeyCode, Is.EqualTo(0x2Eu), "kVK_ANSI_M");
-            Assert.That(spec.ModifierMask, Is.EqualTo(HotKeySpec.ModifierOption));
+            var mute = Parse(HotKeySpec.Default);
+            Assert.That(mute.Key, Is.EqualTo("m"));
+            Assert.That(mute.KeyCode, Is.EqualTo(0x2Eu), "kVK_ANSI_M");
+
+            var hide = Parse(HotKeySpec.DefaultHide);
+            Assert.That(hide.Key, Is.EqualTo("h"));
+            Assert.That(hide.KeyCode, Is.EqualTo(0x04u), "kVK_ANSI_H");
+
+            Assert.That(mute, Is.Not.EqualTo(hide), "既定どうしがぶつかっていないこと");
+        }
+
+        /// <summary>
+        /// ★★ <b>既定に <c>⌥</c> 単体と <c>⌘⌥</c> を選ばないこと（実測で潰した）。</b>
+        /// <c>⌥M</c> は <c>µ</c> を、<c>⌥H</c> は <c>˙</c> を<b>実際に入力する</b>ので
+        /// 登録すると全アプリでその文字が打てなくなり、<c>⌘⌥H</c> / <c>⌘⌥M</c> は
+        /// macOS 標準の「ほかを非表示」「すべてをしまう」と衝突する。
+        /// <c>RegisterEventHotKey</c> はどちらも「登録できた」と言ってくるので、
+        /// <b>ここで固定しておかないと誰も気づけない</b>。
+        /// </summary>
+        [Test]
+        public void TheDefaultsAvoidTextInputAndSystemShortcuts()
+        {
+            foreach (var text in new[] { HotKeySpec.Default, HotKeySpec.DefaultHide })
+            {
+                var spec = Parse(text);
+                Assert.That(spec.ModifierMask & HotKeySpec.ModifierControl, Is.Not.Zero,
+                    $"{text}: ⌃ が要る（⌥ 単体は文字を入力する）");
+                Assert.That(spec.ModifierMask & HotKeySpec.ModifierCommand, Is.Zero,
+                    $"{text}: ⌘⌥ は macOS 標準（ほかを非表示 / すべてをしまう）と衝突する");
+            }
         }
 
         /// <summary>

@@ -167,6 +167,15 @@ bool CM_StatusItemShow(const char* menuJson)
              *   立てると、ユーザーが ⌘ドラッグでアイコンを外しただけでアプリが終了する。
              *   Dock に居ない常駐アプリではそれが「黙って消えた」にしか見えない。
              */
+            /*
+             * ユーザーが ⌘ドラッグで並べ替えた位置を覚えさせる。
+             *
+             * ★ これは「メニューバーに入り切らないとき」の手当てにはならない。
+             *   実測では、付けても付けなくても frame.x = -2287（画面の左外）に
+             *   置かれる状況があった（→ docs/mascot.md）。位置を決めるのは OS で、
+             *   こちらから押し込む API は無い。
+             */
+            gStatusItem.autosaveName = @"ChatterMascotStatusItem";
             gStatusItem.visible = YES;
         }
         CMApplyMenu(root);
@@ -182,6 +191,7 @@ bool CM_StatusItemShow(const char* menuJson)
             gStatusItem.button == nil ? @"なし" : @"あり",
             gStatusItem.button.image == nil ? @"なし" : @"あり",
             (int)gStatusItem.visible] UTF8String]);
+
     });
     return ok;
 }

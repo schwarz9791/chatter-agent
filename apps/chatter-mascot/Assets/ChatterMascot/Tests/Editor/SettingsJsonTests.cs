@@ -36,11 +36,12 @@ namespace ChatterMascot.Tests
         [Test]
         public void RoundTrips()
         {
-            var written = SettingsJson.Write(new MascotSettings(true, "cmd+shift+m"));
+            var written = SettingsJson.Write(new MascotSettings(true, "cmd+shift+m", "cmd+shift+h"));
             var parsed = Parse(written);
 
             Assert.That(parsed.Muted, Is.True);
             Assert.That(parsed.MuteHotKey, Is.EqualTo("cmd+shift+m"));
+            Assert.That(parsed.HideHotKey, Is.EqualTo("cmd+shift+h"));
             Assert.That(_warnings, Is.Empty);
         }
 
@@ -50,6 +51,7 @@ namespace ChatterMascot.Tests
             var parsed = Parse("{}");
             Assert.That(parsed.Muted, Is.EqualTo(MascotSettings.Defaults.Muted));
             Assert.That(parsed.MuteHotKey, Is.EqualTo(HotKeySpec.Default));
+            Assert.That(parsed.HideHotKey, Is.EqualTo(HotKeySpec.DefaultHide));
         }
 
         /// <summary>★ ファイル全体が読めないケース。呼び出し側は直前値を維持する。</summary>
@@ -99,6 +101,39 @@ namespace ChatterMascot.Tests
             var parsed = Parse("{\"audio\":{\"muteHotKey\":\"m\"}}");
 
             Assert.That(parsed.MuteHotKey, Is.EqualTo(HotKeySpec.Default));
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        /// <summary>ui は audio と同じ作法（キー単位で既定に倒す / 未知キーは無視）。</summary>
+        [Test]
+        public void ReadsTheHideHotKey()
+        {
+            var parsed = Parse("{\"ui\":{\"hideHotKey\":\"cmd+shift+h\"}}");
+
+            Assert.That(parsed.HideHotKey, Is.EqualTo("cmd+shift+h"));
+            Assert.That(_warnings, Is.Empty);
+        }
+
+        [Test]
+        public void RejectsAnUnregisterableHideHotKey()
+        {
+            var parsed = Parse("{\"ui\":{\"hideHotKey\":\"h\"}}");
+
+            Assert.That(parsed.HideHotKey, Is.EqualTo(HotKeySpec.DefaultHide));
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        [Test]
+        public void IgnoresUnknownKeysUnderUi()
+        {
+            Parse("{\"ui\":{\"nope\":1}}");
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        [Test]
+        public void WarnsWhenUiIsNotAnObject()
+        {
+            Parse("{\"ui\": 1}");
             Assert.That(_warnings, Has.Count.EqualTo(1));
         }
 

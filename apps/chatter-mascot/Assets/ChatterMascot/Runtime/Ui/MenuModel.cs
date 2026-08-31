@@ -72,13 +72,14 @@ namespace ChatterMascot.Ui
     public readonly struct MenuState
     {
         public MenuState(
-            bool muted, bool hidden, HotKeySpec muteHotKey,
+            bool muted, bool hidden, HotKeySpec muteHotKey, HotKeySpec hideHotKey,
             string productName, string version, int pid,
             string icon1xPath, string icon2xPath)
         {
             Muted = muted;
             Hidden = hidden;
             MuteHotKey = muteHotKey;
+            HideHotKey = hideHotKey;
             ProductName = productName;
             Version = version;
             Pid = pid;
@@ -89,6 +90,7 @@ namespace ChatterMascot.Ui
         public bool Muted { get; }
         public bool Hidden { get; }
         public HotKeySpec MuteHotKey { get; }
+        public HotKeySpec HideHotKey { get; }
         public string ProductName { get; }
         public string Version { get; }
         public int Pid { get; }
@@ -103,17 +105,17 @@ namespace ChatterMascot.Ui
         {
             var product = string.IsNullOrEmpty(state.ProductName) ? "Chatter Mascot" : state.ProductName;
 
-            var mute = "ミュート";
-            var symbols = state.MuteHotKey.FormatSymbols();
-            // ★ ショートカットはラベルに書くだけ（→ HotKeySpec.FormatSymbols）
-            if (!string.IsNullOrEmpty(symbols)) mute = $"{mute}（{symbols}）";
-
             var entries = new List<MenuEntry>
             {
-                MenuEntry.Of(MenuKeys.Mute, mute, isChecked: state.Muted),
+                MenuEntry.Of(
+                    MenuKeys.Mute,
+                    WithShortcut("ミュート", state.MuteHotKey),
+                    isChecked: state.Muted),
                 MenuEntry.Of(
                     MenuKeys.Hide,
-                    state.Hidden ? "キャラクターを表示する" : "キャラクターを隠す"),
+                    WithShortcut(
+                        state.Hidden ? "キャラクターを表示する" : "キャラクターを隠す",
+                        state.HideHotKey)),
                 MenuEntry.Of(MenuKeys.Settings, "設定を開く…"),
                 MenuEntry.Separator(),
 
@@ -137,6 +139,16 @@ namespace ChatterMascot.Ui
                 Dimmed = state.Muted,
                 Entries = entries,
             };
+        }
+
+        /// <summary>
+        /// ★ <b>ショートカットはラベルに書くだけ</b>（→ <see cref="HotKeySpec.FormatSymbols"/>）。
+        /// ★ <b>登録できていないときは表記を出さない</b> —— 効かないショートカットを案内しない。
+        /// </summary>
+        private static string WithShortcut(string label, HotKeySpec hotKey)
+        {
+            var symbols = hotKey.FormatSymbols();
+            return string.IsNullOrEmpty(symbols) ? label : $"{label}（{symbols}）";
         }
     }
 }

@@ -8,16 +8,22 @@ namespace ChatterMascot.Tests
     [TestFixture]
     public sealed class MenuJsonTests
     {
-        private static MenuState State(bool muted = false, bool hidden = false, string hotKey = "opt+m")
+        private static MenuState State(
+            bool muted = false, bool hidden = false,
+            string muteHotKey = "ctrl+opt+m", string hideHotKey = "ctrl+opt+h")
+        {
+            return new MenuState(
+                muted, hidden, Spec(muteHotKey), Spec(hideHotKey),
+                "Chatter Mascot", "1.2.3", 4242,
+                "/tmp/trayTemplate.png", "/tmp/trayTemplate@2x.png");
+        }
+
+        private static HotKeySpec Spec(string text)
         {
             HotKeySpec spec;
             string error;
-            HotKeySpec.TryParse(hotKey, out spec, out error);
-
-            return new MenuState(
-                muted, hidden, spec,
-                "Chatter Mascot", "1.2.3", 4242,
-                "/tmp/trayTemplate.png", "/tmp/trayTemplate@2x.png");
+            HotKeySpec.TryParse(text, out spec, out error);
+            return spec;
         }
 
         // ---- メニューの組み立て ----
@@ -53,10 +59,10 @@ namespace ChatterMascot.Tests
         {
             Assert.That(
                 MascotMenu.Build(State(hidden: false)).Entries.First(e => e.Key == MenuKeys.Hide).Label,
-                Is.EqualTo("キャラクターを隠す"));
+                Does.StartWith("キャラクターを隠す"));
             Assert.That(
                 MascotMenu.Build(State(hidden: true)).Entries.First(e => e.Key == MenuKeys.Hide).Label,
-                Is.EqualTo("キャラクターを表示する"));
+                Does.StartWith("キャラクターを表示する"));
         }
 
         /// <summary>#76（設定 UI）が入るまで押す先が無い。押せるように見せない。</summary>
@@ -79,18 +85,22 @@ namespace ChatterMascot.Tests
         [Test]
         public void ShowsTheShortcutInTheMuteLabel()
         {
-            Assert.That(MascotMenu.Build(State()).Entries.First(e => e.Key == MenuKeys.Mute).Label,
-                Does.Contain("⌥M"));
+            var entries = MascotMenu.Build(State()).Entries;
+            Assert.That(entries.First(e => e.Key == MenuKeys.Mute).Label, Does.Contain("⌃⌥M"));
+            Assert.That(entries.First(e => e.Key == MenuKeys.Hide).Label, Does.Contain("⌃⌥H"));
         }
 
         /// <summary>登録できていないときは表記を出さない（嘘のショートカットを見せない）。</summary>
         [Test]
         public void OmitsTheShortcutWhenItIsNotRegistered()
         {
-            var state = new MenuState(false, false, default(HotKeySpec), "Chatter Mascot", "1.0", 1, null, null);
-            var label = MascotMenu.Build(state).Entries.First(e => e.Key == MenuKeys.Mute).Label;
+            var state = new MenuState(
+                false, false, default(HotKeySpec), default(HotKeySpec),
+                "Chatter Mascot", "1.0", 1, null, null);
+            var entries = MascotMenu.Build(state).Entries;
 
-            Assert.That(label, Is.EqualTo("ミュート"));
+            Assert.That(entries.First(e => e.Key == MenuKeys.Mute).Label, Is.EqualTo("ミュート"));
+            Assert.That(entries.First(e => e.Key == MenuKeys.Hide).Label, Is.EqualTo("キャラクターを隠す"));
         }
 
         // ---- JSON ----
@@ -118,8 +128,8 @@ namespace ChatterMascot.Tests
         [Test]
         public void OmitsTheIconWhenThereIsNoPath()
         {
-            var model = MascotMenu.Build(
-                new MenuState(false, false, default(HotKeySpec), "x", "1", 1, null, null));
+            var model = MascotMenu.Build(new MenuState(
+                false, false, default(HotKeySpec), default(HotKeySpec), "x", "1", 1, null, null));
 
             Assert.That(JObject.Parse(MenuJson.Write(model))["icon"], Is.Null);
         }

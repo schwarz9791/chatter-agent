@@ -33,6 +33,10 @@ namespace ChatterMascot.Settings
                     ["mute"] = settings.Muted,
                     ["muteHotKey"] = settings.MuteHotKey ?? HotKeySpec.Default,
                 },
+                ["ui"] = new JObject
+                {
+                    ["hideHotKey"] = settings.HideHotKey ?? HotKeySpec.DefaultHide,
+                },
             };
             return root.ToString(Formatting.Indented) + "\n";
         }
@@ -89,6 +93,7 @@ namespace ChatterMascot.Settings
 
             var muted = MascotSettings.Defaults.Muted;
             var hotKey = MascotSettings.Defaults.MuteHotKey;
+            var hideHotKey = MascotSettings.Defaults.HideHotKey;
 
             foreach (var property in root)
             {
@@ -101,6 +106,10 @@ namespace ChatterMascot.Settings
                         ReadAudio(property.Value as JObject, property.Value, ref muted, ref hotKey, warn);
                         break;
 
+                    case "ui":
+                        ReadUi(property.Value as JObject, property.Value, ref hideHotKey, warn);
+                        break;
+
                     default:
                         // ★ 知らないキーは無視する（throw も既定へのリセットもしない）。
                         //   新しい版が書いた設定を古い版が読むことは普通に起きる
@@ -109,7 +118,7 @@ namespace ChatterMascot.Settings
                 }
             }
 
-            settings = new MascotSettings(muted, hotKey);
+            settings = new MascotSettings(muted, hotKey, hideHotKey);
             return true;
         }
 
@@ -132,28 +141,57 @@ namespace ChatterMascot.Settings
                         break;
 
                     case "muteHotKey":
-                    {
-                        if (property.Value.Type != JTokenType.String)
-                        {
-                            Warn(warn, $"audio.muteHotKey が文字列ではありません（{property.Value}）。既定を使います");
-                            break;
-                        }
-
-                        // ★ ここで妥当性まで見ること。 「修飾キー無し」を保存できてしまうと、
-                        //   次の起動でそのキーが全アプリから奪われる（→ HotKeySpec）
-                        var text = property.Value.Value<string>();
-                        HotKeySpec spec;
-                        string reason;
-                        if (HotKeySpec.TryParse(text, out spec, out reason)) hotKey = text;
-                        else Warn(warn, $"audio.muteHotKey を使えません（{reason}）。既定を使います");
+                        ReadHotKey(property.Value, "audio.muteHotKey", ref hotKey, warn);
                         break;
-                    }
 
                     default:
                         Warn(warn, $"知らないキー \"audio.{property.Key}\" は無視します");
                         break;
                 }
             }
+        }
+
+        private static void ReadUi(
+            JObject ui, JToken raw, ref string hideHotKey, Action<string> warn)
+        {
+            if (ui == null)
+            {
+                Warn(warn, $"ui がオブジェクトではありません（{raw?.Type.ToString() ?? "無し"}）。既定を使います");
+                return;
+            }
+
+            foreach (var property in ui)
+            {
+                switch (property.Key)
+                {
+                    case "hideHotKey":
+                        ReadHotKey(property.Value, "ui.hideHotKey", ref hideHotKey, warn);
+                        break;
+
+                    default:
+                        Warn(warn, $"知らないキー \"ui.{property.Key}\" は無視します");
+                        break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// ★ <b>ここで妥当性まで見ること。</b> 「修飾キー無し」を保存できてしまうと、
+        /// 次の起動でそのキーが<b>全アプリから奪われる</b>（→ <see cref="HotKeySpec"/>）。
+        /// </summary>
+        private static void ReadHotKey(JToken value, string key, ref string target, Action<string> warn)
+        {
+            if (value.Type != JTokenType.String)
+            {
+                Warn(warn, $"{key} が文字列ではありません（{value}）。既定を使います");
+                return;
+            }
+
+            var text = value.Value<string>();
+            HotKeySpec spec;
+            string reason;
+            if (HotKeySpec.TryParse(text, out spec, out reason)) target = text;
+            else Warn(warn, $"{key} を使えません（{reason}）。既定を使います");
         }
 
         private static void Warn(Action<string> warn, string message)

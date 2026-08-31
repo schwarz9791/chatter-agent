@@ -470,8 +470,17 @@ namespace ChatterMascot.Desktop
             }
 
             /// <summary>
-            /// ★ <b>tmp + rename で置くこと。</b> 書きかけを次の起動が読むと
-            ///   「壊れている」と判定されて位置が1回リセットされる。
+            /// ★ <b>別名で書いてから置き換えること。</b> 直接書くと、書きかけを次の起動が読んで
+            ///   「壊れている」と判定し、位置が1回リセットされる。
+            ///
+            /// ★ <b>「消してから移す」にしないこと。</b> 2段になると、その間にプロセスが落ちたり
+            ///   移動が失敗したりしたときに<b>保存そのものが消える</b>。
+            ///   しかもこの経路は<b>終了処理からも呼ばれる</b>ので、プロセスの終了と正面から重なる。
+            ///   置き換えは1操作で済ませる（core の原子書き込みと同じ形）。
+            ///
+            /// ★ <b>「上書きする移動」はこのプロファイルに無い</b>（コンパイルで確認した）ので、
+            ///   置き換え先の有無で2つの API を使い分ける。<b>どちらの枝も1操作</b>なので、
+            ///   消えてしまう窓は無い。
             /// </summary>
             private void WriteState(string text)
             {
@@ -482,8 +491,8 @@ namespace ChatterMascot.Desktop
 
                 var tmp = _statePath + ".tmp";
                 File.WriteAllText(tmp, text);
-                if (File.Exists(_statePath)) File.Delete(_statePath);
-                File.Move(tmp, _statePath);
+                if (File.Exists(_statePath)) File.Replace(tmp, _statePath, null);
+                else File.Move(tmp, _statePath);
             }
         }
     }

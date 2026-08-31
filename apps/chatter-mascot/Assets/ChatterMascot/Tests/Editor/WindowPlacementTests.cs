@@ -14,6 +14,11 @@ namespace ChatterMascot.Tests
         private static readonly PointRect Primary = new PointRect(0f, 0f, 3840f, 2130f);
         private static readonly PointRect Secondary = new PointRect(1041f, -1111f, 1800f, 1072f);
 
+        /// <summary>
+        /// ★ <b>本番の下限（<c>WindowGeometry</c> の定数）とは意図的に別の値。</b>
+        /// ここは判定の規則を固定する場所で、出荷値を固定する場所ではない。
+        /// 本番値に追随させると、値を調整するたびに無関係なテストが落ちる。
+        /// </summary>
         private static readonly PlacementLimits Limits = new PlacementLimits(
             defaultWidth: 300f, defaultHeight: 480f,
             minWidth: 120f, minHeight: 120f,
@@ -188,8 +193,11 @@ namespace ChatterMascot.Tests
         // ── モニタが取れない ──────────────────────────────────────────
 
         /// <summary>
-        /// ★ <b>ここで既定へ寄せないこと。</b> 置き場所が分からないのに動かすと、
+        /// ★ <b>位置は動かさない。</b> 置き場所が分からないのに動かすと、
         /// 「モニタ情報が一瞬取れなかっただけ」で窓が飛ぶ。
+        ///
+        /// ★ 理由は <c>Restored</c>。**保存された位置をそのまま使ったのが事実**で、
+        ///   モニタが取れなかったことは <c>MonitorIndex</c> が担う。
         /// </summary>
         [Test]
         public void KeepsTheSavedRectWhenNoMonitorIsReported()
@@ -197,9 +205,120 @@ namespace ChatterMascot.Tests
             var rect = new PointRect(1770f, 1598f, 300f, 480f);
             var placement = WindowPlacement.Resolve(Saved(rect), Layout(), Limits);
 
-            Assert.That(placement.Reason, Is.EqualTo(PlacementReason.Defaulted));
+            Assert.That(placement.Reason, Is.EqualTo(PlacementReason.Restored));
             Assert.That(placement.Rect, Is.EqualTo(rect));
-            Assert.That(placement.MonitorIndex, Is.EqualTo(-1));
+            Assert.That(placement.MonitorIndex, Is.EqualTo(WindowPlacement.NoMonitor));
+        }
+
+        /// <summary>
+        /// ★ <b>保存ファイルは人が編集しうる。</b> 潰れた矩形をそのまま適用すると
+        /// 掴めない窓ができるので、モニタが取れなくても下限だけは効かせる。
+        /// </summary>
+        [Test]
+        public void AppliesTheMinimumSizeEvenWhenNoMonitorIsReported()
+        {
+            var placement = WindowPlacement.Resolve(
+                Saved(new PointRect(1770f, 1598f, 20f, 20f)), Layout(), Limits);
+
+            Assert.That(placement.Reason, Is.EqualTo(PlacementReason.Restored));
+            Assert.That(placement.Rect.Width, Is.EqualTo(120f));
+            Assert.That(placement.Rect.Height, Is.EqualTo(120f));
+            Assert.That(placement.Rect.X, Is.EqualTo(1770f), "位置は動かさない");
+            Assert.That(placement.Rect.Y, Is.EqualTo(1598f), "位置は動かさない");
+        }
+
+        [Test]
+        public void UsesTheDefaultSizeWhenThereIsNoSavedRectAndNoMonitor()
+        {
+            var placement = WindowPlacement.Resolve(WindowState.None, Layout(), Limits);
+
+            Assert.That(placement.Reason, Is.EqualTo(PlacementReason.Defaulted));
+            Assert.That(placement.Rect, Is.EqualTo(new PointRect(0f, 0f, 300f, 480f)));
+            Assert.That(placement.MonitorIndex, Is.EqualTo(WindowPlacement.NoMonitor));
+        }
+
+        // ── 置くと決めたディスプレイに収まること ──────────────────────
+
+        /// <summary>
+        /// ★ <b>そのまま復元する経路でも削ること。</b> 「主モニタで挟んでから選ぶ」形だと、
+        /// 主モニタには収まる大きさが、選んだ先のもっと狭いディスプレイからはみ出す。
+        /// </summary>
+        [Test]
+        public void ShrinksToTheDisplayItLandsOnEvenWhenRestoring()
+        {
+            var placement = WindowPlacement.Resolve(
+                Saved(new PointRect(1041f, -1111f, 99999f, 1000f)), TwoDisplays, Limits);
+
+            Assert.That(placement.Reason, Is.EqualTo(PlacementReason.Restored));
+            Assert.That(placement.MonitorIndex, Is.EqualTo(1));
+            Assert.That(placement.Rect.Width, Is.EqualTo(1800f), "主モニタの 3840 ではない");
+            Assert.That(placement.Rect.Height, Is.EqualTo(1000f));
+        }
+
+        /// <summary>
+        /// ★ 押し込んだのにはみ出す、が起きないこと。<c>ClampInto</c> は領域より大きい矩形を
+        /// 最小コーナーに寄せるだけなので、渡す前に大きさを収めておく必要がある。
+        /// </summary>
+        [Test]
+        public void ClampedWindowsFitInsideTheDisplayTheyWerePushedInto()
+        {
+            var placement = WindowPlacement.Resolve(
+                Saved(new PointRect(2800f, -1090f, 2000f, 900f)), TwoDisplays, Limits);
+
+            Assert.That(placement.Reason, Is.EqualTo(PlacementReason.Clamped));
+            Assert.That(placement.MonitorIndex, Is.EqualTo(1));
+            Assert.That(placement.Rect.Width, Is.EqualTo(1800f));
+            Assert.That(placement.Rect.X, Is.EqualTo(1041f));
+            Assert.That(placement.Rect.MaxX, Is.EqualTo(2841f), "セカンダリの右端を越えない");
+        }
+
+        /// <summary>
+        /// ★ <b>縮めた後で可視をもう一度測ること。</b> 縮める前の可視で判定すると、
+        /// 「掴める」と誤判定してそのまま復元してしまう。
+        /// <b>測り直しを消したときに気づける唯一のテスト。</b>
+        /// </summary>
+        [Test]
+        public void JudgesVisibilityWithTheShrunkRectNotTheSavedOne()
+        {
+            var placement = WindowPlacement.Resolve(
+                Saved(new PointRect(-700f, -1000f, 2000f, 900f)), TwoDisplays, Limits);
+
+            // 保存されたままの幅（2000）なら可視 259pt で「掴める」。
+            // セカンダリに収めた幅（1800）だと可視は 59pt しか残らない
+            Assert.That(placement.Reason, Is.EqualTo(PlacementReason.Clamped));
+            Assert.That(placement.MonitorIndex, Is.EqualTo(1));
+            Assert.That(placement.Rect, Is.EqualTo(new PointRect(1041f, -1000f, 1800f, 900f)));
+        }
+
+        /// <summary>この型が守る不変条件そのもの。実装を差し替えても残す。</summary>
+        [TestCase(1041f, -1111f, 99999f, 1000f)]
+        [TestCase(2800f, -1090f, 2000f, 900f)]
+        [TestCase(-700f, -1000f, 2000f, 900f)]
+        [TestCase(0f, 0f, 99999f, 99999f)]
+        [TestCase(1500f, -1100f, 500f, 2400f)]
+        public void NeverReturnsARectLargerThanTheDisplayItChose(float x, float y, float w, float h)
+        {
+            var placement = WindowPlacement.Resolve(
+                Saved(new PointRect(x, y, w, h)), TwoDisplays, Limits);
+
+            Assume.That(placement.MonitorIndex, Is.GreaterThanOrEqualTo(0));
+            var monitor = TwoDisplays.Monitors[placement.MonitorIndex];
+            Assert.That(placement.Rect.Width, Is.LessThanOrEqualTo(monitor.Width));
+            Assert.That(placement.Rect.Height, Is.LessThanOrEqualTo(monitor.Height));
+        }
+
+        /// <summary>
+        /// 特性テスト。<b>保存矩形がどのモニタより大きいとき、どちらに寄るか</b>を固定する。
+        /// 候補ごとに評価するので、**元居たディスプレイが保たれる**。
+        /// </summary>
+        [Test]
+        public void KeepsAnOversizedWindowOnTheDisplayItWasOn()
+        {
+            var placement = WindowPlacement.Resolve(
+                Saved(new PointRect(1500f, -1100f, 500f, 2400f)), TwoDisplays, Limits);
+
+            Assert.That(placement.MonitorIndex, Is.EqualTo(1));
+            Assert.That(placement.Rect, Is.EqualTo(new PointRect(1500f, -1100f, 500f, 1072f)));
         }
     }
 }

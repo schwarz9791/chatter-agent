@@ -82,6 +82,45 @@ namespace ChatterMascot.Tests
             Assert.That(clamped.Width, Is.EqualTo(5000f), "大きさは変えない");
         }
 
+        // ── 大きさの規則 ──────────────────────────────────────────────
+
+        [Test]
+        public void WithMinimumSizeKeepsThePosition()
+        {
+            var grown = new PointRect(100f, 100f, 10f, 10f).WithMinimumSize(120f, 160f);
+
+            Assert.That(grown, Is.EqualTo(new PointRect(100f, 100f, 120f, 160f)));
+        }
+
+        [Test]
+        public void WithMinimumSizeLeavesABigEnoughRectAlone()
+        {
+            var rect = new PointRect(100f, 100f, 300f, 480f);
+
+            Assert.That(rect.WithMinimumSize(120f, 160f), Is.EqualTo(rect));
+        }
+
+        [Test]
+        public void WithSizeFittingIntoShrinksWithoutMoving()
+        {
+            var shrunk = new PointRect(1041f, -1111f, 3000f, 2000f)
+                .WithSizeFittingInto(new PointRect(1041f, -1111f, 1800f, 1072f));
+
+            Assert.That(shrunk, Is.EqualTo(new PointRect(1041f, -1111f, 1800f, 1072f)));
+        }
+
+        /// <summary>
+        /// ★ <b>大きさを持たない領域は無視する。</b> モニタの情報が取れないフレームで
+        /// 0 に潰すと、掴めない窓ができる。
+        /// </summary>
+        [Test]
+        public void WithSizeFittingIntoIgnoresADegenerateBounds()
+        {
+            var rect = new PointRect(100f, 100f, 300f, 480f);
+
+            Assert.That(rect.WithSizeFittingInto(default), Is.EqualTo(rect));
+        }
+
         [Test]
         public void AtBottomCenterOfSitsOnTheBottomEdge()
         {

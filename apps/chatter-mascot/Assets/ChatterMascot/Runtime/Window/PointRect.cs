@@ -80,6 +80,31 @@ namespace ChatterMascot.Window
         }
 
         /// <summary>
+        /// <b>下限を下回らない大きさ</b>にする。位置は動かさない。
+        ///
+        /// ★ <b>大きさの規則は、位置を持つこの型の側に置く。</b> 「大きさだけ返して呼び出し側が
+        ///   位置を付け直す」形にすると、付け忘れられる箇所が規則の数だけ増える。
+        /// </summary>
+        public PointRect WithMinimumSize(float minWidth, float minHeight) =>
+            WithSize(Math.Max(minWidth, Width), Math.Max(minHeight, Height));
+
+        /// <summary>
+        /// <paramref name="bounds"/> に<b>収まる大きさ</b>にする。位置は動かさない。
+        ///
+        /// ★ <b>領域より大きい矩形は、位置をどう動かしても必ずはみ出す。</b> だから
+        ///   <see cref="ClampInto"/> に渡す前に、置くと決めた領域でここを通しておく。
+        ///
+        /// ★ <b>大きさを持たない領域は無視する。</b> モニタの情報が取れないフレームがあり、
+        ///   そこで 0 に潰すと<b>掴めない窓</b>ができる。
+        /// </summary>
+        public PointRect WithSizeFittingInto(PointRect bounds)
+        {
+            var width = bounds.Width > 0f ? Math.Min(Width, bounds.Width) : Width;
+            var height = bounds.Height > 0f ? Math.Min(Height, bounds.Height) : Height;
+            return WithSize(width, height);
+        }
+
+        /// <summary>
         /// <paramref name="bounds"/> の<b>下端中央</b>へ置く。
         ///
         /// ★ cc-mascot の既定位置と同じ。マスコットは足元が下端に接している方が自然で、

@@ -5,10 +5,16 @@ namespace ChatterMascot.Window
     /// <summary>なぜその位置になったか。ログと実機確認のために必ず出す。</summary>
     public enum PlacementReason
     {
-        /// <summary>保存が無い / 壊れている。既定の場所へ。</summary>
+        /// <summary>保存が無い / 壊れている。既定の大きさで既定の場所へ。</summary>
         Defaulted,
 
-        /// <summary>保存された位置をそのまま使った。</summary>
+        /// <summary>
+        /// 保存された位置をそのまま使った。
+        ///
+        /// ★ <b>モニタの情報が1枚も取れなかったときもこれ。</b> 事実として
+        ///   「保存された位置をそのまま使った」であり、区別は
+        ///   <see cref="Placement.MonitorIndex"/> が担う。
+        /// </summary>
         Restored,
 
         /// <summary>ほとんどはみ出していたので、いちばん重なるモニタへ押し込んだ。</summary>
@@ -23,7 +29,9 @@ namespace ChatterMascot.Window
         public readonly PointRect Rect;
         public readonly PlacementReason Reason;
 
-        /// <summary>基準にしたモニタ。決められなければ -1。</summary>
+        /// <summary>
+        /// 基準にしたモニタ。決められなければ <see cref="WindowPlacement.NoMonitor"/>。
+        /// </summary>
         public readonly int MonitorIndex;
 
         public Placement(PointRect rect, PlacementReason reason, int monitorIndex)
@@ -90,74 +98,83 @@ namespace ChatterMascot.Window
     /// </summary>
     public static class WindowPlacement
     {
+        /// <summary>
+        /// 基準にしたモニタが決まらなかったことを表す。
+        ///
+        /// ★ <b>「モニタの情報が1枚も取れなかった」ことは、理由ではなくこれで読み取る。</b>
+        ///   <see cref="PlacementReason"/> に値を足しても、ここで既に分かることしか増えない。
+        /// </summary>
+        public const int NoMonitor = -1;
+
         public static Placement Resolve(WindowState saved, DisplayLayout now, PlacementLimits limits)
         {
-            if (now == null || !now.HasMonitors)
-            {
-                // モニタが1枚も取れない。ここで既定へ寄せても置き場所が無いので、
-                // 保存があればそのまま、無ければ原点に既定サイズで出す
-                var fallback = saved.Rect.IsValid
-                    ? saved.Rect
-                    : new PointRect(0f, 0f, limits.DefaultWidth, limits.DefaultHeight);
-                return new Placement(fallback, PlacementReason.Defaulted, -1);
-            }
-
-            var primary = now.Primary;
+            var hasMonitors = now != null && now.HasMonitors;
 
             if (!saved.Rect.IsValid)
             {
-                var size = ClampSize(limits.DefaultWidth, limits.DefaultHeight, primary, limits);
-                return new Placement(size.AtBottomCenterOf(primary), PlacementReason.Defaulted, DisplayLayout.PrimaryIndex);
+                var fresh = new PointRect(0f, 0f, limits.DefaultWidth, limits.DefaultHeight);
+                if (!hasMonitors) return new Placement(fresh, PlacementReason.Defaulted, NoMonitor);
+
+                var target = now.Primary;
+                return new Placement(
+                    fresh.WithSizeFittingInto(target).AtBottomCenterOf(target),
+                    PlacementReason.Defaulted, DisplayLayout.PrimaryIndex);
             }
 
-            // ★ 大きさを先に決める。位置の判定は「その大きさの窓が見えるか」なので、
-            //   クランプ後の大きさでやらないと閾値がずれる
-            var wanted = ClampSize(saved.Rect.Width, saved.Rect.Height, primary, limits)
-                .WithPosition(saved.Rect.X, saved.Rect.Y);
+            var wanted = saved.Rect.WithMinimumSize(limits.MinWidth, limits.MinHeight);
 
-            var best = -1;
+            if (!hasMonitors)
+            {
+                // ★ **位置は動かさない。** 置き場所が分からないのに動かすと、
+                //   「モニタの情報が一瞬取れなかっただけ」で窓が飛ぶ。
+                //   ★ 大きさの下限だけは効かせる —— 保存ファイルは人が編集しうるので、
+                //   潰れた矩形をそのまま適用すると掴めない窓ができる。
+                //   モニタが取れなかったことは <see cref="Placement.MonitorIndex"/> で読み取れる
+                return new Placement(wanted, PlacementReason.Restored, NoMonitor);
+            }
+
+            // ★ **候補ごとに「そのモニタに収まる大きさ」で評価する。**
+            //   「主モニタで削ってから選ぶ」と、選んだ先がもっと狭いときに削り足りず、
+            //   そのまま復元しても押し込んでも**そのディスプレイからはみ出す**。
+            //   ★ 「縮めてから可視をもう一度測る」を別の手順にしないこと ——
+            //   別手順にすると測り直しを忘れる余地が残る。ここで一緒に決めれば構造的に消える。
+            var best = NoMonitor;
             var bestArea = 0f;
+            var bestRect = default(PointRect);
             var bestVisible = default(PointRect);
             for (var i = 0; i < now.Monitors.Count; i++)
             {
-                var visible = wanted.Intersect(now.Monitors[i]);
+                var monitor = now.Monitors[i];
+                var candidate = wanted.WithSizeFittingInto(monitor);
+                var visible = candidate.Intersect(monitor);
                 if (visible.Area <= bestArea) continue;
+
                 bestArea = visible.Area;
                 best = i;
+                bestRect = candidate;
                 bestVisible = visible;
             }
 
-            if (best < 0)
+            if (best == NoMonitor)
             {
-                var size = wanted.AtBottomCenterOf(primary);
-                return new Placement(size, PlacementReason.ReanchoredToPrimary, DisplayLayout.PrimaryIndex);
+                var target = now.Primary;
+                return new Placement(
+                    wanted.WithSizeFittingInto(target).AtBottomCenterOf(target),
+                    PlacementReason.ReanchoredToPrimary, DisplayLayout.PrimaryIndex);
             }
 
+            // ★ 構成が変わっていたら厳しい方の閾値を使う。前と同じ構成なら、
+            //   端に寄っているのはユーザーがそう置いた結果かもしれないので尊重する
             var sameLayout = string.Equals(saved.DisplaySignature, now.Signature, StringComparison.Ordinal);
             var needWidth = sameLayout ? limits.MinVisibleWidth : limits.StrictVisibleWidth;
             var needHeight = sameLayout ? limits.MinVisibleHeight : limits.StrictVisibleHeight;
 
             if (bestVisible.Width >= needWidth && bestVisible.Height >= needHeight)
             {
-                return new Placement(wanted, PlacementReason.Restored, best);
+                return new Placement(bestRect, PlacementReason.Restored, best);
             }
 
-            return new Placement(wanted.ClampInto(now.Monitors[best]), PlacementReason.Clamped, best);
-        }
-
-        /// <summary>
-        /// 大きさを下限と<b>モニタの作業領域</b>で挟む。
-        ///
-        /// ★ 上限をモニタにするのは、<b>作業領域より大きい窓は必ずどこかがはみ出す</b>から。
-        ///   はみ出したまま <see cref="PointRect.ClampInto"/> に渡すと最小コーナーに張り付く。
-        /// </summary>
-        private static PointRect ClampSize(float width, float height, PointRect monitor, PlacementLimits limits)
-        {
-            var w = Math.Max(limits.MinWidth, width);
-            var h = Math.Max(limits.MinHeight, height);
-            if (monitor.Width > 0f) w = Math.Min(w, monitor.Width);
-            if (monitor.Height > 0f) h = Math.Min(h, monitor.Height);
-            return new PointRect(0f, 0f, w, h);
+            return new Placement(bestRect.ClampInto(now.Monitors[best]), PlacementReason.Clamped, best);
         }
     }
 }

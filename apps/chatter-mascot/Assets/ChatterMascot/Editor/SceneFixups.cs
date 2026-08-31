@@ -100,6 +100,7 @@ namespace ChatterMascot.EditorTools
             // ★ 検査系は直さない。人が読む前提で LogError するだけにして exit コードも変えない
             AssertForwardRendering();
             AssertRendererFeatures();
+            AssertDefaultWindowSize();
 
             Debug.Log($"[Fixups] 完了（{changed} 件を更新）");
             EditorApplication.Exit(0);
@@ -433,6 +434,34 @@ namespace ChatterMascot.EditorTools
                 Debug.LogError("[Fixups] GraphicsSettings を操作できませんでした: " + e.Message);
                 return false;
             }
+        }
+
+        /// <summary>
+        /// ★ <b><c>Default Screen Width/Height</c> だけを変えても、窓の大きさは変わらない。</b>
+        ///
+        /// 起動時の大きさを決めるのは <see cref="ChatterMascot.Desktop.WindowGeometry"/> で、
+        /// <b>ポイントで持った定数と、自前の永続化（<c>window.json</c>）</b>が権威になる。
+        /// <c>ProjectSettings</c> の値が効くのは、<c>UniWindowController</c> がウィンドウを
+        /// 掴むまでの<b>最初の数フレームだけ</b>。
+        ///
+        /// ★ <b>単位が違う</b>（<c>defaultScreen*</c> はバッキング px、定数はポイント）ので、
+        ///   一致は「正しさ」ではなく<b>約束</b>。それでも揃えておかないと、
+        ///   起動直後にウィンドウが1回リサイズされて見える。
+        /// </summary>
+        private static void AssertDefaultWindowSize()
+        {
+            var width = PlayerSettings.defaultScreenWidth;
+            var height = PlayerSettings.defaultScreenHeight;
+            var wantedWidth = (int)ChatterMascot.Desktop.WindowGeometry.DefaultWidthPoints;
+            var wantedHeight = (int)ChatterMascot.Desktop.WindowGeometry.DefaultHeightPoints;
+
+            if (width == wantedWidth && height == wantedHeight) return;
+
+            Debug.LogError(
+                $"[Fixups] Default Screen Width/Height ({width}x{height}) と " +
+                $"WindowGeometry の既定 ({wantedWidth}x{wantedHeight}pt) が食い違っています。" +
+                "起動時の大きさを決めるのは WindowGeometry の方なので、" +
+                "ProjectSettings だけ変えても窓の大きさは変わりません");
         }
 
         /// <summary>

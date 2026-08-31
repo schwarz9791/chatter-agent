@@ -108,6 +108,24 @@ namespace ChatterMascot.Net
         /// <summary>接続ごとに1回で足りる警告のラッチ。壊れた相手だとログが洪水になる。</summary>
         private bool _warnedAckFailure;
 
+        /// <summary>
+        /// <b>閉じる前に投げ切るものが残っているか。</b>
+        ///
+        /// ★ <b>終了を保留するかどうかの判断にだけ使う</b>
+        ///   （<see cref="ChatterMascot.ShutdownPolicy.ShouldDefer"/>）。未 ack が無いのに
+        ///   毎回保留していたのが
+        ///   <a href="https://github.com/schwarz9791/chatter-agent/issues/68">#68</a>
+        ///   （Dock からの「終了」を2回選ぶ必要がある）の入口だった。
+        ///
+        /// ★ <b><c>_sending</c> も見ること。</b> <see cref="FlushAckAsync"/> は成功するまで
+        ///   <c>_pendingAckSeq</c> を消さないが、<b>送信が飛行中の一瞬だけ</b>
+        ///   <c>_pendingAckSeq</c> が null になる窓がある（成功の直後・<c>_sending</c> が
+        ///   戻る直前）。そこで「投げ切るものは無い」と読むと、
+        ///   <c>CloseAsync</c> を待たずに <c>_cancellation.Cancel()</c> まで進んで
+        ///   <b>飛行中の ack を自分で切る</b>。
+        /// </summary>
+        public bool HasPendingWork => _pendingAckSeq != null || _sending;
+
         private readonly Random _random = new Random();
 
         public SpeechClient(string url)

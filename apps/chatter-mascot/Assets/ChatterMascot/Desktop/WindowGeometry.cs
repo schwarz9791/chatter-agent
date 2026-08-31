@@ -178,6 +178,15 @@ namespace ChatterMascot.Desktop
             private bool _dirty;
             private float _saveAt;
             private float _nextPollAt;
+
+            /// <summary>
+            /// 保存に失敗したあと、次に試してよい時刻。
+            ///
+            /// ★ <b>落ち着き待ち（<see cref="_saveAt"/>）と同じ変数にしないこと。</b>
+            ///   窓が動き続けている間は落ち着き待ちが何度も引き直されるので、
+            ///   共有すると<b>失敗の後退が上書きされて再試行が早まる</b>。
+            /// </summary>
+            private float _retryAt;
             private int _saveFailures;
             private bool _gaveUpSaving;
 
@@ -415,9 +424,13 @@ namespace ChatterMascot.Desktop
             {
                 var now = Time.realtimeSinceStartup;
                 var candidate = new WindowState(rect, _signature);
-                var retryAt = immediate ? now : _saveAt;
+                // ★ 終了時（immediate）は待ちも<b>あきらめも飛ばす</b>。書けなかった原因
+                //   （権限・空き容量）が解消していれば、ここで拾えることがある。
+                //   増えるのは最悪でも警告1本
+                var retryAt = immediate ? now : _retryAt;
+                var maxFailures = immediate ? 0 : MaxSaveFailures;
 
-                switch (SavePolicy.Decide(candidate, _lastPersisted, _saveFailures, MaxSaveFailures,
+                switch (SavePolicy.Decide(candidate, _lastPersisted, _saveFailures, maxFailures,
                                           now, retryAt))
                 {
                     case SaveAction.Skip:
@@ -439,7 +452,7 @@ namespace ChatterMascot.Desktop
                 // ★ 保留は落とさない。ただし**必ず待たせる** ——
                 //   落とさないだけだと毎フレーム書き込みを試すことになる
                 _saveFailures++;
-                _saveAt = now + SaveRetrySeconds;
+                _retryAt = now + SaveRetrySeconds;
 
                 if (_saveFailures >= MaxSaveFailures && !_gaveUpSaving)
                 {

@@ -117,14 +117,19 @@ hook 方式への転換で、`textFilter.ts` が**上流と要件で食い違う
 | 上流 | 移送先 | 大きさ | 改変 |
 |---|---|---|---|
 | `public/animations/idle_loop.vrma` | `apps/chatter-mascot/Assets/StreamingAssets/idle_loop.vrma` | 157,664 B | **無改変**（バイト単位で同一） |
+| `resources/icons/trayTemplate.png` | `apps/chatter-mascot/Assets/StreamingAssets/trayTemplate.png` | 671 B | **無改変**（バイト単位で同一） |
+| `resources/icons/trayTemplate@2x.png` | `apps/chatter-mascot/Assets/StreamingAssets/trayTemplate@2x.png` | 1,410 B | **無改変**（バイト単位で同一） |
 
 | | |
 |---|---|
-| 最終更新のコミット | **`7ce44bd674c0f5fc65c41b20d5344d4e358f6d5e`**（`7ce44bd` / 2026-02-08 / kazakago / ":recycle: idle_loop.vrmaアニメーションの調整"） |
-| コピー実施日 | 2026-08-26（[#56](https://github.com/schwarz9791/chatter-agent/issues/56)。使うのは [#59](https://github.com/schwarz9791/chatter-agent/issues/59)） |
+| 最終更新のコミット（`idle_loop.vrma`） | **`7ce44bd674c0f5fc65c41b20d5344d4e358f6d5e`**（`7ce44bd` / 2026-02-08 / kazakago / ":recycle: idle_loop.vrmaアニメーションの調整"） |
+| 最終更新のコミット（`trayTemplate*.png`） | **`a61a572`**（2026-02-06 / kazakago / ":sparkles: システムトレイアイコンを追加"）。`c641331`（2026-02-16 / "アプリアイコンを差し替え"）は `icon.*` のみで、トレイ側は触っていない |
+| コピー実施日 | `idle_loop.vrma` は 2026-08-26（[#56](https://github.com/schwarz9791/chatter-agent/issues/56)。使うのは [#59](https://github.com/schwarz9791/chatter-agent/issues/59)）、`trayTemplate*.png` は 2026-08-31（[#75](https://github.com/schwarz9791/chatter-agent/issues/75)） |
 
-**これは kazakago の著作物**。冒頭の「⚠」節の判定に照らすと、上流の `main` に kazakago 名義で
-入っているので**帰属が要る側**（`public/` にあるのは自分の作業ブランチで書いたものではない）。
+**どちらも kazakago の著作物**。冒頭の「⚠」節の判定に照らすと、上流の `main` に kazakago 名義で
+入っているので**帰属が要る側**（`public/` や `resources/` にあるのは自分の作業ブランチで書いたものではない）。
+`trayTemplate*.png` はフォーク点 `46f7def` の時点で既に存在することを確認してある
+（`git cat-file -e 46f7def:resources/icons/trayTemplate.png`）。
 
 ★ **`Modified for chatter-agent.` は要らない。** 無改変なうえ、**バイナリなので
 ヘッダコメントを埋め込む場所が無い**。Apache-2.0 §4(b)（改変の告知）は改変していないので
@@ -147,6 +152,8 @@ cc-mascot 側も再配布不可のモーションは**プライベート submodu
 | `prompt/promptEventFormatter.ts` + `.test.ts` | 自分が cc-mascot の作業ブランチ上で書いたものを持ち込んだ |
 | `summarizer/` 配下すべて | 自分が cc-mascot の作業ブランチ上で書いたものを持ち込んだ（`9b23434` で新規作成） |
 | `core/` `cli/` `server/` 配下すべて | chatter-agent 独自 |
+| `apps/chatter-mascot/Assets/Plugins/macOS~/ChatterMascotNative/` | chatter-agent で新規に書いた（#75 のネイティブプラグイン。**cc-mascot に相当する実装は無い** —— あちらは Electron の `Tray` / `app.dock.hide()` で済んでおり、ObjC のコードは1行も存在しない） |
+| `apps/chatter-mascot/Assets/ChatterMascot/Runtime/Ui/` `Runtime/Settings/` | chatter-agent で新規に書いた（#75。メニューの組み立て・ショートカットの解釈・設定の永続化） |
 
 `prompt/promptEventFormatter.ts` は移送時に `SpeakMessage` の import 元を `../adapters/harnessAdapter`（kazakago の `adapters/` は移植しない）から `../core/types` に張り替えてある。
 

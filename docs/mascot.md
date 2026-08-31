@@ -1945,6 +1945,274 @@ VRM のテクスチャは `.vrm` の中にあるので、`.png` が単体で入�
 `com.unity.ai.assistant` も依存していない）。残すとビルドのたびに**膨大なシェーダー警告**が出て、
 コンパイル時間も伸びる。外してある。
 
+### ★ Unity 単体では常駐アプリにならない（#75）
+
+メニューバー常駐に要る3つのうち、**Unity で書けるものが1つも無い。**
+
+| やりたいこと | Unity だけでできるか |
+|---|---|
+| メニューバーのアイコンとメニュー（`NSStatusItem` / `NSMenu`） | **できない。** UniWindowController にもステータスバーの API は無い |
+| フォーカスが無い状態でのキー入力（グローバルショートカット） | **できない。** Input System はフォーカスを持つときしかキーを受け取らない。常駐マスコットは基本フォーカスを持たない |
+| Dock に出さない（`LSUIElement`） | ビルド後処理で `Info.plist` を書けばできる |
+
+→ **Objective-C のネイティブプラグインを自作する**（`Assets/Plugins/macOS~/ChatterMascotNative/`）。
+設定パネル（[#76](https://github.com/schwarz9791/chatter-agent/issues/76)）もこの土台に乗る。
+
+★ **cc-mascot から流用できるコードは1行も無い。** あちらは Electron の `Tray` と
+`app.dock.hide()` で済んでおり、ObjC のコードが存在しない。**流用したのはアイコン画像だけ**
+（`trayTemplate.png` / `@2x`。→ [`origin.md`](./origin.md)）。
+
+★ **ただし知見は1つ効いた。** cc-mascot は `app.dock.hide()` を `ready-to-show` から
+**500ms 遅らせている**（コメント: 「起動時に呼ぶとフルスクリーン Space で起動してしまうため」）。
+`LSUIElement` は起動前から accessory なので同じ罠は踏まない見込みだが、
+保険の `CM_SetActivationPolicy` も**起動から1秒待ってから**呼んでいる。
+
+### ★★ `-fvisibility=hidden` で作ったバンドルは、シンボルが1つも見えない
+
+`clang -bundle` に `-fvisibility=hidden` を付けると、**`CM_` で始まる関数が
+`nm -gU` に1つも出なくなる**（実測）。C の関数は既定で external だが、
+このフラグは `__attribute__((visibility("default")))` が無いものを全部隠す。
+
+**症状は `DllNotFoundException` ではなく `EntryPointNotFoundException`。**
+バンドル自体は読めているので「プラグインが無い」とは言われず、
+呼んだ関数だけが見つからない。
+
+```c
+#define CM_EXPORT __attribute__((visibility("default")))
+CM_EXPORT bool CM_Initialize(void);
+```
+
+★ **フラグを外すのではなく、公開するものに印を付けること。** 外すと ObjC のクラスや
+内部ヘルパまで全部エクスポートされ、**何が ABI なのかがソースから読めなくなる**。
+
+確かめ方:
+
+```bash
+nm -gU Assets/Plugins/macOS/ChatterMascotNative.bundle/Contents/MacOS/ChatterMascotNative | grep _CM_
+```
+
+### ★★ `PluginImporter` の設定は、バッチモードの初回インポートでは書かれない
+
+`.bundle` を置いて `scripts/test.sh` を回すと `.meta` は作られるが、中身が**GUID だけ**になる:
+
+```yaml
+fileFormatVersion: 2
+guid: a692ce6a5257a459fb5b8910fa38355f
+```
+
+`PluginImporter` のブロックが無い＝**プラットフォームの絞り込みが記録されていない**。
+このままだと Unity が既定（すべてのプラットフォーム）でインポートし直すことがあり、
+**macOS のバンドルが Android ビルドに混ざる**（→ [#25](https://github.com/schwarz9791/chatter-agent/issues/25)）。
+
+★ **Inspector で直さないこと。** `.bundle` は git に入っていない（バイナリはレビューできず、
+`plugin/bin/*.mjs` のように CI でソースとの一致を検証できない）ので、
+**新規クローンには `.meta` しか無い**。手で直すと「誰かのマシンでだけ通る」状態になる。
+直し方はコードに置いてある:
+
+```bash
+./scripts/run.sh ChatterMascot.EditorTools.NativePluginSettings.FixAll
+```
+
+正しく入ると `.meta` はこうなる（`Any: enabled: 0` が要点）:
+
+```yaml
+  platformData:
+    Any:
+      enabled: 0
+    Editor:
+      enabled: 1
+      settings: { CPU: AnyCPU, OS: OSX }
+    OSXUniversal:
+      enabled: 1
+```
+
+### ★★ `Info.plist` を `System.Xml.Linq` で書き換えると壊れる
+
+plist は普通の XML に見えるので `XDocument` で読んで保存したくなるが、**2箇所壊れた**（実測）:
+
+1. **DOCTYPE の末尾に `[]` が付く。** `XDocumentType.InternalSubset` が
+   `null` ではなく空文字列になり、`Save` がそれを内部サブセットとして出力する。
+   結果、`PlistBuddy` が
+   `Encountered unexpected character [ on line 2 while parsing DTD` で読めなくなる
+2. **UTF-8 BOM が付く**（`XDocument.Save(path)` の既定）
+
+```xml
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"[]>
+```
+
+どちらも XML としては直せるが、**直し続ける理由が無い** —— plist を壊さずに書き換える道具が
+OS に入っている。`MacPostBuild` は `/usr/libexec/PlistBuddy` を呼ぶ:
+
+```
+Set :LSUIElement true    # 既にあれば成功
+Add :LSUIElement bool true    # 無ければこちら
+```
+
+★ **`UnityEditor.iOS.Xcode.PlistDocument` も使わないこと。** iOS Build Support に入っているので、
+モジュールを入れていない環境では**コンパイルすら通らない**。
+
+★ **ビルド後処理が失敗してもビルドを落とさないこと。** ここが転んで失うのは
+「Dock にアイコンが出ない」だけで、マスコットは動く。例外を投げると
+`BuildPipeline` がビルドごと失敗させる。
+
+### ★ リバース P/Invoke（ネイティブ → C#）で踏むところ
+
+| # | |
+|---|---|
+| 1 | **`static` メソッド + `[AOT.MonoPInvokeCallback]`。** インスタンスメソッドやクロージャを渡さない。Mono では動くが IL2CPP で落ちる |
+| 2 | **デリゲートを `static readonly` フィールドで保持する。** `CM_SetEventCallback(OnNativeEvent)` と直接書くと暗黙に作られたデリゲートが GC され、症状は**「しばらく使っていると SIGSEGV」**になる |
+| 3 | ★ **コールバックの中から Unity API を呼ばない。** AppKit の menu action と Carbon の hotkey handler は**Unity のプレイヤーループの外**（メニュー追跡中のネストした run loop）で発火しうる。`ConcurrentQueue` に積み、`Update()` で drain する（`AfplaySpeechPlayer` が `Process.Exited` を使わないのと同じ判断） |
+| 4 | **managed 例外をネイティブのスタックへ抜かない。** `try/catch` で握る |
+| 5 | **`CM_SetEventCallback(NULL)` → `CM_Shutdown()` の順**で終了処理する。逆だと、終了中の menu action がもう生きていない Mono ドメインを叩く |
+| 6 | **可用性の判定は初回1回だけ。** 「無い」をフラグで覚え、以降は try/catch を回さない（イベントの drain は毎フレーム走る） |
+| 7 | **`CM_Version()` の戻り値を `string` で受けない。** P/Invoke の戻り値 `string` はマーシャラが**受け取った領域を解放しようとする**。`IntPtr` で受けて `Marshal.PtrToStringAnsi` |
+
+★ **コールバックを1本に統一してある。** 理由が2つ: (1) 上の 2 を守る対象が増えない、
+(2)「main thread かどうか」の保証を ObjC 側1箇所に書ける。
+
+★ **ObjC 側にメニューのキーもラベルも書かないこと。** C# が JSON でメニューを渡し、
+ネイティブは `representedObject` に載せた key を返すだけ。項目の追加・並び替え・ラベルの変更が
+C# だけの変更で済むのが、この作りを選んだ理由そのもの（#76 の設定パネルが同じ形で乗る）。
+
+### ★ `NSStatusItemBehaviorTerminationOnRemoval` を立てない
+
+「⌘ドラッグでアイコンを外したらアプリを終了する」挙動。一見親切だが、
+**Dock に居ない常駐アプリでは「黙って消えた」にしか見えない**。戻す手段も無い。
+
+### ★★ 一時ミュートは「声だけ消す」—— 音量では実装できない
+
+**音量を変える手段が無い。** macOS の再生の実体は引数なしの `afplay`（音量を渡す口が無い）で、
+`Disable Unity Audio` が ON なので `AudioListener.volume` も効かない。
+**再生そのものを飛ばす**のが唯一の手段になる。
+
+`MutedSpeechPlayer`（`ISpeechPlayer` のデコレータ）が3つを同時に満たす:
+
+| | |
+|---|---|
+| **ack は必ず出す** | `PlayAsync` が成功を返せば `Played` → `Finish` → `ConsumeHead` → `EmitAck` の**通常経路そのまま**が走る。★ 止めるとキューが `speechQueueMaxEntries`（500）まで溜まって古い方から捨てられ、解除後に**歯抜けで喋り出す**（→ [`protocol.md`](./protocol.md) の責務2・3）。**`PlaybackQueue` には1行も触らない** |
+| **長さぶん待つ** | ★ 即座に返すと、溜まっていた発話が数百 ms で全部消化されて**表情が高速で切り替わる**。「声だけ消す」は実時間を消費して初めて成立する |
+| **口だけ止める** | `MascotRunner.BeginSpeaking` が `_mute.Muted` のときエンベロープを落とす。★ **`_speaking` への登録そのものは飛ばさない** —— 飛ばすと表情も体の動きも止まり、「声を消した」ではなく「居なくなった」に見える（→ `SpeakingSet.Begin` の doc） |
+
+★ **`ActiveCount` に「無音で待っている本数」を足すこと。** 足さないとミュート中は
+本物の `ActiveCount` が常に 0 になり、`AudioIdleGate` が「鳴っていない」と判定して
+出力デバイスを手放す。macOS は `CanSuspendOutput == false` なので無害だが、
+**Android では実際に手放してしまう**（→ #25）。
+
+★ **`Prepare` は本物に委譲すること。** WAV の検証もエンベロープ生成も走るので、
+ミュートの有無で**ログの見え方が変わらない**。無音の原因を切り分けるとき、
+ミュートかどうかで診断の出方が変わるのはいちばん困る。
+
+★ **ミュートにした瞬間、鳴っているものを止める。** 押す動機は「いま喋っているのを黙らせたい」
+なので、次の発話から効くのでは遅い。**そのとき返る失敗は成功に倒す**（止めたのは自分なので、
+押した本人に向かって警告を出さない）。
+
+★ **合成は止まらない。** ミュート中も `GET /audio/…` は走る。止めるには `PlaybackQueue` に
+触る必要があり、上の規律と引き換えになるのでしない。
+
+### ★ `LSUIElement` の代償
+
+| # | 代償 | 手当て |
+|---|---|---|
+| 1 | **Dock から終了できない** → [#68](https://github.com/schwarz9791/chatter-agent/issues/68) の再現手段が消える | **#16 で #68 を閉じてから着手した。** 保留経路の確認は `-quitProbe` が唯一の手段になる |
+| 2 | **⌘Q が効かない**（メニューバーが無い） | ステータスバーのメニューに「終了」を置く。★ **ネイティブから `[NSApp terminate:]` を呼ばないこと** —— `Application.Quit()` なら #68 で直した経路（`wantsToQuit` で ack を投げ切ってから `Update` の先頭で呼び直す）にそのまま乗る。`applicationShouldTerminate:` を握る必要が無いので `CM_ReplyToTerminate` も要らない |
+| 3 | **アプリがアクティブになれない** | 何かウィンドウを出すときは `[NSApp activateIgnoringOtherApps:YES]`（本番になるのは #76） |
+| 4 | ★ **`forceSingleInstance` が防げない二重起動が見えなくなる** | (a) 起動時に `[Mascot] pid=… bundlePath=…` (b) ★ **ステータスバーのツールチップに pid を入れる** —— アイコンが2つ並ぶので目で分かる。これが実際にいちばん効く |
+
+### ★ 「キャラクターを隠す」は窓ではなくカメラを止める
+
+`UniWindowController` は窓の生成と透過の面倒を見ているので、**窓そのものを消しに行くと
+透過とクリック透過の設定ごと崩れる**。`cullingMask` を 0 にすれば
+カメラは透明でクリアし続け、ヒットテストの raycast も当たらなくなる
+（＝クリック透過も自然に成立する）。
+
+★ **この状態を永続化しないこと。** 隠れたまま次を起動すると「マスコットが出ない」に化ける。
+ミュートはアイコンが薄くなるので気づけるが、隠れているものは気づきようが無い。
+（`settings.json` に入るのは `audio.mute` / `audio.muteHotKey` の2つだけ。）
+
+### ★★ ObjC の `NSLog` は Unity の `Player.log` に入らない
+
+ネイティブプラグインの中で `NSLog` を呼んでも、**ビルドした `.app` ではどこにも残らない**（実測）。
+`Player.log` に入らないのはもちろん、`log show --predicate 'process == "Chatter Mascot"'` にも出ず、
+`.app` の実行ファイルを直接叩いて stderr をリダイレクトしても出なかった。
+
+つまり **「メニューバーに出ない」ときに手掛かりが1つも残らない**。
+`CMEmitLog` を足して、診断も**イベントと同じ1本のコールバック**で C# へ返している:
+
+```objc
+CMEmitLog("ステータスバー: item=あり button=あり image=あり visible=1");
+```
+```csharp
+case MenuEventKind.Log:
+    Debug.Log("[Native] " + value.Message);   // ここで初めて Player.log に載る
+```
+
+★ **`CMEmit` の失敗そのものを `CMEmitLog` で報告しないこと**（同じ経路なので無限に回る）。
+
+★ **コールバックが付く前の診断は捨てられる。** `CM_SetEventCallback` より前に起きたことは残らないので、
+初期化の順序を変えるときは診断の見え方も一緒に動く。
+
+### ★ `NSStatusItem` を作った直後に frame を測っても意味が無い
+
+レイアウトは**次の run loop** で走るので、`CM_StatusItemShow` の中で
+`gStatusItem.button.window.frame` を読むと **必ず `0,0 38x0`（高さ 0）** が返る。
+「高さ 0 だから表示されていない」と読むと、丸1本ぶん誤った方向へ進む。
+
+2秒後に測り直すと `frame=3103,2130 38x30` で正しく載っていた（AppKit の座標系は
+**bottom-up**。y=2130 は 2160 の画面の上端＝メニューバー）。
+
+★ **アクセシビリティからは見えない。** `System Events` で
+`menu bar 2` も `AXExtrasMenuBar` も取れない（`missing value`）。
+一方 **`click at {x, y}` は効く** ので、実機確認でメニューを開くならこれを使う:
+
+```bash
+osascript -e 'tell application "System Events" to click at {3196, 15}'
+```
+
+★ **`orca computer click` は使えない。** `LSUIElement` のアプリは
+「フォーカスされた最前面のウィンドウ」を持てないので `window_not_focused` で拒否される。
+
+### #75 の実機確認（macOS 26.6.2 / `.app`）
+
+| 確認したこと | 結果 |
+|---|---|
+| Dock に出ない | `lsappinfo` が **`type="UIElement"`**（同じアプリの旧ビルドは `type="Foreground"`） |
+| メニューバーのアイコン | 出る。テンプレート画像なので背景に応じて白/黒が入れ替わる |
+| **二重起動** | ★ **アイコンが並ぶ。** 3つ動かしたら3つ並んだ —— pid をツールチップに入れた狙いどおり、目で分かる |
+| メニューの中身 | ミュート（⌥M）/ キャラクターを隠す / 設定を開く… / ── / Chatter Mascot 0.1.0（**灰色**）/ 終了 |
+| 状態の反映 | ミュートに ✓ が付き、ラベルが「キャラクターを**表示する**」に変わる |
+| **⌥M（他アプリにフォーカスがある状態）** | ★ 効く。**アクセシビリティ権限のダイアログは出ない**（Carbon を選んだ理由） |
+| ミュート中のアイコン | **薄くなる**（`appearsDisabled`） |
+| 設定を開く | TextEdit が開く（#76 までの繋ぎ） |
+| **メニューの「終了」** | ★ **1回で終わる。** `試行 2` も `LogError` も出ない（#68 の手当てが `LSUIElement` でも効いている） |
+| **ミュート中の発話** | ★ `afplay` は**起動せず**、サーバー側は `seq<=1 を 1 件消しました`（**ack は出ている**）。キューは空のまま |
+| 解除後の発話 | `afplay の実時間 1454ms / WAV の長さ 1140ms`（鳴る） |
+| **バンドルを消した `.app`** | ★ 起動する。`[Native] ChatterMascotNative.bundle が見つかりません…` の**警告1本**だけで、VRM も読み込まれ、マスコットは動く |
+
+★ **`.app` の中の `.bundle` を手で差し替えないこと。** コード署名が壊れて
+`open` から起動できなくなる（`Player.log` が空のまま終了する）。
+ネイティブだけ直したときも `./scripts/build.sh` を通すこと（2回目以降は5秒で終わる）。
+
+★ **`open` は同じ bundle id のアプリが動いていると新しいプロセスを起こさない。**
+別ワークツリーのビルドと並べて試すときは `open -n` を使う。
+
+### ★ グローバルショートカットは Carbon で登録する
+
+`RegisterEventHotKey`（HIToolbox）は **アクセシビリティ権限のダイアログが出ない**。
+`NSEvent.addGlobalMonitorForEvents` は出る —— 常駐マスコットのために
+「入力の監視」を許可させるのは要求として重すぎる。
+
+★ **修飾キー無しを拒否すること。** 単独のキーを登録すると、そのキーが
+**どのアプリでも入力できなくなる**。`HotKeySpec` とネイティブ側の両方で弾いている。
+
+★ **Carbon の仮想キーコードは「物理キーの位置」であって刻印ではない。**
+`kVK_ANSI_M`（0x2E）は US 配列で M がある位置を指す。JIS 配列でも同じ位置に M が
+刻印されているので実用上は一致するが、Dvorak などでは合わない。
+レイアウトを見て変換する API（`UCKeyTranslate`）はあるが、
+**ショートカットは物理位置で覚えるもの**なので変換しないのが macOS の作法。
+
+★ **`NSMenuItem.keyEquivalent` に渡さないこと。** 渡すとアプリがアクティブなときだけ効く
+**2つ目の**ショートカットができ、グローバル登録と二重に発火する。**ラベルに書くだけ**にする。
+
 ## 実装の決めごと
 
 ### `PlaybackQueue` に判断を集める

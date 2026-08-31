@@ -15,12 +15,12 @@ namespace ChatterMascot.Audio
     /// ★ <see cref="ILipSyncSource"/> のぶんだけ自動プロパティなのは、C# が
     ///   インターフェースのメンバーをフィールドで実装できないため（→ <see cref="ILipSyncSource"/>）。
     /// </summary>
-    public sealed class AfplayAudioHandle : ILipSyncSource
+    public sealed class AfplayAudioHandle : ILipSyncSource, IAudioDuration
     {
         public string Path;
 
         /// <summary>再生時間（ミリ秒）。<b>0 は「長さ 0」ではなく「不明」</b></summary>
-        public int DurationMs;
+        public int DurationMs { get; set; }
 
         /// <summary><c>null</c> 可（口が動かないだけ。発話は落とさない）</summary>
         public float[] Envelope { get; set; }

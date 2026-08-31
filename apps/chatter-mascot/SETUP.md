@@ -20,11 +20,29 @@ Android XR グラス（XREAL Aura）の両方をここからビルドする。
 | JSON | `com.unity.nuget.newtonsoft-json` |
 | XR（Android のみ） | `com.unity.xr.androidxr-openxr` + [Android XR Extensions for Unity](https://github.com/android/android-xr-unity-package) |
 | グラフィックス API | Metal（macOS）/ Vulkan（Android XR） |
+| 常駐（macOS のみ） | **自作の Objective-C プラグイン** `Assets/Plugins/macOS~/ChatterMascotNative/`（→ [#75](https://github.com/schwarz9791/chatter-agent/issues/75)） |
 
 ### 必要な Unity モジュール
 
 - **Mac Build Support (IL2CPP)** — macOS Standalone のビルドに要る
 - **Android Build Support**（OpenJDK / SDK & NDK 込み）— #25 で要る
+
+### Xcode コマンドラインツール（macOS のみ）
+
+メニューバー常駐（#75）のネイティブプラグインを `clang` でビルドするのに要る。
+
+```bash
+xcode-select --install   # 既に Xcode があれば不要
+./scripts/build-native.sh
+```
+
+★ **`.bundle` は git に入っていない。** バイナリはレビューできず、`plugin/bin/*.mjs` のように
+CI で「ソースと一致するか」を検証する手段が無い（clang の出力に再現性が無い）。
+`./scripts/build.sh` が Unity より先に自動で作るので、普段は意識しなくてよい。
+
+★ **バンドルが無くても起動する。** `DllNotFoundException` を握って警告1本
+（`[Native] ChatterMascotNative.bundle が見つかりません…`）にしてあり、落ちるのは
+**メニューバー常駐とミュートのショートカットだけ**。マスコットは出て喋る。
 
 ### パッケージの導入
 
@@ -47,6 +65,14 @@ Android XR グラス（XREAL Aura）の両方をここからビルドする。
 
 ★ **プラグインのプラットフォームを絞ること。** UniWindowController の macOS ネイティブプラグインが
 Android ビルドに混ざらないよう Plugin Inspector で macOS に限定し、XR パッケージは Android にだけ効かせる。
+
+★ **自作プラグイン（`ChatterMascotNative.bundle`）の設定は手で直さないこと。**
+`.bundle` が git に無いので、新規クローンには `.meta` しか無い。Unity が既定でインポートし直すと
+**「すべてのプラットフォーム」に化ける**ことがある。直し方はコードに置いてある:
+
+```bash
+./scripts/run.sh ChatterMascot.EditorTools.NativePluginSettings.FixAll
+```
 
 ---
 
@@ -164,6 +190,16 @@ Bluetooth イヤホンの電池を食う。macOS には手放す API が無い�
 Assets/StreamingAssets/
   vita.vrm                          同梱モデル（CC0。→ ../../NOTICE）
   idle_loop.vrma                    同梱アイドル（使うのは #59）
+  trayTemplate.png / @2x            メニューバーのアイコン（cc-mascot 由来。→ ../../NOTICE）
+
+Assets/Plugins/
+  macOS~/ChatterMascotNative/       ★ `~` 付き。Unity は完全に無視する（ObjC のソース）
+    CMNative.h                      ABI。★ 公開するものに CM_EXPORT を付ける
+    CMEvent.m                       C# へ返す唯一の口（main thread の保証もここ）
+    CMApp.m                         NSApplicationActivationPolicy / 版
+    CMStatusItem.m                  NSStatusItem + NSMenu（★ キーもラベルも書かない）
+    CMHotKey.m                      Carbon RegisterEventHotKey
+  macOS/ChatterMascotNative.bundle  成果物（.gitignore。.meta だけコミットする）
 
 Assets/ChatterMascot/
   Runtime/                          ChatterMascot.Runtime — 描画に依存しない層
@@ -175,6 +211,13 @@ Assets/ChatterMascot/
                 AudioFetcher.cs     GET /audio/<epoch>-<seq>.wav
     Audio/      WavDecoder.cs       WAV → AudioClip
                 AudioClipPlayer.cs  AudioSource で1件ずつ鳴らす
+                MuteState.cs        一時ミュートの状態（#75）
+                MutedSpeechPlayer.cs ★ 「声だけ消す」デコレータ。ack は通常経路のまま出す
+    Ui/         HotKeySpec.cs       "opt+m" ⇄ Carbon の (keyCode, modifiers)
+                MenuModel.cs        ★ メニューの並びの唯一の持ち主
+                MenuJson.cs         ネイティブとやり取りする JSON
+    Settings/   SettingsStore.cs    ~/.config/chatter-agent/mascot/settings.json
+                SettingsJson.cs / MascotSettings.cs
     Vrm/        AssetPath.cs        ★ .vrm / .vrma の探索順（純粋。下の表）
                 VrmFraming.cs       ★ 画面に収まるカメラ距離（純粋）
     CommandLine.cs                  起動引数（-serverUrl / -vrm / -buildScene が共有）
@@ -192,8 +235,12 @@ Assets/ChatterMascot/
     WindowGeometry.cs               ★ 位置と大きさをポイントで復元・永続化
     DragStateGuard.cs               ★ ドラッグ終了の取りこぼしでクリック透過が死ぬのを救う
     WindowProbe.cs                  座標系の実測（`-windowProbe` のときだけ動く）
+    StatusItemBridge.cs             ★ メニューバー常駐の配線（判断は Runtime 側）
+    Native/ChatterMascotNative.cs   DllImport。★ 可用性の判定は初回1回だけ
   Editor/
     SceneFixups.cs                  シーンとプロジェクトの修繕・検査
+    MacPostBuild.cs                 ★ Info.plist に LSUIElement を書く（Dock に出さない）
+    NativePluginSettings.cs         PluginImporter を出荷値にする
     BuildScript.cs / VrmProbe.cs
   Tests/Editor/                     EditMode テスト（状態機械が主）
 ```
@@ -298,6 +345,31 @@ cd apps/chatter-mascot
   動かしたときに、後発が先行インスタンスの再生中の WAV を消さないため
 
 ---
+
+#### 常駐まわり（#75）
+
+★ **`.app` の中の `.bundle` を手で差し替えない。** コード署名が壊れて `open` から
+起動できなくなる（`Player.log` が空のまま終了する）。ネイティブだけ直したときも
+`./scripts/build.sh` を通すこと（2回目以降は5秒で終わる）。
+
+★ **`open` は同じ bundle id のアプリが動いていると新しいプロセスを起こさない。**
+別ワークツリーのビルドと並べて試すときは `open -n`。
+
+★ **メニューはアクセシビリティから触れない**（`menu bar 2` も `AXExtrasMenuBar` も
+`missing value`）。実機確認で開くなら座標クリック:
+
+```bash
+osascript -e 'tell application "System Events" to click at {3196, 15}'
+```
+
+★ **Dock に出ないことの確認は `lsappinfo`。**
+
+```bash
+lsappinfo list | grep -A2 "pid = <pid>"   # type="UIElement" なら Dock に出ない
+```
+
+★ **ObjC 側の `NSLog` はどこにも残らない**（→ [`../../docs/mascot.md`](../../docs/mascot.md)）。
+ネイティブの診断は `CMEmitLog` で C# へ返し、`[Native]` 付きで `Player.log` に出す。
 
 ## XR 固有（→ [#25](https://github.com/schwarz9791/chatter-agent/issues/25)）
 

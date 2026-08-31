@@ -47,6 +47,15 @@ crashlytics-build.properties
 *.unitypackage
 *.app
 
+# ネイティブプラグイン（#75）の成果物。
+# ★ .bundle をコミットしないこと。 バイナリはレビューできず、plugin/bin/*.mjs のように
+#   CI で「ソースと一致するか」を検証する手段が無い（clang の出力に再現性が無い）。
+#   ソースは Assets/Plugins/macOS~/ にあり、./scripts/build-native.sh で作れる。
+# ★ .meta は追跡する（GUID が動くと、参照している側が壊れる）。
+#   下の !*.meta が 13 行目の除外規則より後に来るので、こちらが勝つ。
+*.bundle
+!/[Aa]ssets/**/*.bundle.meta
+
 # Addressables
 /[Aa]ssets/[Aa]ddressable[Aa]ssets[Dd]ata/*/*.bin*
 /[Aa]ssets/[Ss]treamingAssets/aa.meta

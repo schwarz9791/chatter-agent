@@ -8,8 +8,7 @@ namespace ChatterMascot.Window
     /// （<c>AssetEnv</c> と同じ形。<c>UniWindowController</c> を EditMode から呼べないため）。
     ///
     /// ★ <b>矩形は「作業領域（visible frame）」であってフルフレームではない。</b>
-    ///   実測ではメインが <c>(0,0 3840x2130)</c> ——<b>2160 ではなく 2130</b> で、
-    ///   メニューバーの 30pt が除かれている（→ <c>docs/mascot.md</c>）。
+    ///   メニューバーや Dock の帯は含まれない（実測値は <c>docs/mascot.md</c>）。
     ///
     /// ★ <b>作業領域の和集合には隙間がある。</b> メニューバーや Dock の帯はどの矩形にも入らない
     ///   （実測でカーソルが <c>y=-23</c> という、どのモニタにも属さない位置に居た）。

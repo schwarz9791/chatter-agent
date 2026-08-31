@@ -55,8 +55,8 @@ namespace ChatterMascot.Window
         /// <summary>
         /// 「掴める」と認める最小の可視矩形。
         ///
-        /// ★ <b>面積比で判定しないこと。</b> 300x480 の縦長では「面積の 20% が見えている」を
-        ///   満たしても、可視部が下端の帯だけということが起きる。**帯は掴めない。**
+        /// ★ <b>面積比で判定しないこと。</b> 縦長の窓では、面積の条件を満たしていても
+        ///   <b>可視部が端の細い帯だけ</b>ということが起きる。<b>帯は掴めない。</b>
         /// </summary>
         public readonly float MinVisibleWidth;
         public readonly float MinVisibleHeight;

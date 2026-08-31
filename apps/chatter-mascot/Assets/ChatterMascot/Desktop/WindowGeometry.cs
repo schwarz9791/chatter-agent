@@ -17,11 +17,11 @@ namespace ChatterMascot.Desktop
     ///   <c>windowPosition</c> / <c>windowSize</c> / <c>GetMonitorRect</c> は
     ///   <b>すべて NSWindow のポイント</b>なので、そこで閉じれば換算そのものが要らなくなる。
     ///
-    /// ★ <b>これは <c>WindowSizeKeeper</c> の置き換え。</b> あちらは「起動直後に見えていた大きさ」を
-    ///   守って枠なし化の +32 を打ち消す対症療法で、
+    /// ★ <b>これは、枠なし化で増えたぶんを打ち消していた対症療法の置き換え。</b> あちらは
+    ///   「起動直後に見えていた大きさ」を守る作りで、
     ///   <a href="https://github.com/schwarz9791/chatter-agent/issues/66">#66</a> の2点
-    ///   （<c>_intended</c> を捕まえる順序が未保証 / 補正が最初の1回で打ち切り）を抱えていた。
-    ///   <b>意図した大きさの権威を自前の永続化（pt）に移すと、どちらも構造的に消える。</b>
+    ///   （捕まえる順序が保証されない / 補正が最初の1回で打ち切り）を抱えていた。
+    ///   <b>意図した大きさの権威を自前の永続化へ移すと、どちらも構造的に消える。</b>
     ///
     /// ★ <b>2人が <c>windowSize</c> を書く状態を作らないこと。</b> だから
     ///   <c>WindowSizeKeeper</c> は削除してある。
@@ -34,9 +34,8 @@ namespace ChatterMascot.Desktop
         /// <summary>
         /// 初回起動の大きさ（ポイント）。
         ///
-        /// ★ <b>ランタイムからは復元できない。</b> <c>clientSize</c> が読めるようになる
-        ///   （= attach）時点で、枠なし化の +32 は<b>もう乗っている</b>
-        ///   （実測: <c>client=300,512pt</c> に対し <c>Screen</c> はまだ <c>300x480px</c>）。
+        /// ★ <b>ランタイムからは復元できない。</b> ウィンドウを掴み取った時点で、
+        ///   枠なし化で増えたぶんは<b>もう乗っている</b>（→ <c>docs/mascot.md</c> の実測）。
         ///   だから<b>定数で持つ</b>。<c>ProjectSettings</c> の
         ///   <c>defaultScreenWidth/Height</c> は、ここが効くまでの一瞬しか効かない。
         /// ★ <b>食い違ったら <c>SceneFixups</c> が警告する。</b>

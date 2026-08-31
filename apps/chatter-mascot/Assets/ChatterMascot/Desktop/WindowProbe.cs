@@ -16,19 +16,20 @@ namespace ChatterMascot.Desktop
     ///   窓を動かし合うと何を測っているのか分からなくなるし、実測で飛ばした位置が
     ///   永続化されてしまう。
     ///
-    /// <b>実測で分かったこと</b>（2026-08-30 / macOS 26.6.2 / 外部 4K + 内蔵 Retina):
+    /// <b>ここで分かったこと</b>（値と生ログは <c>docs/mascot.md</c> の
+    /// 「ウィンドウの座標系は bottom-up・左下基準」に、測った日付と構成つきで置いてある）:
     ///
     /// <list type="bullet">
-    ///   <item><c>windowPosition</c> は<b>左下（最小コーナー）</b>。<c>(3540,1650)</c> を入れた窓が
-    ///         画面の<b>右上</b>（top-down で y=30..510）に着いた</item>
-    ///   <item><see cref="UniWindowController.GetMonitorRect"/> は<b>同じ bottom-up 空間</b>を返すが、
-    ///         ★ <b>visible frame（作業領域）</b>であってフルフレームではない ——
-    ///         メインが <c>(0,0 3840x2130)</c> で、<b>2160 ではなく 2130</b>
-    ///         （メニューバーの 30pt を除いてある）。<b>だから作業領域の和集合には隙間がある</b>
-    ///         （カーソルが <c>y=-23</c> という、どのモニタ矩形にも入らない位置に居た実測がある）</item>
-    ///   <item>作業領域の中に収まる位置なら<b>引き戻しは起きない</b>。入れた値がそのまま読み戻る</item>
+    ///   <item><c>windowPosition</c> は<b>窓の左下（最小コーナー）</b>で、原点は
+    ///         メインディスプレイのフルフレームの左下</item>
+    ///   <item><see cref="UniWindowController.GetMonitorRect"/> は<b>同じ空間</b>を返すが、
+    ///         ★ <b>作業領域</b>であってフルフレームではない。
+    ///         <b>だから作業領域の和集合には隙間がある</b></item>
+    ///   <item>★ <b>こちらから位置を書いたぶんは引き戻されない</b>（画面外でも、
+    ///         <c>isFreePositioningEnabled</c> が false でも）</item>
     /// </list>
     ///
+    /// ★ <b>値をここに書き写さないこと。</b> 二重に置くと、片方だけ古くなる。
     /// ★ <b><see cref="MonoBehaviour"/> をシーンに置かないこと。</b> Android ではこの
     ///   アセンブリごと存在しないので、属性の走査対象にすらならない（→ <see cref="VrmDragHandleBinder"/>）。
     /// </summary>
@@ -70,8 +71,8 @@ namespace ChatterMascot.Desktop
             /// 画面外へどれだけはみ出させるか。
             ///
             /// ★ <b>両軸とも破ること。</b> 片方だけだと、引き戻しが x / y のどちらに効いたのかが
-            ///   1回の観測で分からない。窓は 300x480pt なので、最大コーナーから 60pt 内側に
-            ///   左下を置けば <b>右へ 240pt / 上へ 420pt</b> はみ出す。
+            ///   1回の観測で分からない。作業領域の最大コーナーからわずかに内側へ左下を置けば、
+            ///   窓の大きさぶんだけ両方向へはみ出す。
             /// </summary>
             private const float OverhangInsetPoints = 60f;
 

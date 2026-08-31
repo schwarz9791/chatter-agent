@@ -170,10 +170,10 @@ bool CM_StatusItemShow(const char* menuJson)
             /*
              * ユーザーが ⌘ドラッグで並べ替えた位置を覚えさせる。
              *
-             * ★ これは「メニューバーに入り切らないとき」の手当てにはならない。
-             *   実測では、付けても付けなくても frame.x = -2287（画面の左外）に
-             *   置かれる状況があった（→ docs/mascot.md）。位置を決めるのは OS で、
-             *   こちらから押し込む API は無い。
+             * ★ メニューバー管理ツール（Thaw / Bartender / Ice など）が隠すのは
+             *   これでは防げない。あの種のツールはアイコンを画面外の負の座標へ
+             *   移動させるので、frame.x が負なら「隠されている」と読む
+             *   （→ docs/mascot.md）。押し戻す API は無い。
              */
             gStatusItem.autosaveName = @"ChatterMascotStatusItem";
             gStatusItem.visible = YES;

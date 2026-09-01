@@ -14,6 +14,11 @@ void CM_SetEventCallback(CM_EventCallback cb)
     gCallback = cb;
 }
 
+bool CMIsMainThread(void)
+{
+    return [NSThread isMainThread];
+}
+
 void CMRunOnMain(void (^block)(void))
 {
     if (block == nil) return;

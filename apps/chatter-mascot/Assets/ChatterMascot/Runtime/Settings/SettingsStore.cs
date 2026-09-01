@@ -94,7 +94,7 @@ namespace ChatterMascot.Settings
             // ★ ファイルが無いのは正常（初回起動）。警告しない
             if (raw == null)
             {
-                var changed = !Equals(_current, MascotSettings.Defaults);
+                var changed = !_current.Equals(MascotSettings.Defaults);
                 _current = MascotSettings.Defaults;
                 _warned.Clear();
                 return changed;
@@ -110,7 +110,7 @@ namespace ChatterMascot.Settings
             }
 
             _warned.Clear();
-            var updated = !Equals(_current, parsed);
+            var updated = !_current.Equals(parsed);
             _current = parsed;
             return updated;
         }
@@ -154,11 +154,6 @@ namespace ChatterMascot.Settings
         {
             if (!_warned.Add(key)) return;
             if (_warn != null) _warn(message);
-        }
-
-        private static bool Equals(MascotSettings a, MascotSettings b)
-        {
-            return a.Muted == b.Muted && string.Equals(a.MuteHotKey, b.MuteHotKey, StringComparison.Ordinal);
         }
     }
 }

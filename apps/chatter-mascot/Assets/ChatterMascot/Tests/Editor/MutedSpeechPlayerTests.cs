@@ -16,8 +16,10 @@ namespace ChatterMascot.Tests
             public int DurationMs { get; set; }
         }
 
-        private sealed class FakePlayer : ISpeechPlayer
+        private sealed class FakePlayer : ISpeechPlayer, IDisposable
         {
+            public int DisposeCalls;
+
             public int PlayCalls;
             public int StopAllCalls;
             public int DiscardCalls;
@@ -76,6 +78,11 @@ namespace ChatterMascot.Tests
 
             public void ResumeOutput()
             {
+            }
+
+            public void Dispose()
+            {
+                DisposeCalls++;
             }
         }
 
@@ -324,6 +331,29 @@ namespace ChatterMascot.Tests
 
             _mute.Muted = true;
             Assert.That(_inner.StopAllCalls, Is.EqualTo(0));
+        }
+
+        /// <summary>
+        /// ★ <b>内側へも渡すこと。</b> 他のメンバーは全部転送しているのにここだけ抜けると、
+        /// 内側が <c>IDisposable</c> を実装した瞬間（<c>afplay</c> の子プロセス回収など）
+        /// その <c>Dispose</c> が二度と呼ばれなくなる ——
+        /// <c>MascotRunner.OnDestroy</c> のキャストはラッパーにしか当たらない。
+        /// </summary>
+        [Test]
+        public void DisposeForwardsToTheInnerPlayer()
+        {
+            _player.Dispose();
+            Assert.That(_inner.DisposeCalls, Is.EqualTo(1));
+        }
+
+        /// <summary>二重 Dispose で内側を2回捨てない。</summary>
+        [Test]
+        public void DisposeIsIdempotent()
+        {
+            _player.Dispose();
+            _player.Dispose();
+
+            Assert.That(_inner.DisposeCalls, Is.EqualTo(1));
         }
     }
 }

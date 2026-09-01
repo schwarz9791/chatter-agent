@@ -127,8 +127,20 @@ namespace ChatterMascot.Desktop
 
             private MascotRunner _runner;
             private Camera _camera;
+
+            /// <summary>
+            /// いま隠しているカメラ。<c>null</c> なら隠していない。
+            ///
+            /// ★★ <b>bool と「保存したマスク」を別々に持たないこと。</b> 別々だと、
+            ///   隠している間にカメラが破棄・交代したとき<b>旧カメラのマスクを別のカメラへ書き</b>、
+            ///   元のカメラは <c>cullingMask = 0</c> のまま残る（＝二度と表示されない）。
+            ///   組で持てば「戻すのは隠したカメラ」が型で保証され、
+            ///   カメラが破棄されていれば Unity の <c>!=</c> が false になるので
+            ///   自然に「隠していない」へ倒れる。
+            /// </summary>
+            private Camera _hiddenCamera;
+
             private int _savedCullingMask;
-            private bool _hidden;
 
             private string _icon1xPath;
             private string _icon2xPath;
@@ -288,20 +300,23 @@ namespace ChatterMascot.Desktop
                     return;
                 }
 
-                if (!_hidden)
+                if (_hiddenCamera == null)
                 {
                     _savedCullingMask = camera.cullingMask;
                     camera.cullingMask = 0;
-                    _hidden = true;
+                    _hiddenCamera = camera;
                 }
                 else
                 {
-                    camera.cullingMask = _savedCullingMask;
-                    _hidden = false;
+                    // ★ 戻すのは「隠したカメラ」。いま解決したカメラではない
+                    _hiddenCamera.cullingMask = _savedCullingMask;
+                    _hiddenCamera = null;
                 }
 
                 UpdateMenu();
-                Debug.Log(_hidden ? "[Mascot] キャラクターを隠しました" : "[Mascot] キャラクターを表示しました");
+                Debug.Log(_hiddenCamera != null
+                    ? "[Mascot] キャラクターを隠しました"
+                    : "[Mascot] キャラクターを表示しました");
             }
 
             /// <summary>
@@ -473,7 +488,7 @@ namespace ChatterMascot.Desktop
             {
                 return MascotMenu.Build(new MenuState(
                     muted: _settings.Muted,
-                    hidden: _hidden,
+                    hidden: _hiddenCamera != null,
                     muteHotKey: _muteHotKey,
                     hideHotKey: _hideHotKey,
                     productName: Application.productName,

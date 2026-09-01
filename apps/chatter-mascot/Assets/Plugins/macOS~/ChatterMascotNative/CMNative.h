@@ -47,6 +47,13 @@ CM_EXPORT const char* CM_Version(void);      /* 静的な文字列。呼び出�
 /* 0 = regular（Dock に出る） / 1 = accessory（出ない） */
 CM_EXPORT void CM_SetActivationPolicy(int policy);
 
+/*
+ * ★★ 結果を返す関数は「メインスレッドから呼ぶ」ことが契約。
+ *   AppKit を触る処理は main queue に載せるが、メインでないときの CMRunOnMain は
+ *   dispatch_async（デッドロック回避のため意図的）なので、**ブロックが走る前に関数が戻る**。
+ *   そこで初期値を返すと「登録できていないのに成功」を騙ることになるため、
+ *   非メインからの呼び出しは**明示的に失敗**にして CMEmitLog で理由を残す。
+ */
 CM_EXPORT bool CM_StatusItemShow(const char* menuJson);
 CM_EXPORT bool CM_StatusItemUpdate(const char* menuJson);  /* チェック状態・ラベルの差し替え */
 CM_EXPORT void CM_StatusItemHide(void);
@@ -63,6 +70,9 @@ CM_EXPORT void CM_HotKeyUnregister(int id);
 
 /* AppKit を触る処理を main thread に載せる。既に main なら直接走る */
 void CMRunOnMain(void (^block)(void));
+
+/* 結果を返す関数が「いま同期で走れるか」を判定する（→ 上の契約） */
+bool CMIsMainThread(void);
 
 /* { "type": ..., "key": ... } を投げる。key が NULL なら省略する */
 void CMEmitEvent(const char* type, const char* key);

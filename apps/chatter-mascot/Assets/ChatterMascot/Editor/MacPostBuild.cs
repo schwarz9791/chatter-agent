@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
@@ -94,11 +95,29 @@ namespace ChatterMascot.EditorTools
             {
                 if (process == null) return PlistBuddy + " を起動できませんでした";
 
+                // ★★ 両方を ReadToEnd() で順に読まないこと。 片方の EOF を待っている間に
+                //   子がもう片方のパイプを埋めると（OS のバッファは約 64KB）、
+                //   親は read で、子は write でブロックして**ビルドが永久に止まる**。
+                //   この型の doc が「失敗してもビルドを落とさない」と言っている以上、
+                //   ハングは守ろうとしている失敗より悪い。
+                // ★ ReadToEndAsync().Result にもしないこと —— Editor のメインスレッドには
+                //   SynchronizationContext があるので、継続がそれを待ってデッドロックしうる。
+                //   イベントで受ければ、読み取りは別スレッドで進む
+                var errors = new StringBuilder();
+                process.ErrorDataReceived += (sender, e) =>
+                {
+                    if (e.Data != null) errors.AppendLine(e.Data);
+                };
+                process.BeginErrorReadLine();
+
                 var stdout = process.StandardOutput.ReadToEnd();
-                var stderr = process.StandardError.ReadToEnd();
                 process.WaitForExit();
 
                 if (process.ExitCode == 0) return null;
+
+                // ★ PlistBuddy はエラーを stdout に出す（"Set: Entry ... Does Not Exist"）ので、
+                //   stderr が空でも stdout を理由として使う
+                var stderr = errors.ToString();
                 return OneLine(string.IsNullOrEmpty(stderr) ? stdout : stderr);
             }
         }

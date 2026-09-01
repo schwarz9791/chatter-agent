@@ -148,6 +148,12 @@ static void CMApplyMenu(NSDictionary *root)
 
 bool CM_StatusItemShow(const char* menuJson)
 {
+    /* ★ 非メインからは成功を騙らない（→ CMNative.h の契約） */
+    if (!CMIsMainThread()) {
+        CMEmitLog("CM_StatusItemShow をメインスレッド以外から呼びました");
+        return false;
+    }
+
     NSDictionary *root = CMParseMenuJson(menuJson);
     if (root == nil) return false;
 
@@ -198,6 +204,11 @@ bool CM_StatusItemShow(const char* menuJson)
 
 bool CM_StatusItemUpdate(const char* menuJson)
 {
+    if (!CMIsMainThread()) {
+        CMEmitLog("CM_StatusItemUpdate をメインスレッド以外から呼びました");
+        return false;
+    }
+
     NSDictionary *root = CMParseMenuJson(menuJson);
     if (root == nil) return false;
     if (gStatusItem == nil) return false;

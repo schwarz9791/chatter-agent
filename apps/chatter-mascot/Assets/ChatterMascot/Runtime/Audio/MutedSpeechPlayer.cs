@@ -27,6 +27,12 @@ namespace ChatterMascot.Audio
     ///   ミュートの有無で<b>ログの見え方が変わらない</b>。無音の原因を切り分けるとき、
     ///   ミュートかどうかで診断の出方が変わるのはいちばん困る。
     /// </summary>
+    /// <remarks>
+    /// ★ <b>Unity のメインスレッドからのみ触ること。</b> <c>_cancel</c> は <c>volatile</c> ではなく、
+    ///   <c>PlayAsync</c> の継続も Unity の <c>SynchronizationContext</c> でメインへ戻る前提。
+    ///   <c>_waiting</c> だけ <c>Interlocked</c> なのは、<c>ActiveCount</c> が
+    ///   <c>AudioIdleGate</c> から読まれる値だから（数え落としが即デバイス解放に化ける）。
+    /// </remarks>
     public sealed class MutedSpeechPlayer : ISpeechPlayer, IDisposable
     {
         private readonly ISpeechPlayer _inner;
@@ -141,6 +147,12 @@ namespace ChatterMascot.Audio
 
             _mute.Changed -= OnMuteChanged;
             CancelWaiting();
+
+            // ★ 内側へも渡すこと。 他のメンバーは全部転送しているのにここだけ抜けると、
+            //   内側が IDisposable を実装した瞬間（afplay の子プロセス回収など）
+            //   その Dispose が二度と呼ばれなくなる —— MascotRunner.OnDestroy の
+            //   `(_player as IDisposable)?.Dispose()` はラッパーにしか当たらない
+            (_inner as IDisposable)?.Dispose();
         }
 
         /// <summary>
@@ -164,9 +176,15 @@ namespace ChatterMascot.Audio
         /// </summary>
         private void CancelWaiting()
         {
+            // ★★ 差し替える前に Cancel すること。 逆にすると、PlayAsync が
+            //   「代入後・Cancel 前」に `_cancel.Token` を読む窓ができ、
+            //   キャンセルされない token を掴んで Task.Delay が最後まで走る。
+            //   終了時（OnDestroy → StopAll）に踏むと、止めたつもりの player に
+            //   WAV 全長ぶんの待ちが残り、ActiveCount が非ゼロのままになる
+            //   （Android では AudioIdleGate のデバイス解放が止まる）。
             var previous = _cancel;
-            _cancel = new CancellationTokenSource();
             previous.Cancel();
+            _cancel = new CancellationTokenSource();
         }
     }
 }

@@ -74,6 +74,16 @@ int CM_HotKeyRegister(int id, unsigned int keyCode, unsigned int modifiers)
      */
     if (modifiers == 0) return paramErr;
 
+    /*
+     * ★ 非メインからは成功を騙らない（→ CMNative.h の契約）。
+     *   ここで noErr を返すと、C# 側が registered = true にして
+     *   「ショートカット: ⌃⌥M」とログまで出すのに、実際には何も登録されていない。
+     */
+    if (!CMIsMainThread()) {
+        CMEmitLog("CM_HotKeyRegister をメインスレッド以外から呼びました");
+        return eventInternalErr;
+    }
+
     __block int result = noErr;
     CMRunOnMain(^{
         if (!CMEnsureHandler()) {

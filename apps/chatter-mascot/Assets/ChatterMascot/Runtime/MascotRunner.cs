@@ -140,6 +140,13 @@ namespace ChatterMascot
         ///   <b>孤児が鳴っている間は常に <c>false</c></b> だった。<see cref="SpeakingSet"/> は
         ///   再生開始時に写し取るので、その穴が閉じている。
         /// </summary>
+        public bool TryGetSpeaking(out SpeechKind kind, out Emotion emotion)
+        {
+            // ★ 引数の順が逆（TryGetFace は emotion が先）。呼び出し側の並びは
+            //   VrmCharacter が使っているものなので、こちらで受け替える
+            return _speaking.TryGetFace(out emotion, out kind);
+        }
+
         /// <summary>
         /// 一時ミュートの状態。<b>読み書きの両方に使う</b>（ステータスバーのメニューと
         /// グローバルショートカットから切り替わる）。
@@ -147,13 +154,6 @@ namespace ChatterMascot
         public MuteState Mute
         {
             get { return _mute; }
-        }
-
-        public bool TryGetSpeaking(out SpeechKind kind, out Emotion emotion)
-        {
-            // ★ 引数の順が逆（TryGetFace は emotion が先）。呼び出し側の並びは
-            //   VrmCharacter が使っているものなので、こちらで受け替える
-            return _speaking.TryGetFace(out emotion, out kind);
         }
 
         /// <summary>

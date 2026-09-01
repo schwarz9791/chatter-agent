@@ -21,6 +21,24 @@ import { buildSummaryArgs, runClaudeCli } from "./claudeCli";
 import { SUMMARY_INSTRUCTION, SUMMARY_MAX_CHARS } from "./prompt";
 import type { Summarize, SummaryOutcome } from "./types";
 
+/**
+ * 要約として採用してよいか。**純粋関数。**
+ *
+ * ★ 同期の pipeline（ここ）と非同期のプレビュー（`summaryPreview.ts`）が
+ *   **同じ規則を見る**ために切り出してある。片方だけ直すと、設定パネルの
+ *   「テスト要約」が通るのに本番では原文が読み上げられる（またはその逆）という、
+ *   いちばん切り分けにくいズレになる。
+ *
+ * ★ 上限を `SUMMARY_MAX_CHARS`（120）の2倍にしている根拠は下の判定箇所のコメント参照
+ *   （`claude -p` が exit 0 のままレート制限の通知を stdout に出す事故を実測で踏んでいる）。
+ *
+ * @param spoken 実際に読み上げる形（`toSpeechSentences` を通した後）
+ * @param originalLength 比較相手の原文の長さ。**整形済みの長さで比べること**
+ */
+export function isAcceptableSummary(spoken: string, originalLength: number): boolean {
+  return spoken.length > 0 && spoken.length < originalLength && spoken.length <= SUMMARY_MAX_CHARS * 2;
+}
+
 export interface SummaryPipelineDeps {
   /** 機能が有効か */
   isEnabled: () => boolean;
@@ -170,7 +188,7 @@ export function createSummaryPipeline(deps: SummaryPipelineDeps): Summarize {
       //   65 / 80 / 82 / 102 / 116 / 118 / 335 で、240 で切ると外れ値の335だけが弾かれ他は
       //   全部通る。これより厳しくすると、数十秒待った末に invalid で原文フォールバックする
       //   回数が増え、遅延だけ払って効果ゼロになる。
-      if (!spoken || spoken.length >= text.length || spoken.length > SUMMARY_MAX_CHARS * 2) {
+      if (!isAcceptableSummary(spoken, text.length)) {
         log("invalid", startedAt, text.length, spoken.length);
         return text;
       }

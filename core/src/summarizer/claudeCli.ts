@@ -9,7 +9,7 @@
  * [#51]: https://github.com/schwarz9791/chatter-agent/issues/51
  */
 
-import { execFileSync } from "child_process";
+import { execFile, execFileSync } from "child_process";
 import * as fs from "fs";
 import type { ClaudeCliResult } from "./types";
 
@@ -169,8 +169,23 @@ function extractSummary(stdout: string): string {
  */
 const MAX_BUFFER_BYTES = 1024 * 1024;
 
+function ensureHomeDir(homeDir: string): void {
+  try {
+    fs.mkdirSync(homeDir, { recursive: true });
+  } catch {
+    // 作れなくても致命ではない。この後の実行が ENOENT 等で失敗し、
+    // 呼び出し側（summaryPipeline / summaryPreview）が原文にフォールバックする
+  }
+}
+
+/** stdout/stderr から診断用の1行を作る。長さは 500 文字で頭打ち */
+function detailOf(stderr: string, fallback: string): string {
+  return (stderr.trim() || fallback).slice(0, 500);
+}
+
 /**
- * 要約 CLI を実行する。
+ * 要約 CLI を実行する。**同期**。呼んでよいのは単発プロセス（`chatter-agent-speak`）だけ
+ * （常駐プロセスからは `runClaudeCliAsync` を使う。→ そちらのヘッダ ★★）。
  *
  * ★ タイムアウトの既定（`aiSummaryTimeoutMs`。→ `core/config.ts`）について:
  *   所要時間は**入力の長さから予測できない**。実機実測10件では相関が見られず、短い入力が
@@ -181,12 +196,7 @@ const MAX_BUFFER_BYTES = 1024 * 1024;
  *   倍率を掛けても意味が無いため）。
  */
 export function runClaudeCli(deps: RunClaudeCliDeps): ClaudeCliResult {
-  try {
-    fs.mkdirSync(deps.homeDir, { recursive: true });
-  } catch {
-    // 作れなくても致命ではない。この後の execFileSync が ENOENT 等で失敗し、
-    // 呼び出し側（summaryPipeline）が原文にフォールバックする
-  }
+  ensureHomeDir(deps.homeDir);
 
   try {
     const stdout = execFileSync(deps.commandPath, deps.args, {
@@ -219,10 +229,80 @@ export function runClaudeCli(deps: RunClaudeCliDeps): ClaudeCliResult {
     const e = err as NodeJS.ErrnoException & { signal?: string | null; stderr?: string | Buffer };
     const stderr =
       typeof e.stderr === "string" ? e.stderr : Buffer.isBuffer(e.stderr) ? e.stderr.toString("utf-8") : "";
-    const detail = (stderr.trim() || e.message || String(err)).slice(0, 500);
+    const detail = detailOf(stderr, e.message || String(err));
 
     if (e.code === "ETIMEDOUT") return { ok: false, reason: "timeout", detail };
     if (e.code === "ENOBUFS") return { ok: false, reason: "overflow", detail };
     return { ok: false, reason: "error", detail };
   }
+}
+
+/**
+ * `runClaudeCli` の**非同期版**。常駐プロセス（`chatter-agent-server`）から呼ぶのはこちら。
+ *
+ * ★★ **同期版をサーバーから呼ばないこと。** `execFileSync` は最悪 `aiSummaryTimeoutMs`
+ *   （既定60秒）イベントループを止める。その間、WebSocket の配信も `GET /audio/…` の応答も
+ *   止まるので、クライアント側の音声取得が `audioFetchTimeoutMs`（既定45秒）で
+ *   **転送エラーとして試行回数を消費し、発話が捨てられる**（→ `docs/protocol.md` の責務8）。
+ *   設定パネルのテストボタンを押しただけで発話が落ちる、という壊れ方になる。
+ *   CLI 側（`chatter-agent-speak`）は hook から起動される単発プロセスで、ロックが直列化を
+ *   担っているので同期のままでよい —— **プロセスの性格が違うので実装も違う**。
+ *
+ * ★★ **失敗の見分け方が同期版と違う**（Node 24.19.0 実測）:
+ *
+ *   |            | `execFileSync`         | `execFile`（非同期）                     |
+ *   |------------|------------------------|------------------------------------------|
+ *   | タイムアウト | `code: "ETIMEDOUT"`    | `code: null` / **`killed: true`**        |
+ *   | maxBuffer  | `code: "ENOBUFS"`      | `code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"` |
+ *   | 非ゼロ終了  | `status: <n>`          | `code: <n>`（**数値**）/ `killed: false` |
+ *   | ENOENT     | `code: "ENOENT"`       | `code: "ENOENT"`                         |
+ *
+ *   `ETIMEDOUT` / `ENOBUFS` を非同期側で待っても**永久に来ない**。同期版の判定を
+ *   そのままコピーすると、タイムアウトが全部 `error` として記録される（症状は
+ *   「テスト要約がいつも『失敗』と出る」で、原因の見当が付かない）。
+ *
+ * ★ **maxBuffer の判定を `killed` より先に置くこと。** maxBuffer 超過でも子は殺されるので、
+ *   順番を逆にすると overflow が timeout に化ける。
+ */
+export function runClaudeCliAsync(deps: RunClaudeCliDeps): Promise<ClaudeCliResult> {
+  ensureHomeDir(deps.homeDir);
+
+  return new Promise<ClaudeCliResult>((resolve) => {
+    let child: ReturnType<typeof execFile>;
+    try {
+      child = execFile(
+        deps.commandPath,
+        deps.args,
+        {
+          encoding: "utf-8",
+          cwd: deps.homeDir,
+          env: buildSummaryEnv(),
+          timeout: deps.timeoutMs,
+          killSignal: "SIGKILL",
+          maxBuffer: MAX_BUFFER_BYTES,
+        },
+        (err, stdout, stderr) => {
+          if (!err) return resolve({ ok: true, stdout: extractSummary(stdout) });
+
+          const e = err as NodeJS.ErrnoException & { killed?: boolean };
+          const detail = detailOf(stderr, e.message || String(err));
+
+          if (e.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
+            return resolve({ ok: false, reason: "overflow", detail });
+          }
+          if (e.killed === true) return resolve({ ok: false, reason: "timeout", detail });
+          return resolve({ ok: false, reason: "error", detail });
+        },
+      );
+    } catch (err) {
+      // spawn 自体が同期で throw する経路（引数の型エラーなど）
+      return resolve({ ok: false, reason: "error", detail: detailOf("", String(err)) });
+    }
+
+    // ★ 原文は stdin で渡す（同期版の `input` と同じ理由 —— ARG_MAX と `ps` への露出）。
+    //   ★ **`error` を握ること。** 子が起動に失敗した直後の stdin は既に壊れており、
+    //   書き込むと EPIPE が unhandled で飛ぶ。失敗そのものはコールバック側が受け取る
+    child.stdin?.on("error", () => {});
+    child.stdin?.end(deps.text);
+  });
 }

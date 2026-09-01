@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createAudioStore, SynthesisUnavailableError } from "./audioStore";
 
-const VOICE = { baseUrl: "http://127.0.0.1:10101", speakerId: 888753760 };
+const VOICE = { baseUrl: "http://127.0.0.1:10101", speakerId: 888753760, speedScale: 1.0 };
 
 function wav(bytes: number): ArrayBuffer {
   return new ArrayBuffer(bytes);
@@ -146,7 +146,26 @@ describe("createAudioStore", () => {
     voice = { ...VOICE, speakerId: 1 };
     await store.get("g", 1, "あ。");
     expect(synthesize).toHaveBeenCalledTimes(2);
-    expect(synthesize).toHaveBeenLastCalledWith("あ。", { baseUrl: VOICE.baseUrl, speakerId: 1 });
+    expect(synthesize).toHaveBeenLastCalledWith("あ。", { ...VOICE, speakerId: 1 });
+  });
+
+  /**
+   * ★★ #76。`Voice` に `speedScale` を足したときに、キャッシュキーへ入れ忘れると
+   *   **速度を変えた直後に取り直した文だけ古い速度の WAV** が返る。
+   *   `Voice` にフィールドを足したら `keyFor` にも足すこと
+   */
+  it("★★ 話速が変わればキャッシュに当たらない（速度を変えた直後の文が古い速度で鳴らない）", async () => {
+    let voice = VOICE;
+    const synthesize = vi.fn(() => Promise.resolve(wav(10)));
+    const store = createAudioStore({ currentVoice: () => voice, synthesize });
+
+    await store.get("g", 1, "あ。");
+    expect(synthesize).toHaveBeenCalledTimes(1);
+
+    voice = { ...VOICE, speedScale: 1.5 };
+    await store.get("g", 1, "あ。");
+    expect(synthesize).toHaveBeenCalledTimes(2);
+    expect(synthesize).toHaveBeenLastCalledWith("あ。", { ...VOICE, speedScale: 1.5 });
   });
 
   it("★ 声は1回だけ解決する（キーを決めた後に config が変わると、声Bの WAV が声Aのキーに入る）", async () => {

@@ -1,17 +1,23 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import type * as http from "http";
+import * as http from "http";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { createAudioStore } from "./audioStore";
 import { TtsHttpError } from "../tts/voicevoxClient";
-import { createAudioHttpServer, type AudioHttpDeps } from "./httpServer";
+import { createHttpServer, type HttpServerDeps } from "./httpServer";
+import type { ControlApi, ControlResponse } from "./controlApi";
 import type { SpeechRecord } from "../core/types";
 
 const HOST = "127.0.0.1";
 const EPOCH = "gen-1";
 
 const servers: http.Server[] = [];
+const tmpDirs: string[] = [];
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  for (const d of tmpDirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
   await Promise.all(
     servers.splice(0).map(
       (server) =>
@@ -38,19 +44,36 @@ function record(seq: number, text = `文${seq}。`, epoch = EPOCH): SpeechRecord
   };
 }
 
-const VOICE = { baseUrl: "http://127.0.0.1:10101", speakerId: 888753760 };
+const VOICE = { baseUrl: "http://127.0.0.1:10101", speakerId: 888753760, speedScale: 1.0 };
 
 function wavOf(bytes: number): ArrayBuffer {
   return new ArrayBuffer(bytes);
 }
 
-async function start(overrides: Partial<AudioHttpDeps> = {}): Promise<string> {
-  const server = createAudioHttpServer({
+/**
+ * 制御 API のスタブ。**このファイルが見るのはルーティングと絞りだけ**なので、
+ * 中身は「呼ばれたことが分かる 200」で足りる（制御 API の中身は `controlApi.test.ts`）。
+ */
+function stubControl(): ControlApi {
+  const ok = (name: string): ControlResponse => ({ status: 200, kind: "json", body: { called: name } });
+  return {
+    health: () => ok("health"),
+    speakers: () => Promise.resolve(ok("speakers")),
+    getConfig: () => ok("getConfig"),
+    patchConfig: (body) => ({ status: 200, kind: "json", body: { called: "patchConfig", body } }),
+    ttsPreview: () => Promise.resolve({ status: 200, kind: "wav", body: wavOf(44) }),
+    summaryPreview: () => Promise.resolve(ok("summaryPreview")),
+  };
+}
+
+async function start(overrides: Partial<HttpServerDeps> = {}): Promise<string> {
+  const server = createHttpServer({
     store: createAudioStore({ currentVoice: () => VOICE, synthesize: () => Promise.resolve(wavOf(12)) }),
-    lookup: (seq) => (seq === 1 ? record(1) : null),
+    lookup: (seq: number) => (seq === 1 ? record(1) : null),
     allowedOrigins: [],
     disabled: () => false,
     responseTimeoutMs: 5_000,
+    control: stubControl(),
     ...overrides,
   });
   servers.push(server);
@@ -275,5 +298,253 @@ describe("Origin（WebSocket と同じ規則）", () => {
   it("Origin を送らないクライアント（Unity ネイティブなど）は素通り", async () => {
     const base = await start();
     expect((await fetch(`${base}/audio/${EPOCH}-000000000001.wav`)).status).toBe(200);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// 制御 API（/v1/*）のルーティングと、書き込み口の3重の絞り（#76）
+//
+// ★ ここで見るのは**ルーティングと絞りだけ**。制御 API の中身は `controlApi.test.ts`。
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * **ループバックでない相手**を再現する。
+ *
+ * ★ TCP で LAN のアドレスから繋ぐテストは環境依存になる（CI にそのインターフェースがあるとは
+ *   限らない）。Unix ドメインソケットなら `req.socket.remoteAddress` が `undefined` になり、
+ *   `isLoopbackAddress` の「判定できないものは false に倒す」経路をそのまま通る。
+ *   **判定関数を注入で差し替えていない**ので、本番と同じコードが動いている。
+ */
+async function startUnix(overrides: Partial<HttpServerDeps> = {}): Promise<string> {
+  const server = createHttpServer({
+    store: createAudioStore({ currentVoice: () => VOICE, synthesize: () => Promise.resolve(wavOf(12)) }),
+    lookup: (seq: number) => (seq === 1 ? record(1) : null),
+    allowedOrigins: [],
+    disabled: () => false,
+    responseTimeoutMs: 5_000,
+    control: stubControl(),
+    ...overrides,
+  });
+  servers.push(server);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cm-"));
+  tmpDirs.push(dir);
+  const socketPath = path.join(dir, "s.sock");
+  await new Promise<void>((done) => server.listen(socketPath, done));
+  return socketPath;
+}
+
+interface RawResponse {
+  status: number;
+  headers: http.IncomingHttpHeaders;
+  text: string;
+}
+
+function requestUnix(socketPath: string, options: http.RequestOptions & { body?: string }): Promise<RawResponse> {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ socketPath, ...options }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (c: Buffer) => chunks.push(c));
+      res.on("end", () =>
+        resolve({ status: res.statusCode ?? 0, headers: res.headers, text: Buffer.concat(chunks).toString("utf-8") }),
+      );
+    });
+    req.on("error", reject);
+    req.end(options.body);
+  });
+}
+
+const JSON_HEADERS = { "content-type": "application/json" };
+
+describe("制御 API のルーティング（#76）", () => {
+  it("GET /v1/health は制御 API に届く", async () => {
+    const base = await start();
+    const res = await fetch(`${base}/v1/health`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ called: "health" });
+  });
+
+  it("GET /v1/config と PATCH /v1/config は同じパスで振り分けられる", async () => {
+    const base = await start();
+    expect(await (await fetch(`${base}/v1/config`)).json()).toEqual({ called: "getConfig" });
+
+    const patched = await fetch(`${base}/v1/config`, {
+      method: "PATCH",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ ttsSpeedScale: 1.5 }),
+    });
+    expect(await patched.json()).toEqual({ called: "patchConfig", body: { ttsSpeedScale: 1.5 } });
+  });
+
+  it("POST /v1/tts/preview は WAV を返す", async () => {
+    const base = await start();
+    const res = await fetch(`${base}/v1/tts/preview`, { method: "POST", headers: JSON_HEADERS, body: "{}" });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("audio/wav");
+  });
+
+  it("表に無いパスは 404", async () => {
+    const base = await start();
+    expect((await fetch(`${base}/v1/nope`)).status).toBe(404);
+    expect((await fetch(`${base}/v1/`)).status).toBe(404);
+  });
+
+  /**
+   * ★★ #76 まではメソッド判定が先で、`GET / HEAD / OPTIONS` 以外はルーティングに
+   *   到達する前に 405 で切られていた。順序を入れ替えた証拠
+   */
+  it("★★ PATCH がルーティングまで届く（メソッドで先に切られない）", async () => {
+    const base = await start();
+    const res = await fetch(`${base}/v1/config`, { method: "PATCH", headers: JSON_HEADERS, body: "{}" });
+    expect(res.status).toBe(200);
+  });
+
+  /** ★ 405 の `Allow` は**リソースごと**（RFC 9110 §15.5.6） */
+  it("★ 405 の Allow はリソースごと", async () => {
+    const base = await start();
+
+    const audio = await fetch(`${base}/audio/${EPOCH}-000000000001.wav`, { method: "PATCH" });
+    expect(audio.status).toBe(405);
+    expect(audio.headers.get("allow")).toBe("GET, HEAD, OPTIONS");
+
+    const health = await fetch(`${base}/v1/health`, { method: "POST", headers: JSON_HEADERS, body: "{}" });
+    expect(health.status).toBe(405);
+    expect(health.headers.get("allow")).toBe("GET, HEAD, OPTIONS");
+
+    const config = await fetch(`${base}/v1/config`, { method: "DELETE" });
+    expect(config.status).toBe(405);
+    expect(config.headers.get("allow")).toBe("GET, HEAD, PATCH, OPTIONS");
+
+    const preview = await fetch(`${base}/v1/tts/preview`, { method: "GET" });
+    expect(preview.status).toBe(405);
+    expect(preview.headers.get("allow")).toBe("POST, OPTIONS");
+  });
+
+  it("OPTIONS は 204 + リソースごとの Allow。制御 API だけ content-type を許す", async () => {
+    const base = await start();
+
+    const config = await fetch(`${base}/v1/config`, { method: "OPTIONS" });
+    expect(config.status).toBe(204);
+    expect(config.headers.get("allow")).toBe("GET, HEAD, PATCH, OPTIONS");
+    expect(config.headers.get("access-control-allow-headers")).toBe("content-type");
+
+    // ★ /audio/… では返さない（Range を実装していないのと同じ理由で、対応していないと言う）
+    const audio = await fetch(`${base}/audio/${EPOCH}-000000000001.wav`, { method: "OPTIONS" });
+    expect(audio.headers.get("access-control-allow-headers")).toBeNull();
+  });
+
+  it("ボディが上限を超えたら 413", async () => {
+    const base = await start();
+    const res = await fetch(`${base}/v1/config`, {
+      method: "PATCH",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ pad: "x".repeat(80 * 1024) }),
+    });
+    expect(res.status).toBe(413);
+  });
+
+  it("JSON として読めないボディは 400", async () => {
+    const base = await start();
+    const res = await fetch(`${base}/v1/config`, { method: "PATCH", headers: JSON_HEADERS, body: "{ 壊れている" });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "invalid_json" });
+  });
+});
+
+describe("書き込み口の3重の絞り（#76）", () => {
+  /**
+   * ★★ 絞り1。**403 ではなく 404** —— 403 は「口はあるが権限が無い」と教えることになる。
+   *   存在そのものを見せない
+   */
+  it("★★ ループバックでない相手の PATCH は 404（403 ではない）", async () => {
+    const socketPath = await startUnix();
+    const res = await requestUnix(socketPath, {
+      method: "PATCH",
+      path: "/v1/config",
+      headers: JSON_HEADERS,
+      body: "{}",
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("★★ ループバックでない相手の POST も 404", async () => {
+    const socketPath = await startUnix();
+    const res = await requestUnix(socketPath, {
+      method: "POST",
+      path: "/v1/tts/preview",
+      headers: JSON_HEADERS,
+      body: "{}",
+    });
+    expect(res.status).toBe(404);
+  });
+
+  /** ★ 読みは絞らない（LAN の XR クライアントが話者一覧を引けなくなる） */
+  it("★ ループバックでない相手でも GET は通る", async () => {
+    const socketPath = await startUnix();
+    const res = await requestUnix(socketPath, { method: "GET", path: "/v1/config" });
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.text)).toEqual({ called: "getConfig" });
+  });
+
+  /** ★ `Allow` に載せるのは「その相手が使えるメソッド」。404 になるものを名乗らない */
+  it("★ ループバックでない相手には書き込みメソッドを名乗らない", async () => {
+    const socketPath = await startUnix();
+    const res = await requestUnix(socketPath, { method: "OPTIONS", path: "/v1/config" });
+    expect(res.status).toBe(204);
+    expect(res.headers.allow).toBe("GET, HEAD, OPTIONS");
+  });
+
+  /**
+   * ★★ 絞り2。`Origin` が付く＝ WebView / ブラウザから張られた。`allowedOrigins` に
+   *   開発サーバーのポートを足していた人が、そのポートを踏んだ Web ページに
+   *   設定を書き換えられる穴を塞ぐ
+   */
+  it("★★ Origin が付いた書き込みは、許可済みの Origin でも 403", async () => {
+    const base = await start({ allowedOrigins: ["http://localhost:3000"] });
+    const res = await fetch(`${base}/v1/config`, {
+      method: "PATCH",
+      headers: { ...JSON_HEADERS, origin: "http://localhost:3000" },
+      body: "{}",
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("Origin が付いていない書き込みは通る（ネイティブクライアント）", async () => {
+    const base = await start({ allowedOrigins: ["http://localhost:3000"] });
+    const res = await fetch(`${base}/v1/config`, { method: "PATCH", headers: JSON_HEADERS, body: "{}" });
+    expect(res.status).toBe(200);
+  });
+
+  /**
+   * ★★ 絞り3。simple request では JSON の Content-Type を付けられないので、
+   *   **プリフライトが必ず走って絞り2に掛かる**（CSRF 対策の本体はこの連鎖）
+   */
+  it("★★ Content-Type が application/json でなければ 415", async () => {
+    const base = await start();
+    expect((await fetch(`${base}/v1/config`, { method: "PATCH", body: "{}" })).status).toBe(415);
+    expect(
+      (
+        await fetch(`${base}/v1/config`, {
+          method: "PATCH",
+          headers: { "content-type": "text/plain" },
+          body: "{}",
+        })
+      ).status,
+    ).toBe(415);
+  });
+
+  it("charset 付きの application/json は通る", async () => {
+    const base = await start();
+    const res = await fetch(`${base}/v1/config`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: "{}",
+    });
+    expect(res.status).toBe(200);
+  });
+
+  /** 読み（GET）には Content-Type を要求しない */
+  it("GET には Content-Type を要求しない", async () => {
+    const base = await start();
+    expect((await fetch(`${base}/v1/config`)).status).toBe(200);
   });
 });

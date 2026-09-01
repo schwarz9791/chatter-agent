@@ -70,6 +70,7 @@ function drain(overrides: Partial<DrainDeps> = {}) {
       return records;
     },
     workerStatePath: path.join(dir, "speak.state.json"),
+    summarizerSessionsPath: path.join(dir, "summarizer-sessions.json"),
     speakPrompts: true,
     spoolMaxAgeMs: 6 * HOUR,
     classify: () => "neutral",
@@ -995,6 +996,23 @@ describe("AI要約", () => {
 
     expect(texts()).toEqual([]);
     expect(fs.readdirSync(spoolDir)).toEqual([]);
+  });
+
+  /**
+   * ★★ #76。サーバー（`POST /v1/summary/preview`）が起こした要約の session_id は
+   *   `worker.state.json` ではなく専用ファイルに入る。**書き手を1人に保つための分割**
+   *   （サーバーがロックの外から `worker.state.json` を read-modify-write すると、
+   *   CLI の tombstone を巻き添えで消しうる。→ `core/summarizerSessions.ts`）。
+   *   CLI は両方を or で見る —— 片方だけ見ていると保険が半分黙って外れる
+   */
+  it("★★ 第2層: サーバー側のレジストリ（summarizer-sessions.json）も効く", () => {
+    fs.writeFileSync(path.join(dir, "summarizer-sessions.json"), JSON.stringify(["server-sess"]));
+
+    appendDelta("m1", 0, "テスト要約プロセス自身の出力です。", true, "server-sess");
+    drain();
+
+    expect(texts()).toEqual([]);
+    expect(fs.existsSync(path.join(spoolDir, "m1.0.json"))).toBe(false);
   });
 
   it("★ 第2層の永続化: registerSessionId が呼ばれた時点で speak.state.json に既に書かれている", () => {

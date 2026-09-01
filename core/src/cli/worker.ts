@@ -22,6 +22,7 @@ import {
 import { cleanTextForSpeech, splitIntoSentences } from "../text/textFilter";
 import { toSpeechSentences } from "../text/speechText";
 import { acquireLock, type Lock } from "../core/lock";
+import { readSummarizerSessions } from "../core/summarizerSessions";
 import type { SpeechEntry } from "../core/speechLog";
 import type { Emotion, SpeechRecord } from "../core/types";
 import type { Summarize } from "../summarizer/types";
@@ -199,6 +200,18 @@ export interface DrainDeps {
    */
   publish: (entries: SpeechEntry[]) => SpeechRecord[];
   workerStatePath: string;
+  /**
+   * サーバーが要約 CLI に渡した `--session-id` のレジストリ（→ `core/summarizerSessions.ts`）。
+   *
+   * ★ 無限ループ防止の第2層は、**CLI 自身が起こした要約**（`worker.state.json` の
+   *   `summarizerSessionIds`）と、**サーバーが起こした要約**（#76 の
+   *   `POST /v1/summary/preview`）の2箇所に分かれている。書き手を1人ずつに保つための分割で、
+   *   読む側（ここ）は or で見る。
+   *
+   * ★ 既定値は持たせない。渡し忘れると保険が半分だけ黙って外れる
+   *   （`summarize` と同じ理由）。
+   */
+  summarizerSessionsPath: string;
   /** 応答待ち通知（kind: "prompt"）を読み上げるか */
   speakPrompts: boolean;
   /** これより無活動な spool は孤児として掃除する */
@@ -289,6 +302,9 @@ export function drainSpool(deps: DrainDeps): DrainResult {
   const orphansRemoved = cleanOrphans(deps.spoolDir, deps.spoolMaxAgeMs, now());
 
   const state = readWorkerState(deps.workerStatePath);
+  // ★ ドレインの先頭で1回だけ読む（`readWorkerState` と同じ位置）。毎 item で読むと
+  //   spool の件数ぶん stat + read が走る
+  const serverSummarizerSessions = readSummarizerSessions(deps.summarizerSessionsPath);
   let stateDirty = false;
   let written = 0;
   let passes = 0;
@@ -335,7 +351,10 @@ export function drainSpool(deps: DrainDeps): DrainResult {
       //   hasNewerInSameSession の候補計算はこの後の loaded を見るので、ここで弾かないと
       //   要約セッションの delta が「同一セッションの後続」として救済の材料に混ざってしまう
       const sessionId = sessionIdOf(item);
-      if (sessionId !== null && isSummarizerSession(state, sessionId)) {
+      if (
+        sessionId !== null &&
+        (isSummarizerSession(state, sessionId) || serverSummarizerSessions.includes(sessionId))
+      ) {
         tryRemoveEntry(item.entry);
         changed = true;
         continue;

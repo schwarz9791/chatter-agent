@@ -22,7 +22,9 @@ core/src/
 │   ├── dispatcher.ts        配信済み seq と**採番の世代**の判断。フレームの組み立てもここ（ユニットテストのため純粋な部品に切り出してある）
 │   ├── audioStore.ts        ★合成のキャッシュと single-flight。ディスクを持たない（issue #29）
 │   ├── engineProcess.ts     ★合成エンジンを起こす条件の判断と、プロセスグループごとの停止（issue #51）
-│   ├── httpServer.ts        `GET /audio/<epoch>-<seq>.wav`。200 / 503 / 404 / 403 の切り分け
+│   ├── httpServer.ts        ルーティング（`/audio/…` と `/v1/*`）と、書き込み口の3重の絞り（issue #76）
+│   ├── controlApi.ts        ★設定パネルの制御 API（`/v1/*`）。**HTTP を知らない層**（issue #76）
+│   ├── loopback.ts          peer がループバックか（純粋関数）。書き込み口を絞るのに使う（issue #76）
 │   ├── wsServer.ts          配信と ack。Origin 検査、外部 http.Server への相乗りもここ
 │   └── throttledWarn.ts     同じ警告を間引く（503 の連発と Origin 拒否。黙らせずに件数を出す）
 ├── tts/          音声合成エンジンのクライアント（issue #29 で player/ から移設）
@@ -39,6 +41,9 @@ core/src/
 │   ├── audioPath.ts         `/audio/<epoch>-<seq>.wav` の組み立てと検証。server と player が共有する
 │   ├── paths.ts             ← cc-mascot-xr 流用
 │   ├── config.ts            ← cc-mascot-xr configStore 流用
+│   ├── configPatch.ts       ★`PATCH /v1/config` の検証と書き戻しの組み立て（純粋関数。issue #76）
+│   ├── version.ts           バンドルに焼き込むバージョン。`package.json` との一致はテストが固定する
+│   ├── summarizerSessions.ts サーバーが起こした要約の session_id（無限ループ防止の第2層。issue #76）
 │   ├── lock.ts              mkdir の原子性を使った単一ワーカー / 単一サーバーのロック
 │   ├── atomicWrite.ts       tmp + rename の共通化。キュー entry / seq state / worker state の3箇所が使う
 │   ├── commandPath.ts       外部コマンドの絶対パス探索（spawn しない）。要約 CLI と合成エンジンが共有する（issue #51 で summarizer/ から移設）
@@ -54,8 +59,9 @@ core/src/
 └── summarizer/   AI要約（既定OFF。issue #31）
     ├── types.ts             Summarize / SummaryOutcome / ClaudeCliResult の型定義
     ├── prompt.ts            要約 CLI に渡す指示文（SUMMARY_INSTRUCTION）
-    ├── claudeCli.ts         引数組み立て / execFileSync での同期実行（コマンド解決は `core/commandPath.ts`）
-    └── summaryPipeline.ts   判定とフォールバック（createSummaryPipeline）。cli/worker.ts から呼ばれる
+    ├── claudeCli.ts         引数組み立て / 実行（同期版と**非同期版**。コマンド解決は `core/commandPath.ts`）
+    ├── summaryPipeline.ts   判定とフォールバック（createSummaryPipeline）。cli/worker.ts から呼ばれる
+    └── summaryPreview.ts    ★テスト要約（`POST /v1/summary/preview`）。**非同期**。server から呼ばれる
 ```
 
 判断ロジックは基本的に `cli/` と `core/` に置く。**`server/index.ts` と `wsServer.ts` は判断ロジックを持たない** — 配線に留める。
@@ -67,6 +73,13 @@ core/src/
 | `server/dispatcher.ts` | 何を配信済みとし、何を消してよいか。どの世代の entry を配信し、どの ack を弾くか |
 | `server/audioStore.ts` | 何を合成し、何を覚えておくか（issue #29） |
 | `server/engineProcess.ts` | 合成エンジンを起こしてよいか、どう止めるか（issue #51） |
+| `server/controlApi.ts` | 設定を読み書きしてよいか、プレビューを走らせてよいか（issue #76） |
+
+> ★ **`controlApi.ts` は「HTTP を知らない層」にしてある。** `req` / `res` は `httpServer.ts` が扱い、
+> こちらは「入力 → レスポンスの値」だけを返す。実サーバーを立てずにテストが書ける。
+> ★ **書き込み口の絞り（ループバック限定 / `Origin` 禁止 / `Content-Type` 必須）は
+> `controlApi.ts` に置かないこと。** ルーティングの手前で効かせるものなので `httpServer.ts` が持つ。
+> こちらに置くと「ハンドラを1つ足したときに絞りを付け忘れる」形になる。
 
 > ★ **`audioStore.ts` は #29 で増えた2つ目の例外。** 「サーバーは判断ロジックを持たない」という
 > 方針そのものは変えていない。合成を GET が来たときに走らせる形にしたので、
@@ -113,6 +126,34 @@ tsdown 等でバンドルし、成果物を `plugin/bin/chatter-agent-speak.mjs`
 - ビルド成果物を git に入れるのは本意ではないが、`/plugin install` だけで完結する導入体験と引き換える
 - **CI で「コミット済みバンドルがソースと一致するか」を検証**して腐敗を防ぐ
 - 開発時にソースから直接動かせるよう、`CHATTER_AGENT_CLI` 環境変数による上書きだけ残す。**それ以外の解決経路を足さない**
+
+### 6. 常駐プロセス（server / player）から `execFileSync` を呼ばない
+
+**CLI（`chatter-agent-speak`）は hook から起動される単発プロセスで、ロックが直列化を担っている**ので、
+`execFileSync` でイベントループを止めて構わない（要約の `summaryPipeline.ts` がそう書いてある）。
+**サーバーは違う。** 止めている間は WebSocket の配信も `GET /audio/…` の応答も止まるので、
+クライアント側の音声取得が `audioFetchTimeoutMs`（既定45秒）で**転送エラーになり、試行回数を
+消費して発話が捨てられる**（→ [`protocol.md`](./protocol.md) の責務8）。
+要約は最悪 `aiSummaryTimeoutMs`（既定60秒）掛かるので、設定パネルのテストボタンを押しただけで
+発話が落ちることになる。`summaryPreview.ts` が非同期版（`runClaudeCliAsync`）を使うのはこのため。
+
+★★ **失敗の見分け方が同期版と違う**（Node 24.19.0 実測）。同期版の判定をコピーすると
+タイムアウトが全部 `error` に化ける（症状は「テスト要約がいつも失敗と出る」で、原因の見当が付かない）:
+
+| | `execFileSync` | `execFile`（非同期） |
+|---|---|---|
+| タイムアウト | `code: "ETIMEDOUT"` | `code: null` / **`killed: true`** |
+| maxBuffer 超過 | `code: "ENOBUFS"` | `code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"` |
+| 非ゼロ終了 | `status: <n>` | `code: <n>`（**数値**）/ `killed: false` |
+| コマンドが無い | `code: "ENOENT"` | `code: "ENOENT"` |
+
+★ **maxBuffer の判定を `killed` より先に置くこと。** maxBuffer 超過でも子は殺されるので、
+逆にすると overflow が timeout に化ける。
+
+★ **判断そのものは分けないこと。** 引数（`buildSummaryArgs`）・環境変数（`buildSummaryEnv`）・
+指示文（`SUMMARY_INSTRUCTION`）・採用の規則（`isAcceptableSummary`）・整形（`toSpeechSentences`）は
+同期版と**同じものを共有している**。片方だけ直すと「テストボタンは通るのに本番では原文が
+読み上げられる」という、いちばん切り分けにくいズレになる。
 
 ## 前身から流用するもの
 
@@ -265,14 +306,26 @@ cc-mascot から移植したコードを oxfmt で整形すると、上流との
 | 発話の記録 | `{root}/speech.jsonl`（退避は `speech.1.jsonl` の1世代だけ） | CLI |
 | 配信キュー | `{root}/speech/<seq>.json` | CLI が書く。上限超過は CLI が切り、ack と起動時の掃除は server が行う |
 | seq の state | `{root}/speech.state.json`（`{nextSeq, epoch}`） | CLI |
-
 | 抑制の state | `{root}/speak.state.json` | CLI |
+| 要約セッションの共有レジストリ | `{root}/summarizer-sessions.json` | **server**（`POST /v1/summary/preview` が起こした要約の `--session-id`。読むのは CLI） |
 | 要約 CLI の cwd | `{root}/summarizer-home/` | CLI（要約 CLI を隔離実行する作業ディレクトリ。プロジェクトの `CLAUDE.md` を読ませないため） |
 | 要約の実測ログ | `{root}/summarizer.log` | CLI（要約が有効なときだけ書く。既定 OFF なら1バイトも増えない） |
 | CLI のロック | `{root}/speak.lock/`（ディレクトリ） | CLI |
 | サーバーのロック | `{root}/server.lock/`（ディレクトリ） | **server**（bind の前に取る。2台目は起動に失敗する） |
 | player のロック | `{root}/player.lock/`（ディレクトリ） | **player**（接続の前に取る。2台目は起動に失敗する） |
 | player の一時 WAV | `{root}/player-tmp/<エポック>-<seq>.wav` | **player**（起動時にディレクトリごと作り直す。`seq` は採番の世代を跨いで一意でないので、ファイル名に世代を混ぜる） |
+
+★★ **`summarizer-sessions.json` を `speak.state.json` に相乗りさせないこと。**
+あちらは CLI が「ドレインの先頭で読み、途中と末尾で全体を書き戻す」形で使っている。
+ロックの外に居るサーバーが同じファイルを read-modify-write すると、**CLI の tombstone
+（`publishedMessageIds`）を巻き添えで消しうる** —— 症状は「同じメッセージを2回喋る」で、
+設定パネルのテスト要約を押しただけで起きる。しかも再現条件がタイミングなので追えない。
+ファイルを分けて**書き手を1人だけ**にしてある（CLI 側は `speak.state.json`、
+サーバー側はこちら）。読む側（CLI の無限ループ防止・第2層）が or で見る。
+
+★ **CLI のロックを取りに行くのも駄目。** あのロックはドレイン全体（要約中は数十秒、上限は
+`aiSummaryTimeoutMs × aiSummaryMaxPerDrain`）保持される。テストボタン1つのためにそこまで待つか、
+待たずに諦めるかの二択になる。
 
 ### 採番の世代（`epoch`）
 
@@ -312,6 +365,7 @@ server（音声合成）だけが読むキー。**別ファイルに分けない
 | `ttsEnabled` | `true` | `CHATTER_AGENT_TTS_ENABLED` |
 | `ttsBaseUrl` | `"http://127.0.0.1:10101"` | `CHATTER_AGENT_TTS_URL` |
 | `ttsSpeakerId` | `888753760` | `CHATTER_AGENT_TTS_SPEAKER_ID` |
+| `ttsSpeedScale` | `1.0` | `CHATTER_AGENT_TTS_SPEED_SCALE` |
 | `synthesisTimeoutMs` | `30000` | `CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS` |
 | `ttsSpawn` | `true` | `CHATTER_AGENT_TTS_SPAWN` |
 | `ttsSpawnCommand` | `""` | `CHATTER_AGENT_TTS_SPAWN_COMMAND` |
@@ -335,6 +389,22 @@ server（音声合成）だけが読むキー。**別ファイルに分けない
   `GET /audio/…` の**応答**を保留する上限。後者は応答を打ち切るだけで**合成は続ける**ので、
   クライアントの取り直しがキャッシュに当たって即 200 になる
 - モジュール名は API ファミリ（`voicevoxClient`）、config キーはエンジン中立（`tts*`）で割り切ってある
+- ★★ **`ttsSpeedScale`（[#76](https://github.com/schwarz9791/chatter-agent/issues/76)）は
+  `voicevoxClient` の「`AudioQuery` の中身は解釈しない」方針の唯一の例外。** `audio_query` が
+  返した JSON の `speedScale` **だけ**を書き換えて `synthesis` に投げる（`applySpeedScale`）。
+  **例外をここ1つに留めること** —— `pitchScale` / `intonationScale` を同じ理屈で足していくと、
+  「エンジンが返した JSON をそのまま返送する」という一番安全な形が失われる。
+  `speedScale` を持たないエンジンには**何もしない**（無いキーを生やさない）
+- ★ **範囲 0.5〜2.0 はエンジンの受理範囲ではなく実用の範囲。** VOICEVOX 互換 API はもっと広い値も
+  受けるが、0.5 未満は間延びして意味を取りづらく、2.0 超は聞き取れない
+- ★ **`ttsSpeedScale` はこのファイルで小数を受ける最初のキー。** 既存の `toInt` は
+  `Number.isInteger` 縛りなので流用できず、`makeRangeParser` が要った。
+  ★ `Number("")` も `Number(" ")` も `Number(null)` も `0` になるので、
+  空・空白・非文字列を明示的に落としている（`toInt` では `Number.isInteger(NaN)` が
+  その分を弾いていた）
+- ★ **`audioStore` のキャッシュキーに `speedScale` が入っている。** 合成結果を変えうる設定を
+  `Voice` に足したら、`keyFor` にも足すこと。足さないと**速度を変えた直後に取り直した文だけ
+  古い速度の WAV** がキャッシュから返る
 
 #### エンジンを起こす（`ttsSpawn*`、[#51](https://github.com/schwarz9791/chatter-agent/issues/51)）
 

@@ -294,6 +294,85 @@ TTS + 再生は生成よりずっと遅い。Claude Code は 2 秒で 20 文吐�
 - **音声の GET にもタイムアウトを置く。** 返らない相手を掴むと head-of-line blocking で**以後すべてが無音になり、エラーも1行も出ない**。★ **サーバー側の設定と突き合わせる必要は無い** — サーバーが応答を `synthesisTimeoutMs` で打ち切って `503` を返す（上の「応答の期限」）ので、待たされ続ける側は塞がっている
 - **`503` が続いたら、取り直す間隔を伸ばすこと。** 固定間隔だと、エンジンを起動し忘れているだけで **1 req/s のループが恒久的に回る**。指数バックオフにして上限で頭を打たせ、`200` が返ったら元に戻す
 
+## 制御 API — `/v1/*`
+
+**設定パネル（[#76](https://github.com/schwarz9791/chatter-agent/issues/76)）が設定を読み書きする口。**
+発話の契約とは独立していて、**繋がなくても発話は成立する**。
+
+★★ **書き込み（`PATCH` / `POST`）は同じマシンからだけ。** それ以外は **404**。
+読み（`GET`）は今までと同じ姿勢（無認証・LAN から届く。→ 下の「セキュリティ」）のままにしてある ——
+XR クライアント（[#25](https://github.com/schwarz9791/chatter-agent/issues/25)）が
+LAN 越しに話者一覧を引けなくなるため。
+
+```
+GET   /v1/health           200 {"ok":true,"version":"0.1.0"}
+GET   /v1/speakers         200 {"speakers":[{"id":888753760,"label":"Anneli（ノーマル）"}]}
+                           503 {"error":"engine_unreachable","detail":"…"}
+GET   /v1/config           200 {"values":{…},"origins":{…},"writable":[…]}
+PATCH /v1/config           200 {"values":{…},"origins":{…}}   ← 適用後に読み直した値
+                           400 {"error":"unknown_key"|"invalid_value"|"invalid_body"|"invalid_json","key":"…"}
+                           403 {"error":"readonly_key","key":"…"}
+                           409 {"error":"env_override","key":"…"}
+                           413 {"error":"payload_too_large"}
+                           415（本文は text/plain）
+                           500 {"error":"config_unreadable"|"config_unwritable"}
+POST  /v1/tts/preview      200 audio/wav      ★ 固定文。任意テキストは受けない
+                           429 {"error":"too_many_requests"}
+POST  /v1/summary/preview  200 {"summary":"…","outcome":"ok","elapsedMs":11845}
+                           200 {"summary":null,"outcome":"timeout","detail":"…"}   ★ 失敗も 200
+                           429 {"error":"too_many_requests"}
+```
+
+### 書き込み口の絞りは3重
+
+サーバーは既定 `host: 0.0.0.0` で無認証（→ 下の「セキュリティ」/ [#3](https://github.com/schwarz9791/chatter-agent/issues/3)）。
+**bind は変えない**（Android から繋ぐ #25 が死ぬ）。代わりに**書き込み口だけ**を絞る。
+
+| # | 絞り | 返す | 理由 |
+|---|---|---|---|
+| 1 | peer がループバック（`127.0.0.0/8` / `::1` / `::ffff:127.0.0.x`）でない | **404** | ★ **403 ではない。** 403 は「口はあるが権限が無い」と教えることになる。**存在そのものを見せない**。★ **`X-Forwarded-For` を見ない**（クライアントが自由に付けられるので、見た瞬間にこの絞りが1行で無効になる） |
+| 2 | `Origin` が付いている | **403** | `Origin` が付く＝ WebView / ブラウザから張られた。`allowedOrigins` に `http://localhost:3000` を足していた人が、そのポートを踏んだ Web ページに設定を書き換えられる穴を塞ぐ。ネイティブクライアント（Unity の `UnityWebRequest`）は `Origin` を送らない |
+| 3 | `Content-Type: application/json` でない | **415** | simple request では JSON の Content-Type を付けられないので、**プリフライトが必ず走って 2 に掛かる**。CSRF 対策の本体はこの連鎖 |
+
+★ **ループバックでない相手には、書き込みメソッドを `Allow` に載せない。** どうせ 404 を返すので、
+載せるのは嘘になる。`OPTIONS /v1/config` は同じマシンからなら `GET, HEAD, PATCH, OPTIONS`、
+LAN からなら `GET, HEAD, OPTIONS` を返す。
+
+★ **405 の `Allow` はリソースごと。** `/v1/tts/preview` は `POST, OPTIONS`、
+`/audio/…` は `GET, HEAD, OPTIONS`（RFC 9110 §15.5.6）。
+
+### 書けないキーは2種類ある
+
+`writable` に載らず、`PATCH` すると **403 `readonly_key`**。
+
+| キー | 理由 |
+|---|---|
+| `ttsSpawnCommand` / `ttsSpawnArgs` / `playerCommand` / `playerArgs` / `aiSummaryCommand` | **(a) コマンド実行に繋がる。** ループバック限定でも「設定を1行書き換えるだけで任意コマンド実行」は別格の壊れ方をする。**緩めないこと** |
+| `host` / `port` / `allowedOrigins` | **(b) 効かない。** 再起動まで反映されないので、UI から触れる意味が無いうえに「効かない設定」という最悪の見え方になる |
+
+★ **環境変数が勝っているキーは 409 `env_override`。** 優先順位は「環境変数 > ファイル > 既定」なので、
+書いても効かない。**黙って書いて効かないのがいちばん悪い。**
+
+★ **書き戻しは「生の JSON をベースに、変更キーだけ差し替え」。** `config.json` に置かれた
+**他バイナリ向けの未知キーは消えない**。
+
+★★ **all-or-nothing。** 1つでも弾かれたら**何も書かない**。部分適用にすると
+「400 が返ったのに半分は書き換わっている」という、呼び出し側から復元できない状態になる。
+
+★ **レスポンスは書いた後に読み直した値。** ストアは `mtime`+`size` のスタンプで読み直すので、
+これが「本当に効いた値」になる。
+
+### プレビューは固定文
+
+- ★★ **`POST /v1/tts/preview` は任意テキストを受けない。** 受けた瞬間、無認証（LAN 露出）の
+  合成 API になる。`/synthesis` は CPU 律速なので、長文を並べるだけで実質 DoS
+- ★ **`POST /v1/summary/preview` も任意テキストを受けない。** 理由は別で、要約は `claude -p` を
+  起こす＝**ユーザーの課金を消費する**
+- ★★ **要約の失敗は 200 で返す**（`outcome` に理由が入る）。503 にすると、クライアントの
+  再試行（→ 下の「クライアント側の責務」8）が噛んで、押していないのに何度も `claude -p` が走る
+- **レート制限は「同時1本 + 最短間隔1秒」**（合成と要約で別々のゲート）。超えたら **429**。
+  ★ **本命の間引きはクライアント側**（スライダーを 300ms デバウンスする）で、ここは最後の砦
+
 ## セキュリティ
 
 **`Origin` ヘッダを持つ接続は、`allowedOrigins` に載っていなければ拒否する。** WebSocket は CORS の対象外なので、これが無いとユーザーが開いた任意の Web ページが `new WebSocket("ws://127.0.0.1:8570")` で会話を読み、ack を投げてマスコットを黙らせられる。`host` を `127.0.0.1` に絞っても塞がらない。
@@ -314,6 +393,8 @@ TTS + 再生は生成よりずっと遅い。Claude Code は 2 秒で 20 文吐�
 `tauri://localhost` のような**ブラウザからは名乗れないスキーム**を足すぶんには、上の脅威（任意の Web ページが繋ぐ）は塞がったまま。`http://localhost:*` を足すときは、そのポートを開発サーバー以外に使わないこと。
 
 **LAN 上の他端末に対する認証は無い。** 既定の `0.0.0.0` バインドは、同一 LAN の誰でもエージェントの発言を読める状態を意味する。**会話のテキストに加えて、合成した音声も同じ口から取れる。** 信頼できないネットワークでは `host` を `127.0.0.1` にすること。認証の追加は [#3](https://github.com/schwarz9791/chatter-agent/issues/3)。
+
+★ **制御 API（[#76](https://github.com/schwarz9791/chatter-agent/issues/76)）でもこの姿勢は変えていない。** bind を絞ると LAN の Android から繋ぐ [#25](https://github.com/schwarz9791/chatter-agent/issues/25) が死ぬので、**新しく開いた書き込み口（`PATCH` / `POST`）だけをループバックに絞った**（→ 上の「制御 API」）。`GET /v1/config` は LAN から読める —— つまり **`playerCommand` などのローカルなパスが LAN に見える**。会話全文が既に読める状態と比べれば増分は小さいが、増えていないわけではない。ここを塞ぐのは認証（#3）の仕事。
 
 ## 記録 — `{root}/speech.jsonl`
 

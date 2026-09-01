@@ -70,6 +70,24 @@ void CMEmitEvent(const char* type, const char* key)
     CMEmit(payload);
 }
 
+/*
+ * 設定パネルの項目が操作された（#76）。
+ *
+ * ★ value は文字列で運ぶ。 型ごとに枝を増やすと、ネイティブ側が「その項目が何型か」を
+ *   知る必要が出てきて、「ネイティブに設定の知識を持たせない」という前提が崩れる。
+ *   ショートカットの記録だけは "<keyCode>,<修飾マスク>" という数値2つで、
+ *   ctrl+opt+m という語彙への変換は C# の HotKeySpec が行う。
+ */
+void CMEmitSetting(const char* key, const char* value)
+{
+    if (key == NULL) return;
+    NSMutableDictionary *payload = [NSMutableDictionary dictionary];
+    payload[@"type"] = @"setting";
+    payload[@"key"] = @(key);
+    payload[@"value"] = value != NULL ? @(value) : @"";
+    CMEmit(payload);
+}
+
 void CMEmitHotKey(int hotKeyId)
 {
     CMEmit(@{ @"type": @"hotkey", @"id": @(hotKeyId) });

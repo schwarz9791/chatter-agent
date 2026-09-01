@@ -136,5 +136,95 @@ namespace ChatterMascot.Tests
             Assert.That(spec.Format(), Is.Empty);
             Assert.That(spec.FormatSymbols(), Is.Empty);
         }
+    
+        // ── 記録方式（#76） ────────────────────────────────────
+
+        /// <summary>
+        /// ★★ ネイティブが返すのは<b>数値だけ</b>（keyCode と Carbon の修飾マスク）。
+        ///   <c>ctrl+opt+m</c> という語彙はこの変換でしか作らない。
+        /// </summary>
+        [Test]
+        public void BuildsFromRecordedCodes()
+        {
+            HotKeySpec spec;
+            string error;
+
+            // 0x2E = kVK_ANSI_M、0x1000|0x0800 = ctrl+opt
+            Assert.That(HotKeySpec.TryFromCode(0x2E, 0x1000 | 0x0800, out spec, out error), Is.True, error);
+            Assert.That(spec.Format(), Is.EqualTo("ctrl+opt+m"));
+            Assert.That(spec.FormatSymbols(), Is.EqualTo("⌃⌥M"));
+        }
+
+        /// <summary>★ 修飾キー無しは受けない（そのキーが全アプリで入力できなくなる）</summary>
+        [Test]
+        public void RejectsRecordedKeysWithoutModifiers()
+        {
+            HotKeySpec spec;
+            string error;
+
+            Assert.That(HotKeySpec.TryFromCode(0x2E, 0, out spec, out error), Is.False);
+            Assert.That(error, Is.Not.Empty);
+        }
+
+        /// <summary>
+        /// ★ 表に無いキーは受けない。記録できてしまうと <c>settings.json</c> に
+        ///   往復できない値が入り、次の起動でショートカットが消える。
+        /// </summary>
+        [Test]
+        public void RejectsRecordedKeysThatCannotRoundTrip()
+        {
+            HotKeySpec spec;
+            string error;
+
+            // 0x21 = kVK_ANSI_LeftBracket（表に載せていない）
+            Assert.That(HotKeySpec.TryFromCode(0x21, 0x1000, out spec, out error), Is.False);
+            Assert.That(error, Is.Not.Empty);
+        }
+
+        /// <summary>★ Caps Lock / Fn / 左右の区別が混ざったまま登録すると、打っても一致しない</summary>
+        [Test]
+        public void DropsUnknownModifierBits()
+        {
+            HotKeySpec spec;
+            string error;
+
+            Assert.That(HotKeySpec.TryFromCode(0x2E, 0x1000 | 0x0800 | 0x00010000, out spec, out error), Is.True);
+            Assert.That(spec.ModifierMask, Is.EqualTo(HotKeySpec.ModifierControl | HotKeySpec.ModifierOption));
+        }
+
+        [Test]
+        public void ParsesTheRecordedWireFormat()
+        {
+            HotKeySpec spec;
+            string error;
+
+            Assert.That(HotKeySpec.TryParseRecorded("46,6144", out spec, out error), Is.True, error);
+            Assert.That(spec.Format(), Is.EqualTo("ctrl+opt+m"));
+        }
+
+        [Test]
+        public void RejectsAMalformedRecordedWireFormat()
+        {
+            HotKeySpec spec;
+            string error;
+
+            Assert.That(HotKeySpec.TryParseRecorded("", out spec, out error), Is.False);
+            Assert.That(HotKeySpec.TryParseRecorded("46", out spec, out error), Is.False);
+            Assert.That(HotKeySpec.TryParseRecorded("46,6144,1", out spec, out error), Is.False);
+            Assert.That(HotKeySpec.TryParseRecorded("あ,6144", out spec, out error), Is.False);
+        }
+
+        /// <summary>★ 記録 → 保存 → 読み直しが往復すること（保存形式は文字列）</summary>
+        [Test]
+        public void RecordedKeysRoundTripThroughTheSavedFormat()
+        {
+            HotKeySpec recorded;
+            string error;
+            Assert.That(HotKeySpec.TryParseRecorded("46,6144", out recorded, out error), Is.True);
+
+            HotKeySpec reparsed;
+            Assert.That(HotKeySpec.TryParse(recorded.Format(), out reparsed, out error), Is.True);
+            Assert.That(reparsed, Is.EqualTo(recorded));
+        }
     }
 }

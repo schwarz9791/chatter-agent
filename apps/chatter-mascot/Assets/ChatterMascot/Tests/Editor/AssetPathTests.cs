@@ -247,5 +247,73 @@ namespace ChatterMascot.Tests
 
             Assert.That(candidates.Any(c => c.Source == AssetSource.CommandLine), Is.False);
         }
+
+        // ── 設定で選んだモデル（#76） ──────────────────────────
+
+        /// <summary>
+        /// ★★ <c>models/*.vrm</c> の走査は <c>Ordinal</c> の先頭が勝つので、
+        ///   名前を覚えて<b>名指しで先に出す</b>。これが無いと2つ目のモデルを選んでも
+        ///   反映されない。
+        /// </summary>
+        [Test]
+        public void PutsTheChosenModelBeforeTheDirectoryScan()
+        {
+            var env = Env(listFiles: (dir, pattern) => new[] { "/home/u/.config/chatter-agent/models/aaa.vrm" });
+            env.SelectedVrmFileName = "chosen.vrm";
+
+            var candidates = AssetPath.Enumerate(env, AssetKind.Vrm).ToList();
+            var settings = candidates.FindIndex(c => c.Source == AssetSource.Settings);
+            var scanned = candidates.FindIndex(c => c.Source == AssetSource.UserConfig);
+
+            Assert.That(settings, Is.GreaterThanOrEqualTo(0), "設定の候補が出ていない");
+            Assert.That(scanned, Is.GreaterThanOrEqualTo(0), "走査の候補が出ていない");
+            Assert.That(settings, Is.LessThan(scanned));
+            Assert.That(candidates[settings].Path, Does.EndWith("models/chosen.vrm"));
+        }
+
+        /// <summary>
+        /// ★ <c>-vrm</c> は切り分けの逃げ道（「設定が壊れていてもこれを付ければ必ず出る」）
+        ///   なので、設定より優先を保つ。
+        /// </summary>
+        [Test]
+        public void KeepsTheCommandLineAboveTheChosenModel()
+        {
+            var env = Env(commandLine: new[] { "-vrm", "/tmp/forced.vrm" });
+            env.SelectedVrmFileName = "chosen.vrm";
+
+            Assert.That(AssetPath.Enumerate(env, AssetKind.Vrm)[0].Source, Is.EqualTo(AssetSource.CommandLine));
+        }
+
+        [Test]
+        public void OmitsTheChosenModelWhenNoneIsSelected()
+        {
+            Assert.That(
+                AssetPath.Enumerate(Env(), AssetKind.Vrm).ToList().Exists(c => c.Source == AssetSource.Settings),
+                Is.False);
+        }
+
+        /// <summary>★ Android には共有ファイルシステムが無いので、この段ごと落ちる</summary>
+        [Test]
+        public void OmitsTheChosenModelWithoutAUserConfigDirectory()
+        {
+            var env = Env(desktop: false);
+            env.SelectedVrmFileName = "chosen.vrm";
+
+            Assert.That(
+                AssetPath.Enumerate(env, AssetKind.Vrm).ToList().Exists(c => c.Source == AssetSource.Settings),
+                Is.False);
+        }
+
+        /// <summary>★ <c>.vrma</c> には対応する設定が無い（意図的な非対称）</summary>
+        [Test]
+        public void DoesNotApplyTheChosenModelToAnimations()
+        {
+            var env = Env();
+            env.SelectedVrmFileName = "chosen.vrm";
+
+            Assert.That(
+                AssetPath.Enumerate(env, AssetKind.Vrma).ToList().Exists(c => c.Source == AssetSource.Settings),
+                Is.False);
+        }
     }
 }

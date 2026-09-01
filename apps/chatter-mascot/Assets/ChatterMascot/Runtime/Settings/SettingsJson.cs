@@ -14,12 +14,17 @@ namespace ChatterMascot.Settings
     ///
     /// ★ <b>throw しない。</b> 設定ファイルが1文字壊れただけでマスコットが出ないのは
     ///   割に合わない（<c>WindowStateJson</c> と同じ判断）。
+    ///
+    /// ★ <b>読み取りは「値を1つずつ差し替える」形にしてある。</b> #75 の頃は
+    ///   <c>ref</c> 引数を積んでいたが、#76 で項目が9つに増えたので
+    ///   <see cref="MascotSettings"/> を返す形に変えた。項目を足すときに
+    ///   引数リストを全経路で直す必要が無くなる。
     /// </summary>
     public static class SettingsJson
     {
         /// <summary>
         /// 書式のバージョン。★ <b>キーが増えるだけなら上げない</b>
-        /// —— 上げると既存ユーザーの設定が1回リセットされる。
+        /// —— 上げると既存ユーザーの設定が1回リセットされる。#76 で6つ増えたが**上げていない**。
         /// </summary>
         public const int CurrentVersion = 1;
 
@@ -32,10 +37,21 @@ namespace ChatterMascot.Settings
                 {
                     ["mute"] = settings.Muted,
                     ["muteHotKey"] = settings.MuteHotKey ?? HotKeySpec.Default,
+                    // ★ 刻みに丸めてから書くこと。スライダー由来の 0.7000000119 を
+                    //   そのまま残すと、次に開いたときハンドルが刻みに乗らない位置から始まる
+                    ["volume"] = Round(settings.Volume, SettingsMapping.VolumeStep),
                 },
                 ["ui"] = new JObject
                 {
                     ["hideHotKey"] = settings.HideHotKey ?? HotKeySpec.DefaultHide,
+                },
+                ["character"] = new JObject
+                {
+                    ["scale"] = Round(settings.CharacterScale, SettingsMapping.ScaleStep),
+                    ["idleMotion"] = settings.IdleMotion,
+                    ["cursorGaze"] = settings.CursorGaze,
+                    ["blink"] = settings.Blink,
+                    ["vrm"] = settings.VrmFileName ?? "",
                 },
             };
             return root.ToString(Formatting.Indented) + "\n";
@@ -91,9 +107,7 @@ namespace ChatterMascot.Settings
                 }
             }
 
-            var muted = MascotSettings.Defaults.Muted;
-            var hotKey = MascotSettings.Defaults.MuteHotKey;
-            var hideHotKey = MascotSettings.Defaults.HideHotKey;
+            var result = MascotSettings.Defaults;
 
             foreach (var property in root)
             {
@@ -103,11 +117,15 @@ namespace ChatterMascot.Settings
                         break;
 
                     case "audio":
-                        ReadAudio(property.Value as JObject, property.Value, ref muted, ref hotKey, warn);
+                        result = ReadAudio(property.Value, result, warn);
                         break;
 
                     case "ui":
-                        ReadUi(property.Value as JObject, property.Value, ref hideHotKey, warn);
+                        result = ReadUi(property.Value, result, warn);
+                        break;
+
+                    case "character":
+                        result = ReadCharacter(property.Value, result, warn);
                         break;
 
                     default:
@@ -118,17 +136,17 @@ namespace ChatterMascot.Settings
                 }
             }
 
-            settings = new MascotSettings(muted, hotKey, hideHotKey);
+            settings = result;
             return true;
         }
 
-        private static void ReadAudio(
-            JObject audio, JToken raw, ref bool muted, ref string hotKey, Action<string> warn)
+        private static MascotSettings ReadAudio(JToken raw, MascotSettings settings, Action<string> warn)
         {
+            var audio = raw as JObject;
             if (audio == null)
             {
-                Warn(warn, $"audio がオブジェクトではありません（{raw?.Type.ToString() ?? "無し"}）。既定を使います");
-                return;
+                Warn(warn, $"audio がオブジェクトではありません（{Describe(raw)}）。既定を使います");
+                return settings;
             }
 
             foreach (var property in audio)
@@ -136,12 +154,19 @@ namespace ChatterMascot.Settings
                 switch (property.Key)
                 {
                     case "mute":
-                        if (property.Value.Type == JTokenType.Boolean) muted = property.Value.Value<bool>();
-                        else Warn(warn, $"audio.mute が真偽値ではありません（{property.Value}）。既定を使います");
+                        settings = settings.WithMuted(
+                            ReadBool(property.Value, "audio.mute", settings.Muted, warn));
                         break;
 
                     case "muteHotKey":
-                        ReadHotKey(property.Value, "audio.muteHotKey", ref hotKey, warn);
+                        settings = settings.WithMuteHotKey(
+                            ReadHotKey(property.Value, "audio.muteHotKey", settings.MuteHotKey, warn));
+                        break;
+
+                    case "volume":
+                        settings = settings.WithVolume(ReadNumber(
+                            property.Value, "audio.volume", settings.Volume,
+                            SettingsMapping.VolumeMin, SettingsMapping.VolumeMax, SettingsMapping.VolumeStep, warn));
                         break;
 
                     default:
@@ -149,15 +174,16 @@ namespace ChatterMascot.Settings
                         break;
                 }
             }
+            return settings;
         }
 
-        private static void ReadUi(
-            JObject ui, JToken raw, ref string hideHotKey, Action<string> warn)
+        private static MascotSettings ReadUi(JToken raw, MascotSettings settings, Action<string> warn)
         {
+            var ui = raw as JObject;
             if (ui == null)
             {
-                Warn(warn, $"ui がオブジェクトではありません（{raw?.Type.ToString() ?? "無し"}）。既定を使います");
-                return;
+                Warn(warn, $"ui がオブジェクトではありません（{Describe(raw)}）。既定を使います");
+                return settings;
             }
 
             foreach (var property in ui)
@@ -165,7 +191,8 @@ namespace ChatterMascot.Settings
                 switch (property.Key)
                 {
                     case "hideHotKey":
-                        ReadHotKey(property.Value, "ui.hideHotKey", ref hideHotKey, warn);
+                        settings = settings.WithHideHotKey(
+                            ReadHotKey(property.Value, "ui.hideHotKey", settings.HideHotKey, warn));
                         break;
 
                     default:
@@ -173,25 +200,148 @@ namespace ChatterMascot.Settings
                         break;
                 }
             }
+            return settings;
+        }
+
+        private static MascotSettings ReadCharacter(JToken raw, MascotSettings settings, Action<string> warn)
+        {
+            var character = raw as JObject;
+            if (character == null)
+            {
+                Warn(warn, $"character がオブジェクトではありません（{Describe(raw)}）。既定を使います");
+                return settings;
+            }
+
+            foreach (var property in character)
+            {
+                switch (property.Key)
+                {
+                    case "scale":
+                        settings = settings.WithCharacterScale(ReadNumber(
+                            property.Value, "character.scale", settings.CharacterScale,
+                            SettingsMapping.ScaleMin, SettingsMapping.ScaleMax, SettingsMapping.ScaleStep, warn));
+                        break;
+
+                    case "idleMotion":
+                        settings = settings.WithIdleMotion(
+                            ReadBool(property.Value, "character.idleMotion", settings.IdleMotion, warn));
+                        break;
+
+                    case "cursorGaze":
+                        settings = settings.WithCursorGaze(
+                            ReadBool(property.Value, "character.cursorGaze", settings.CursorGaze, warn));
+                        break;
+
+                    case "blink":
+                        settings = settings.WithBlink(
+                            ReadBool(property.Value, "character.blink", settings.Blink, warn));
+                        break;
+
+                    case "vrm":
+                        settings = settings.WithVrmFileName(
+                            ReadFileName(property.Value, "character.vrm", settings.VrmFileName, warn));
+                        break;
+
+                    default:
+                        Warn(warn, $"知らないキー \"character.{property.Key}\" は無視します");
+                        break;
+                }
+            }
+            return settings;
+        }
+
+        private static bool ReadBool(JToken value, string key, bool fallback, Action<string> warn)
+        {
+            if (value.Type == JTokenType.Boolean) return value.Value<bool>();
+            Warn(warn, $"{key} が真偽値ではありません（{value}）。既定を使います");
+            return fallback;
+        }
+
+        /// <summary>
+        /// 数値を読んで、<b>刻みに丸めて範囲へ収める</b>。
+        ///
+        /// ★ <b>範囲外を「不正」として既定に倒さないこと。</b> 範囲を狭めたときに、
+        ///   前の版で保存された値が全部既定へ飛ぶ。クランプなら「一番近い有効な値」に落ちる。
+        /// ★ ただし<b>数値ですらない</b>ときは既定に倒す（クランプする先が無い）。
+        /// </summary>
+        private static float ReadNumber(
+            JToken value, string key, float fallback, float min, float max, float step, Action<string> warn)
+        {
+            if (value.Type != JTokenType.Float && value.Type != JTokenType.Integer)
+            {
+                Warn(warn, $"{key} が数値ではありません（{value}）。既定を使います");
+                return fallback;
+            }
+
+            var raw = value.Value<float>();
+            if (float.IsNaN(raw) || float.IsInfinity(raw))
+            {
+                Warn(warn, $"{key} が数値として扱えません（{value}）。既定を使います");
+                return fallback;
+            }
+
+            var normalized = SettingsMapping.Normalize(raw, min, max, step);
+            if (Math.Abs(normalized - raw) > step / 2f)
+            {
+                Warn(warn, $"{key} を {SettingsMapping.Format(normalized)} に丸めました（元の値: {SettingsMapping.Format(raw)}）");
+            }
+            return normalized;
         }
 
         /// <summary>
         /// ★ <b>ここで妥当性まで見ること。</b> 「修飾キー無し」を保存できてしまうと、
         /// 次の起動でそのキーが<b>全アプリから奪われる</b>（→ <see cref="HotKeySpec"/>）。
         /// </summary>
-        private static void ReadHotKey(JToken value, string key, ref string target, Action<string> warn)
+        private static string ReadHotKey(JToken value, string key, string fallback, Action<string> warn)
         {
             if (value.Type != JTokenType.String)
             {
                 Warn(warn, $"{key} が文字列ではありません（{value}）。既定を使います");
-                return;
+                return fallback;
             }
 
             var text = value.Value<string>();
             HotKeySpec spec;
             string reason;
-            if (HotKeySpec.TryParse(text, out spec, out reason)) target = text;
-            else Warn(warn, $"{key} を使えません（{reason}）。既定を使います");
+            if (HotKeySpec.TryParse(text, out spec, out reason)) return text;
+            Warn(warn, $"{key} を使えません（{reason}）。既定を使います");
+            return fallback;
+        }
+
+        /// <summary>
+        /// ★★ <b>ファイル名だけを受けること。</b> この値は
+        /// <c>~/.config/chatter-agent/models/</c> に連結される。区切り文字を通すと
+        /// <c>../../</c> でランタイムルートの外を読ませられる（<c>plugin/</c> の spool 命名で
+        /// 一度潰した形と同じ）。ここは設定ファイルなので攻撃者を想定するというより、
+        /// <b>手で書き換えた人が意図せず壊れた候補を作らないため</b>の門番。
+        /// </summary>
+        private static string ReadFileName(JToken value, string key, string fallback, Action<string> warn)
+        {
+            if (value.Type != JTokenType.String)
+            {
+                Warn(warn, $"{key} が文字列ではありません（{value}）。既定を使います");
+                return fallback;
+            }
+
+            var text = value.Value<string>().Trim();
+            if (text.Length == 0) return "";
+
+            if (text.IndexOf('/') >= 0 || text.IndexOf('\\') >= 0 || text == "." || text == "..")
+            {
+                Warn(warn, $"{key} はファイル名だけを書いてください（区切り文字は使えません）。既定を使います");
+                return fallback;
+            }
+            return text;
+        }
+
+        private static float Round(float value, float step)
+        {
+            return SettingsMapping.RoundToStep(value, step);
+        }
+
+        private static string Describe(JToken raw)
+        {
+            return raw == null ? "無し" : raw.Type.ToString();
         }
 
         private static void Warn(Action<string> warn, string message)

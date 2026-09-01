@@ -27,10 +27,20 @@ namespace ChatterMascot.Audio
         /// Unity 内蔵オーディオで鳴らすときの <see cref="AudioSource"/>。
         /// 外部プロセスで鳴らす実装では使わない。
         /// </param>
-        public static ISpeechPlayer Create(AudioSource template)
+        /// <param name="volume">
+        /// 再生音量（0.0〜2.0）。<c>null</c> なら等倍。
+        ///
+        /// ★★ <b>効かせ方がプラットフォームで違う。</b> macOS は <c>afplay -v</c>、
+        ///   Android は<b>テンプレートの <see cref="AudioSource.volume"/></b>
+        ///   （<c>AudioClipPlayer.CopySettings</c> が各 voice に写す）。
+        ///   ここで getter を渡しているのは macOS だけで、Android 側は
+        ///   <b>呼び出し側がテンプレートに書く</b> —— voice は発話ごとに作られるので、
+        ///   テンプレートを書き換えれば次の発話から効く。
+        /// </param>
+        public static ISpeechPlayer Create(AudioSource template, System.Func<float> volume = null)
         {
 #if UNITY_STANDALONE_OSX || UNITY_EDITOR_OSX
-            return new AfplaySpeechPlayer();
+            return new AfplaySpeechPlayer(volume: volume);
 #else
             return new AudioClipPlayer(template);
 #endif

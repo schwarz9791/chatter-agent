@@ -15,6 +15,16 @@ namespace ChatterMascot.Vrm
     {
         CommandLine,
         EnvironmentVariable,
+
+        /// <summary>
+        /// 設定パネル（#76）で選ばれたモデル。<c>models/&lt;名前&gt;</c> を指す。
+        ///
+        /// ★ <b><c>UserConfig</c>（<c>models/*.vrm</c> の走査）より前に置くこと。</b>
+        ///   あちらは <c>Ordinal</c> の先頭が勝つので、2つ目のモデルを選んでも
+        ///   反映されない。名前を覚えて<b>名指しで</b>先に出す。
+        /// </summary>
+        Settings,
+
         PersistentData,
         UserConfig,
         StreamingAssets,
@@ -40,6 +50,7 @@ namespace ChatterMascot.Vrm
             {
                 case AssetSource.CommandLine: return "起動引数";
                 case AssetSource.EnvironmentVariable: return "環境変数";
+                case AssetSource.Settings: return "設定";
                 case AssetSource.PersistentData: return "persistentDataPath";
                 case AssetSource.UserConfig: return "ユーザー設定";
                 case AssetSource.StreamingAssets: return "同梱";
@@ -61,6 +72,18 @@ namespace ChatterMascot.Vrm
 
         public IReadOnlyDictionary<string, string> Variables { get; set; } =
             new Dictionary<string, string>(StringComparer.Ordinal);
+
+        /// <summary>
+        /// 設定パネルで選ばれた <c>.vrm</c> のファイル名（<c>models/</c> 配下）。空なら候補を出さない。
+        ///
+        /// ★ <b>絶対パスではなくファイル名。</b> 選んだファイルは <c>models/</c> へコピーするので、
+        ///   元ファイルが消えても動き続ける（→ <c>Settings.MascotSettings.VrmFileName</c>）。
+        ///
+        /// ★ <b><c>.vrma</c> には対応する設定が無い。</b> モーションを選ばせる UI を
+        ///   作っていないため（#70 が入るまで、選ばせる中身が同梱の1本しか無い）。
+        ///   ここが <c>.vrm</c> 専用なのは意図的な非対称。
+        /// </summary>
+        public string SelectedVrmFileName { get; set; } = "";
 
         public string PersistentDataPath { get; set; } = "";
         public string StreamingAssetsPath { get; set; } = "";
@@ -86,11 +109,17 @@ namespace ChatterMascot.Vrm
     ///
     /// | 順 | 出どころ | <c>.vrm</c> | <c>.vrma</c> | 対象 |
     /// |---|---|---|---|---|
+    /// | 順 | 出どころ | <c>.vrm</c> | <c>.vrma</c> | 対象 |
+    /// |---|---|---|---|---|
     /// | 1 | 起動引数 | <c>-vrm</c> | <c>-vrma</c> | 全 |
     /// | 2 | 環境変数 | <c>CHATTER_MASCOT_VRM</c> | <c>CHATTER_MASCOT_VRMA</c> | 全 |
-    /// | 3 | <c>persistentDataPath/</c> | <c>model.vrm</c> | <c>idle.vrma</c> | 全 |
-    /// | 4 | <c>${XDG_CONFIG_HOME:-~/.config}/chatter-agent/</c> | <c>models/*.vrm</c> | <c>animations/*.vrma</c> | デスクトップのみ |
-    /// | 5 | <c>streamingAssetsPath/</c>（同梱） | <c>vita.vrm</c> | <c>idle_loop.vrma</c> | 全 |
+    /// | 3 | <b>設定</b>（#76） | <c>models/&lt;選んだ名前&gt;</c> | —— | デスクトップのみ |
+    /// | 4 | <c>persistentDataPath/</c> | <c>model.vrm</c> | <c>idle.vrma</c> | 全 |
+    /// | 5 | <c>${XDG_CONFIG_HOME:-~/.config}/chatter-agent/</c> | <c>models/*.vrm</c> | <c>animations/*.vrma</c> | デスクトップのみ |
+    /// | 6 | <c>streamingAssetsPath/</c>（同梱） | <c>vita.vrm</c> | <c>idle_loop.vrma</c> | 全 |
+    ///
+    /// ★ <b>設定は起動引数・環境変数より<u>下</u>。</b> <c>-vrm</c> は切り分けの逃げ道
+    ///   （「設定が壊れていても、この引数を付ければ必ず出る」）なので、設定より優先を保つ。
     ///
     /// ★ <b>存在確認をしない。</b> 「存在する候補だけ返す」形（<c>exists</c> の注入）は
     ///   <b>Android で破綻する</b> —— <c>streamingAssetsPath</c> は APK 内の
@@ -99,7 +128,8 @@ namespace ChatterMascot.Vrm
     ///   <c>Vrm10.LoadPathAsync</c> ではなく <c>LoadBytesAsync</c> に統一したのと同じ理由で、
     ///   <b>「読めたか」を唯一の判定にする</b>。
     ///
-    /// ★ <b>設定 UI（#16）はこの表の 1〜4 の上に乗せること。</b> ここは探索順だけを決める。
+    /// ★ <b>設定 UI（#76）はこの表に乗った</b>（3段目）。ここは探索順だけを決める ——
+    ///   ファイルのコピーも、名前の検証（区切り文字を通さない）も、呼び出し側の仕事。
     /// </summary>
     public static class AssetPath
     {
@@ -145,6 +175,16 @@ namespace ChatterMascot.Vrm
 
             Add(result, AssetSource.CommandLine, env, CommandLine.Argument(env.CommandLine, spec.Argument));
             Add(result, AssetSource.EnvironmentVariable, env, Variable(env, spec.Variable));
+
+            // ★ 設定で選ばれたモデルを名指しで先に出す（#76）。`models/*.vrm` の走査（下）は
+            //   Ordinal の先頭が勝つので、これが無いと2つ目を選んでも反映されない。
+            //   ★ Android には共有ファイルシステムが無いのでここごと落ちる（下の段と同じ条件）
+            if (kind == AssetKind.Vrm && env.HasUserConfigDirectory && !string.IsNullOrEmpty(env.SelectedVrmFileName))
+            {
+                var selected = Join(Join(RuntimeDirectory(env), spec.UserDirectory), env.SelectedVrmFileName);
+                Add(result, AssetSource.Settings, env, selected);
+            }
+
             Add(result, AssetSource.PersistentData, env, Join(env.PersistentDataPath, spec.PersistentFile));
 
             // ★ Android には共有ファイルシステムが無いのでここごと落ちる

@@ -119,13 +119,12 @@ namespace ChatterMascot.Ui
                 MenuEntry.Of(MenuKeys.Settings, "設定を開く…"),
                 MenuEntry.Separator(),
 
-                // ★ #76（設定 UI）が入るまで押せない。押す先が無い項目を押せるように見せない。
-                //   版を出す場所としては要る（Dock に居ないので「どれが動いているか」の手掛かりが
-                //   ここしか無い）
+                // ★ #76 で押せるようになった。押すと設定パネルが開き、末尾に版とライセンスがある。
+                //   版をここに出し続けるのは、Dock に居ないので「どれが動いているか」の
+                //   手掛かりがここしか無いため
                 MenuEntry.Of(
                     MenuKeys.About,
-                    string.IsNullOrEmpty(state.Version) ? product : $"{product} {state.Version}",
-                    enabled: false),
+                    string.IsNullOrEmpty(state.Version) ? product : $"{product} {state.Version}"),
                 MenuEntry.Of(MenuKeys.Quit, "終了"),
             };
 

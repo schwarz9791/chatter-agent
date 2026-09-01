@@ -66,6 +66,23 @@ CM_EXPORT void CM_StatusItemHide(void);
 CM_EXPORT int  CM_HotKeyRegister(int id, unsigned int keyCode, unsigned int modifiers);
 CM_EXPORT void CM_HotKeyUnregister(int id);
 
+/*
+ * 設定パネル（#76）。schemaJson は SettingsPanelJson.Write が作ったもの。
+ *
+ * ★★ このパネルに設定のキーもラベルも1つも書かないこと。 kind を見てビューを組み、
+ *   操作されたら key と value を返すだけ。ボタンの文字（「記録」など）まで JSON の
+ *   strings で受け取るのは、そこだけ例外にすると必ず増えるため。
+ *
+ * ★★ nonactivatingPanel にしないこと。 LSUIElement のアプリはキーウィンドウを
+ *   取りづらく、ショートカットの記録にはキー入力が要る。Show のときに
+ *   [NSApp activateIgnoringOtherApps:YES] を呼ぶ。実機では
+ *   「スライダーは動くが記録が始まらない」という形で出る。
+ */
+CM_EXPORT bool CM_SettingsPanelShow(const char* schemaJson);
+CM_EXPORT bool CM_SettingsPanelUpdate(const char* schemaJson);
+CM_EXPORT void CM_SettingsPanelHide(void);
+CM_EXPORT bool CM_SettingsPanelIsVisible(void);
+
 /* --- プラグインの内部で共有するもの（C# からは呼ばない） --- */
 
 /* AppKit を触る処理を main thread に載せる。既に main なら直接走る */
@@ -76,6 +93,9 @@ bool CMIsMainThread(void);
 
 /* { "type": ..., "key": ... } を投げる。key が NULL なら省略する */
 void CMEmitEvent(const char* type, const char* key);
+
+/* { "type": "setting", "key": ..., "value": ... } を投げる（#76） */
+void CMEmitSetting(const char* key, const char* value);
 
 /* { "type": "hotkey", "id": <id> } を投げる */
 void CMEmitHotKey(int hotKeyId);

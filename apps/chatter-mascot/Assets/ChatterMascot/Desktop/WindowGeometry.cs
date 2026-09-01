@@ -86,6 +86,35 @@ namespace ChatterMascot.Desktop
         /// ★ <c>AssetPath.RuntimeDirectory</c> を使い回して、ユーザーから見た
         ///   「chatter-agent の設定はここ1箇所」を崩さない。
         /// </summary>
+        /// <summary>
+        /// 位置と大きさを既定へ戻す（設定パネル / #76）。
+        ///
+        /// ★ <b>ファイルを消すだけにしないこと。</b> 次の起動まで何も起きないと、
+        ///   押した人からは「効かないボタン」にしか見えない。走っている管理側にも
+        ///   その場で既定を適用させる。
+        /// ★ <b>core の <c>config.json</c> は触らない。</b> 別プロセスの設定を消すのは越権。
+        /// </summary>
+        public static void Reset()
+        {
+            try
+            {
+                var path = ResolveStatePath();
+                if (!string.IsNullOrEmpty(path) && File.Exists(path)) File.Delete(path);
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[Mascot] ウィンドウの保存を消せませんでした: " + e.Message);
+            }
+
+            var keeper = UnityEngine.Object.FindFirstObjectByType<Keeper>(FindObjectsInactive.Include);
+            if (keeper == null)
+            {
+                Debug.Log("[Mascot] ウィンドウの管理が動いていないので、位置のリセットは次の起動から効きます");
+                return;
+            }
+            keeper.ResetToDefault();
+        }
+
         internal static string ResolveStatePath()
         {
             var root = AssetPath.RuntimeDirectory(AssetEnvFactory.Current());
@@ -287,6 +316,19 @@ namespace ChatterMascot.Desktop
                                      $"clientSize={client}");
                     Destroy(gameObject);
                 }
+            }
+
+            /// <summary>
+            /// 保存を無かったことにして、既定の位置と大きさをその場で適用する（#76）。
+            ///
+            /// ★ <c>_lastPersisted</c> も捨てること。残っていると
+            ///   「もう保存済み」と判断されて、戻した位置が書き戻されない。
+            /// </summary>
+            internal void ResetToDefault()
+            {
+                _saved = default(WindowState);
+                _lastPersisted = default(WindowState);
+                BeginApplying(_saved);
             }
 
             // ── Applying ──────────────────────────────────────────────

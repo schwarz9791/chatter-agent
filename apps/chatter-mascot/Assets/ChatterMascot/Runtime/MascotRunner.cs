@@ -5,6 +5,7 @@ using ChatterMascot.Audio;
 using ChatterMascot.Net;
 using ChatterMascot.Playback;
 using ChatterMascot.Protocol;
+using ChatterMascot.Settings;
 using UnityEngine;
 
 namespace ChatterMascot
@@ -151,6 +152,67 @@ namespace ChatterMascot
         /// 一時ミュートの状態。<b>読み書きの両方に使う</b>（ステータスバーのメニューと
         /// グローバルショートカットから切り替わる）。
         /// </summary>
+        /// <summary>
+        /// 再生音量（0.0〜2.0。既定 1.0）。設定パネル（#76）が書き、次の発話から効く。
+        ///
+        /// ★★ <b>ミュートの代わりにしないこと。</b> <c>0</c> にしても
+        ///   <c>afplay</c> のプロセスは起動し、実時間ぶん走る。ミュートは
+        ///   <see cref="Audio.MutedSpeechPlayer"/> が「声だけ消す」形で担う
+        ///   （ack は通常経路のまま出す）。
+        ///
+        /// ★ <b>効かせ方がプラットフォームで違う。</b> macOS は <c>afplay -v</c>
+        ///   （getter を再生側へ渡してある）、Android は<b>テンプレートの
+        ///   <see cref="AudioSource.volume"/></b>（voice は発話ごとに作られるので、
+        ///   ここを書けば次の発話から効く）。
+        /// </summary>
+        public float Volume
+        {
+            get { return _volume; }
+            set
+            {
+                _volume = SettingsMapping.Normalize(
+                    value, SettingsMapping.VolumeMin, SettingsMapping.VolumeMax, SettingsMapping.VolumeStep);
+                // ★ Android 側はテンプレートに書く。macOS 側は getter 越しに読まれるので何もしない
+                if (audioSource != null) audioSource.volume = _volume;
+            }
+        }
+
+        /// <summary>
+        /// 接続先（<c>ws://host:port</c>）。設定パネル（#76）が制御 API の口を導くのに使う。
+        ///
+        /// ★ 起動引数（<c>-serverUrl</c>）で上書きされた後の<b>実際の値</b>を返すこと。
+        ///   <c>[SerializeField]</c> をそのまま読むと、引数で別のサーバーを指したときに
+        ///   設定パネルだけ元のサーバーを見に行く。
+        /// </summary>
+        public string ServerUrl
+        {
+            get { return serverUrl; }
+        }
+
+        /// <summary>
+        /// 設定パネルのテスト音声を鳴らす（#76）。失敗したら理由、成功なら <c>null</c>。
+        ///
+        /// ★ <b>通常の再生経路をそのまま通す。</b> 別経路で鳴らすと、
+        ///   「テストは鳴るのに本番が鳴らない」（またはその逆）を作ってしまう。
+        ///   ★ その帰結として、<b>ミュート中は鳴らない</b>（<c>MutedSpeechPlayer</c> が
+        ///   声だけ消す）。呼び出し側がミュート中である旨を出すこと。
+        ///
+        /// ★ <b>キューには載せない。</b> 配信された発話ではないので <c>seq</c> も ack も無い。
+        ///   口も表情も動かない（<c>BeginSpeaking</c> を通さない）——
+        ///   確かめたいのは「声と速さ」なので、それで足りる。
+        /// </summary>
+        public async Task<string> PlayPreviewAsync(byte[] wav)
+        {
+            if (_player == null) return "再生の準備ができていません";
+            if (wav == null || wav.Length == 0) return "音声が空です";
+
+            string error;
+            var handle = _player.Prepare(wav, "preview-" + DateTime.UtcNow.Ticks, out error);
+            if (handle == null) return string.IsNullOrEmpty(error) ? "音声を用意できませんでした" : error;
+
+            return await _player.PlayAsync(handle);
+        }
+
         public MuteState Mute
         {
             get { return _mute; }
@@ -190,6 +252,7 @@ namespace ChatterMascot
         ///   <c>StatusItemBridge</c> が読みに来る（実行順は保証されない）。
         /// </summary>
         private readonly MuteState _mute = new MuteState();
+        private float _volume = 1f;
 
         /// <summary>
         /// <see cref="speakingFrameRate"/> の借用。<b>1本だけ取り回す。</b>
@@ -455,7 +518,7 @@ namespace ChatterMascot
             // ★ ミュートは音の層で実装する（→ MutedSpeechPlayer）。PlaybackQueue には触らない。
             //   包むのはここ1箇所で、CanSuspendOutput も ActiveCount も委譲されるので
             //   下の AudioIdleGate の判定は何も変わらない
-            _player = new MutedSpeechPlayer(SpeechPlayerFactory.Create(audioSource), _mute);
+            _player = new MutedSpeechPlayer(SpeechPlayerFactory.Create(audioSource, () => _volume), _mute);
             _player.Warn += message => Debug.LogWarning("[Mascot] " + message);
             _idleGate = new AudioIdleGate(audioIdleSuspendMs)
             {

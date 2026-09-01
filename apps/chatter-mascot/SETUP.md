@@ -270,13 +270,20 @@ Editor が UniVRM の型を直接使うなら Editor の asmdef にも `VRM10` �
 |---|---|---|---|---|
 | 1 | 起動引数 | `-vrm <path>` | `-vrma <path>` | 全 |
 | 2 | 環境変数 | `CHATTER_MASCOT_VRM` | `CHATTER_MASCOT_VRMA` | 全 |
-| 3 | `Application.persistentDataPath/` | `model.vrm` | `idle.vrma` | 全 |
-| 4 | `${XDG_CONFIG_HOME:-~/.config}/chatter-agent/` | `models/*.vrm` | `animations/*.vrma` | デスクトップのみ |
-| 5 | 同梱（`StreamingAssets/`） | `vita.vrm` | `idle_loop.vrma` | 全 |
+| 3 | **設定パネルで選んだモデル**（#76） | `models/<選んだ名前>` | —— | デスクトップのみ |
+| 4 | `Application.persistentDataPath/` | `model.vrm` | `idle.vrma` | 全 |
+| 5 | `${XDG_CONFIG_HOME:-~/.config}/chatter-agent/` | `models/*.vrm` | `animations/*.vrma` | デスクトップのみ |
+| 6 | 同梱（`StreamingAssets/`） | `vita.vrm` | `idle_loop.vrma` | 全 |
 
-- 4 は `core/src/core/paths.ts` の `getRuntimeDir` と**同じ規則**。ユーザーから見て
+- 5 は `core/src/core/paths.ts` の `getRuntimeDir` と**同じ規則**。ユーザーから見て
   「chatter-agent の設定はここ1箇所」を保つため。辞書順の先頭を採る
-- ★ **Android には共有ファイルシステムが無い**ので 4 は落ちる
+- ★ **3 が要るのは 5 が辞書順だから。** 設定パネルは選んだファイルを `models/` へ**コピー**する
+  （元ファイルを消しても動く）が、名前を覚えないと `models/` に2つ目を入れたときに
+  **選んだ方が反映されない**。名前を覚えて名指しで先に出す
+- ★ **3 は起動引数・環境変数より下。** `-vrm` は切り分けの逃げ道
+  （「設定が壊れていてもこれを付ければ必ず出る」）なので、設定より優先を保つ
+- ★ **`.vrma` に対応する設定は無い。** モーションを選ばせる UI を作っていないため（意図的な非対称）
+- ★ **Android には共有ファイルシステムが無い**ので 3 と 5 は落ちる
 - ★ **`.app` を Finder から起動すると環境変数は空**（シェルを継承しない）。2 に頼らない
 - ★ **`~/Downloads` / `~/Desktop` / `~/Documents` は macOS の TCC で止められる。**
   読み込みが返らないので、15秒で打ち切って次の候補へ進む（→ `docs/mascot.md`）
@@ -287,8 +294,9 @@ Editor が UniVRM の型を直接使うなら Editor の asmdef にも `VRM10` �
 スクリーンショットの公開・デモに使えない。**差し替え検証で `-vrm` から読ませるだけ**にする。
 `.gitignore` が `StreamingAssets/` 以外の `.vrm` を落とすようにしてあるが、最後は人の判断。
 
-★ **設定 UI（任意のモデルに差し替え）は [#16](https://github.com/schwarz9791/chatter-agent/issues/16)。**
-ここにあるのは探索順まで。UI は後から 1〜4 に乗る。
+★ **設定パネルからの差し替えは次の起動から効く**（[#76](https://github.com/schwarz9791/chatter-agent/issues/76)）。
+`VrmStage` は起動時に1回だけ読む作りで、差し替えるには spring bone・コライダ・ドラッグハンドル・
+待機モーション・表情の結び直しが要る（→ `docs/mascot.md`）。
 
 **判断は `PlaybackQueue` に集めてある。** イベントを入れるとコマンドの配列が返る純粋な関数で、
 副作用（取得・再生・ack）は `MascotRunner` が実行して結果をイベントとして戻す。
@@ -346,6 +354,43 @@ cd apps/chatter-mascot
 
 ---
 
+#### 設定パネルまわり（#76）
+
+**キャラクターを右クリック**すると開く。メニューバーの「設定を開く…」と
+「Chatter Mascot 0.1.0」からも同じパネルが開く。
+
+★ **パネルが開かないときは、まず `Player.log` を見る。**
+
+```
+[Native] 設定パネル: frame=1041,-1111 606x664 visible=1 key=0 screen={{1041, -1169}, {1800, 1169}}
+```
+
+`visible=1` なら**こちらは仕事を終えている** —— 見えないのは
+「他のウィンドウの背後に居る」か「別のディスプレイに出ている」。
+`frame` と `screen` がそれを教える。
+
+★ **右クリックが効かないときは、この行が出ているかを見る。**
+
+```
+[Mascot] 右クリックのハンドルを付けました: ModelPlaceholder
+[Mascot] 右クリックのハンドルを付けました: VRM1
+```
+
+出ていなければハンドルが付いていない。出ているのに効かないなら、ポインタイベントが
+届いていない（→ `docs/mascot.md`「EventSystem があってもポインタイベントは配送されない」）。
+
+★ **パネルの中身だけ確かめたいときは `-settingsProbe`。** `LSUIElement` のアプリは
+メニューバーのアイコンを自動で押せない（アクセシビリティから見えない）ので、
+起動時に開く経路を用意してある（`-quitProbe` / `-windowProbe` と同じ）。
+
+```bash
+"Build/ChatterMascot.app/Contents/MacOS/Chatter Mascot" -settingsProbe
+```
+
+★ **ショートカットは「記録」ボタンで実際にキーを押して決める。** 修飾キーを1つ以上入れること
+（単独のキーはそのキーが全アプリで入力できなくなるので弾かれる）。
+中止は**修飾キー無しの esc**。
+
 #### 常駐まわり（#75）
 
 設定は `~/.config/chatter-agent/mascot/settings.json`（`window.json` と同じディレクトリ）。
@@ -353,10 +398,23 @@ cd apps/chatter-mascot
 ```json
 {
   "version": 1,
-  "audio": { "mute": false, "muteHotKey": "ctrl+opt+m" },
-  "ui": { "hideHotKey": "ctrl+opt+h" }
+  "audio": { "mute": false, "muteHotKey": "ctrl+opt+m", "volume": 1.0 },
+  "ui": { "hideHotKey": "ctrl+opt+h" },
+  "character": {
+    "scale": 1.0,
+    "idleMotion": true,
+    "cursorGaze": true,
+    "blink": true,
+    "vrm": ""
+  }
 }
 ```
+
+★ **音声スタイル・話す速さ・要約の ON/OFF はここに無い。** あれは core の
+`~/.config/chatter-agent/config.json` が持ち、設定パネルは `PATCH /v1/config` 経由で書く
+（→ [`../../docs/protocol.md`](../../docs/protocol.md) の「制御 API」）。
+音量が Unity 側で速さが core 側なのは紛らわしいが理由がある —— 音量は**再生側のつまみ**で
+合成し直さなくても効き、速さは**合成のパラメータ**で `audio_query` を変えない限り WAV が変わらない。
 
 ★ **既定を変えたら、自分の `settings.json` も直すこと。** ファイルの値は既定より優先されるので、
 **コードの既定を変えても、既に書かれているキーには届かない**。しかも保存のたびに全キーが書き出される

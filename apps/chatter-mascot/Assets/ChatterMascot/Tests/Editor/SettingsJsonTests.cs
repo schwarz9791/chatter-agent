@@ -36,7 +36,7 @@ namespace ChatterMascot.Tests
         [Test]
         public void RoundTrips()
         {
-            var written = SettingsJson.Write(new MascotSettings(true, "cmd+shift+m", "cmd+shift+h"));
+            var written = SettingsJson.Write(MascotSettings.Defaults.WithMuted(true).WithMuteHotKey("cmd+shift+m").WithHideHotKey("cmd+shift+h"));
             var parsed = Parse(written);
 
             Assert.That(parsed.Muted, Is.True);
@@ -151,6 +151,144 @@ namespace ChatterMascot.Tests
         public void AcceptsAFileWithoutAVersion()
         {
             Assert.That(Parse("{\"audio\":{\"mute\":true}}").Muted, Is.True);
+        }
+
+        // ── #76 で増えた項目 ─────────────────────────────────
+
+        /// <summary>★ キーが増えても <c>version</c> を上げない（既存の設定が1回リセットされる）</summary>
+        [Test]
+        public void KeepsTheFormatVersionWhenKeysAreAdded()
+        {
+            Assert.That(SettingsJson.CurrentVersion, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void RoundTripsEveryValue()
+        {
+            var source = MascotSettings.Defaults
+                .WithMuted(true)
+                .WithVolume(0.3f)
+                .WithCharacterScale(1.4f)
+                .WithIdleMotion(false)
+                .WithCursorGaze(false)
+                .WithBlink(false)
+                .WithVrmFileName("foo.vrm");
+
+            MascotSettings parsed;
+            string error;
+            Assert.That(SettingsJson.TryParse(SettingsJson.Write(source), out parsed, out error, null), Is.True, error);
+            Assert.That(parsed, Is.EqualTo(source));
+        }
+
+        /// <summary>★ スライダー由来の 0.7000000119 をそのまま残さない</summary>
+        [Test]
+        public void RoundsSliderNoiseBeforeWriting()
+        {
+            var written = SettingsJson.Write(MascotSettings.Defaults.WithVolume(0.7000000119f));
+
+            Assert.That(written, Does.Contain("0.7"));
+            Assert.That(written, Does.Not.Contain("0.70000"));
+        }
+
+        /// <summary>
+        /// ★ 範囲外を「不正」として既定に倒さないこと。範囲を狭めたときに、
+        ///   前の版で保存された値が全部既定へ飛ぶ。
+        /// </summary>
+        [Test]
+        public void ClampsOutOfRangeNumbersInsteadOfResettingThem()
+        {
+            MascotSettings parsed;
+            string error;
+            var raw = "{\"version\":1,\"audio\":{\"volume\":9.0},\"character\":{\"scale\":-3.0}}";
+
+            Assert.That(SettingsJson.TryParse(raw, out parsed, out error, null), Is.True, error);
+            Assert.That(parsed.Volume, Is.EqualTo(SettingsMapping.VolumeMax));
+            Assert.That(parsed.CharacterScale, Is.EqualTo(SettingsMapping.ScaleMin));
+        }
+
+        /// <summary>★ 数値ですらないときは既定に倒す（クランプする先が無い）</summary>
+        [Test]
+        public void FallsBackWhenANumberIsNotANumber()
+        {
+            MascotSettings parsed;
+            string error;
+            var warnings = new List<string>();
+
+            Assert.That(
+                SettingsJson.TryParse(
+                    "{\"version\":1,\"audio\":{\"volume\":\"おおきく\"}}",
+                    out parsed, out error, warnings.Add),
+                Is.True, error);
+            Assert.That(parsed.Volume, Is.EqualTo(MascotSettings.Defaults.Volume));
+            Assert.That(warnings, Is.Not.Empty);
+        }
+
+        /// <summary>
+        /// ★★ VRM の名前に区切り文字を通さないこと。この値は
+        ///   <c>models/</c> に連結されるので、<c>../</c> でランタイムルートの外を指せる。
+        /// </summary>
+        [Test]
+        public void RejectsVrmNamesWithPathSeparators()
+        {
+            MascotSettings parsed;
+            string error;
+            var warnings = new List<string>();
+
+            Assert.That(
+                SettingsJson.TryParse(
+                    "{\"version\":1,\"character\":{\"vrm\":\"../../secret.vrm\"}}",
+                    out parsed, out error, warnings.Add),
+                Is.True, error);
+            Assert.That(parsed.VrmFileName, Is.Empty);
+            Assert.That(warnings, Is.Not.Empty);
+        }
+
+        [Test]
+        public void AcceptsAPlainVrmFileName()
+        {
+            MascotSettings parsed;
+            string error;
+
+            Assert.That(
+                SettingsJson.TryParse("{\"version\":1,\"character\":{\"vrm\":\" foo.vrm \"}}",
+                    out parsed, out error, null),
+                Is.True, error);
+            Assert.That(parsed.VrmFileName, Is.EqualTo("foo.vrm"));
+        }
+
+        /// <summary>★ 新しい版が書いた設定を古い版が読むことは普通に起きる</summary>
+        [Test]
+        public void IgnoresUnknownKeysInTheNewSections()
+        {
+            MascotSettings parsed;
+            string error;
+            var warnings = new List<string>();
+
+            Assert.That(
+                SettingsJson.TryParse(
+                    "{\"version\":1,\"character\":{\"blink\":false,\"future\":1}}",
+                    out parsed, out error, warnings.Add),
+                Is.True, error);
+            Assert.That(parsed.Blink, Is.False);
+            Assert.That(warnings, Is.Not.Empty);
+        }
+
+        /// <summary>#75 の頃に書かれた設定（新しいキーが無い）も読めること</summary>
+        [Test]
+        public void ReadsFilesWrittenBeforeTheNewKeysExisted()
+        {
+            MascotSettings parsed;
+            string error;
+
+            Assert.That(
+                SettingsJson.TryParse(
+                    "{\"version\":1,\"audio\":{\"mute\":true,\"muteHotKey\":\"ctrl+opt+m\"}," +
+                    "\"ui\":{\"hideHotKey\":\"ctrl+opt+h\"}}",
+                    out parsed, out error, null),
+                Is.True, error);
+            Assert.That(parsed.Muted, Is.True);
+            Assert.That(parsed.Volume, Is.EqualTo(1f), "新しいキーは既定のまま");
+            Assert.That(parsed.IdleMotion, Is.True);
         }
     }
 }

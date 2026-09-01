@@ -2276,6 +2276,127 @@ frame=-2287,2130 38x30 onScreen=1 screen={{0, 0}, {0, 0}}
 ★ `autosaveName` は付けてある。目的は**ユーザーが ⌘ドラッグで並べ替えた位置を覚えること**で、
 この問題の手当てではない。
 
+### ★★ 縦の `NSStackView` は「左揃えにするだけ」で、幅は内容依存になる
+
+設定パネル（#76）で最初に踏んだ。`alignment = NSLayoutAttributeLeading` の縦スタックに
+行を積むと、**note を持つ行だけスライダーが縮む**（note の無い行と幅が揃わない）。
+note がある行は「行 + 注記」を縦スタックに包んでいるので、その包みの幅が内容依存になるため。
+
+```objc
+for (NSView *row in rows) {
+    [row.widthAnchor constraintEqualToAnchor:group.widthAnchor].active = YES;
+}
+```
+
+★ **一番外側のスタックでも同じことをすること**（`edgeInsets` のぶんを引く）。
+★ **症状が「一部の行だけ狭い」なので、レイアウトの崩れではなく仕様に見えてしまう。**
+
+### ★★ `setFrameAutosaveName:` だけではウィンドウ位置が復元されない
+
+保存はされるが、読み戻すのは `setFrameUsingName:`。付け忘れると、毎回
+`initWithContentRect:` の矩形に出る —— **AppKit は bottom-up なので画面の左下**。
+症状は「動かしたのに次に開くと左下へ戻る」。
+
+```objc
+gPanel.frameAutosaveName = @"ChatterMascotSettingsPanel";
+if (![gPanel setFrameUsingName:gPanel.frameAutosaveName]) [gPanel center];
+```
+
+### ★ パネルを出したら frame をログに残す
+
+「開かない」には (a) `Show` が失敗した (b) 画面外に出た (c) **他のウィンドウの背後に居る**
+の3通りがあり、手当てが全部違う。実際に (c) を踏んだ —— `CM_SettingsPanelIsVisible()` は
+`1` を返すのに画面のどこにも見えず、原因は「アプリが非アクティブなので前に出ていない」だった。
+
+```
+[Native] 設定パネル: frame=1041,-1111 606x664 visible=1 key=0 screen={{1041, -1169}, {1800, 1169}}
+```
+
+★ **`NSStatusItem` と違い、frame はその場で測ってよい**（`makeKeyAndOrderFront:` の後なので
+確定している）。あちらはレイアウトが次の run loop に回るので必ず高さ 0 が返る。
+
+★ **`key=0` を「キーウィンドウを取れていない」と早合点しないこと。** 実測では
+`makeKeyAndOrderFront:` の直後は `0` だが、その後キーになる ——
+ショートカットの記録（キー入力を要求する）は**実際に動いた**。
+
+### ★★ `LSUIElement` でもショートカットの記録はできる（ローカルモニタ）
+
+`NSEvent.addLocalMonitorForEventsMatchingMask:` は**自分のアプリに配送されるイベント**しか
+見ないので、**アクセシビリティ権限が要らない**（グローバルショートカットの登録に Carbon を
+選んだのと同じ理由。`addGlobalMonitorForEvents` は権限のダイアログを出す）。
+
+要るのは `[NSApp activateIgnoringOtherApps:YES]` だけ。#75 の「`LSUIElement` の代償 3」で
+「本番になるのは #76」と書いた手当てが、ここで実際に効いた。
+
+★ **ハンドラで `nil` を返して飲み込むこと。** 返さないと Unity 側にもキーが届く。
+★ **修飾キー無しの `esc` を「中止」にすること。** 抜ける手段が無いと、パネルのどこを押しても
+記録が続く。★ **修飾キー付きの `esc` は記録する**（`⌃⌥esc` は正当なショートカット）。
+
+★ **ネイティブが返すのは数値だけ。** `NSEvent` の `keyCode` と Carbon の修飾マスクを
+`"46,6144"` の形で返し、`ctrl+opt+m` という語彙への変換は C# の `HotKeySpec.TryFromCode` が行う
+（#75 で決めた「ネイティブに設定の語彙を書かない」をショートカットにも通す）。
+Cocoa の `NSEventModifierFlag*` と Carbon の `cmdKey` 等は**ビットが違う**ので、
+`RegisterEventHotKey` が要求する Carbon の形に**ネイティブ側で**直してから渡す。
+
+### ★ 右クリックは `UniWindowMoveHandle` と衝突しない
+
+同梱のドラッグハンドルは `OnBeginDrag` の先頭で
+`if (eventData.button != PointerEventData.InputButton.Left) return;` と早期 return するので、
+右ボタンでは `_isDragging` が立たず**窓は動かない**（上流のソースで確認）。
+`IPointerClickHandler` を `Collider` 持ちに足すだけで両立する。
+
+★ **ポインタイベントの配線は #12 の時点で揃っている。** `SceneFixups` が
+`EventSystem` / `InputSystemUIInputModule` / `PhysicsRaycaster` を面倒みており、
+`InputSystem_Actions` の `RightClick` もバインド済み。新しい配線は要らない。
+
+★ **付けたことを1行残すこと。** 右クリックが効かないとき、「ハンドルが付いていない」のか
+「ポインタイベントが届いていない」のかで手当てが全く違う。
+
+### ★ `LSUIElement` のアプリは「メニューバーを押す」を自動化できない
+
+アクセシビリティからステータスバーの項目が見えない（#75 で実測）ので、設定パネルの中身を
+自動で確かめるには**その手前を飛ばす経路**が要る。`-settingsProbe` を足してある
+（`-quitProbe` / `-windowProbe` と同じ位置づけ）。
+
+★ 右クリックは自動化できる（`CGEvent` の `rightMouseDown` / `rightMouseUp`）が、
+**それはポインタイベントの経路そのものを試していることになる**ので、
+「パネルの中身」を確かめたいときの手段としては切り分けが混ざる。
+
+### ★ VRM の差し替えは次の起動から
+
+`VrmStage` は起動時に1回だけ読む作りで、差し替えるには spring bone・コライダ・
+ドラッグハンドル・待機モーション・表情の結び直しが要る。中途半端に作ると
+「差し替えたのに一部だけ前のモデルのまま」になるので、**できないことをできると見せない**方を
+採った（note に「次に起動したときから反映されます」と出す）。
+
+★ **選んだファイルは `~/.config/chatter-agent/models/` へコピーする。** パスを覚えるだけだと、
+元ファイルを消したときに候補が死ぬ。
+★ **ファイル名も覚える。** `models/*.vrm` の走査は `Ordinal` の先頭が勝つので、
+名前を覚えないと**2つ目を選んでも反映されない**（→ `Runtime/Vrm/AssetPath.cs` の探索順3）。
+
+### #76 の実機確認（macOS / `.app` / AivisSpeech 稼働）
+
+| 確認したこと | 結果 |
+|---|---|
+| **キャラの右クリックで開閉** | ★ 動く。`[Mascot] 設定パネル: 開きます / 閉じます` |
+| メニューバーの「設定を開く…」/「Chatter Mascot 0.1.0」 | どちらも同じパネルを開く |
+| 項目の描画 | キャラクター / オーディオ / モーション / AI要約 / ショートカット / リセット / このアプリについて がすべて出る |
+| 話者一覧 | ★ 実際のエンジンから取れる（「まお（ノーマル）」等） |
+| **ショートカットの記録** | ★★ `⌃⌥J` を押して記録でき、`settings.json` に `ctrl+opt+j` が入り、その場で再登録される（＝ **キー入力がパネルに届いている**） |
+| **音量 0.3** | ★ `ps` に `/usr/bin/afplay -v 0.3 …` |
+| **音量 1.5** | ★★ `-v 1.5`（`< 1` で判定していたら出ない） |
+| スライダーの刻み | ★ 0.1 に吸着し、`settings.json` にも `0.3` / `1.5`（`0.30000001` ではない） |
+| 話す速さ 2.0 | ★ `config.json` に `ttsSpeedScale: 2`（**Unity は `config.json` を直接書いていない**） |
+| 要約の ON | ★ `config.json` に `aiSummaryEnabled: true` |
+| 音声スタイルの変更 | ★ `config.json` に `ttsSpeakerId: 888753761` |
+| テスト音声 | 鳴る（`afplay の実時間 4973ms / WAV の長さ 4031ms`） |
+| **サーバーを止めて開く** | ★★ 話者・速さ・テスト音声が**項目ごと消えず**、「（取得できません）」「サーバーに繋がりません」で無効になる |
+| **再起動しても残る** | ★ 音量 1.5 / 速さ 2 / 話者「まお（ふつー）」/ `⌃⌥J` がそのまま復元される |
+| **about** | ★ UniWindowController の **MIT 全文**（`Copyright (c) 2020 Kirurobo`）がパネル内で読める |
+
+★ **未確認**: VRM の差し替え（ファイル選択ダイアログは自動化していない）、
+リセットの2つ、`⌃⌥J` の実発火。
+
 ## 実装の決めごと
 
 ### `PlaybackQueue` に判断を集める

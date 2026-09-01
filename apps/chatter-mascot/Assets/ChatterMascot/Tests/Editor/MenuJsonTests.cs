@@ -65,13 +65,17 @@ namespace ChatterMascot.Tests
                 Does.StartWith("キャラクターを表示する"));
         }
 
-        /// <summary>#76（設定 UI）が入るまで押す先が無い。押せるように見せない。</summary>
+        /// <summary>
+        /// ★ #76 で押せるようになった（設定パネルの末尾に版とライセンスがある）。
+        ///   版をここに出し続けるのは、Dock に居ないので「どれが動いているか」の
+        ///   手掛かりがここしか無いため。
+        /// </summary>
         [Test]
-        public void TheAboutEntryIsNotClickable()
+        public void TheAboutEntryOpensTheSettingsPanel()
         {
             var about = MascotMenu.Build(State()).Entries.First(e => e.Key == MenuKeys.About);
 
-            Assert.That(about.Enabled, Is.False);
+            Assert.That(about.Enabled, Is.True);
             Assert.That(about.Label, Does.Contain("1.2.3"));
         }
 

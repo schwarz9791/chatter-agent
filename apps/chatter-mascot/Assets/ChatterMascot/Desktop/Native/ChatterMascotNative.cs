@@ -111,6 +111,21 @@ namespace ChatterMascot.Desktop.Native
 
         /// <summary>0 = 成功。それ以外は OSStatus（-9878 = 他のアプリが取っている）</summary>
         [DllImport(Library)]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool CM_SettingsPanelShow([MarshalAs(UnmanagedType.LPUTF8Str)] string schemaJson);
+
+        [DllImport(Library)]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool CM_SettingsPanelUpdate([MarshalAs(UnmanagedType.LPUTF8Str)] string schemaJson);
+
+        [DllImport(Library)]
+        internal static extern void CM_SettingsPanelHide();
+
+        [DllImport(Library)]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool CM_SettingsPanelIsVisible();
+
+        [DllImport(Library)]
         internal static extern int CM_HotKeyRegister(int id, uint keyCode, uint modifiers);
 
         [DllImport(Library)]

@@ -119,6 +119,11 @@ Unity Software License に従う。
       https://github.com/kazakago/cc-mascot
       **改変していない。** 待機モーション（→ issue #59）。
 
+  - trayTemplate.png / trayTemplate@2x.png — kazakago/cc-mascot の resources/icons/
+      Copyright 2026 kazakago, licensed under the Apache License, Version 2.0.
+      https://github.com/kazakago/cc-mascot
+      **改変していない。** メニューバー（ステータスバー）のアイコン（→ issue #75）。
+
 ---
 
 **`apps/chatter-mascot/` の C# は、すべて chatter-agent で新規に書いたもので、

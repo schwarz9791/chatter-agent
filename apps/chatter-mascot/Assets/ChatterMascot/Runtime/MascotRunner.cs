@@ -148,6 +148,15 @@ namespace ChatterMascot
         }
 
         /// <summary>
+        /// 一時ミュートの状態。<b>読み書きの両方に使う</b>（ステータスバーのメニューと
+        /// グローバルショートカットから切り替わる）。
+        /// </summary>
+        public MuteState Mute
+        {
+            get { return _mute; }
+        }
+
+        /// <summary>
         /// 区間 <c>[from, to]</c>（<c>Time.realtimeSinceStartupAsDouble</c> の秒）における
         /// 口の開きの元になる値（<b>生の RMS。ゲイン前</b>）。
         ///
@@ -172,6 +181,15 @@ namespace ChatterMascot
         /// <c>Start()</c> を待つと呼び出し側に null チェックが要る。
         /// </summary>
         private readonly SpeakingSet _speaking = new SpeakingSet();
+
+        /// <summary>
+        /// 一時ミュート（#75）。<b>ここが所有者</b>で、ステータスバー（<c>Desktop</c>）は
+        /// <see cref="Mute"/> 越しに触る。
+        ///
+        /// ★ <b>フィールド初期化子で作ること。</b> <c>Start</c> の前に
+        ///   <c>StatusItemBridge</c> が読みに来る（実行順は保証されない）。
+        /// </summary>
+        private readonly MuteState _mute = new MuteState();
 
         /// <summary>
         /// <see cref="speakingFrameRate"/> の借用。<b>1本だけ取り回す。</b>
@@ -434,7 +452,10 @@ namespace ChatterMascot
             };
             _state = new PlaybackState(options);
 
-            _player = SpeechPlayerFactory.Create(audioSource);
+            // ★ ミュートは音の層で実装する（→ MutedSpeechPlayer）。PlaybackQueue には触らない。
+            //   包むのはここ1箇所で、CanSuspendOutput も ActiveCount も委譲されるので
+            //   下の AudioIdleGate の判定は何も変わらない
+            _player = new MutedSpeechPlayer(SpeechPlayerFactory.Create(audioSource), _mute);
             _player.Warn += message => Debug.LogWarning("[Mascot] " + message);
             _idleGate = new AudioIdleGate(audioIdleSuspendMs)
             {
@@ -558,6 +579,11 @@ namespace ChatterMascot
                 _player?.Discard(handle);
             }
             _handles.Clear();
+
+            // ★ Discard の後に捨てること。 MutedSpeechPlayer は MuteState の購読を持つので、
+            //   ここで外さないと Desktop 側（DontDestroyOnLoad で生き続ける）から
+            //   死んだシーンのプレイヤーが掴まれたままになる
+            (_player as IDisposable)?.Dispose();
 
             var client = _client;
             _client = null;
@@ -849,6 +875,12 @@ namespace ChatterMascot
             ReadFace(_state, seq, out kind, out emotion);
 
             var source = audio as ILipSyncSource;
+
+            // ★★ ミュート中は口だけ止める。 登録そのものは飛ばさないこと ——
+            //   飛ばすと表情も体の動きも止まり、「声を消した」ではなく「居なくなった」に見える
+            //   （→ SpeakingSet.Begin の doc / MutedSpeechPlayer）
+            if (_mute.Muted) source = null;
+
             _speaking.Begin(
                 epoch, seq, emotion, kind,
                 source == null ? null : source.Envelope,

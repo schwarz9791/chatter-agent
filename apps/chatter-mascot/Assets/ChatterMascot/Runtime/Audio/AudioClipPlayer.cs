@@ -13,12 +13,12 @@ namespace ChatterMascot.Audio
     ///   揃える</b>ため。どれも <see cref="WavHeader.DurationMs"/>（fmt の byteRate 由来、
     ///   参照実装の <c>wavDurationMs</c> と同じ式）を見る。
     /// </summary>
-    public sealed class UnityAudioHandle : ILipSyncSource
+    public sealed class UnityAudioHandle : ILipSyncSource, IAudioDuration
     {
         public AudioClip Clip;
 
         /// <summary>再生時間（ミリ秒）。<b>0 は「長さ 0」ではなく「不明」</b></summary>
-        public int DurationMs;
+        public int DurationMs { get; set; }
 
         /// <summary>
         /// <c>null</c> 可（口が動かないだけ。発話は落とさない）。

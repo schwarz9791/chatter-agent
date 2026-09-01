@@ -18,8 +18,12 @@ namespace ChatterMascot.Audio
     ///
     /// ★ <b>プロパティであってフィールドではない。</b> C# はインターフェースのメンバーを
     ///   フィールドで実装できないので、ハンドル側は自動プロパティになる
-    ///   （既存の <c>Path</c> / <c>Clip</c> / <c>DurationMs</c> は public フィールドなので
-    ///   書き方が揃わないが、揃えるために明示的実装を挟むほうが読みにくい）。
+    ///   （<c>Path</c> / <c>Clip</c> は public フィールドのままなので書き方が揃わないが、
+    ///   揃えるために明示的実装を挟むほうが読みにくい）。
+    ///
+    /// ★ <b><c>DurationMs</c> も同じ理由でプロパティになった</b> —— #75 で
+    ///   <see cref="IAudioDuration"/>（ミュート中に「長さぶん無音で待つ」ために要る）を
+    ///   実装するとき、両ハンドルで自動プロパティへ変えた。
     /// </summary>
     public interface ILipSyncSource
     {

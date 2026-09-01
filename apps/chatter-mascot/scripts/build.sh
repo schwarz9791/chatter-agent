@@ -28,6 +28,16 @@ restore_audio_manager() {
 }
 trap restore_audio_manager EXIT INT TERM
 
+# ★ **Unity より先にネイティブプラグインを作ること。**（#75）
+#   Unity は Assets/Plugins/macOS/ に .bundle が置かれている状態でビルドする必要がある。
+#
+# ★ **失敗してもビルドを止めないこと。** 止めると「マスコットが出ない」に化ける。
+#   バンドルが無くても起動はして、常駐機能（メニューバー・ショートカット）だけが落ちる
+#   （→ Desktop/Native/ChatterMascotNative.cs）。set -e があるので明示的に受ける。
+if ! "$(dirname "${BASH_SOURCE[0]}")/build-native.sh"; then
+  echo "[Native] ネイティブプラグインを作れませんでした。メニューバー常駐は動きません" >&2
+fi
+
 # ★ **終了コードを捨てないこと。** `| grep ... || true` にすると BuildScript の
 #   EditorApplication.Exit(1) が消え、成果物の有無だけで判定することになる。
 #   一度でも成功していれば古い .app が残っているので、**コンパイルエラーでも
@@ -38,7 +48,7 @@ run_unity -quit \
   -executeMethod ChatterMascot.EditorTools.BuildScript.BuildMacOS \
   -buildScene "$SCENE" \
   -buildOutput "$OUTPUT" \
-  2>&1 | grep -E "^\[Build\]|error CS|Error building|Exception|BuildFailedException"
+  2>&1 | grep -E "^\[Build\]|^\[Native\]|error CS|Error building|Exception|BuildFailedException"
 STATUS=${PIPESTATUS[0]}
 set -e
 

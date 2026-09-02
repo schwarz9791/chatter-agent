@@ -183,6 +183,19 @@ describe("PATCH /v1/config", () => {
     expect(body(res)).toEqual({ error: "readonly_key", key: "ttsBaseUrl" });
   });
 
+  /**
+   * ★ #76 のレビュー B-2。`CHATTER_AGENT_CONFIG` が未作成のディレクトリを指していると、
+   *   tmp の書き込みが ENOENT で落ちて**すべての PATCH が 500** になっていた
+   *   （パネルには「保存できません」としか出ず、`mkdir` で直ることは分からない）
+   */
+  it("★ 親ディレクトリが無くても書ける", () => {
+    const nested = path.join(dir, "new", "dir", "config.json");
+    const res = api({ config: createConfigStore({ filePath: nested, env: {} }) }).patchConfig({ ttsSpeedScale: 1.5 });
+
+    expect(res.status).toBe(200);
+    expect(JSON.parse(fs.readFileSync(nested, "utf-8")).ttsSpeedScale).toBe(1.5);
+  });
+
   /** ★ 黙って書いて効かないのが最悪。409 で明示的に断る */
   it("★ 環境変数が勝っているキーは 409 env_override（ファイルも書き換わらない）", () => {
     write({ ttsSpeakerId: 1 });

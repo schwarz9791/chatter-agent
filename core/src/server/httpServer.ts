@@ -51,8 +51,13 @@ export interface HttpServerDeps {
    *   `synthesisTimeoutMs` より長くしなければならない」という**設定間の暗黙の順序制約が
    *   要らなくなる**（守られなかったときの症状は「試行回数を消費して発話が捨てられる」で、
    *   設定からは読み取れない）。
+   *
+   * ★ **関数であること**（`disabled` と同じ理由。config は実行中に読み直される）。値で渡すと、
+   *   `PATCH /v1/config` で `synthesisTimeoutMs` を変えたときに**エンジンへのリクエスト期限だけ**が
+   *   変わり、ここの打ち切りは再起動まで旧値のまま＝**半分だけ効く**。200 が返って新しい値が
+   *   エコーされるぶん、「変えても何も起きない」より見え方が悪い。
    */
-  responseTimeoutMs: number;
+  responseTimeoutMs: () => number;
   /** 合成に失敗したときに呼ぶ。診断（話者一覧など）の再実行に使う */
   onSynthesisFailed?: () => void;
   /**
@@ -178,8 +183,16 @@ function withDeadline<T>(work: Promise<T>, ms: number): Promise<T> {
   });
 }
 
+/**
+ * text/plain で返す。
+ *
+ * ★ **`destroyed` も見ること。** `writableEnded` は**自分が `end()` を呼んだ後にしか
+ *   真にならない**ので、合成を待っている間にクライアントが切ったかどうかは分からない。
+ *   破棄済みの応答に `writeHead()` すると、リスナの付いていない `ServerResponse` に
+ *   `ERR_STREAM_DESTROYED` が上がり、ただのキャンセルでプロセスのガードまで届く。
+ */
 function endWith(res: http.ServerResponse, status: number, body: string): void {
-  if (res.writableEnded) return;
+  if (res.writableEnded || res.destroyed) return;
   res.writeHead(status, {
     "content-type": "text/plain; charset=utf-8",
     "cache-control": "no-store",
@@ -193,6 +206,9 @@ function endWith(res: http.ServerResponse, status: number, body: string): void {
  *
  * ★ `HEAD` でも `content-length` は本来の長さを返すこと（RFC 9110 §9.3.2）。
  *   0 にすると、長さを見てから取りに来るクライアントが「中身が無い」と判断する。
+ *
+ * ★ **`destroyed` も見ること**（理由は `endWith` の ★）。`POST /v1/summary/preview` は
+ *   `claude -p` を最大 `aiSummaryTimeoutMs`（既定60秒）待つので、いちばん切られやすい。
  */
 function endWithJson(
   res: http.ServerResponse,
@@ -201,7 +217,7 @@ function endWithJson(
   headers: Record<string, string>,
   head: boolean,
 ): void {
-  if (res.writableEnded) return;
+  if (res.writableEnded || res.destroyed) return;
   const text = `${JSON.stringify(body)}\n`;
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
@@ -243,13 +259,31 @@ function checkOrigin(
   return true;
 }
 
-/** ボディを上限つきで読む。超えたら `null` */
-function readBody(req: http.IncomingMessage, limit: number): Promise<string | null> {
+/**
+ * ボディの決着。**「大きすぎる」と「切られた」を同じ値にしないこと。**
+ *
+ * ★ 1つの `null` に畳むと、40バイトのボディが接続リセットで落ちただけで
+ *   **413 payload_too_large** として報告される。413 は恒久的な拒否なので、
+ *   クライアントは再送しない —— 一時的な転送エラーの正しい復旧ができなくなる。
+ */
+type BodyResult = { ok: true; text: string } | { ok: false; reason: "too_large" | "aborted" };
+
+/**
+ * ボディを上限つきで読む。
+ *
+ * ★★ **`close` を必ず見ること。** クライアントが送信途中で切ると Node は
+ *   `IncomingMessage` に `close` を出すが、**`end` は出さず `error` も保証されない**。
+ *   `data` / `end` / `error` の3本だけだと Promise が settle せず、`handleControl` の
+ *   `await readBody(...)` が**永久に返らない** —— バッファも `req` / `res` も
+ *   ハンドラのクロージャも、プロセスが生きている限り到達可能なまま残る
+ *   （設定パネルがキャンセルするたびに1件ずつ増える）。
+ */
+function readBody(req: http.IncomingMessage, limit: number): Promise<BodyResult> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let size = 0;
     let settled = false;
-    const finish = (value: string | null) => {
+    const finish = (value: BodyResult) => {
       if (settled) return;
       settled = true;
       resolve(value);
@@ -260,13 +294,15 @@ function readBody(req: http.IncomingMessage, limit: number): Promise<string | nu
         // ★ 読み捨てを続けること。ここで destroy すると、クライアントは
         //   413 のレスポンスを読む前に接続を切られる
         req.resume();
-        finish(null);
+        finish({ ok: false, reason: "too_large" });
         return;
       }
       chunks.push(chunk);
     });
-    req.on("end", () => finish(Buffer.concat(chunks).toString("utf-8")));
-    req.on("error", () => finish(null));
+    req.on("end", () => finish({ ok: true, text: Buffer.concat(chunks).toString("utf-8") }));
+    req.on("error", () => finish({ ok: false, reason: "aborted" }));
+    // ★ 正常終了の後にも来るが、`settled` で畳まれるので無害
+    req.on("close", () => finish({ ok: false, reason: "aborted" }));
   });
 }
 
@@ -363,10 +399,15 @@ export function createHttpServer(deps: HttpServerDeps): http.Server {
       // ★ 使わない場合でもボディは読み切ること。放置すると keep-alive の次の
       //   リクエストがパースできなくなる
       const raw = await readBody(req, MAX_BODY_BYTES);
-      if (raw === null) return endWithJson(res, 413, { error: "payload_too_large" }, {}, false);
-      if (raw.trim().length > 0) {
+      if (!raw.ok) {
+        // ★ 切られたときは**何も返さない**。相手はもう居ないので、書けば
+        //   破棄済みの応答に `writeHead()` することになる（→ `endWith` の ★）
+        if (raw.reason === "aborted") return;
+        return endWithJson(res, 413, { error: "payload_too_large" }, {}, false);
+      }
+      if (raw.text.trim().length > 0) {
         try {
-          body = JSON.parse(raw);
+          body = JSON.parse(raw.text);
         } catch {
           return endWithJson(res, 400, { error: "invalid_json" }, {}, false);
         }
@@ -425,9 +466,11 @@ export function createHttpServer(deps: HttpServerDeps): http.Server {
     // ★ **応答だけを打ち切る。合成は走らせたまま。** `audioStore` は single-flight なので、
     //   終われば同じキーでキャッシュに入り、クライアントの取り直しが即 200 になる。
     //   合成そのものを短く切ると、モデルロード中の1文目が永久に完成しない
+    // ★ リクエストごとに読む（→ deps の ★）。catch からも参照するので try の外で取る
+    const deadlineMs = deps.responseTimeoutMs();
     let wav: ArrayBuffer;
     try {
-      wav = await withDeadline(deps.store.get(key.epoch, key.seq, record.text), deps.responseTimeoutMs);
+      wav = await withDeadline(deps.store.get(key.epoch, key.seq, record.text), deadlineMs);
     } catch (err) {
       if (err instanceof SynthesisUnavailableError) {
         deps.onSynthesisFailed?.();
@@ -435,7 +478,7 @@ export function createHttpServer(deps: HttpServerDeps): http.Server {
         return endWith(res, 503, `synthesis unavailable: ${err.message}\n`);
       }
       if (err instanceof ResponseDeadlineError) {
-        warn(`[HTTP] 合成が ${deps.responseTimeoutMs}ms で終わらないので一旦返します（合成は続行中）`);
+        warn(`[HTTP] 合成が ${deadlineMs}ms で終わらないので一旦返します（合成は続行中）`);
         return endWith(res, 503, "synthesis in progress\n");
       }
       throw err;

@@ -72,7 +72,7 @@ async function start(overrides: Partial<HttpServerDeps> = {}): Promise<string> {
     lookup: (seq: number) => (seq === 1 ? record(1) : null),
     allowedOrigins: [],
     disabled: () => false,
-    responseTimeoutMs: 5_000,
+    responseTimeoutMs: () => 5_000,
     control: stubControl(),
     ...overrides,
   });
@@ -179,7 +179,7 @@ describe("GET /audio/<epoch>-<seq>.wav", () => {
     );
     const base = await start({
       store: createAudioStore({ currentVoice: () => VOICE, synthesize }),
-      responseTimeoutMs: 150,
+      responseTimeoutMs: () => 150,
     });
 
     const first = await fetch(`${base}/audio/${EPOCH}-000000000001.wav`);
@@ -196,6 +196,31 @@ describe("GET /audio/<epoch>-<seq>.wav", () => {
     expect((await second.arrayBuffer()).byteLength).toBe(9);
     // 打ち切っても合成をやり直していない
     expect(synthesize).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * ★★ #76 のレビュー A-4。値で受けていた頃は、`PATCH /v1/config` で
+   *   `synthesisTimeoutMs` を変えても**エンジンへのリクエスト期限しか**変わらず、
+   *   ここの打ち切りは再起動まで旧値のままだった（**半分だけ効く**）。
+   */
+  it("★★ 応答の期限はリクエストごとに読み直す", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    let timeoutMs = 50;
+    const base = await start({
+      lookup: (seq: number) => record(seq),
+      store: createAudioStore({
+        currentVoice: () => VOICE,
+        synthesize: () => new Promise<ArrayBuffer>((resolve) => setTimeout(() => resolve(wavOf(9)), 200)),
+      }),
+      responseTimeoutMs: () => timeoutMs,
+    });
+
+    expect((await fetch(`${base}/audio/${EPOCH}-000000000001.wav`)).status).toBe(503);
+
+    // 設定を変えた（サーバーは再起動していない）。**別の seq** で確かめること ——
+    // 同じ seq は打ち切った合成がキャッシュに入るので、期限を見ずに 200 になる
+    timeoutMs = 5_000;
+    expect((await fetch(`${base}/audio/${EPOCH}-000000000002.wav`)).status).toBe(200);
   });
 
   it("★ 503 の warn は間引かれる（先読み窓 × 1秒で1日34万行になる）", async () => {
@@ -321,7 +346,7 @@ async function startUnix(overrides: Partial<HttpServerDeps> = {}): Promise<strin
     lookup: (seq: number) => (seq === 1 ? record(1) : null),
     allowedOrigins: [],
     disabled: () => false,
-    responseTimeoutMs: 5_000,
+    responseTimeoutMs: () => 5_000,
     control: stubControl(),
     ...overrides,
   });
@@ -440,6 +465,37 @@ describe("制御 API のルーティング（#76）", () => {
       body: JSON.stringify({ pad: "x".repeat(80 * 1024) }),
     });
     expect(res.status).toBe(413);
+  });
+
+  /**
+   * ★★ #76 のレビュー A-3。`close` を見ていなかった頃は、送信途中で切られると
+   *   `readBody` の Promise が settle せず `handleControl` の `await` が**永久に返らなかった**
+   *   （バッファも `req` / `res` もクロージャも、プロセスが生きている限り残る）。
+   *   ★ 漏れそのものは外から観測できないので、ここで固定するのは
+   *   「切られても応答を書かず、サーバーは生き続ける」ところまで。
+   */
+  it("★ 送信途中で切られてもサーバーは生き続ける", async () => {
+    const base = await start();
+    const url = new URL(base);
+
+    await new Promise<void>((done) => {
+      const req = http.request({
+        host: url.hostname,
+        port: Number(url.port),
+        path: "/v1/config",
+        method: "PATCH",
+        headers: { "content-type": "application/json", "content-length": "100" },
+      });
+      req.on("error", () => {});
+      // content-length ぶん送らずに切る
+      req.write("{");
+      setTimeout(() => {
+        req.destroy();
+        done();
+      }, 20);
+    });
+
+    expect((await fetch(`${base}/v1/health`)).status).toBe(200);
   });
 
   it("JSON として読めないボディは 400", async () => {

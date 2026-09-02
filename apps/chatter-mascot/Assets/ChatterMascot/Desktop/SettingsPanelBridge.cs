@@ -41,6 +41,22 @@ namespace ChatterMascot.Desktop
         /// <summary>いまのウィンドウの倍率（<c>window.json</c> が権威。→ <c>SettingsMapping.ScaleForWindow</c>）</summary>
         float WindowScale { get; }
 
+        /// <summary>
+        /// ウィンドウの大きさが<b>まだ落ち着いていない</b>か（→ <c>WindowGeometry.SetSize</c>）。
+        ///
+        /// ★★ <b>見送らないと、この PR が「話す速さ」で潰した teardown が「大きさ」で再発する。</b>
+        ///   <c>WindowGeometry</c> は書いた値が読み返しで一致するまで最大5回書き直すが、
+        ///   その間 <see cref="WindowScale"/> は<b>まだ古い倍率</b>を返す。
+        ///   <c>WatchWindowSize</c> がそれを「外から変わった」と誤読すると
+        ///   <c>Push(update: true)</c>＝<b>全ビューの破棄</b>に入り、スクロール位置が先頭へ飛び、
+        ///   掴み直していればつまみが手の中で死ぬ。
+        ///
+        /// ★ <b>「押した直後は読まない」をフレーム数の当て推量ではなく状態で表す。</b>
+        ///   適用が終われば（一致でも打ち切りでも）実際の矩形が読めるので、
+        ///   リセット後の追いつき（<c>WatchWindowSize</c> の本来の仕事）は壊れない。
+        /// </summary>
+        bool WindowSizeSettling { get; }
+
         void Quit();
     }
 
@@ -63,9 +79,6 @@ namespace ChatterMascot.Desktop
     /// </summary>
     internal sealed class SettingsPanelBridge
     {
-        /// <summary>スライダーを動かしてから core へ送るまでの猶予</summary>
-        private const float PatchDebounceSeconds = 0.3f;
-
         /// <summary>
         /// 制御 API の1リクエストの上限。<b>設定の読み書きはファイル I/O だけ</b>なので短くてよい。
         /// </summary>
@@ -103,26 +116,17 @@ namespace ChatterMascot.Desktop
         /// <summary>項目ごとの一時的なメッセージ（テスト要約の結果、拒否の理由など）</summary>
         private readonly Dictionary<string, string> _notices = new Dictionary<string, string>();
 
-        /// <summary>デバウンス待ちの core への変更。key は core の設定キー</summary>
-        private readonly Dictionary<string, JToken> _pending = new Dictionary<string, JToken>();
-
         /// <summary>
-        /// デバウンス待ちの Unity 側の変更。
+        /// 保留中の変更（core への <c>PATCH</c> / Unity 側 / ウィンドウの倍率）。
         ///
-        /// ★★ <b>スライダーを1ティック動かすたびに保存・適用しないこと。</b> #76 の初版は
-        ///   毎ティックで <c>settings.json</c> の書き込み・シーンへの反映・メニューの更新を
-        ///   走らせていて、実機で「重い」と言われた。特にウィンドウのリサイズは
-        ///   <c>WindowGeometry</c> が最大5回書き直して追従するので効く。
+        /// ★ <b>判断は <see cref="PendingChanges"/> が持つ</b>（<c>Runtime</c> 側なので
+        ///   EditMode で固定してある）。ここは締め切りに届いたものを実際に適用する配線だけ。
         /// </summary>
-        private MascotSettings? _pendingSettings;
-
-        /// <summary>デバウンス待ちのウィンドウ倍率（→ <c>ISettingsHost.SetWindowSize</c>）</summary>
-        private float? _pendingScale;
+        private readonly PendingChanges _pending = new PendingChanges();
 
         /// <summary>注記を消したが、まだ画面に反映していない（→ <see cref="Queue"/>）</summary>
         private bool _noticesStale;
 
-        private float _pendingAt = float.PositiveInfinity;
         private bool _refreshing;
         private bool _open;
 
@@ -176,6 +180,11 @@ namespace ChatterMascot.Desktop
 
         public void Close()
         {
+            // ★ **捨てる前に投げ切ること。** ここは OnDestroy（シーンのアンロード /
+            //   ドメインリロード）からも来る。閉じるだけなら Bridge.Update の Tick() が
+            //   着地させるが、その経路では二度と Tick が来ない
+            Flush();
+
             _open = false;
             // ★ 一時的なメッセージは持ち越さないこと。閉じて開き直したときに
             //   「さっき押した結果」が残っていると、いま起きたことと区別が付かない
@@ -213,17 +222,34 @@ namespace ChatterMascot.Desktop
         public void Tick()
         {
             WatchWindowSize();
-            if (_pending.Count == 0 && _pendingSettings == null && _pendingScale == null) return;
-            if (Time.realtimeSinceStartup < _pendingAt) return;
+            if (!_pending.Due(Time.realtimeSinceStartup)) return;
+            Flush();
+        }
 
-            var batch = new List<KeyValuePair<string, JToken>>(_pending);
-            var settings = _pendingSettings;
-            var scale = _pendingScale;
+        /// <summary>
+        /// 保留を締め切りを待たずに適用する。
+        ///
+        /// ★★ <b>終了の手前で呼ぶこと。</b> <c>Quit</c> は <c>Application.Quit()</c> を
+        ///   先に走らせるので、呼ばないと締め切りが来ないまま終わる ——
+        ///   音量は古いまま / <c>PATCH</c> は飛ばない / ウィンドウは変わらない。
+        ///   <b>閉じるだけなら失われない</b>（<c>Bridge.Update</c> が <c>Tick()</c> を
+        ///   無条件に呼ぶので、見えていなくても締め切りは着地する）。落ちるのは
+        ///   <c>Quit</c> と <c>OnDestroy</c> → <see cref="Close"/> の2経路だけ。
+        ///
+        /// ★ <b>即時適用もここを通す</b>（→ <see cref="Apply"/>）。別経路にすると権威が2つになる。
+        ///
+        /// ★ <c>PATCH</c> は非同期なので、<c>Quit</c> では<b>投げるところまで</b>しか保証できない
+        ///   （Unity 側の <c>settings.json</c> とウィンドウは同期で確定する）。実際には
+        ///   <c>wantsToQuit</c> が ack を投げ切るぶん終了が遅れるので、そこで着地することが多い。
+        /// </summary>
+        public void Flush()
+        {
+            if (_pending.IsEmpty) return;
 
-            _pending.Clear();
-            _pendingSettings = null;
-            _pendingScale = null;
-            _pendingAt = float.PositiveInfinity;
+            MascotSettings? settings;
+            float? scale;
+            List<KeyValuePair<string, JToken>> batch;
+            _pending.Take(out settings, out scale, out batch);
 
             if (settings != null) _host.ApplySettings(settings.Value);
             if (scale != null)
@@ -238,7 +264,6 @@ namespace ChatterMascot.Desktop
             foreach (var entry in batch) _ = PatchAsync(entry.Key, entry.Value);
         }
 
-        /// <summary>Unity 側の変更を保留する（→ <see cref="Tick"/>）</summary>
         /// <summary>
         /// ウィンドウの大きさが<b>外から</b>変わったら「大きさ」を追いつかせる。
         ///
@@ -253,10 +278,16 @@ namespace ChatterMascot.Desktop
         ///
         /// ★ <b>保留中は見送る。</b> つまみをドラッグしている最中に作り直すと、
         ///   掴んでいるスライダーごと消える（→ <see cref="Push"/>）。
+        ///
+        /// ★★ <b>適用中も見送る</b>（<c>ISettingsHost.WindowSizeSettling</c>）。保留を出した
+        ///   <b>直後</b>が抜けていた —— <c>SetWindowSize</c> は窓に書くだけで、
+        ///   <c>WindowScale</c> が新しい値を返すのは数フレーム後。その間ここが
+        ///   「外から変わった」と誤読して、<b>「話す速さ」で潰したはずの teardown を
+        ///   「大きさ」で再発させていた</b>（#85 レビュー A-2）。
         /// </summary>
         private void WatchWindowSize()
         {
-            if (!_open || _pendingScale != null) return;
+            if (!_open || _pending.HasScale || _host.WindowSizeSettling) return;
 
             var scale = _host.WindowScale;
             if (Mathf.Abs(scale - _context.WindowScale) < 0.001f) return;
@@ -265,16 +296,25 @@ namespace ChatterMascot.Desktop
             Push(update: true);
         }
 
+        /// <summary>Unity 側の変更を保留する（→ <see cref="Tick"/>）</summary>
         private void Defer(MascotSettings next)
         {
-            _pendingSettings = next;
-            Postpone();
+            _pending.Defer(next, Time.realtimeSinceStartup);
         }
 
-        /// <summary>締め切りを（再）設定する。★ 触るたびに延ばす（＝最後の操作から数える）</summary>
-        private void Postpone()
+        /// <summary>
+        /// Unity 側の変更を<b>その場で</b>確定する（チェックボックス・ショートカット・VRM）。
+        ///
+        /// ★ 連打されるものではないし、遅らせると「押したのに効いていない」に見える。
+        ///
+        /// ★★ <b><c>_host.ApplySettings</c> を直接呼ばないこと。</b> 保留を素通りすると、
+        ///   同じ 300ms の窓に居るデバウンス中の変更が<b>あとから巻き戻す</b>
+        ///   （→ <see cref="PendingChanges"/> の ★★）。<b>権威は1つ</b>。
+        /// </summary>
+        private void Apply(MascotSettings next)
         {
-            _pendingAt = Time.realtimeSinceStartup + PatchDebounceSeconds;
+            Defer(next);
+            Flush();
         }
 
         /// <summary>設定ファイルが外から書き換わったときなど、表示を作り直す</summary>
@@ -292,7 +332,10 @@ namespace ChatterMascot.Desktop
         /// </summary>
         public void HandleSetting(string key, string value)
         {
-            var settings = _host.Settings;
+            // ★★ **保留があるならそこから積むこと**（→ PendingChanges の ★★）。
+            //   `_host.Settings` から始めると、デバウンス中の保留が、ここで確定した
+            //   別の項目を**あとから巻き戻す**（症状は「外れて見えるのに実際はオン」）
+            var settings = _pending.Base(_host.Settings);
 
             switch (key)
             {
@@ -304,14 +347,16 @@ namespace ChatterMascot.Desktop
                 //   「外から変わったとき」だけ（→ Refresh）。
 
                 case SettingKeys.Scale:
+                {
                     // ★ 大きさは settings.json に持たない。**ウィンドウそのものを変える**
                     //   （→ SettingsMapping.WindowSizeFor / MascotSettings の型 doc）
-                    _pendingScale = SettingsMapping.Normalize(
+                    var scale = SettingsMapping.Normalize(
                         SettingsMapping.Parse(value, _context.WindowScale),
                         SettingsMapping.ScaleMin, SettingsMapping.ScaleMax, SettingsMapping.ScaleStep);
-                    _context.WindowScale = _pendingScale.Value;
-                    Postpone();
+                    _pending.DeferScale(scale, Time.realtimeSinceStartup);
+                    _context.WindowScale = scale;
                     return;
+                }
 
                 case SettingKeys.Volume:
                     // ★ スライダーなのでデバウンスする（1ティックごとに保存しない）
@@ -322,24 +367,28 @@ namespace ChatterMascot.Desktop
 
                 // ★ チェックボックスは即座に反映する。連打されるものではないし、
                 //   遅らせると「押したのに効いていない」に見える
+                // ★★ ただし **Apply を通すこと**（＝保留に載せてすぐ flush）。
+                //   `_host.ApplySettings` を直接呼ぶと権威が2つになる（→ Apply の ★★）
                 case SettingKeys.IdleMotion:
-                    _host.ApplySettings(settings.WithIdleMotion(SettingsPanelJson.ParseBool(value, settings.IdleMotion)));
+                    Apply(settings.WithIdleMotion(SettingsPanelJson.ParseBool(value, settings.IdleMotion)));
                     return;
 
                 case SettingKeys.CursorGaze:
-                    _host.ApplySettings(settings.WithCursorGaze(SettingsPanelJson.ParseBool(value, settings.CursorGaze)));
+                    Apply(settings.WithCursorGaze(SettingsPanelJson.ParseBool(value, settings.CursorGaze)));
                     return;
 
                 case SettingKeys.Blink:
-                    _host.ApplySettings(settings.WithBlink(SettingsPanelJson.ParseBool(value, settings.Blink)));
+                    Apply(settings.WithBlink(SettingsPanelJson.ParseBool(value, settings.Blink)));
                     return;
 
                 case SettingKeys.MuteHotKey:
-                    ApplyHotKey(key, value, spec => _host.ApplySettings(_host.Settings.WithMuteHotKey(spec)));
+                    // ★ 起点は `settings`（＝保留があるならそれ）。`_host.Settings` を
+                    //   読み直すと、同じ窓に居る保留を巻き戻す（→ 上の ★★）
+                    ApplyHotKey(key, value, spec => Apply(settings.WithMuteHotKey(spec)));
                     return;
 
                 case SettingKeys.HideHotKey:
-                    ApplyHotKey(key, value, spec => _host.ApplySettings(_host.Settings.WithHideHotKey(spec)));
+                    ApplyHotKey(key, value, spec => Apply(settings.WithHideHotKey(spec)));
                     return;
 
                 case SettingKeys.Vrm:
@@ -388,6 +437,11 @@ namespace ChatterMascot.Desktop
                     return;
 
                 case SettingKeys.ResetPosition:
+                    // ★★ **保留の倍率を捨ててから戻すこと。** 残すと、既定へ戻した**後ろ**に
+                    //   古い倍率が着地する（レビューは挙げていないが A-3 / A-4 と同型）。
+                    //   ★ Clear() にはしない —— 戻すのは窓だけなので、同じ窓に居る
+                    //     音量や話す速さまで道連れにしない
+                    _pending.ClearScale();
                     _host.ResetWindow();
                     // ★ ここで WindowScale を読まないこと。反映は数フレーム遅れるので
                     //   まだ古い倍率が返る。スライダーは WatchWindowSize が追いつかせる
@@ -400,6 +454,9 @@ namespace ChatterMascot.Desktop
                     return;
 
                 case SettingKeys.Quit:
+                    // ★★ **保留を投げ切ってから終わること。** Application.Quit() が先に走ると
+                    //   Tick() の締め切りが二度と来ない（#85 レビュー A-4）
+                    Flush();
                     _host.Quit();
                     return;
 
@@ -441,8 +498,7 @@ namespace ChatterMascot.Desktop
         /// </summary>
         private void Queue(string coreKey, JToken value, string uiKey)
         {
-            _pending[coreKey] = value;
-            _pendingAt = Time.realtimeSinceStartup + PatchDebounceSeconds;
+            _pending.Queue(coreKey, value, Time.realtimeSinceStartup);
 
             // ★ ここでは作り直さない（ドラッグ中かもしれない）。前回の失敗の注記が
             //   残っていたら、成功したあとの Push で消す（→ PatchAsync）
@@ -628,6 +684,10 @@ namespace ChatterMascot.Desktop
         {
             if (!Confirm()) return;
 
+            // ★★ **保留を捨ててから戻すこと。** 残すと、既定へ戻した**後ろ**に古い値が
+            //   着地する（→ ResetPosition と同型。こちらは全部戻すので Clear でよい）
+            _pending.Clear();
+
             // 1. Unity 側（settings.json + window.json）
             _host.ResetUnitySettings();
             _context.WindowScale = _host.WindowScale;
@@ -775,7 +835,7 @@ namespace ChatterMascot.Desktop
             }
 
             Notice(SettingKeys.Vrm, "次に起動したときから反映されます");
-            _host.ApplySettings(_host.Settings.WithVrmFileName(name));
+            Apply(_pending.Base(_host.Settings).WithVrmFileName(name));
             // ★ ここは作り直す。選んだモデル名は note に出るので、画面が自分で追いつけない
             Push(update: true);
         }

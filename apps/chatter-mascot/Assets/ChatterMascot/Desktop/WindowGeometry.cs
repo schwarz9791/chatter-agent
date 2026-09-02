@@ -82,19 +82,6 @@ namespace ChatterMascot.Desktop
         }
 
         /// <summary>
-        /// <c>{XDG_CONFIG_HOME:-~/.config}/chatter-agent/mascot/window.json</c>。
-        /// ★ <c>AssetPath.RuntimeDirectory</c> を使い回して、ユーザーから見た
-        ///   「chatter-agent の設定はここ1箇所」を崩さない。
-        /// </summary>
-        /// <summary>
-        /// 位置と大きさを既定へ戻す（設定パネル / #76）。
-        ///
-        /// ★ <b>ファイルを消すだけにしないこと。</b> 次の起動まで何も起きないと、
-        ///   押した人からは「効かないボタン」にしか見えない。走っている管理側にも
-        ///   その場で既定を適用させる。
-        /// ★ <b>core の <c>config.json</c> は触らない。</b> 別プロセスの設定を消すのは越権。
-        /// </summary>
-        /// <summary>
         /// 走っている <see cref="Keeper"/>。
         ///
         /// ★★ <b><c>FindFirstObjectByType</c> で探さないこと。</b> <see cref="Install"/> は
@@ -111,6 +98,35 @@ namespace ChatterMascot.Desktop
         /// </summary>
         private static Keeper _keeper;
 
+        /// <summary>
+        /// ウィンドウの大きさが<b>まだ落ち着いていない</b>か（設定パネル / #76）。
+        ///
+        /// ★★ <b>「押した直後に読むと古い値が返る」を、状態として外へ出すためのもの。</b>
+        ///   <see cref="SetSize"/> / <see cref="Reset"/> は窓に書くだけで、
+        ///   <see cref="CurrentSize"/> が新しい値を返すのは <c>Applying</c> が
+        ///   一致を確かめた後（最大5回の書き直しぶん遅れる）。設定パネルはこれを見て
+        ///   「外から変わった」の誤読を避ける（→ <c>ISettingsHost.WindowSizeSettling</c>）。
+        ///
+        /// ★ <b>管理が動いていなければ <c>false</c>。</b> 「落ち着くのを待つ」相手が
+        ///   居ないので、待たせる理由も無い。
+        /// </summary>
+        internal static bool IsApplying
+        {
+            get
+            {
+                var keeper = _keeper;
+                return keeper != null && keeper.IsApplying;
+            }
+        }
+
+        /// <summary>
+        /// 位置と大きさを既定へ戻す（設定パネル / #76）。
+        ///
+        /// ★ <b>ファイルを消すだけにしないこと。</b> 次の起動まで何も起きないと、
+        ///   押した人からは「効かないボタン」にしか見えない。走っている管理側にも
+        ///   その場で既定を適用させる。
+        /// ★ <b>core の <c>config.json</c> は触らない。</b> 別プロセスの設定を消すのは越権。
+        /// </summary>
         public static void Reset()
         {
             try
@@ -169,6 +185,11 @@ namespace ChatterMascot.Desktop
             return keeper.CurrentSize();
         }
 
+        /// <summary>
+        /// <c>{XDG_CONFIG_HOME:-~/.config}/chatter-agent/mascot/window.json</c>。
+        /// ★ <c>AssetPath.RuntimeDirectory</c> を使い回して、ユーザーから見た
+        ///   「chatter-agent の設定はここ1箇所」を崩さない。
+        /// </summary>
         internal static string ResolveStatePath()
         {
             var root = AssetPath.RuntimeDirectory(AssetEnvFactory.Current());
@@ -277,6 +298,12 @@ namespace ChatterMascot.Desktop
             private float _reapplyAt = -1f;
             private PointRect _reapplyFrom;
 
+            /// <summary>→ <see cref="WindowGeometry.IsApplying"/></summary>
+            internal bool IsApplying
+            {
+                get { return _phase == Phase.Applying; }
+            }
+
             private void Start()
             {
                 // ★ ここで static に握ること（→ WindowGeometry._keeper の doc）。
@@ -377,12 +404,6 @@ namespace ChatterMascot.Desktop
             }
 
             /// <summary>
-            /// 保存を無かったことにして、既定の位置と大きさをその場で適用する（#76）。
-            ///
-            /// ★ <c>_lastPersisted</c> も捨てること。残っていると
-            ///   「もう保存済み」と判断されて、戻した位置が書き戻されない。
-            /// </summary>
-            /// <summary>
             /// 位置はそのまま、大きさだけ変える（→ <see cref="WindowGeometry.SetSize"/>）。
             ///
             /// ★ <c>BeginApplying</c> を通すこと。直接 <c>Write</c> すると
@@ -409,6 +430,12 @@ namespace ChatterMascot.Desktop
                 return new Vector2(rect.Width, rect.Height);
             }
 
+            /// <summary>
+            /// 保存を無かったことにして、既定の位置と大きさをその場で適用する（#76）。
+            ///
+            /// ★ <c>_lastPersisted</c> も捨てること。残っていると
+            ///   「もう保存済み」と判断されて、戻した位置が書き戻されない。
+            /// </summary>
             internal void ResetToDefault()
             {
                 _saved = default(WindowState);

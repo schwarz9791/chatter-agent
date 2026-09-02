@@ -669,6 +669,11 @@ namespace ChatterMascot.Desktop
                 }
             }
 
+            bool ISettingsHost.WindowSizeSettling
+            {
+                get { return WindowGeometry.IsApplying; }
+            }
+
             void ISettingsHost.Quit()
             {
                 // ★★ ネイティブから [NSApp terminate:] を呼ばないこと（→ Invoke の Quit）

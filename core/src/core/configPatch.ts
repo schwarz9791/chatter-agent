@@ -12,10 +12,11 @@
 import { isConfigKey, parseConfigValue, type ConfigKey, type ConfigOrigin } from "./config";
 
 /**
- * 制御 API から書けないキー。**理由が2種類あるので分けて持つ。**
+ * 制御 API から書けないキー。**理由が3種類あるので分けて持つ。**
  *
- * ★ 1つの配列に混ぜないこと。「なぜ書けないのか」で対応が変わる —— (a) は緩めてはいけない
- *   セキュリティ境界、(b) は**将来サーバーが再起動できるようになれば書けるようになりうる**。
+ * ★ 1つの配列に混ぜないこと。「なぜ書けないのか」で対応が変わる —— (a) と (c) は緩めては
+ *   いけないセキュリティ境界、(b) は**将来サーバーが再起動できるようになれば書けるように
+ *   なりうる**。
  */
 
 /**
@@ -49,7 +50,28 @@ const READONLY_EXECUTABLE: readonly ConfigKey[] = [
  */
 const READONLY_UNTIL_RESTART: readonly ConfigKey[] = ["host", "port", "allowedOrigins"];
 
-const READONLY_KEYS: readonly ConfigKey[] = [...READONLY_EXECUTABLE, ...READONLY_UNTIL_RESTART];
+/**
+ * (c) **本文の外部送信路になる。**
+ *
+ * `ttsBaseUrl` を書き換えると、以後 `ttsFor(currentVoice())` は Claude Code の
+ * **全メッセージ本文**をそのホストの `/audio_query` へ POST する。`currentVoice()` は
+ * 毎回 `config.get` するので（→ `server/index.ts`）**再起動も要らず、次の1文から**そうなる。
+ * しかも音が鳴らなくなるだけなので、**利用者から見た症状は「無音」だけ**で、本文が
+ * 出ていることには気付けない。(a) と同じ「設定を1行書き換えるだけ」の壊れ方。
+ *
+ * ★ 設定パネルはこのキーを一度も書かない（書くのは `ttsSpeakerId` / `ttsSpeedScale` /
+ *   `aiSummaryEnabled` の3つだけ）。塞いでも UI は何も失わない。
+ *
+ * ★ `playerServerUrl` は載せない。player は**受け手**なので、向き先を変えても
+ *   本文が外へ出ることはない（別のサーバーの音声を再生させられるだけ）。
+ */
+const READONLY_EXFILTRATION: readonly ConfigKey[] = ["ttsBaseUrl"];
+
+const READONLY_KEYS: readonly ConfigKey[] = [
+  ...READONLY_EXECUTABLE,
+  ...READONLY_UNTIL_RESTART,
+  ...READONLY_EXFILTRATION,
+];
 
 export function isWritableConfigKey(key: ConfigKey): boolean {
   return !READONLY_KEYS.includes(key);

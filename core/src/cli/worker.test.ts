@@ -1015,6 +1015,30 @@ describe("AI要約", () => {
     expect(fs.existsSync(path.join(spoolDir, "m1.0.json"))).toBe(false);
   });
 
+  /**
+   * ★★ #76 のレビュー A-1。ドレインはロックを長く握る（AI要約 ON なら
+   *   `aiSummaryTimeoutMs × aiSummaryMaxPerDrain`）ので、**その最中に**サーバーが
+   *   テスト要約を起こすことがある。レジストリをドレインの先頭で1回しか読まないと
+   *   登録がその読み取りより後になり、**要約器自身の出力が読み上げられる**。
+   */
+  it("★★ 第2層: ドレインの走行中に登録されたセッションにも効く", () => {
+    appendDelta("m1", 0, "先に流れているメッセージ。", true);
+
+    drain({
+      summarize: (text) => {
+        // 走行中のサーバーが `POST /v1/summary/preview` を受けた、という状況。
+        // registerSummarizerSession は要約 CLI を spawn する**前**に書く契約なので、
+        // その出力の spool より必ず先に置かれる
+        fs.writeFileSync(path.join(dir, "summarizer-sessions.json"), JSON.stringify(["mid-drain-sess"]));
+        appendDelta("m2", 0, "要約プロセス自身の出力です。", true, "mid-drain-sess");
+        return text;
+      },
+    });
+
+    expect(texts()).toEqual(["先に流れているメッセージ。"]);
+    expect(fs.existsSync(path.join(spoolDir, "m2.0.json"))).toBe(false);
+  });
+
   it("★ 第2層の永続化: registerSessionId が呼ばれた時点で speak.state.json に既に書かれている", () => {
     appendDelta("m1", 0, "長いメッセージ。", true);
 

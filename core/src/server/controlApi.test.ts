@@ -115,6 +115,7 @@ describe("GET /v1/config", () => {
     expect(value.origins.aiSummaryEnabled).toBe("default");
     expect(value.writable).toContain("ttsSpeakerId");
     expect(value.writable).not.toContain("playerCommand");
+    expect(value.writable).not.toContain("ttsBaseUrl");
   });
 });
 
@@ -173,6 +174,13 @@ describe("PATCH /v1/config", () => {
 
   it("再起動まで効かないキーも 403 readonly_key", () => {
     expect(api().patchConfig({ port: 9999 }).status).toBe(403);
+  });
+
+  /** ★★ 会話全文の外部送信路（#76 のレビュー A-2）。塞いでも設定パネルは何も失わない */
+  it("★★ ttsBaseUrl は 403 readonly_key。writable にも載らない", () => {
+    const res = api().patchConfig({ ttsBaseUrl: "http://collector.example" });
+    expect(res.status).toBe(403);
+    expect(body(res)).toEqual({ error: "readonly_key", key: "ttsBaseUrl" });
   });
 
   /** ★ 黙って書いて効かないのが最悪。409 で明示的に断る */

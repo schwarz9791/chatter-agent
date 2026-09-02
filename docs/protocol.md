@@ -308,7 +308,7 @@ LAN 越しに話者一覧を引けなくなるため。
 GET   /v1/health           200 {"ok":true,"version":"0.1.0"}
 GET   /v1/speakers         200 {"speakers":[{"id":888753760,"label":"Anneli（ノーマル）"}]}
                            503 {"error":"engine_unreachable","detail":"…"}
-GET   /v1/config           200 {"values":{…},"origins":{…},"writable":[…]}
+GET   /v1/config           200 {"values":{…},"origins":{…},"writable":[…],"defaults":{…}}
 PATCH /v1/config           200 {"values":{…},"origins":{…}}   ← 適用後に読み直した値
                            400 {"error":"unknown_key"|"invalid_value"|"invalid_body"|"invalid_json","key":"…"}
                            403 {"error":"readonly_key","key":"…"}
@@ -349,6 +349,10 @@ LAN からなら `GET, HEAD, OPTIONS` を返す。
 |---|---|
 | `ttsSpawnCommand` / `ttsSpawnArgs` / `playerCommand` / `playerArgs` / `aiSummaryCommand` | **(a) コマンド実行に繋がる。** ループバック限定でも「設定を1行書き換えるだけで任意コマンド実行」は別格の壊れ方をする。**緩めないこと** |
 | `host` / `port` / `allowedOrigins` | **(b) 効かない。** 再起動まで反映されないので、UI から触れる意味が無いうえに「効かない設定」という最悪の見え方になる |
+
+★ **`defaults` は既定値そのもの**（`createDefaultConfig()`）。設定 UI の「すべての設定をリセット」が
+これを使って書き戻す。★ **クライアントに既定値を書き写させないこと** —— 写した瞬間に
+「core を直したのにクライアントだけ古い既定に戻す」がありうる。
 
 ★ **環境変数が勝っているキーは 409 `env_override`。** 優先順位は「環境変数 > ファイル > 既定」なので、
 書いても効かない。**黙って書いて効かないのがいちばん悪い。**

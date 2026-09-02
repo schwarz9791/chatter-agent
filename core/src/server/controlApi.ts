@@ -4,7 +4,7 @@
  * ```
  * GET   /v1/health           200 {"ok":true,"version":"…"}
  * GET   /v1/speakers         200 {"speakers":[{"id":…,"label":"…"}]} / 503 engine_unreachable
- * GET   /v1/config           200 {"values":…,"origins":…,"writable":[…]}
+ * GET   /v1/config           200 {"values":…,"origins":…,"writable":[…],"defaults":…}
  * PATCH /v1/config           200 {"values":…}（**適用後に読み直した値**）
  * POST  /v1/tts/preview      200 audio/wav（★ 固定文）
  * POST  /v1/summary/preview  200 {"summary":…,"outcome":…,"elapsedMs":…}（★ 失敗も 200）
@@ -23,7 +23,7 @@
  */
 
 import { buildConfigPatch, writableConfigKeys } from "../core/configPatch";
-import { configKeys, type ConfigKey, type ConfigStore } from "../core/config";
+import { configKeys, createDefaultConfig, type ConfigKey, type ConfigStore } from "../core/config";
 import { writeFileAtomic } from "../core/atomicWrite";
 import { VERSION } from "../core/version";
 import { runSummaryPreview, type SummaryPreviewDeps } from "../summarizer/summaryPreview";
@@ -154,7 +154,14 @@ export function createControlApi(deps: ControlApiDeps): ControlApi {
     },
 
     getConfig() {
-      return json(200, { ...configBody(), writable: writableConfigKeys(configKeys()) });
+      return json(200, {
+        ...configBody(),
+        writable: writableConfigKeys(configKeys()),
+        // ★★ **既定値をクライアントに書き写させないこと。** `SPECS` が権威なので、
+        //   写した瞬間に「core を直したのにクライアントだけ古い既定に戻す」がありうる。
+        //   設定パネルの「すべての設定をリセット」がこれを使う（#76）
+        defaults: createDefaultConfig(),
+      });
     },
 
     patchConfig(body) {

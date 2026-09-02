@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { createConfigStore, type ConfigStore } from "../core/config";
+import { createConfigStore, createDefaultConfig, type ConfigStore } from "../core/config";
 import { VERSION } from "../core/version";
 import { createControlApi, type ControlApiDeps } from "./controlApi";
 
@@ -84,6 +84,20 @@ describe("GET /v1/speakers", () => {
 });
 
 describe("GET /v1/config", () => {
+  /**
+   * ★★ 既定値はクライアントに書き写させない。写した瞬間に
+   *   「core を直したのにクライアントだけ古い既定に戻す」がありうる
+   *   （設定パネルの「すべての設定をリセット」がこれを使う）。
+   */
+  it("★★ defaults に本番の既定値をそのまま載せる", () => {
+    write({ ttsSpeakerId: 3 });
+    const value = body<{ defaults: Record<string, unknown> }>(api().getConfig());
+
+    expect(value.defaults).toEqual(createDefaultConfig());
+    // 書かれている値ではなく既定値であること
+    expect(value.defaults.ttsSpeakerId).not.toBe(3);
+  });
+
   it("values / origins / writable を返す", () => {
     write({ ttsSpeakerId: 3 });
     const res = api({ config: store({ CHATTER_AGENT_TTS_SPEED_SCALE: "1.5" }) }).getConfig();

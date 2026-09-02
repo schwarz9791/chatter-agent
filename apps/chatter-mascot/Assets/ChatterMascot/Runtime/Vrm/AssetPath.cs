@@ -162,7 +162,7 @@ namespace ChatterMascot.Vrm
         ///   作っていないため（#70 が入るまで、選ばせる中身が同梱の1本しか無い）。
         ///   ここが <c>.vrm</c> 専用なのは意図的な非対称。
         /// </summary>
-        public const string SelectedVrmFile = "selected.vrm";
+        public const string SelectedVrmFile = "mascot.vrm";
 
         /// <summary>
         /// 候補を優先順に並べる。

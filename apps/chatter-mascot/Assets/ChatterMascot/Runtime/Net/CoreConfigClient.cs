@@ -255,6 +255,14 @@ namespace ChatterMascot.Net
                     return "知らない設定です（" + key + "）";
                 case "engine_unreachable":
                     return "音声合成エンジンに繋がりません";
+                // ★ `engine_unreachable` は話者一覧（`GET /v1/speakers`）が返すもの。
+                //   テスト音声が失敗したときはこちらで、**理由が別**（合成まで届いて落ちた）
+                case "synthesis_unavailable":
+                    return "音声を合成できませんでした";
+                // ★ サーバー側で `ttsEnabled: false` にしている。「繋がらない」ではないので
+                //   名指しする（→ core の `controlApi.ttsPreview`）
+                case "tts_disabled":
+                    return "サーバー側で音声が無効になっています（ttsEnabled）";
                 case "config_unreadable":
                     return "config.json を読めないので書き込みませんでした";
                 case "config_unwritable":

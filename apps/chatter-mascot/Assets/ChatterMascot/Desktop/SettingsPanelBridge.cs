@@ -66,7 +66,24 @@ namespace ChatterMascot.Desktop
         /// <summary>スライダーを動かしてから core へ送るまでの猶予</summary>
         private const float PatchDebounceSeconds = 0.3f;
 
+        /// <summary>
+        /// 制御 API の1リクエストの上限。<b>設定の読み書きはファイル I/O だけ</b>なので短くてよい。
+        /// </summary>
         private const int RequestTimeoutMs = 5_000;
+
+        /// <summary>
+        /// テスト音声だけの予算。
+        ///
+        /// ★★ <b>他の口と同じ 5秒にしないこと。</b> サーバー側は <c>synthesize</c> の2往復ぶん
+        ///   （<c>synthesisTimeoutMs</c> 既定30秒の<b>最悪2倍</b>。→ core の <c>config.ts</c>）粘る。
+        ///   短くすると、<b>エンジンは起きているがモデルがまだロードされていない</b>という
+        ///   「1文目だけは合成待ちで少し間が空く」場面 —— <b>テスト音声がいちばん効くはずの場面</b>
+        ///   —— でだけ <c>UnityWebRequest.timeout</c> が先に発火し、実際には合成中なのに
+        ///   「サーバーに繋がりません」（status 0）と出る。#84 で足した
+        ///   <c>synthesis_unavailable</c> / <c>tts_disabled</c> の出し分けにも到達しなくなる。
+        /// ★ <c>SummaryPreviewAsync</c> が専用の予算を受けているのと同じ理由（→ <c>CoreConfigClient</c>）。
+        /// </summary>
+        private const int TtsPreviewTimeoutMs = 70_000;
 
         /// <summary>
         /// ネイティブのパネル ID。<b>同じレンダラで2枚描く</b>（→ <c>CMSettingsPanel.m</c>）。
@@ -559,7 +576,7 @@ namespace ChatterMascot.Desktop
         {
             try
             {
-                var result = await _client.TtsPreviewAsync();
+                var result = await _client.TtsPreviewAsync(TtsPreviewTimeoutMs);
                 if (!result.Ok)
                 {
                     Notice(SettingKeys.TtsPreview, result.Reason);

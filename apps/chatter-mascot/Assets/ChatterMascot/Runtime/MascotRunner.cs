@@ -183,6 +183,9 @@ namespace ChatterMascot
         /// ★ 起動引数（<c>-serverUrl</c>）で上書きされた後の<b>実際の値</b>を返すこと。
         ///   <c>[SerializeField]</c> をそのまま読むと、引数で別のサーバーを指したときに
         ///   設定パネルだけ元のサーバーを見に行く。
+        /// ★★ <b>その約束は <c>Awake</c> で上書きすることで守られている</b>
+        ///   （→ <see cref="ResolveServerUrl"/>）。読み手（<c>StatusItemBridge</c>）は
+        ///   <c>Start</c> に居るので、上書きを <c>Start</c> でやると<b>順序が未規定になる</b>。
         /// </summary>
         public string ServerUrl
         {
@@ -350,6 +353,34 @@ namespace ChatterMascot
             // ★ Awake で読むこと。Start は serverUrl が不正だと最後まで走らない
             _quitProbe = CommandLine.Flag("-quitProbe");
             if (_quitProbe) Debug.Log("[Mascot] -quitProbe: 最初の終了要求を1回だけ強制的に保留します");
+
+            ResolveServerUrl();
+        }
+
+        /// <summary>
+        /// <c>-serverUrl</c> の上書きを <see cref="serverUrl"/> へ焼く。
+        ///
+        /// ★★ <b><c>Start</c> ではなく <c>Awake</c> で行うこと。</b> 設定パネル（#76）は
+        ///   <c>StatusItemBridge.Bridge.Start()</c> から <see cref="ServerUrl"/> を読んで
+        ///   <c>CoreConfigClient</c> の接続先を<b>1回きり</b>捕まえる。あちらも <c>Start</c> なので
+        ///   <b>2つの <c>Start</c> の相対順序は保証されない</b>（どちらにも
+        ///   <c>[DefaultExecutionOrder]</c> は付いていない）。先に走られると
+        ///   <c>[SerializeField]</c> の既定値が焼かれ、<b>再生は正しいサーバーなのに設定パネルだけ
+        ///   別のサーバーを読み書きする</b>状態がセッション中ずっと続く。
+        ///   <c>Bridge</c> は <c>RuntimeInitializeOnLoadMethod(AfterSceneLoad)</c> で生えるので、
+        ///   <b>シーンの <c>Awake</c> はすべて終わった後</b>に <c>Start</c> が来る ——
+        ///   ここへ移せば順序が決まる。
+        ///
+        /// ★ <b>検証（<see cref="IsValidServerUrl"/>）は <c>Start</c> のまま。</b> あちらは
+        ///   「<c>_client</c> を作れるか」の話で、読み手の順序とは別の関心事。
+        /// </summary>
+        private void ResolveServerUrl()
+        {
+            var overridden = CommandLine.Argument("-serverUrl");
+            if (string.IsNullOrEmpty(overridden)) return;
+
+            Debug.Log($"[Mascot] serverUrl をコマンドラインで上書きします: \"{overridden}\"");
+            serverUrl = overridden;
         }
 
         /// <summary>
@@ -491,13 +522,9 @@ namespace ChatterMascot
             //   ただ別のアプリを測っているだけになる）。
             //
             //   open Build/ChatterMascot.app --args -serverUrl ws://127.0.0.1:9
-            var overridden = CommandLine.Argument("-serverUrl");
-            if (!string.IsNullOrEmpty(overridden))
-            {
-                Debug.Log($"[Mascot] serverUrl をコマンドラインで上書きします: \"{overridden}\"");
-                serverUrl = overridden;
-            }
-
+            //
+            // ★★ **上書きそのものは Awake で済ませてある**（→ ResolveServerUrl）。ここに残すと、
+            //   同じ Start パスに居る StatusItemBridge が**先に ServerUrl を読みうる**。
             if (!IsValidServerUrl(serverUrl))
             {
                 Debug.LogError($"[Mascot] serverUrl が不正です: \"{serverUrl}\"。" +

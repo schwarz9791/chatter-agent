@@ -297,6 +297,13 @@ namespace ChatterMascot.Desktop
             ///
             /// ★ ここで既定値を書き写さないこと。<c>-serverUrl</c> で別のサーバーを指したときに、
             ///   設定パネルだけ元のサーバーを見に行く。
+            ///
+            /// ★★ <b>「上書き済み」が成立するのは、あちらが <c>Awake</c> で焼いているから</b>
+            ///   （→ <c>MascotRunner.ResolveServerUrl</c>）。ここは <c>Start</c> で、
+            ///   <c>MascotRunner.Start</c> との相対順序は保証されない ——
+            ///   <b>あちらを <c>Start</c> に戻すと、この doc の前提がその瞬間に崩れる</b>。
+            ///   <c>CoreConfigClient</c> は接続先を<b>1回きり</b>捕まえるので、
+            ///   ずれるとセッション中ずっと別のサーバーを読み書きし続ける。
             /// </summary>
             private string ResolveServerUrl()
             {

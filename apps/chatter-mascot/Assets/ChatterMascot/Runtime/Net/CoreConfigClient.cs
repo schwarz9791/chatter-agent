@@ -64,9 +64,10 @@ namespace ChatterMascot.Net
 
         /// <param name="baseUrl"><c>http://host:port</c>（→ <see cref="ServerUrl.ToHttpBase"/>）</param>
         /// <param name="timeoutMs">
-        /// 1リクエストの上限。★ <b>テスト要約だけは長い</b> —— サーバー側は
-        /// <c>aiSummaryTimeoutMs</c>（既定60秒）まで粘るので、
-        /// <see cref="SummaryPreviewAsync"/> には別の予算を渡すこと。
+        /// 1リクエストの上限。★ <b>プレビューの2本だけは長い</b> —— サーバー側は
+        /// <see cref="SummaryPreviewAsync"/> なら <c>aiSummaryTimeoutMs</c>（既定60秒）、
+        /// <see cref="TtsPreviewAsync"/> なら <c>synthesisTimeoutMs</c>（既定30秒）の
+        /// <b>最悪2倍</b>まで粘るので、<b>どちらにも別の予算を渡すこと</b>。
         /// </param>
         public CoreConfigClient(string baseUrl, int timeoutMs)
         {
@@ -108,12 +109,21 @@ namespace ChatterMascot.Net
             return SendJsonAsync("PATCH", "/v1/config", body.ToString(Formatting.None), _timeoutSeconds);
         }
 
-        /// <summary>テスト音声。固定文なので引数は無い（→ <c>docs/protocol.md</c>）</summary>
-        public async Task<CoreResult> TtsPreviewAsync()
+        /// <summary>
+        /// テスト音声。固定文なので<b>読ませる文</b>の引数は無い（→ <c>docs/protocol.md</c>）。
+        ///
+        /// ★★ <b>専用のタイムアウトを渡すこと</b>（<see cref="SummaryPreviewAsync"/> と同じ理由）。
+        ///   サーバー側は <c>synthesize</c> の2往復ぶん —— <c>synthesisTimeoutMs</c>（既定30秒）の
+        ///   <b>最悪2倍</b> —— 粘る。他の口と同じ予算にすると、<b>エンジンは起きているが
+        ///   モデルがまだロードされていない</b>という「1文目だけは合成待ちで少し間が空く」場面
+        ///   —— テスト音声がいちばん効くはずの場面 —— でだけ <c>ConnectionError</c> になり、
+        ///   <b>実際には合成中なのに「サーバーに繋がりません」と出る</b>。
+        /// </summary>
+        public async Task<CoreResult> TtsPreviewAsync(int timeoutMs)
         {
             using (var request = MakeJsonRequest("POST", "/v1/tts/preview", "{}"))
             {
-                request.timeout = _timeoutSeconds;
+                request.timeout = ToSeconds(timeoutMs);
                 await SendAsync(request);
                 if (!Succeeded(request)) return Failed(request);
                 return CoreResult.Binary(request.downloadHandler.data);

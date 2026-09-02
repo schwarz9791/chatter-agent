@@ -28,18 +28,35 @@ namespace ChatterMascot.Ui
         /// ビルドした <c>.app</c> で起きたことを残すにはこの経路しかない。
         /// </summary>
         Log,
+
+        /// <summary>
+        /// パネルが閉じられた（#76）。<c>PanelId</c> に意味がある。
+        ///
+        /// ★★ <b>赤いボタンで閉じる経路は、これでしか届かない。</b> 自分で閉じるとき
+        ///   （<c>CM_PanelHide</c>）は C# 側が知っているので通知が要らないが、
+        ///   ユーザーが閉じる経路を誰も知らないと「開いている」が真のまま残り、
+        ///   開き直したときに<b>数分前の注記が、いま起きたことのように出る</b>。
+        ///
+        /// ★ <b><c>Setting</c> に相乗りさせなかった。</b> あちらは「設定のキー」を運ぶ口で、
+        ///   <b>ネイティブに設定のキーを書かない</b>という規律がある。これは
+        ///   <c>menu</c> / <c>hotkey</c> / <c>log</c> と同じ<b>プロトコルの語彙</b>。
+        /// </summary>
+        PanelClosed,
     }
 
     /// <summary>ネイティブ（<c>CM_EventCallback</c>）から1件届いたもの。</summary>
     public readonly struct MenuEvent
     {
-        public MenuEvent(MenuEventKind kind, string key, int hotKeyId, string message = null, string value = null)
+        public MenuEvent(
+            MenuEventKind kind, string key, int hotKeyId,
+            string message = null, string value = null, int panelId = 0)
         {
             Kind = kind;
             Key = key;
             HotKeyId = hotKeyId;
             Message = message;
             Value = value;
+            PanelId = panelId;
         }
 
         public MenuEventKind Kind { get; }
@@ -65,6 +82,12 @@ namespace ChatterMascot.Ui
 
         /// <summary><see cref="MenuEventKind.Log"/> のときだけ意味がある</summary>
         public string Message { get; }
+
+        /// <summary>
+        /// <see cref="MenuEventKind.PanelClosed"/> のときだけ意味がある。
+        /// ★ 意味（設定 / について）を知っているのは C# だけ（→ <c>SettingsPanelBridge</c>）。
+        /// </summary>
+        public int PanelId { get; }
     }
 
     /// <summary>
@@ -210,6 +233,30 @@ namespace ChatterMascot.Ui
                     var setting = root["value"];
                     var text = setting != null && setting.Type == JTokenType.String ? setting.Value<string>() : "";
                     value = new MenuEvent(MenuEventKind.Setting, key.Value<string>(), 0, null, text);
+                    return true;
+                }
+
+                case "panel":
+                {
+                    var id = root["id"];
+                    if (id == null || id.Type != JTokenType.Integer)
+                    {
+                        error = "panel に id がありません";
+                        return false;
+                    }
+
+                    // ★ 状態は増えうる（開いた、位置が変わった…）。**知らない state は
+                    //   Unknown に倒す** —— 新しいネイティブと古い C# の組み合わせでも
+                    //   throw しない、という既存の方針をそのまま通す
+                    var state = root["state"];
+                    var text = state != null && state.Type == JTokenType.String ? state.Value<string>() : null;
+                    if (text != "closed")
+                    {
+                        error = $"panel の知らない state です: \"{text}\"";
+                        return false;
+                    }
+
+                    value = new MenuEvent(MenuEventKind.PanelClosed, null, 0, null, null, id.Value<int>());
                     return true;
                 }
 

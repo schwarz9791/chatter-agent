@@ -279,10 +279,26 @@ static void CMStartRecording(NSButton *button, NSTextField *field, NSString *key
     CMStartRecording(button, field, (NSString *)key);
 }
 
-/* ★ 閉じたら記録を止めること。モニタを付けたままにすると、パネルが無いのにキーを飲み込む */
+/*
+ * ★ 閉じたら記録を止めること。モニタを付けたままにすると、パネルが無いのにキーを飲み込む
+ *
+ * ★★ 閉じたことを C# へ返すこと（#76）。 赤いボタンで閉じる経路は **ここでしか捕まらない**
+ *   （CM_PanelHide は自分で閉じる経路で、orderOut: は この通知を出さないので二重にはならない）。
+ *   返さないと C# 側の「開いている」が真のまま残り、開き直したときに
+ *   **数分前の注記が、いま起きたことのように出る**。
+ * ★ どのパネルかは C# が決める（id を返すだけで、設定 / について の区別はこちらに書かない）。
+ */
 - (void)windowWillClose:(NSNotification *)notification
 {
     CMStopRecording(nil);
+
+    id closed = notification.object;
+    for (int i = 0; i < CM_PANEL_COUNT; i++) {
+        if (gPanels[i] != nil && gPanels[i] == closed) {
+            CMEmitPanel(i, "closed");
+            return;
+        }
+    }
 }
 
 /*
@@ -495,9 +511,20 @@ static NSView *CMBuildItem(NSDictionary *item)
                 id value = choice[@"value"];
                 id title = choice[@"label"];
                 if (![value isKindOfClass:[NSString class]]) continue;
-                [popUp addItemWithTitle:[title isKindOfClass:[NSString class]] ? title : value];
-                NSMenuItem *entry = popUp.lastItem;
+
+                /*
+                 * ★★ addItemWithTitle: を使わないこと。 同じタイトルの項目が既にあると
+                 *   **古い方を取り除いてから**追加する（NSPopUpButton の文書化された挙動）。
+                 *   話者のラベル（名前（スタイル名））が衝突すると、先に入れた話者が
+                 *   メニューから外れて **パネルから選べなくなる**のに count は増えるので、
+                 *   count == 0 の「—」フォールバックにも落ちない。しかも現在の ttsSpeakerId が
+                 *   外れた方だと、selectItem: は切り離された項目に対して行われ、
+                 *   **別の話者が選択中であるかのように見える**。自分で NSMenuItem を作れば重複を許容できる。
+                 */
+                NSString *label = [title isKindOfClass:[NSString class]] ? (NSString *)title : (NSString *)value;
+                NSMenuItem *entry = [[NSMenuItem alloc] initWithTitle:label action:NULL keyEquivalent:@""];
                 entry.representedObject = value;
+                [popUp.menu addItem:entry];
                 if ([(NSString *)value isEqualToString:selected]) [popUp selectItem:entry];
                 count++;
             }

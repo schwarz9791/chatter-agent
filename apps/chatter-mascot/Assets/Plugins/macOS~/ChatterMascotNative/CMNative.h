@@ -127,6 +127,18 @@ void CMEmitSetting(const char* key, const char* value);
 void CMEmitHotKey(int hotKeyId);
 
 /*
+ * { "type": "panel", "id": <panelId>, "state": ... } を投げる（#76）。
+ *
+ * ★★ 赤いボタンで閉じたことは、これでしか C# に届かない。 CM_PanelHide（orderOut:）は
+ *   自分で閉じる経路なので通知が要らないが、ユーザーが閉じる経路は誰も知らないまま
+ *   「開いている」状態が C# 側に残る（症状は「数分前の注記が、いま起きたことのように出る」）。
+ * ★ setting に相乗りさせないこと。 あちらは「設定のキー」を運ぶ口で、
+ *   ObjC に設定のキーを書かないという規律がある。これは menu / hotkey / log と同じ
+ *   プロトコルの語彙なので、型を1つ足す方に倒す。
+ */
+void CMEmitPanel(int panelId, const char* state);
+
+/*
  * ★ NSLog を使わないこと。 Unity の Player.log には入らないので、
  *   ビルドした .app で起きたことが**どこにも残らない**。C# 側へ流せば
  *   [Native] 付きで Player.log に出て、scripts の grep も通る。

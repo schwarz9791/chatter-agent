@@ -361,6 +361,11 @@ namespace ChatterMascot.Desktop
                             if (_panel != null) _panel.HandleSetting(value.Key, value.Value);
                             break;
 
+                        case MenuEventKind.PanelClosed:
+                            // ★ どのパネルかを知っているのはあちら（ネイティブは id しか返さない）
+                            if (_panel != null) _panel.NotifyClosed(value.PanelId);
+                            break;
+
                         case MenuEventKind.Log:
                             // ★ ネイティブの診断はここでしか残らない（NSLog は Player.log に入らない）
                             Debug.Log("[Native] " + value.Message);

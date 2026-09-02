@@ -191,6 +191,37 @@ namespace ChatterMascot.Tests
         }
 
         /// <summary>
+        /// ★★ 赤いボタンで閉じたことは、この経路でしか届かない（#76）。
+        ///   届かないと「開いている」が C# 側に残り、開き直したときに
+        ///   <b>数分前の注記が、いま起きたことのように出る</b>。
+        /// </summary>
+        [Test]
+        public void ParsesAPanelClosedEvent()
+        {
+            MenuEvent value;
+            string error;
+            Assert.That(
+                MenuJson.TryParseEvent("{\"type\":\"panel\",\"id\":0,\"state\":\"closed\"}",
+                    out value, out error),
+                Is.True, error);
+
+            Assert.That(value.Kind, Is.EqualTo(MenuEventKind.PanelClosed));
+            Assert.That(value.PanelId, Is.EqualTo(0));
+        }
+
+        /// <summary>★ どのパネルかは id で分かること（「について」と設定を取り違えない）</summary>
+        [Test]
+        public void KeepsThePanelId()
+        {
+            MenuEvent value;
+            string error;
+            MenuJson.TryParseEvent("{\"type\":\"panel\",\"id\":1,\"state\":\"closed\"}",
+                out value, out error);
+
+            Assert.That(value.PanelId, Is.EqualTo(1));
+        }
+
+        /// <summary>
         /// ★ 読めないものは <c>Unknown</c> に倒して throw しない。この経路は
         /// <b>ネイティブのコールバックの中</b>から呼ばれる。
         /// </summary>
@@ -204,6 +235,10 @@ namespace ChatterMascot.Tests
                 "{\"type\":\"hotkey\"}",          // id が無い
                 "{\"type\":\"hotkey\",\"id\":\"1\"}",  // id が文字列
                 "{\"type\":\"log\"}",             // message が無い
+                "{\"type\":\"panel\",\"state\":\"closed\"}",   // id が無い
+                // ★ 状態は増えうる（開いた、位置が変わった…）。知らない state は Unknown に倒す
+                "{\"type\":\"panel\",\"id\":0,\"state\":\"opened\"}",
+                "{\"type\":\"panel\",\"id\":0}",  // state が無い
                 "{\"type\":\"未来のイベント\"}",
             })
             {

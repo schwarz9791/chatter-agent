@@ -93,6 +93,13 @@ void CMEmitHotKey(int hotKeyId)
     CMEmit(@{ @"type": @"hotkey", @"id": @(hotKeyId) });
 }
 
+/* → CMNative.h */
+void CMEmitPanel(int panelId, const char* state)
+{
+    if (state == NULL) return;
+    CMEmit(@{ @"type": @"panel", @"id": @(panelId), @"state": @(state) });
+}
+
 void CMEmitLog(const char* message)
 {
     if (message == NULL) return;

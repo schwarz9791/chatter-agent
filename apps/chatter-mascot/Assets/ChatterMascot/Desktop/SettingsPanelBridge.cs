@@ -194,6 +194,28 @@ namespace ChatterMascot.Desktop
         }
 
         /// <summary>
+        /// ネイティブ側で<b>閉じられた</b>（→ <c>CMSettingsPanel.m</c> の <c>windowWillClose:</c>）。
+        ///
+        /// ★★ <b>赤いボタンで閉じる経路は、これでしか届かない。</b> <see cref="Toggle"/> は
+        ///   ネイティブに「見えているか」を聞くので<b>開閉のずれは起きない</b>が、
+        ///   <see cref="_open"/> と <see cref="_notices"/> はこちらの持ち物なので、
+        ///   閉じたことを知らないと<b>数分前の注記が、開き直したときに
+        ///   「いま起きたこと」として出る</b>（→ <see cref="Close"/> の ★）。
+        ///
+        /// ★ <b><c>CM_PanelHide</c> は呼ばない。</b> もう閉じている。
+        /// ★ 「について」でも飛んでくるので、id で弾くこと。
+        /// </summary>
+        public void NotifyClosed(int panelId)
+        {
+            if (panelId != SettingsPanelId) return;
+
+            Flush();
+            _open = false;
+            _notices.Clear();
+            _noticesStale = false;
+        }
+
+        /// <summary>
         /// 「Chatter Mascot について」を開く。<b>設定とは別のダイアログ</b>。
         ///
         /// ★ ライセンス本文だけで数百行あるので、設定パネルに混ぜると項目が埋もれる。
@@ -482,9 +504,15 @@ namespace ChatterMascot.Desktop
                 return;
             }
 
-            Notice(key, null);
+            var cleared = Notice(key, null);
             // ★ 保存するのは正規化した文字列（ctrl+opt+m）。画面に出るのは記号（⌃⌥M）
             apply(spec.Format());
+
+            // ★★ **消えたなら作り直すこと。** ネイティブは値のラベルしか自分で更新しないので、
+            //   Push しないと注記が残る —— 修飾キー無しで押して怒られた直後に ⌃⌥J を正しく
+            //   記録すると、**⌃⌥J の下にさっきのエラー文が残ったまま**になる（#85 レビュー C-1）。
+            //   ★ ここで作り直してよいのは、記録がもう終わっているから（掴んでいるスライダーは無い）
+            if (cleared) Push(update: true);
         }
 
         // ── core とのやり取り ──────────────────────────────────
@@ -514,6 +542,15 @@ namespace ChatterMascot.Desktop
                 {
                     Notice(UiKeyOf(coreKey), result.Reason);
                     Debug.LogWarning($"[Mascot] 設定を送れませんでした（{coreKey}）: {result.Reason}");
+
+                    // ★★ **描画を下の refresh に任せないこと。** `Tick()` は溜まった batch を
+                    //   並行に投げるので、300ms 以内に2項目を触って**両方が落ちる**と、
+                    //   2件目の `RefreshFromCoreAsync` は `_refreshing` で即 return して
+                    //   Push が走らない。失敗が5秒のタイムアウトだと、**その5秒間どちらの変更が
+                    //   拒否されたのか画面に何も出ない**（#85 レビュー C-3）。
+                    //   ★ 失敗枝はもともと作り直す経路なので、「自分起点で作り直さない」とは衝突しない
+                    Push(update: true);
+
                     // ★ 失敗したら core の値を取り直す。画面だけ新しい値のまま残ると
                     //   「変えたつもりが効いていない」に気づけない
                     await RefreshFromCoreAsync();

@@ -240,6 +240,22 @@ describe("POST /v1/tts/preview", () => {
     expect(seen[0]).toContain("テスト音声");
   });
 
+  /**
+   * ★★ #76 のレビュー B-5。`ttsEnabled: false` は `GET /audio/…` が
+   *   `404 audio is disabled` で断る状態。ここを素通りすると待ち切って
+   *   `503 synthesis_unavailable` になり、「エンジンに繋がりません」と誤診させる
+   */
+  it("★★ ttsEnabled が false なら 409 tts_disabled（合成しない）", async () => {
+    write({ ttsEnabled: false });
+    const synthesizePreview = vi.fn(() => Promise.resolve(new ArrayBuffer(44)));
+
+    const res = await api({ synthesizePreview }).ttsPreview();
+
+    expect(res.status).toBe(409);
+    expect(body(res)).toEqual({ error: "tts_disabled" });
+    expect(synthesizePreview).not.toHaveBeenCalled();
+  });
+
   it("合成に失敗したら 503", async () => {
     const res = await api({ synthesizePreview: () => Promise.reject(new Error("エンジンが居ません")) }).ttsPreview();
     expect(res.status).toBe(503);

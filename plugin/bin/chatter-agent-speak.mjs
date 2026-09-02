@@ -589,7 +589,10 @@ function createConfigStore(deps = {}) {
 			if (Object.hasOwn(fileValues, key)) return "file";
 			return "default";
 		},
-		readRawFile: readRaw
+		readRawFile: readRaw,
+		invalidate() {
+			loaded = false;
+		}
 	};
 }
 

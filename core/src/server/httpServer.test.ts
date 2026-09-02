@@ -564,6 +564,25 @@ describe("書き込み口の3重の絞り（#76）", () => {
     expect(res.status).toBe(403);
   });
 
+  /**
+   * ★★ #76 のレビュー B-6。プリフライトは**必ず `Origin` 付き**なので、ここで `PATCH` を
+   *   許すと「書いてよい」と答えた直後に絞り2が 403 を返す。非ループバック相手には
+   *   わざわざ避けている「嘘」そのもの
+   */
+  it("★★ Origin 付きのプリフライトには書き込みメソッドを名乗らない", async () => {
+    const base = await start({ allowedOrigins: ["http://localhost:3000"] });
+    const res = await fetch(`${base}/v1/config`, {
+      method: "OPTIONS",
+      headers: { origin: "http://localhost:3000" },
+    });
+
+    expect(res.status).toBe(204);
+    expect(res.headers.get("access-control-allow-methods")).toBe("GET, HEAD, OPTIONS");
+    expect(res.headers.get("allow")).toBe("GET, HEAD, OPTIONS");
+    // 許可済みの Origin なので CORS ヘッダ自体は返る（読みは絞らない）
+    expect(res.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
+  });
+
   it("Origin が付いていない書き込みは通る（ネイティブクライアント）", async () => {
     const base = await start({ allowedOrigins: ["http://localhost:3000"] });
     const res = await fetch(`${base}/v1/config`, { method: "PATCH", headers: JSON_HEADERS, body: "{}" });

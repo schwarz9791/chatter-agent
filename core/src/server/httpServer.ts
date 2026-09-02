@@ -135,14 +135,19 @@ function resolveRoute(pathname: string): Route | null {
  *
  * ★ **`GET` を受けるなら `HEAD` も受ける**。`OPTIONS` は常に受ける（プリフライト）。
  *
- * ★ **ループバックでない相手には書き込みメソッドを名乗らない。** どうせ 404 を返すので
+ * ★ **書けない相手には書き込みメソッドを名乗らない。** どうせ 404 / 403 を返すので
  *   `Allow` に載せるのは嘘になるし、「口の存在を見せない」（下の絞り1）とも揃わない。
+ *
+ * ★★ **`Origin` が付いている相手にも名乗らないこと**（`mayWrite` が絞り1と絞り2の両方を
+ *   畳んでいる理由）。プリフライトは**必ず `Origin` 付き**なので、ここを `loopback` だけで
+ *   判断すると `OPTIONS /v1/config` が `PATCH` を許可すると答え、続く本リクエストが
+ *   絞り2で 403 になる —— 非ループバック相手にわざわざ避けている「嘘」そのもの。
  */
-function allowFor(route: Route, loopback: boolean): string[] {
+function allowFor(route: Route, mayWrite: boolean): string[] {
   const set = new Set<string>(route.methods);
   if (set.has("GET")) set.add("HEAD");
   set.add("OPTIONS");
-  return METHOD_ORDER.filter((m) => set.has(m) && (loopback || !isWriteMethod(m)));
+  return METHOD_ORDER.filter((m) => set.has(m) && (mayWrite || !isWriteMethod(m)));
 }
 
 /** `application/json`（`; charset=utf-8` 付きも通す） */
@@ -326,6 +331,8 @@ export function createHttpServer(deps: HttpServerDeps): http.Server {
     if (route === null) return endWith(res, 404, "not found\n");
 
     const loopback = isLoopbackAddress(req.socket.remoteAddress);
+    // `Origin` が付いている＝ WebView / ブラウザから張られた（下の絞り2）
+    const hasOrigin = typeof req.headers.origin === "string" && req.headers.origin.length > 0;
 
     // ★★ 絞り1: 書き込み口はループバックからだけ。**403 ではなく 404。**
     //   403 は「口はあるが権限が無い」と教えることになる。存在そのものを見せない。
@@ -337,9 +344,21 @@ export function createHttpServer(deps: HttpServerDeps): http.Server {
     //   403 が返る＝**口の存在が Origin の違いで漏れる**。
     if (isWriteMethod(method) && !loopback) return endWith(res, 404, "not found\n");
 
+    // ★★ 絞り2: `Origin` が付いた書き込みは拒否。**付いている＝ WebView / ブラウザから来た。**
+    //   `allowedOrigins` に `http://localhost:3000` を足していた人が、そのポートを踏んだ
+    //   Web ページに設定を書き換えられる穴を塞ぐ。ネイティブクライアント
+    //   （Unity の `UnityWebRequest`）は `Origin` を送らない。
+    //
+    // ★★ **405 の判定より前に置くこと。** 下の `allowFor` が `Origin` 付きの相手から
+    //   書き込みメソッドを落とすので、ここが後ろにあると**到達不能**になり、
+    //   CSRF を明示的に断っている 403 が 405 に化ける。絞り1が既に
+    //   「絞りをメソッド意味論より先に置く」形なので、並べても一貫する。
+    if (isWriteMethod(method) && hasOrigin) return endWith(res, 403, "forbidden\n");
+
     if (!checkOrigin(req, res, allowed, warn)) return endWith(res, 403, "forbidden\n");
 
-    const allowList = allowFor(route, loopback);
+    // ★ 書き込みを名乗れるのは「ループバックから、`Origin` 無しで」来た相手だけ（→ `allowFor`）
+    const allowList = allowFor(route, loopback && !hasOrigin);
     const allow = allowList.join(", ");
 
     // ★ プリフライトは `checkOrigin` の**後**。405 で切ると `Access-Control-Allow-Methods` が
@@ -369,13 +388,6 @@ export function createHttpServer(deps: HttpServerDeps): http.Server {
     }
 
     if (isWriteMethod(method)) {
-      // ★★ 絞り2: `Origin` が付いた書き込みは拒否。**付いている＝ WebView / ブラウザから来た。**
-      //   `allowedOrigins` に `http://localhost:3000` を足していた人が、そのポートを踏んだ
-      //   Web ページに設定を書き換えられる穴を塞ぐ。ネイティブクライアント
-      //   （Unity の `UnityWebRequest`）は `Origin` を送らない
-      const origin = req.headers.origin;
-      if (typeof origin === "string" && origin.length > 0) return endWith(res, 403, "forbidden\n");
-
       // ★★ 絞り3: `Content-Type: application/json` を必須にする。
       //   simple request では JSON の Content-Type を付けられないので、**プリフライトが必ず走り、
       //   絞り2に掛かる**（CSRF 対策の本体はこの連鎖）

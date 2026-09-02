@@ -211,6 +211,17 @@ export function createControlApi(deps: ControlApiDeps): ControlApi {
     },
 
     async ttsPreview() {
+      // ★★ **`ttsEnabled` を先に見ること。** `handleAudio` が `404 audio is disabled` で
+      //   断るのと同じ状態なのに、ここを素通りすると `synthesisTimeoutMs` を待ち切って
+      //   `503 synthesis_unavailable` になり、パネルには「合成エンジンに繋がりません」と出る
+      //   —— 本当の理由は**利用者自身が TTS を切っていること**。503 と 404 を使い分けている
+      //   設計（→ `docs/protocol.md`）が避けようとしている誤診と同じ型。
+      //
+      // ★ **ゲートより前**に置く（断る要求でレート制限を消費しない）。
+      //
+      // ★ 404 ではなく **409**。`handleAudio` の 404 は「ack して諦めろ」という配信の契約が
+      //   背景にあるが、プレビューに ack は無い。409 は「今の設定と矛盾する」で理由がそのまま出る
+      if (!deps.config.get("ttsEnabled")) return fail(409, "tts_disabled");
       if (!ttsGate.tryEnter()) return fail(429, "too_many_requests");
       try {
         const wav = await deps.synthesizePreview(TTS_PREVIEW_TEXT);

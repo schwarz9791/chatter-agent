@@ -100,7 +100,9 @@ npm run start:server     # 別ターミナル
 npm run start:player     # 別ターミナル
 ```
 
-話者を変えるには**サーバーに** `CHATTER_AGENT_TTS_SPEAKER_ID` を指定します（起動時に候補の一覧が出ます）。macOS 以外では **player に** `CHATTER_AGENT_PLAYER_COMMAND` で再生コマンドを指定してください（既定は `afplay`）。
+話者を変えるには**サーバーに** `CHATTER_AGENT_TTS_SPEAKER_ID`、話す速さは `CHATTER_AGENT_TTS_SPEED_SCALE`（0.5〜2.0）を指定します（起動時に話者の候補一覧が出ます）。macOS 以外では **player に** `CHATTER_AGENT_PLAYER_COMMAND` で再生コマンドを指定してください（既定は `afplay`）。
+
+> どちらも**設定パネルから変えられます**（サーバーの `/v1/*` 越し。→ [`docs/protocol.md`](./docs/protocol.md)）。環境変数で指定した場合は環境変数が勝つので、パネル側はその項目を無効にして理由を出します。
 
 ## 開発
 

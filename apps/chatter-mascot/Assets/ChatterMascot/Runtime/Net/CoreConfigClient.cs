@@ -59,6 +59,26 @@ namespace ChatterMascot.Net
         /// <summary>サーバーが本文に載せた理由の上限（<c>AudioFetcher</c> と同じ）</summary>
         private const int ReasonMaxChars = 300;
 
+        /// <summary>
+        /// <c>/v1/*</c> が 404 だったとき。<b>そのサーバーに制御 API が無い</b>。
+        ///
+        /// ★★ <b>本文をそのまま出さないこと。</b> 制御 API を持たないサーバー
+        ///   （#76 より前の <c>chatter-agent-server</c>）は、ルートに当たらない要求へ
+        ///   <c>not found</c> という<b>プレーンテキスト2語</b>を返す。それを note に出すと、
+        ///   利用者に届くのは「not found」だけで、<b>音声スタイル・話す速さ・要約が
+        ///   まとめて無効になっている理由に辿り着けない</b>（実際に踏んだ）。
+        ///
+        /// ★ <b>英語のまま出す。</b> 他の note と揃わないのは承知のうえで —— これは
+        ///   設定の説明ではなく<b>配線の診断</b>で、読む相手は「サーバーを更新する人」だから。
+        ///   検索してそのまま突き合わせられる方がよい。
+        ///
+        /// ★★ <b>「版が違う」と言い切らないこと。</b> 404 が言っているのは
+        ///   <b>その口が無い</b>ことだけで、なぜ無いのか（古い / 別物 / 将来消した）は
+        ///   こちら側の推論にすぎない。観測した事実だけを出して、対処だけ添える。
+        /// </summary>
+        private const string ApiNotFound =
+            "API not found (/v1). Update chatter-agent-server.";
+
         public readonly string BaseUrl;
         private readonly int _timeoutSeconds;
 
@@ -220,10 +240,32 @@ namespace ChatterMascot.Net
             }
 
             var body = request.downloadHandler != null ? request.downloadHandler.text : null;
-            var described = DescribeError(body);
-            if (!string.IsNullOrEmpty(described)) return CoreResult.Failure(described, status);
+            return CoreResult.Failure(DescribeFailure(status, body), status);
+        }
 
-            return CoreResult.Failure("エラーが返りました（HTTP " + status + "）", status);
+        /// <summary>
+        /// ステータスと本文から、note に出す1行を作る。<b>純粋関数</b>
+        /// （<c>MascotRunner.ReadFace</c> と同じく、テストで固定するために <c>static</c>）。
+        ///
+        /// ★★ <b>404 を本文より先に見ること。</b> <c>/v1</c> を持たないサーバーの
+        ///   <c>not found</c> は JSON ではないので、<see cref="DescribeError"/> に渡すと
+        ///   <b>そのまま素通りして note に出る</b>（→ <see cref="ApiNotFound"/>）。
+        ///
+        /// ★ <b>このクライアントにとって 404 は「その口が無い」だけ。</b> サーバー側には
+        ///   もう1つ 404 を返す枝がある（<b>ループバック以外からの書き込み</b>を
+        ///   「口の存在ごと見せない」で断る絞り。→ <c>docs/protocol.md</c>）が、
+        ///   このクライアントは同じマシンで動く前提なので当たらない。
+        ///   ★ <b>#25 で別ホストのサーバーに繋ぐようになったら、そこが崩れる</b> ——
+        ///   書き込みだけ 404 になるので、そのときはメソッドで出し分けること。
+        /// </summary>
+        public static string DescribeFailure(long status, string body)
+        {
+            if (status == 404) return ApiNotFound;
+
+            var described = DescribeError(body);
+            if (!string.IsNullOrEmpty(described)) return described;
+
+            return "エラーが返りました（HTTP " + status + "）";
         }
 
         /// <summary>

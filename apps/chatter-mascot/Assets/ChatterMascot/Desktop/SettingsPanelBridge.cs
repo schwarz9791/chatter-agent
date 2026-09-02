@@ -591,6 +591,10 @@ namespace ChatterMascot.Desktop
                 {
                     _context.CoreNote = config.Reason ?? "サーバーに繋がりません";
                     _context.Speakers = new SettingChoice[0];
+                    // ★ ログにも残すこと。パネルの note は**開いている間しか見えない**うえ、
+                    //   3項目がまとめて無効になる原因（版の食い違い / 落ちている）は
+                    //   後から突き合わせたくなる種類の情報
+                    Debug.LogWarning($"[Mascot] 設定を取れませんでした（{_client.BaseUrl}）: {config.Reason}");
                     Push(update: true);
                     return;
                 }

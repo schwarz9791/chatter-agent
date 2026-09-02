@@ -35,6 +35,42 @@ namespace ChatterMascot.Tests
                 Is.EqualTo("サーバー側で音声が無効になっています（ttsEnabled）"));
         }
 
+        /// <summary>
+        /// ★★ <b>404 は「そのサーバーに制御 API が無い」。</b> <c>/v1</c> を持たない
+        ///   <c>chatter-agent-server</c> は <c>not found</c> という<b>プレーンテキスト2語</b>を
+        ///   返すので、本文をそのまま出すと利用者に届くのはそれだけになる ——
+        ///   音声スタイル・話す速さ・要約がまとめて無効になっている理由に辿り着けない。
+        ///
+        /// ★ 英語のまま出すのは、これが設定の説明ではなく<b>配線の診断</b>だから。
+        /// ★★ <b>「版が違う」と言い切らないこと。</b> 404 が言っているのは口が無いことだけで、
+        ///   なぜ無いのか（古い / 別物 / 将来消した）はこちらの推論にすぎない。
+        /// </summary>
+        [Test]
+        public void NamesTheMissingApiInsteadOfEchoingNotFound()
+        {
+            var reason = CoreConfigClient.DescribeFailure(404, "not found\n");
+
+            Assert.That(reason, Does.Contain("API not found"));
+            Assert.That(reason, Does.Contain("chatter-agent-server"));
+            Assert.That(reason, Does.Not.Contain("not found\n"), "★ 本文を素通しさせない");
+        }
+
+        /// <summary>★ 404 以外は今までどおり本文の <c>error</c> を訳す</summary>
+        [Test]
+        public void StillTranslatesTheBodyForOtherStatuses()
+        {
+            Assert.That(
+                CoreConfigClient.DescribeFailure(403, "{\"error\":\"readonly_key\",\"key\":\"ttsBaseUrl\"}"),
+                Is.EqualTo("この設定は変更できません（ttsBaseUrl）"));
+        }
+
+        /// <summary>★ 本文が無いときはステータスだけでも出す（「失敗しました」で終わらせない）</summary>
+        [Test]
+        public void FallsBackToTheStatusWhenThereIsNoBody()
+        {
+            Assert.That(CoreConfigClient.DescribeFailure(500, ""), Does.Contain("500"));
+        }
+
         /// <summary>★ 知らないキーは生のまま。空にすると「押したのに何も起きない」に見える</summary>
         [Test]
         public void FallsBackToTheRawKey()

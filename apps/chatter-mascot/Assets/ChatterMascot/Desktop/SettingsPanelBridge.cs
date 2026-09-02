@@ -760,6 +760,7 @@ namespace ChatterMascot.Desktop
                 ["cancel"] = "やめる",
                 ["destructive"] = true,
             };
+            // ★★ ここも `runModal`（→ `ChooseVrm` の ★★）。押されるまで ack が止まる
             return ChatterMascotNative.CM_Confirm(options.ToString(Formatting.None));
         }
 
@@ -854,6 +855,9 @@ namespace ChatterMascot.Desktop
             };
 
             // ★ 取り消しは何も返らない（false）。エラーではないので何も出さない
+            // ★★ **選んでいる間はプレイヤーループごと止まる**（`runModal`。→ `CMNative.h`）。
+            //   口も瞬きも止まり、**再生の終わった発話の ack が出ない**ので、
+            //   サーバーはそのぶんを未 ack として再送し続ける。閉じれば再開する
             ChatterMascotNative.CM_OpenFilePanel(options.ToString(Formatting.None));
         }
 

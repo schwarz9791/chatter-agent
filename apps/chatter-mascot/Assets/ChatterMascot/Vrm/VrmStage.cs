@@ -124,33 +124,6 @@ namespace ChatterMascot.Vrm
         public GameObject Model { get; private set; }
 
         /// <summary>
-        /// 自動フレーミングの余白の係数（設定パネル / #76）。
-        ///
-        /// ★★ <b>大きいほどキャラが小さい。</b> カメラを後ろへ下げる量なので、
-        ///   UI の「大きさ」とは<b>向きが逆</b>。写像は
-        ///   <c>Settings.SettingsMapping.HeadroomFor</c> に出してテストで固定してある ——
-        ///   ここに直接 UI の値を代入すると、スライダーを右に振るほど小さくなる。
-        ///
-        /// ★ <b>set で <c>Frame()</c> を直接呼ばないこと。</b> フレーミングは
-        ///   <c>LateUpdate</c> の中で、境界の再計測と同じ順序で走る必要がある
-        ///   （<c>Remeasure</c> の3点セット）。ここでは<b>次の <c>LateUpdate</c> に
-        ///   組み直させる</b>ために、最後にフレーミングした画面サイズの記憶を捨てるだけにする。
-        /// </summary>
-        public float Headroom
-        {
-            get { return headroom; }
-            set
-            {
-                // ★ 0 以下を通さないこと。カメラがモデルの中へ入る（クリップして中身が見える）
-                var next = Mathf.Max(0.01f, value);
-                if (Mathf.Approximately(next, headroom)) return;
-                headroom = next;
-                _framedWidth = -1;
-                _framedHeight = -1;
-            }
-        }
-
-        /// <summary>
         /// 読み込み完了を購読する。
         ///
         /// ★ <b><c>event +=</c> にしないこと。</b> 購読者（<c>VrmDragHandleBinder</c>）は

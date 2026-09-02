@@ -98,8 +98,6 @@ namespace ChatterMascot.Vrm
     ///
     /// | 順 | 出どころ | <c>.vrm</c> | <c>.vrma</c> | 対象 |
     /// |---|---|---|---|---|
-    /// | 順 | 出どころ | <c>.vrm</c> | <c>.vrma</c> | 対象 |
-    /// |---|---|---|---|---|
     /// | 1 | 起動引数 | <c>-vrm</c> | <c>-vrma</c> | 全 |
     /// | 2 | 環境変数 | <c>CHATTER_MASCOT_VRM</c> | <c>CHATTER_MASCOT_VRMA</c> | 全 |
     /// | 3 | <b>設定</b>（#76） | <c>models/&lt;選んだ名前&gt;</c> | —— | デスクトップのみ |

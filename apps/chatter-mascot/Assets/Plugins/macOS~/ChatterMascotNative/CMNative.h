@@ -97,6 +97,16 @@ CM_EXPORT bool CM_PanelIsVisible(int panelId);
  *
  * ★ 拡張子もタイトルも C# から渡す（ネイティブに "vrm" を書かない）。
  * ★ 選ばれたら CMEmitSetting(key, パス) を投げる。取り消しなら何も投げない。
+ *
+ * ★★ runModal は Unity のプレイヤーループごと止める。 これは割り切りだが、
+ *   **何が止まるか**を知っておくこと —— この関数は Bridge.Update() → DrainEvents() →
+ *   HandleSetting の中から呼ばれるので、ユーザーがダイアログを触っている間（ファイル選択なら
+ *   数分になり得る）:
+ *     - フレームが1枚も回らない（キャラが姿勢のまま固まり、リップシンクと瞬きが止まる）
+ *     - **PlaybackQueue が汲まれないので、再生の終わった発話の ack が出ない**
+ *       → サーバーは未 ack とみなして再送し続ける
+ *     - MascotRunner の WebSocket ドレインと、ホットキーのイベントキューも止まる
+ *   閉じれば全部再開する（取りこぼすのは時間だけ）。
  */
 CM_EXPORT bool CM_OpenFilePanel(const char* optionsJson);
 
@@ -105,7 +115,17 @@ CM_EXPORT bool CM_OpenFilePanel(const char* optionsJson);
  * OK が押されたら true。
  *
  * ★ 取り消せない操作（ファイルの削除）の前に挟む。文言は C# から渡す。
- * ★ runModal はメインスレッドを止める。結果を返す関数なのでメインスレッド契約に従う。
+ * ★ 結果を返す関数なのでメインスレッド契約に従う。
+ *
+ * ★★ runModal は Unity のプレイヤーループごと止める。 これは割り切りだが、
+ *   **何が止まるか**を知っておくこと —— この関数は Bridge.Update() → DrainEvents() →
+ *   HandleSetting の中から呼ばれるので、ユーザーがダイアログを触っている間（ファイル選択なら
+ *   数分になり得る）:
+ *     - フレームが1枚も回らない（キャラが姿勢のまま固まり、リップシンクと瞬きが止まる）
+ *     - **PlaybackQueue が汲まれないので、再生の終わった発話の ack が出ない**
+ *       → サーバーは未 ack とみなして再送し続ける
+ *     - MascotRunner の WebSocket ドレインと、ホットキーのイベントキューも止まる
+ *   閉じれば全部再開する（取りこぼすのは時間だけ）。
  */
 CM_EXPORT bool CM_Confirm(const char* optionsJson);
 

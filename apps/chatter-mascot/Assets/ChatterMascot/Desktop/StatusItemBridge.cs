@@ -607,10 +607,13 @@ namespace ChatterMascot.Desktop
                 var runner = ResolveRunner();
                 if (runner != null) runner.Volume = _settings.Volume;
 
-                // ★★ ここで `VrmStage.Headroom` を触らないこと。 あれは「bounds をどれだけ
+                // ★★ ここで `VrmStage` の `headroom` を触らないこと。 あれは「bounds をどれだけ
                 //   余裕を持って収めるか」の係数で、1 を下回るとモデルが画面からはみ出す
                 //   （実機で頭と足が対称に欠けた）。キャラの大きさは**ウィンドウ**で変える
-                //   （→ WindowGeometry.SetSize）。窓が変われば VrmStage が自動で収め直す
+                //   （→ WindowGeometry.SetSize）。窓が変われば VrmStage が自動で収め直す。
+                //   ★ #76 の初版は `VrmStage.Headroom` という setter を生やしていたが、
+                //     大きさを窓で変えることにした時点で呼び出し元が無くなったので消した
+                //     （doc が存在しない `SettingsMapping.HeadroomFor` を指したまま残っていた）
                 var character = FindFirstObjectByType<ChatterMascot.Vrm.VrmCharacter>(FindObjectsInactive.Include);
                 if (character != null)
                 {

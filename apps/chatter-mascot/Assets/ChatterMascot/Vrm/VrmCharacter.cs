@@ -120,12 +120,6 @@ namespace ChatterMascot.Vrm
         [SerializeField] private bool faceDebugLog;
 
         /// <summary>
-        /// Desktop 側（<c>CursorGazeSource</c>）が刺す。<c>null</c> なら自律的な漂いに倒れる。
-        ///
-        /// ★ <b>Android にはこの注入元が存在しない</b>（<c>ChatterMascot.Desktop</c> アセンブリごと
-        ///   コンパイルされない）ので、常に <c>null</c> のまま＝漂いへ自動的に倒れる。
-        /// </summary>
-        /// <summary>
         /// 待機モーションを回すか（設定パネル / #76）。
         ///
         /// ★★ <b>VRMA と手続き的アイドルの<u>両方</u>に効く。</b> あの2実装は
@@ -157,6 +151,12 @@ namespace ChatterMascot.Vrm
             set { blinkEnabled = value; }
         }
 
+        /// <summary>
+        /// Desktop 側（<c>CursorGazeSource</c>）が刺す。<c>null</c> なら自律的な漂いに倒れる。
+        ///
+        /// ★ <b>Android にはこの注入元が存在しない</b>（<c>ChatterMascot.Desktop</c> アセンブリごと
+        ///   コンパイルされない）ので、常に <c>null</c> のまま＝漂いへ自動的に倒れる。
+        /// </summary>
         public Func<Vector2?> CursorProvider { get; set; }
 
         public SpeechKind Kind { get; private set; }

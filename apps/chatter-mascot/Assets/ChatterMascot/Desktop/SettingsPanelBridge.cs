@@ -1,6 +1,7 @@
 #if UNITY_STANDALONE_OSX || UNITY_EDITOR_OSX
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Threading.Tasks;
 using ChatterMascot.Desktop.Native;
@@ -101,6 +102,9 @@ namespace ChatterMascot.Desktop
         /// <summary>デバウンス待ちのウィンドウ倍率（→ <c>ISettingsHost.SetWindowSize</c>）</summary>
         private float? _pendingScale;
 
+        /// <summary>注記を消したが、まだ画面に反映していない（→ <see cref="Queue"/>）</summary>
+        private bool _noticesStale;
+
         private float _pendingAt = float.PositiveInfinity;
         private bool _refreshing;
         private bool _open;
@@ -159,6 +163,7 @@ namespace ChatterMascot.Desktop
             // ★ 一時的なメッセージは持ち越さないこと。閉じて開き直したときに
             //   「さっき押した結果」が残っていると、いま起きたことと区別が付かない
             _notices.Clear();
+            _noticesStale = false;
             if (ChatterMascotNative.IsAvailable) ChatterMascotNative.CM_PanelHide(SettingsPanelId);
         }
 
@@ -421,7 +426,10 @@ namespace ChatterMascot.Desktop
         {
             _pending[coreKey] = value;
             _pendingAt = Time.realtimeSinceStartup + PatchDebounceSeconds;
-            Notice(uiKey, null);
+
+            // ★ ここでは作り直さない（ドラッグ中かもしれない）。前回の失敗の注記が
+            //   残っていたら、成功したあとの Push で消す（→ PatchAsync）
+            if (Notice(uiKey, null)) _noticesStale = true;
         }
 
         private async Task PatchAsync(string coreKey, JToken value)
@@ -438,8 +446,22 @@ namespace ChatterMascot.Desktop
                     await RefreshFromCoreAsync();
                     return;
                 }
+                // ★★ **成功しただけで作り直さないこと。** `CMApplySchema` は全ビューを捨てて
+                //   組み直すので、**掴んでいるスライダーごと消える**。PATCH はスライダーを
+                //   離した 300ms 後（＋往復）に着地するので、続けてもう一度掴んだ人の手の中で
+                //   つまみが死ぬ ——「話す速さだけドラッグできない」という形で出た
+                //   （音量と大きさは Unity 側で完結するので同じ経路を通らない）。
+                //
+                // ★ 画面には既に新しい値が出ている（ネイティブが `%g` で追従させている）。
+                //   作り直すのは **core が画面と違う値を返したとき**だけ ——
+                //   丸め直し・env での固定・繋がるようになった、のどれか。
+                var before = CoreSnapshot();
                 ReadConfig(result.Body);
-                Push(update: true);
+                if (_noticesStale || before != CoreSnapshot())
+                {
+                    _noticesStale = false;
+                    Push(update: true);
+                }
             }
             catch (Exception e)
             {
@@ -480,6 +502,26 @@ namespace ChatterMascot.Desktop
             {
                 _refreshing = false;
             }
+        }
+
+        /// <summary>
+        /// core 由来の値のスナップショット。<b>PATCH の応答が画面と食い違ったか</b>を
+        /// 見るためだけに使う（→ <see cref="PatchAsync"/>）。
+        ///
+        /// ★ <c>SettingsSchema</c> が core から読む値を漏れなく並べること。
+        ///   ここに載せ忘れたものは「変わったのに画面が古いまま」になる。
+        /// </summary>
+        private string CoreSnapshot()
+        {
+            return string.Join("\u001f", new[]
+            {
+                _context.SpeakerId ?? string.Empty,
+                _context.SpeedScale.ToString("R", CultureInfo.InvariantCulture),
+                _context.SummaryEnabled ? "1" : "0",
+                _context.CoreReachable ? "1" : "0",
+                _context.CoreNote ?? string.Empty,
+                _context.CoreEnvOverridden == null ? "" : string.Join(",", _context.CoreEnvOverridden),
+            });
         }
 
         private void ReadConfig(JToken body)
@@ -807,11 +849,17 @@ namespace ChatterMascot.Desktop
             return result;
         }
 
-        private void Notice(string key, string message)
+        /// <returns>注記が実際に変わったか。<b>変わったなら Push が要る</b>（ネイティブは
+        /// 値のラベルしか自分で更新しないので、注記は作り直さないと消えない）</returns>
+        private bool Notice(string key, string message)
         {
-            if (string.IsNullOrEmpty(key)) return;
-            if (string.IsNullOrEmpty(message)) _notices.Remove(key);
-            else _notices[key] = message;
+            if (string.IsNullOrEmpty(key)) return false;
+            if (string.IsNullOrEmpty(message)) return _notices.Remove(key);
+
+            string current;
+            if (_notices.TryGetValue(key, out current) && current == message) return false;
+            _notices[key] = message;
+            return true;
         }
 
         /// <summary>core の設定キー → 画面の項目キー（拒否の理由を出す先）</summary>

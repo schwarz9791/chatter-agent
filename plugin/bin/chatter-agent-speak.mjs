@@ -93,10 +93,6 @@ function getWorkerStatePath(e = currentPathEnv()) {
 	return path.join(getRuntimeDir(e), "speak.state.json");
 }
 /**
-* 単一ワーカーのロック。**ディレクトリ**として作る（mkdir が原子的なため）。
-* CLI に npm 依存を持たせられないので、ロックライブラリは使わない。
-*/
-/**
 * 要約 CLI に渡した `--session-id` の共有レジストリ（→ `core/summarizerSessions.ts`）。
 *
 * ★ **書き手は `chatter-agent-server` だけ、読み手は `chatter-agent-speak` だけ。**
@@ -105,6 +101,10 @@ function getWorkerStatePath(e = currentPathEnv()) {
 function getSummarizerSessionsPath(e = currentPathEnv()) {
 	return path.join(getRuntimeDir(e), "summarizer-sessions.json");
 }
+/**
+* 単一ワーカーのロック。**ディレクトリ**として作る（mkdir が原子的なため）。
+* CLI に npm 依存を持たせられないので、ロックライブラリは使わない。
+*/
 function getLockDir(e = currentPathEnv()) {
 	return path.join(getRuntimeDir(e), "speak.lock");
 }
@@ -1835,17 +1835,6 @@ function extractSummary(stdout) {
 * 大きくしすぎる意味は無い（毎 delta 起動のプロセス1個がここまで貯め込むことは実運用で無い）。
 */
 const MAX_BUFFER_BYTES = 1048576;
-/**
-* 要約 CLI を実行する。
-*
-* ★ タイムアウトの既定（`aiSummaryTimeoutMs`。→ `core/config.ts`）について:
-*   所要時間は**入力の長さから予測できない**。実機実測10件では相関が見られず、短い入力が
-*   タイムアウトする一方で長い入力が10秒台で返ることがあった。ばらつきの支配要因は AI の
-*   生成時間で、マシン・ネットワーク・モデルでも変わる。**秒数を仕様として扱わないこと**
-*   （CLAUDE.md と同じ立場）。既定を60秒にしたのは「30秒では実測10件中3割がタイムアウトした」
-*   という一点が根拠で、**「実測値の N 倍」という決め方はしていない**（相関しないものに
-*   倍率を掛けても意味が無いため）。
-*/
 function ensureHomeDir(homeDir) {
 	try {
 		fs.mkdirSync(homeDir, { recursive: true });
@@ -1855,6 +1844,18 @@ function ensureHomeDir(homeDir) {
 function detailOf(stderr, fallback) {
 	return (stderr.trim() || fallback).slice(0, 500);
 }
+/**
+* 要約 CLI を実行する。**同期**。呼んでよいのは単発プロセス（`chatter-agent-speak`）だけ
+* （常駐プロセスからは `runClaudeCliAsync` を使う。→ そちらのヘッダ ★★）。
+*
+* ★ タイムアウトの既定（`aiSummaryTimeoutMs`。→ `core/config.ts`）について:
+*   所要時間は**入力の長さから予測できない**。実機実測10件では相関が見られず、短い入力が
+*   タイムアウトする一方で長い入力が10秒台で返ることがあった。ばらつきの支配要因は AI の
+*   生成時間で、マシン・ネットワーク・モデルでも変わる。**秒数を仕様として扱わないこと**
+*   （CLAUDE.md と同じ立場）。既定を60秒にしたのは「30秒では実測10件中3割がタイムアウトした」
+*   という一点が根拠で、**「実測値の N 倍」という決め方はしていない**（相関しないものに
+*   倍率を掛けても意味が無いため）。
+*/
 function runClaudeCli(deps) {
 	ensureHomeDir(deps.homeDir);
 	try {

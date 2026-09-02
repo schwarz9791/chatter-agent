@@ -294,6 +294,29 @@ namespace ChatterMascot.Ui
             return KeyCode == other.KeyCode && ModifierMask == other.ModifierMask;
         }
 
+        /// <summary>
+        /// 2つの指定が<b>同じ組み合わせ</b>か。読めないもの・空は <c>false</c>。
+        ///
+        /// ★★ <b>重複は C# 側で弾くこと。</b> 2つ目の登録は Carbon が
+        ///   <c>eventHotKeyExistsErr</c>（-9878）で失敗するが、その番号は
+        ///   <b>他のアプリが取っている</b>ときと同じなので、
+        ///   ネイティブの戻り値だけでは<b>原因を取り違える</b>。
+        ///
+        /// ★ <b>文字列で受ける。</b> 比べたいのは <c>settings.json</c> に入る形
+        ///   （<c>ctrl+opt+m</c>）どうしで、呼び出し側にパースを2回書かせない。
+        ///   ★ 表記ゆれ（<c>opt+ctrl+m</c>）は <see cref="TryParse"/> が吸収するので、
+        ///   <b>文字列の比較にしないこと</b>。
+        /// </summary>
+        public static bool SameCombination(string a, string b)
+        {
+            HotKeySpec left;
+            HotKeySpec right;
+            string error;
+            if (!TryParse(a, out left, out error) || !left.IsValid) return false;
+            if (!TryParse(b, out right, out error) || !right.IsValid) return false;
+            return left.Equals(right);
+        }
+
         public override bool Equals(object obj)
         {
             return obj is HotKeySpec && Equals((HotKeySpec)obj);

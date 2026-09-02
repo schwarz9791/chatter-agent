@@ -6,6 +6,42 @@ namespace ChatterMascot.Tests
     [TestFixture]
     public sealed class HotKeySpecTests
     {
+        // ---- 重複の判定 ----
+
+        /// <summary>
+        /// ★★ <b>表記ゆれを吸収すること。</b> 文字列の比較にすると
+        ///   <c>opt+ctrl+m</c> と <c>ctrl+opt+m</c> が別物になり、
+        ///   <b>すり抜けた方が「押しても何も起きないショートカット」になる</b>。
+        /// </summary>
+        [Test]
+        public void SeesThroughTheOrderOfModifiers()
+        {
+            Assert.That(HotKeySpec.SameCombination("ctrl+opt+m", "opt+ctrl+m"), Is.True);
+            Assert.That(HotKeySpec.SameCombination("ctrl+opt+m", "CTRL+OPT+M"), Is.True);
+        }
+
+        [Test]
+        public void TellsDifferentCombinationsApart()
+        {
+            Assert.That(HotKeySpec.SameCombination("ctrl+opt+m", "ctrl+opt+h"), Is.False);
+            Assert.That(HotKeySpec.SameCombination("ctrl+opt+m", "ctrl+shift+m"), Is.False);
+        }
+
+        /// <summary>
+        /// ★ 読めないもの・空は <c>false</c>。
+        ///   「読めない2つは同じ」にすると、**壊れた設定を直そうとした人が弾かれる**。
+        /// </summary>
+        [Test]
+        public void TreatsUnreadableSpecsAsDifferent()
+        {
+            Assert.That(HotKeySpec.SameCombination("", ""), Is.False);
+            Assert.That(HotKeySpec.SameCombination(null, null), Is.False);
+            Assert.That(HotKeySpec.SameCombination("ぐちゃぐちゃ", "ぐちゃぐちゃ"), Is.False);
+            // ★ 修飾キー無しは IsValid でない（→ TryParse）
+            Assert.That(HotKeySpec.SameCombination("m", "m"), Is.False);
+        }
+
+
         private static HotKeySpec Parse(string text)
         {
             HotKeySpec spec;

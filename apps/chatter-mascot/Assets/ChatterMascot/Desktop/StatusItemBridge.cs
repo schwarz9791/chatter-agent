@@ -507,6 +507,19 @@ namespace ChatterMascot.Desktop
             ///   2つ目が <c>eventHotKeyExistsErr</c>（-9878）で失敗するが、
             ///   その番号は「<b>他のアプリが取っている</b>」ときと同じなので、
             ///   ネイティブからの戻り値だけでは<b>原因を取り違える</b>。
+            ///
+            /// ★★ <b>ここは第2層。</b> 弾いても<b>警告を出して戻るだけ</b>なので、
+            ///   これ1枚だと <c>settings.json</c> に嘘が残り、パネルには2行とも同じ表記が出て
+            ///   note も無効化も出ない —— <c>LSUIElement</c> のアプリなので
+            ///   <c>Player.log</c> は誰も読まない。手当ては2枚ある:
+            ///   <list type="number">
+            ///     <item><b>保存の手前で止める</b>（<c>SettingsPanelBridge.ApplyHotKey</c>）——
+            ///       パネルから記録したときはここに到達しない</item>
+            ///     <item><b>画面に出す</b>（<c>SettingsSchema</c>）—— <c>settings.json</c> を
+            ///       手で編集された場合の受け皿</item>
+            ///   </list>
+            ///   ここが残っているのは、<b>どちらも通らずに登録だけ走る経路</b>
+            ///   （起動時 / ファイルの外部更新）があるため。
             /// </summary>
             private void RegisterHotKeys()
             {

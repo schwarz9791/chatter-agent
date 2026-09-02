@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using ChatterMascot.Ui;
 
 namespace ChatterMascot.Settings
 {
@@ -147,8 +148,17 @@ namespace ChatterMascot.Settings
             //   ネイティブは保存形式を一度も見ない
             items.Add(SettingSpec.HotKey(
                 SettingKeys.MuteHotKey, "ミュートの切り替え", Symbols(settings.MuteHotKey)));
+
+            // ★★ **重複していたら画面に出すこと（第2層）。** パネルからの記録は
+            //   `SettingsPanelBridge.ApplyHotKey` が保存の手前で弾くので、ここに来るのは
+            //   **`settings.json` を手で編集した場合**だけ。放っておくと2行とも同じ表記が出て、
+            //   `RegisterHotKeys` が黙って2つ目を登録せずに戻る ——
+            //   **「押しても何も起きないショートカット」が画面に残る**。
+            //   ★ 後の行に出す。登録されないのは2つ目（→ `StatusItemBridge.RegisterHotKeys`）
+            var duplicated = HotKeySpec.SameCombination(settings.MuteHotKey, settings.HideHotKey);
             items.Add(SettingSpec.HotKey(
-                SettingKeys.HideHotKey, "キャラクターの表示切り替え", Symbols(settings.HideHotKey)));
+                SettingKeys.HideHotKey, "キャラクターの表示切り替え", Symbols(settings.HideHotKey),
+                note: duplicated ? "「ミュートの切り替え」と同じ組み合わせなので登録できません" : ""));
 
             // ── リセット ─────────────────────────────────────
             items.Add(SettingSpec.Section("リセット"));

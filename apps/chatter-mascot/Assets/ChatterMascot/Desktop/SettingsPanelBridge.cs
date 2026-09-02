@@ -406,11 +406,13 @@ namespace ChatterMascot.Desktop
                 case SettingKeys.MuteHotKey:
                     // ★ 起点は `settings`（＝保留があるならそれ）。`_host.Settings` を
                     //   読み直すと、同じ窓に居る保留を巻き戻す（→ 上の ★★）
-                    ApplyHotKey(key, value, spec => Apply(settings.WithMuteHotKey(spec)));
+                    ApplyHotKey(key, value, settings.HideHotKey, "キャラクターの表示切り替え",
+                        spec => Apply(settings.WithMuteHotKey(spec)));
                     return;
 
                 case SettingKeys.HideHotKey:
-                    ApplyHotKey(key, value, spec => Apply(settings.WithHideHotKey(spec)));
+                    ApplyHotKey(key, value, settings.MuteHotKey, "ミュートの切り替え",
+                        spec => Apply(settings.WithHideHotKey(spec)));
                     return;
 
                 case SettingKeys.Vrm:
@@ -493,13 +495,38 @@ namespace ChatterMascot.Desktop
             }
         }
 
-        private void ApplyHotKey(string key, string recorded, Action<string> apply)
+        /// <summary>
+        /// 記録されたショートカットを確定する。
+        ///
+        /// ★★ <b>重複は<u>保存の手前</u>で止めること（第1層）。</b> 止めないと
+        ///   <c>settings.json</c> に嘘が残る —— <c>RegisterHotKeys</c> は2つ目を
+        ///   登録せずに警告を出して戻るだけなので、**パネルには2行とも同じ表記が出て、
+        ///   note も無効化も出ない**まま「押しても何も起きないショートカット」ができる。
+        ///   <c>LSUIElement</c> のアプリなので <c>Player.log</c> は誰も読まない。
+        ///
+        /// ★ <b><c>RegisterHotKeys</c> 側の判定は残す（第2層）。</b> あちらは
+        ///   <c>settings.json</c> を手で編集された場合にも効く。
+        ///   ★ 手編集で入った重複は<b>画面にも出す</b>（→ <c>SettingsSchema</c>）。
+        ///
+        /// ★ <b>ネイティブの戻り値で判定しないこと。</b> 2つ目は Carbon が
+        ///   <c>eventHotKeyExistsErr</c>（-9878）で断るが、その番号は
+        ///   <b>他のアプリが取っている</b>ときと同じで、原因を取り違える。
+        /// </summary>
+        private void ApplyHotKey(
+            string key, string recorded, string other, string otherLabel, Action<string> apply)
         {
             HotKeySpec spec;
             string error;
             if (!HotKeySpec.TryParseRecorded(recorded, out spec, out error))
             {
                 Notice(key, error);
+                Push(update: true);
+                return;
+            }
+
+            if (HotKeySpec.SameCombination(spec.Format(), other))
+            {
+                Notice(key, $"「{otherLabel}」と同じ組み合わせです");
                 Push(update: true);
                 return;
             }

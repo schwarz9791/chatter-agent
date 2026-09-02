@@ -202,6 +202,36 @@ namespace ChatterMascot.Tests
         }
 
         /// <summary>
+        /// ★★ <b>手で編集された <c>settings.json</c> の重複は画面に出す（第2層）。</b>
+        ///   パネルからの記録は保存の手前で弾かれる（<c>SettingsPanelBridge.ApplyHotKey</c>）ので、
+        ///   ここに来るのは手編集だけ。放っておくと2行とも同じ表記が出て、
+        ///   <c>RegisterHotKeys</c> が黙って2つ目を登録せずに戻る。
+        /// </summary>
+        [Test]
+        public void SaysWhenTheTwoShortcutsCollide()
+        {
+            var settings = MascotSettings.Defaults
+                .WithMuteHotKey("ctrl+opt+m")
+                // ★ 表記ゆれでも見つけること（文字列の比較にしない）
+                .WithHideHotKey("opt+ctrl+m");
+
+            var items = SettingsSchema.Build(new SettingsContext { Settings = settings });
+
+            Assert.That(Find(items, SettingKeys.HideHotKey).Note, Does.Contain("同じ組み合わせ"));
+            // ★ 出すのは後の行だけ。登録されないのは2つ目なので
+            Assert.That(Find(items, SettingKeys.MuteHotKey).Note, Is.Empty);
+        }
+
+        /// <summary>★ 重なっていなければ何も出さない</summary>
+        [Test]
+        public void SaysNothingWhenTheShortcutsDiffer()
+        {
+            var items = SettingsSchema.Build(new SettingsContext());
+
+            Assert.That(Find(items, SettingKeys.HideHotKey).Note, Is.Empty);
+        }
+
+        /// <summary>
         /// ★★ ショートカットの記録の仕方は<b>見出しに付ける</b>。ミュートの行に付けると、
         ///   同じことが言える「キャラクターの表示切り替え」にはかかっていないように読める。
         /// </summary>

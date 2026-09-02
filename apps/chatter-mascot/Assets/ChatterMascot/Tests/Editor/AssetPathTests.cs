@@ -247,5 +247,142 @@ namespace ChatterMascot.Tests
 
             Assert.That(candidates.Any(c => c.Source == AssetSource.CommandLine), Is.False);
         }
+
+        // ── 設定パネルが置いたモデル（#76） ────────────────────
+
+        /// <summary>
+        /// ★★ <c>models/*.vrm</c> の走査は <c>Ordinal</c> の先頭が勝つので、
+        ///   パネルが置いたモデルを<b>名指しで先に出す</b>。これが無いと
+        ///   2つ目のモデルを選んでも反映されない。
+        /// </summary>
+        [Test]
+        public void PutsTheChosenModelBeforeTheDirectoryScan()
+        {
+            var env = Env(listFiles: (dir, pattern) => new[]
+            {
+                "/home/u/.config/chatter-agent/models/aaa.vrm",
+                "/home/u/.config/chatter-agent/models/" + AssetPath.SelectedVrmFile,
+            });
+
+            var candidates = AssetPath.Enumerate(env, AssetKind.Vrm).ToList();
+            var settings = candidates.FindIndex(c => c.Source == AssetSource.Settings);
+            var scanned = candidates.FindIndex(c => c.Source == AssetSource.UserConfig);
+
+            Assert.That(settings, Is.GreaterThanOrEqualTo(0), "設定の候補が出ていない");
+            Assert.That(scanned, Is.GreaterThanOrEqualTo(0), "走査の候補が出ていない");
+            Assert.That(settings, Is.LessThan(scanned));
+        }
+
+        /// <summary>
+        /// ★★ <b>固定名であること。</b> 選んだファイルの名前をそのまま使うと
+        ///   <c>models/</c> に積み上がる（実機で報告された）。
+        /// </summary>
+        [Test]
+        public void LooksForTheChosenModelUnderAFixedName()
+        {
+            var env = Env(listFiles: (dir, pattern) => new[]
+            {
+                "/home/u/.config/chatter-agent/models/aaa.vrm",
+                "/home/u/.config/chatter-agent/models/" + AssetPath.SelectedVrmFile,
+            });
+
+            var settings = AssetPath.Enumerate(env, AssetKind.Vrm).ToList()
+                .Find(c => c.Source == AssetSource.Settings);
+
+            Assert.That(settings.Path, Does.EndWith("models/" + AssetPath.SelectedVrmFile));
+        }
+
+        /// <summary>
+        /// ★ <b>引き上げたぶんを走査側に二重で出さないこと。</b> 同じファイルが2回並ぶと、
+        ///   ログの「どれを採ってどれを無視したか」が読めなくなる。
+        /// </summary>
+        [Test]
+        public void DoesNotListTheChosenModelTwice()
+        {
+            var env = Env(listFiles: (dir, pattern) => new[]
+            {
+                "/home/u/.config/chatter-agent/models/" + AssetPath.SelectedVrmFile,
+            });
+
+            var paths = AssetPath.Enumerate(env, AssetKind.Vrm).ToList()
+                .FindAll(c => c.Path.EndsWith(AssetPath.SelectedVrmFile, System.StringComparison.Ordinal));
+
+            Assert.That(paths.Count, Is.EqualTo(1));
+        }
+
+        /// <summary>
+        /// ★★ <b>設定を見ないこと。</b> 以前は settings.json のファイル名を渡す作りで、
+        ///   <b>本番コードが誰も渡していなかった</b>ため候補が一度も出なかった。
+        ///   置き場所が固定なら、走査結果に居るかどうかだけで決まる。
+        /// </summary>
+        [Test]
+        public void FindsTheChosenModelWithoutAnySettings()
+        {
+            var env = Env(listFiles: (dir, pattern) => new[]
+            {
+                "/home/u/.config/chatter-agent/models/" + AssetPath.SelectedVrmFile,
+            });
+
+            Assert.That(
+                AssetPath.Enumerate(env, AssetKind.Vrm).ToList().Exists(c => c.Source == AssetSource.Settings),
+                Is.True);
+        }
+
+        /// <summary>
+        /// ★ <b>置かれていなければ候補を出さない。</b> 無条件に足すと、パネルで一度も
+        ///   選んでいない人の起動ログに毎回「読めませんでした」が1本増える。
+        /// </summary>
+        [Test]
+        public void OmitsTheChosenModelWhenItIsNotThere()
+        {
+            Assert.That(
+                AssetPath.Enumerate(Env(), AssetKind.Vrm).ToList().Exists(c => c.Source == AssetSource.Settings),
+                Is.False);
+        }
+
+        /// <summary>
+        /// ★ <c>-vrm</c> は切り分けの逃げ道（「設定が壊れていてもこれを付ければ必ず出る」）
+        ///   なので、パネルが置いたモデルより優先を保つ。
+        /// </summary>
+        [Test]
+        public void KeepsTheCommandLineAboveTheChosenModel()
+        {
+            var env = Env(
+                commandLine: new[] { "-vrm", "/tmp/forced.vrm" },
+                listFiles: (dir, pattern) => new[]
+                {
+                    "/home/u/.config/chatter-agent/models/" + AssetPath.SelectedVrmFile,
+                });
+
+            Assert.That(AssetPath.Enumerate(env, AssetKind.Vrm)[0].Source, Is.EqualTo(AssetSource.CommandLine));
+        }
+
+        /// <summary>★ Android には共有ファイルシステムが無いので、この段ごと落ちる</summary>
+        [Test]
+        public void OmitsTheChosenModelWithoutAUserConfigDirectory()
+        {
+            var env = Env(desktop: false, listFiles: (dir, pattern) => new[]
+            {
+                "/home/u/.config/chatter-agent/models/" + AssetPath.SelectedVrmFile,
+            });
+
+            Assert.That(
+                AssetPath.Enumerate(env, AssetKind.Vrm).ToList().Exists(c => c.Source == AssetSource.Settings),
+                Is.False);
+        }
+
+        /// <summary>★ <c>.vrma</c> には対応する仕組みが無い（意図的な非対称）</summary>
+        [Test]
+        public void DoesNotApplyTheChosenModelToAnimations()
+        {
+            var env = Env(listFiles: (dir, pattern) => new[]
+            {
+                "/home/u/.config/chatter-agent/animations/" + AssetPath.SelectedVrmFile,
+            });
+
+            Assert.That(
+                AssetPath.Enumerate(env, AssetKind.Vrma).ToList().Exists(c => c.Source == AssetSource.Settings),
+                Is.False);
+        }
     }
 }

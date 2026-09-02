@@ -65,14 +65,26 @@ namespace ChatterMascot.Tests
                 Does.StartWith("キャラクターを表示する"));
         }
 
-        /// <summary>#76（設定 UI）が入るまで押す先が無い。押せるように見せない。</summary>
+        /// <summary>
+        /// ★ #76 で押せるようになった（「について」の別ダイアログが開く）。
+        ///   ★ 版はラベルから外してツールチップへ移した —— ラベルに版を出していたのは
+        ///   「Dock に居ないので、どれが動いているかの手掛かりがここしか無い」ためなので、
+        ///   pid と同じ場所に残せば目的は保てる。
+        /// </summary>
         [Test]
-        public void TheAboutEntryIsNotClickable()
+        public void TheAboutEntryOpensTheAboutDialog()
         {
             var about = MascotMenu.Build(State()).Entries.First(e => e.Key == MenuKeys.About);
 
-            Assert.That(about.Enabled, Is.False);
-            Assert.That(about.Label, Does.Contain("1.2.3"));
+            Assert.That(about.Enabled, Is.True);
+            Assert.That(about.Label, Does.Contain("について"));
+        }
+
+        /// <summary>★ 版の手掛かりを失わないこと（→ 上）</summary>
+        [Test]
+        public void PutsTheVersionInTheTooltip()
+        {
+            Assert.That(MascotMenu.Build(State()).Tooltip, Does.Contain("1.2.3"));
         }
 
         /// <summary>★ Dock に出ない以上、二重起動は「アイコンが2つ並ぶ」でしか気づけない。</summary>
@@ -179,6 +191,37 @@ namespace ChatterMascot.Tests
         }
 
         /// <summary>
+        /// ★★ 赤いボタンで閉じたことは、この経路でしか届かない（#76）。
+        ///   届かないと「開いている」が C# 側に残り、開き直したときに
+        ///   <b>数分前の注記が、いま起きたことのように出る</b>。
+        /// </summary>
+        [Test]
+        public void ParsesAPanelClosedEvent()
+        {
+            MenuEvent value;
+            string error;
+            Assert.That(
+                MenuJson.TryParseEvent("{\"type\":\"panel\",\"id\":0,\"state\":\"closed\"}",
+                    out value, out error),
+                Is.True, error);
+
+            Assert.That(value.Kind, Is.EqualTo(MenuEventKind.PanelClosed));
+            Assert.That(value.PanelId, Is.EqualTo(0));
+        }
+
+        /// <summary>★ どのパネルかは id で分かること（「について」と設定を取り違えない）</summary>
+        [Test]
+        public void KeepsThePanelId()
+        {
+            MenuEvent value;
+            string error;
+            MenuJson.TryParseEvent("{\"type\":\"panel\",\"id\":1,\"state\":\"closed\"}",
+                out value, out error);
+
+            Assert.That(value.PanelId, Is.EqualTo(1));
+        }
+
+        /// <summary>
         /// ★ 読めないものは <c>Unknown</c> に倒して throw しない。この経路は
         /// <b>ネイティブのコールバックの中</b>から呼ばれる。
         /// </summary>
@@ -192,6 +235,10 @@ namespace ChatterMascot.Tests
                 "{\"type\":\"hotkey\"}",          // id が無い
                 "{\"type\":\"hotkey\",\"id\":\"1\"}",  // id が文字列
                 "{\"type\":\"log\"}",             // message が無い
+                "{\"type\":\"panel\",\"state\":\"closed\"}",   // id が無い
+                // ★ 状態は増えうる（開いた、位置が変わった…）。知らない state は Unknown に倒す
+                "{\"type\":\"panel\",\"id\":0,\"state\":\"opened\"}",
+                "{\"type\":\"panel\",\"id\":0}",  // state が無い
                 "{\"type\":\"未来のイベント\"}",
             })
             {

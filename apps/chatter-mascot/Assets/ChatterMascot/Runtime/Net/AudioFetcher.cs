@@ -84,12 +84,15 @@ namespace ChatterMascot.Net
             _timeoutSeconds = Math.Max(1, (int)Math.Ceiling(timeoutMs / 1000.0));
         }
 
-        /// <summary><c>ws://host:port</c> / <c>wss://host:port</c> を音声の取得元に読み替える。</summary>
+        /// <summary>
+        /// <c>ws://host:port</c> / <c>wss://host:port</c> を音声の取得元に読み替える。
+        ///
+        /// ★ 実体は <see cref="ServerUrl.ToHttpBase"/>。制御 API（#76）も同じ導出を使うので、
+        ///   計算そのものは1箇所に出してある（この名前は #29 からの呼び出し側のために残す）。
+        /// </summary>
         public static string DeriveAudioBaseUrl(string serverUrl)
         {
-            var uri = new Uri(serverUrl);
-            var scheme = uri.Scheme == "wss" ? "https" : "http";
-            return scheme + "://" + uri.Authority;
+            return ServerUrl.ToHttpBase(serverUrl);
         }
 
         public async Task<AudioFetchResult> FetchAsync(string audioPath)

@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
+using ChatterMascot.Settings;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
@@ -58,6 +59,7 @@ namespace ChatterMascot.Audio
         private const int ProcessWarnThreshold = 8;
 
         private readonly string _command;
+        private readonly Func<float> _volume;
         private readonly string _tmpDir;
         private readonly List<Process> _running = new List<Process>();
         private bool _warnedProcessCount;
@@ -71,9 +73,19 @@ namespace ChatterMascot.Audio
         public event Action<string> Warn;
 
         /// <param name="command">再生コマンド。テストで差し替えられるようにしてある</param>
-        public AfplaySpeechPlayer(string command = "/usr/bin/afplay")
+        /// <param name="volume">
+        /// 再生音量（0.0〜1.0。既定 1.0）。<c>null</c> なら等倍。
+        ///
+        /// ★ <b>値ではなく getter で受けること。</b> 設定は実行中に書き換わる
+        ///   （設定パネルからも、ファイルを直接編集しても）。値で受けると、
+        ///   起動時の音量のまま鳴り続ける。
+        ///
+        /// ★★ <b>等倍のときは引数を増やさない</b>（→ <see cref="ArgumentsFor"/>）。
+        /// </param>
+        public AfplaySpeechPlayer(string command = "/usr/bin/afplay", Func<float> volume = null)
         {
             _command = command;
+            _volume = volume;
 
             // ★ 起動時に作り直す。前回の残骸（異常終了で消し損ねた WAV）を溜めない。
             //   参照実装の reset() と同じ
@@ -101,6 +113,47 @@ namespace ChatterMascot.Audio
         public int ActiveCount
         {
             get { return _running.Count; }
+        }
+
+        private float CurrentVolume()
+        {
+            if (_volume == null) return 1f;
+            try
+            {
+                return _volume();
+            }
+            catch (Exception e)
+            {
+                // ★ 音量が読めないくらいで発話を落とさない。等倍で鳴らす
+                Debug.LogWarning("[Mascot] 音量を読めませんでした（等倍で鳴らします）: " + e.Message);
+                return 1f;
+            }
+        }
+
+        /// <summary>
+        /// <c>afplay</c> に渡す引数。<b>純粋関数</b>（テストで固定する）。
+        ///
+        /// ★★ <b>等倍のときは <c>-v</c> を足さない。</b> #76 より前の挙動をそのまま保つため
+        ///   （引数が増えると <c>ps</c> の見え方も変わる）。
+        ///
+        /// ★★ <b>判定を <c>&lt; 1</c> にしないこと。</b> 0.1 刻みに丸めた後でも
+        ///   <c>1.0f</c> ちょうどになる保証は無いので、<c>0.9999999</c> に
+        ///   <c>-v 0.9999999</c> が付く（→ <see cref="Settings.SettingsMapping.NeedsVolumeArgument"/>）。
+        ///   ★ 上限が 1.0 に下がった（→ <c>SettingsMapping.VolumeMax</c>）ので
+        ///   「大きくする側が効かなくなる」という以前の理由は消えたが、
+        ///   <b>「単純化」してはいけない理由は残っている</b>。
+        ///
+        /// ★★ <b>値は <c>InvariantCulture</c> で文字列にすること。</b> 忘れると
+        ///   ロケールによって <c>0,5</c> になり、<c>afplay</c> が引数を解釈できずに
+        ///   <b>その発話だけ鳴らない</b>。
+        /// </summary>
+        public static IReadOnlyList<string> ArgumentsFor(float volume, string path)
+        {
+            var normalized = SettingsMapping.Normalize(
+                volume, SettingsMapping.VolumeMin, SettingsMapping.VolumeMax, SettingsMapping.VolumeStep);
+
+            if (!SettingsMapping.NeedsVolumeArgument(normalized)) return new[] { path };
+            return new[] { "-v", SettingsMapping.Format(normalized), path };
         }
 
         /// <summary>
@@ -164,7 +217,7 @@ namespace ChatterMascot.Audio
                     UseShellExecute = false,
                     RedirectStandardError = true,
                 };
-                info.ArgumentList.Add(handle.Path);
+                foreach (var argument in ArgumentsFor(CurrentVolume(), handle.Path)) info.ArgumentList.Add(argument);
 
                 process = Process.Start(info);
             }

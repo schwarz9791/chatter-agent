@@ -276,6 +276,63 @@ namespace ChatterMascot.Tests
             Assert.That(player.ActiveCount, Is.EqualTo(0));
             player.Discard(handle);
         }
+
+        // ── 音量（#76） ───────────────────────────────────────
+
+        /// <summary>★★ 等倍のときは引数を増やさない（#76 より前の挙動をそのまま保つ）</summary>
+        [Test]
+        public void PassesOnlyThePathAtUnityVolume()
+        {
+            Assert.That(
+                AfplaySpeechPlayer.ArgumentsFor(1f, "/tmp/a.wav"),
+                Is.EqualTo(new[] { "/tmp/a.wav" }));
+        }
+
+        /// <summary>
+        /// ★ 等倍でないときだけ <c>-v</c> が付く。
+        ///   ★★ <b>スライダーが % で出ていても、渡すのは生の数</b>（<c>-v 70</c> にしない。
+        ///   表示の文字列と送る値を分けてある。→ <c>CMSettingsPanel.m</c> の <c>CMSliderText</c>）。
+        /// </summary>
+        [Test]
+        public void PassesTheVolumeWhenItIsNotUnity()
+        {
+            Assert.That(
+                AfplaySpeechPlayer.ArgumentsFor(0.3f, "/tmp/a.wav"),
+                Is.EqualTo(new[] { "-v", "0.3", "/tmp/a.wav" }));
+            Assert.That(
+                AfplaySpeechPlayer.ArgumentsFor(0.7f, "/tmp/a.wav"),
+                Is.EqualTo(new[] { "-v", "0.7", "/tmp/a.wav" }));
+        }
+
+        /// <summary>★ 範囲外は握りつぶさずにクランプする（afplay に変な値を渡さない）</summary>
+        [Test]
+        public void ClampsAndRoundsTheVolume()
+        {
+            Assert.That(AfplaySpeechPlayer.ArgumentsFor(99f, "/tmp/a.wav"), Is.EqualTo(new[] { "/tmp/a.wav" }),
+                "★ 上限が 1.0 になったので、大きすぎる値は「等倍」へ丸まって引数が消える");
+            Assert.That(AfplaySpeechPlayer.ArgumentsFor(-1f, "/tmp/a.wav")[1], Is.EqualTo("0"));
+            Assert.That(AfplaySpeechPlayer.ArgumentsFor(0.7000000119f, "/tmp/a.wav")[1], Is.EqualTo("0.7"));
+        }
+
+        /// <summary>
+        /// ★★ <c>InvariantCulture</c> を忘れると <c>0,5</c> になり、
+        ///   <c>afplay</c> が引数を解釈できずに<b>その発話だけ鳴らない</b>。
+        /// </summary>
+        [Test]
+        public void FormatsTheVolumeWithTheInvariantCulture()
+        {
+            var previous = System.Threading.Thread.CurrentThread.CurrentCulture;
+            try
+            {
+                System.Threading.Thread.CurrentThread.CurrentCulture =
+                    new System.Globalization.CultureInfo("de-DE");
+                Assert.That(AfplaySpeechPlayer.ArgumentsFor(0.5f, "/tmp/a.wav")[1], Is.EqualTo("0.5"));
+            }
+            finally
+            {
+                System.Threading.Thread.CurrentThread.CurrentCulture = previous;
+            }
+        }
     }
 }
 #endif

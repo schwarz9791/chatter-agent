@@ -589,7 +589,10 @@ function createConfigStore(deps = {}) {
 			if (Object.hasOwn(fileValues, key)) return "file";
 			return "default";
 		},
-		readRawFile: readRaw
+		readRawFile: readRaw,
+		invalidate() {
+			loaded = false;
+		}
 	};
 }
 
@@ -3005,7 +3008,6 @@ function drainSpool(deps) {
 	const sleep = deps.sleep ?? sleepSync;
 	const orphansRemoved = cleanOrphans(deps.spoolDir, deps.spoolMaxAgeMs, now());
 	const state = readWorkerState(deps.workerStatePath);
-	const serverSummarizerSessions = readSummarizerSessions(deps.summarizerSessionsPath);
 	let stateDirty = false;
 	let written = 0;
 	let passes = 0;
@@ -3014,6 +3016,7 @@ function drainSpool(deps) {
 	for (; passes < MAX_PASSES; passes++) {
 		const entries = scanSpool(deps.spoolDir);
 		if (entries.length === 0) break;
+		const serverSummarizerSessions = readSummarizerSessions(deps.summarizerSessionsPath);
 		const rawLoaded = entries.map((entry) => entry.kind === "message" ? {
 			entry,
 			content: readMessage(entry.filePaths)

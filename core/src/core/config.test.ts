@@ -112,6 +112,32 @@ describe("createDefaultConfig", () => {
 });
 
 describe("createConfigStore", () => {
+  /**
+   * ★★ #76 のレビュー B-1。読み直しの判定は `mtimeMs`+`size` のスタンプなので、
+   *   **バイト長を変えない書き換え**（`1.5` → `1.6`）を mtime の粒度が粗い FS
+   *   （HFS+ / 旧 ext4 は1秒）で行うと読み飛ばす。壊れるのはレスポンスだけではなく、
+   *   **走行中のサーバーが以後ずっと旧値で合成し続ける**。書き手が申告して直す
+   */
+  it("★★ invalidate すればスタンプが同じでも読み直す", () => {
+    // 粒度の粗い FS を再現する（`utimesSync` は ms までしか書けないので、
+    // 2回とも**同じ Date** を渡して mtimeMs を完全に一致させる）
+    const frozen = new Date(Date.now() - 10_000);
+
+    write({ ttsSpeakerId: 111 });
+    fs.utimesSync(filePath, frozen, frozen);
+    const c = store();
+    expect(c.get("ttsSpeakerId")).toBe(111);
+
+    write({ ttsSpeakerId: 222 }); // 同じバイト長
+    fs.utimesSync(filePath, frozen, frozen);
+
+    // スタンプが変わらないので読み飛ばす（これが B-1 の症状そのもの）
+    expect(c.get("ttsSpeakerId")).toBe(111);
+
+    c.invalidate();
+    expect(c.get("ttsSpeakerId")).toBe(222);
+  });
+
   it("設定ファイルが無ければ既定値を返す", () => {
     expect(store().snapshot()).toEqual(DEFAULTS);
   });

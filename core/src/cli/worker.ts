@@ -302,9 +302,6 @@ export function drainSpool(deps: DrainDeps): DrainResult {
   const orphansRemoved = cleanOrphans(deps.spoolDir, deps.spoolMaxAgeMs, now());
 
   const state = readWorkerState(deps.workerStatePath);
-  // ★ ドレインの先頭で1回だけ読む（`readWorkerState` と同じ位置）。毎 item で読むと
-  //   spool の件数ぶん stat + read が走る
-  const serverSummarizerSessions = readSummarizerSessions(deps.summarizerSessionsPath);
   let stateDirty = false;
   let written = 0;
   let passes = 0;
@@ -319,6 +316,20 @@ export function drainSpool(deps: DrainDeps): DrainResult {
   for (; passes < MAX_PASSES; passes++) {
     const entries = scanSpool(deps.spoolDir);
     if (entries.length === 0) break;
+
+    // ★★ **パスごとに読み直すこと**（無限ループ防止の第2層。→ 下の `isSummarizerSession`）。
+    //   AI要約 ON のドレインは `aiSummaryTimeoutMs × aiSummaryMaxPerDrain` ぶんロックを
+    //   保持しうる。ドレインの先頭で1回だけ読むと、その最中にサーバーが起こした要約
+    //   （`POST /v1/summary/preview`）の登録が**この読み取りより後**になり、
+    //   **要約器自身の出力を publish して読み上げる**（残る防壁は第1層だけになる）。
+    //
+    // ★ **`scanSpool` の後に置くのが要点。** `registerSummarizerSession` は要約 CLI を
+    //   spawn する**前**に書く契約（→ `core/summarizerSessions.ts`）なので、
+    //   **spool に要約器の delta が見えているなら、レジストリの書き込みは必ず終わっている**。
+    //
+    // ★ 毎 item では読まない（spool の件数ぶん stat + read が走る）。パスごとなら
+    //   最大 MAX_PASSES 回で、1パスが spool を全件読むコストに比べれば無視できる
+    const serverSummarizerSessions = readSummarizerSessions(deps.summarizerSessionsPath);
 
     // このパスで扱う分をまとめて読む。後続の session_id を見る必要があるので先に揃える
     const rawLoaded: Loaded[] = entries.map((entry) =>

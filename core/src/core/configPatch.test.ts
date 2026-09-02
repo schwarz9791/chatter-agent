@@ -70,12 +70,16 @@ describe("buildConfigPatch", () => {
     expect(base).toEqual({ ttsSpeakerId: 1 });
   });
 
-  /** ★ 値はパーサが正規化したものを書く（生値だとファイルとレスポンスがズレる） */
+  /**
+   * ★ 値はパーサが正規化したものを書く（生値だとファイルとレスポンスがズレる）。
+   *
+   * ★ 例に `ttsBaseUrl` を使わないこと。あちらは readonly になった（→ 下の A-2 のテスト）
+   */
   it("★ パーサが正規化した値を書く", () => {
-    const result = buildConfigPatch({}, { ttsBaseUrl: " http://127.0.0.1:10101/ " }, allDefault);
+    const result = buildConfigPatch({}, { playerServerUrl: " ws://127.0.0.1:9797/ " }, allDefault);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.next.ttsBaseUrl).toBe("http://127.0.0.1:10101");
+    expect(result.next.playerServerUrl).toBe("ws://127.0.0.1:9797");
   });
 
   it("SPECS に無いキーは unknown_key", () => {
@@ -90,6 +94,18 @@ describe("buildConfigPatch", () => {
       ok: false,
       failure: { reason: "readonly_key", key: "playerCommand" },
     });
+  });
+
+  /**
+   * ★★ #76 のレビュー A-2。`ttsBaseUrl` を書き換えると全メッセージ本文が
+   *   そのホストへ POST される。症状は「無音」だけなので気付けない
+   */
+  it("★★ 本文の外部送信路になるキーも readonly_key", () => {
+    expect(buildConfigPatch({}, { ttsBaseUrl: "http://collector.example" }, allDefault)).toEqual({
+      ok: false,
+      failure: { reason: "readonly_key", key: "ttsBaseUrl" },
+    });
+    expect(isWritableConfigKey("ttsBaseUrl")).toBe(false);
   });
 
   /** ★ 環境変数が勝っているキーは書いても効かない。**黙って書いて効かないのが最悪** */

@@ -317,7 +317,9 @@ PATCH /v1/config           200 {"values":{…},"origins":{…}}   ← 適用後�
                            415（本文は text/plain）
                            500 {"error":"config_unreadable"|"config_unwritable"}
 POST  /v1/tts/preview      200 audio/wav      ★ 固定文。任意テキストは受けない
+                           409 {"error":"tts_disabled"}      ★ ttsEnabled: false
                            429 {"error":"too_many_requests"}
+                           503 {"error":"synthesis_unavailable","detail":"…"}
 POST  /v1/summary/preview  200 {"summary":"…","outcome":"ok","elapsedMs":11845}
                            200 {"summary":null,"outcome":"timeout","detail":"…"}   ★ 失敗も 200
                            429 {"error":"too_many_requests"}
@@ -334,14 +336,20 @@ POST  /v1/summary/preview  200 {"summary":"…","outcome":"ok","elapsedMs":11845
 | 2 | `Origin` が付いている | **403** | `Origin` が付く＝ WebView / ブラウザから張られた。`allowedOrigins` に `http://localhost:3000` を足していた人が、そのポートを踏んだ Web ページに設定を書き換えられる穴を塞ぐ。ネイティブクライアント（Unity の `UnityWebRequest`）は `Origin` を送らない |
 | 3 | `Content-Type: application/json` でない | **415** | simple request では JSON の Content-Type を付けられないので、**プリフライトが必ず走って 2 に掛かる**。CSRF 対策の本体はこの連鎖 |
 
-★ **ループバックでない相手には、書き込みメソッドを `Allow` に載せない。** どうせ 404 を返すので、
+★ **書けない相手には、書き込みメソッドを `Allow` に載せない。** どうせ 404 / 403 を返すので、
 載せるのは嘘になる。`OPTIONS /v1/config` は同じマシンからなら `GET, HEAD, PATCH, OPTIONS`、
 LAN からなら `GET, HEAD, OPTIONS` を返す。
+
+★★ **`Origin` が付いている相手にも載せない。** プリフライトは**必ず `Origin` 付き**なので、
+ここを「ループバックかどうか」だけで判断すると、`OPTIONS /v1/config` が
+`Access-Control-Allow-Methods: …, PATCH, …` を返して「書いてよい」と答えた直後に、
+本リクエストが絞り2で 403 になる。**絞り2は 405 の判定より前に置くこと** ——
+`Allow` から落ちた瞬間に到達不能になり、CSRF を明示的に断っている 403 が 405 に化ける。
 
 ★ **405 の `Allow` はリソースごと。** `/v1/tts/preview` は `POST, OPTIONS`、
 `/audio/…` は `GET, HEAD, OPTIONS`（RFC 9110 §15.5.6）。
 
-### 書けないキーは2種類ある
+### 書けないキーは3種類ある
 
 `writable` に載らず、`PATCH` すると **403 `readonly_key`**。
 
@@ -349,6 +357,7 @@ LAN からなら `GET, HEAD, OPTIONS` を返す。
 |---|---|
 | `ttsSpawnCommand` / `ttsSpawnArgs` / `playerCommand` / `playerArgs` / `aiSummaryCommand` | **(a) コマンド実行に繋がる。** ループバック限定でも「設定を1行書き換えるだけで任意コマンド実行」は別格の壊れ方をする。**緩めないこと** |
 | `host` / `port` / `allowedOrigins` | **(b) 効かない。** 再起動まで反映されないので、UI から触れる意味が無いうえに「効かない設定」という最悪の見え方になる |
+| `ttsBaseUrl` | **(c) 本文の外部送信路になる。** 書き換えると以後**全メッセージ本文**がそのホストの `/audio_query` へ POST される（`currentVoice()` は毎回読み直すので**再起動も要らない**）。しかも音が鳴らなくなるだけなので、**症状は「無音」だけ**で気付けない。**緩めないこと** |
 
 ★ **`defaults` は既定値そのもの**（`createDefaultConfig()`）。設定 UI の「すべての設定をリセット」が
 これを使って書き戻す。★ **クライアントに既定値を書き写させないこと** —— 写した瞬間に
@@ -363,8 +372,13 @@ LAN からなら `GET, HEAD, OPTIONS` を返す。
 ★★ **all-or-nothing。** 1つでも弾かれたら**何も書かない**。部分適用にすると
 「400 が返ったのに半分は書き換わっている」という、呼び出し側から復元できない状態になる。
 
-★ **レスポンスは書いた後に読み直した値。** ストアは `mtime`+`size` のスタンプで読み直すので、
-これが「本当に効いた値」になる。
+★ **レスポンスは書いた後に読み直した値。** これが「本当に効いた値」になる。
+
+★★ **読み直しはスタンプ任せにしないこと。** ストアは `mtime`+`size` が同じなら読み飛ばすので、
+**バイト長を変えない書き換え**（`ttsSpeedScale: 1.5` → `1.6`）を mtime の粒度が粗い
+ファイルシステム（HFS+ / 旧 ext4 は1秒）で行うと素通りする。壊れるのはレスポンスだけではなく、
+**走行中のサーバーが以後ずっと旧値で合成し続ける**（別の編集でサイズが変わるまで直らない）。
+書いた本人が申告する（`ConfigStore.invalidate()`）。
 
 ### プレビューは固定文
 

@@ -323,7 +323,9 @@ async function main(): Promise<void> {
     disabled: () => !config.get("ttsEnabled"),
     // GET を保留する上限。合成そのものの上限（`synthesisTimeoutMs`）とは別で、
     // ここで打ち切っても合成は続き、終わればキャッシュに入る（→ httpServer.ts）
-    responseTimeoutMs: config.get("synthesisTimeoutMs"),
+    // ★ **関数で渡す**（`disabled` と同じ）。値にすると、`PATCH /v1/config` で
+    //   `synthesisTimeoutMs` を変えてもここだけ再起動まで旧値のまま＝半分しか効かない
+    responseTimeoutMs: () => config.get("synthesisTimeoutMs"),
     onSynthesisFailed: () => void recheckEngine(),
   });
 

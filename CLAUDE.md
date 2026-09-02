@@ -124,8 +124,9 @@ speech/<seq>.json            配信キュー。1文1ファイル
   ▼
 chatter-agent-server         キューを読んで WebSocket 配信（テキスト。即座に seq 順）
   ▲  │                       ack を受けたぶんを消す
-  │  └──▶ GET /audio/<epoch>-<seq>.wav    **同じポート。** 取りに来られた時点で AivisSpeech に合成させる
-  │                          （エンジンが居なければ起動時に起こす。待たない → #51）
+  │  ├──▶ GET /audio/<epoch>-<seq>.wav    **同じポート。** 取りに来られた時点で AivisSpeech に合成させる
+  │  │                       （エンジンが居なければ起動時に起こす。待たない → #51）
+  │  └──▶ /v1/*              設定パネルの制御 API（#76）。**書き込み口はループバック限定**
   │ ack
   ├──▶ chatter-agent-player  発話 CLI。音声を GET → afplay。**プロトコルの参照実装**
   ▼

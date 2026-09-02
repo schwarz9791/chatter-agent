@@ -22,6 +22,8 @@
  * [#76]: https://github.com/schwarz9791/chatter-agent/issues/76
  */
 
+import * as fs from "fs";
+import * as path from "path";
 import { buildConfigPatch, writableConfigKeys } from "../core/configPatch";
 import { configKeys, createDefaultConfig, type ConfigKey, type ConfigStore } from "../core/config";
 import { writeFileAtomic } from "../core/atomicWrite";
@@ -187,20 +189,39 @@ export function createControlApi(deps: ControlApiDeps): ControlApi {
       }
 
       try {
+        // ★ 親ディレクトリを作ってから書く。`CHATTER_AGENT_CONFIG` が未作成の
+        //   ディレクトリを指していると tmp の書き込みが ENOENT で落ち、**すべての PATCH が
+        //   500 config_unwritable** になる（パネルには「保存できません」としか出ず、
+        //   `mkdir` すれば直ることは分からない）。`readRawFile` が ENOENT を `{}` に落として
+        //   「書き手が新規作成できる」ようにしているのと対にする。
+        //   ★ `writeFileAtomic` の側には入れない。あちらは tmp + rename の**機構だけ**を持ち、
+        //     ディレクトリを誰が保証するかは呼び出し側の話（→ `core/atomicWrite.ts`）
+        fs.mkdirSync(path.dirname(deps.config.filePath), { recursive: true });
         writeFileAtomic(deps.config.filePath, `${JSON.stringify(result.next, null, 2)}\n`);
+        // ★★ **書いた直後にスタンプを捨てる。** これが無いと、バイト長が変わらない書き換えを
+        //   粒度の粗い FS で行ったときに読み飛ばされる（→ `core/config.ts` の `invalidate`）
+        deps.config.invalidate();
       } catch (err) {
         return fail(500, "config_unwritable", { detail: err instanceof Error ? err.message : String(err) });
       }
 
-      // ★ **書いた後に読み直した値を返す。** `snapshot()` は `mtime`+`size` のスタンプで
-      //   読み直すので、これが「本当に効いた値」になる。
-      //   ★ スタンプが同一ミリ秒・同一サイズで変わらない理論的な窓があり、そのときは
-      //     **1つ前の値が返る**。返す側としてはそれで正しい（ストアが実際に使う値だから）。
-      //     「書いたはずの値が返らない」ことがあると知っていれば、症状から辿れる
+      // ★ **書いた後に読み直した値を返す。** これが「本当に効いた値」になる
+      //   （上で `invalidate()` しているので、必ず今書いたファイルを読む）
       return json(200, configBody());
     },
 
     async ttsPreview() {
+      // ★★ **`ttsEnabled` を先に見ること。** `handleAudio` が `404 audio is disabled` で
+      //   断るのと同じ状態なのに、ここを素通りすると `synthesisTimeoutMs` を待ち切って
+      //   `503 synthesis_unavailable` になり、パネルには「合成エンジンに繋がりません」と出る
+      //   —— 本当の理由は**利用者自身が TTS を切っていること**。503 と 404 を使い分けている
+      //   設計（→ `docs/protocol.md`）が避けようとしている誤診と同じ型。
+      //
+      // ★ **ゲートより前**に置く（断る要求でレート制限を消費しない）。
+      //
+      // ★ 404 ではなく **409**。`handleAudio` の 404 は「ack して諦めろ」という配信の契約が
+      //   背景にあるが、プレビューに ack は無い。409 は「今の設定と矛盾する」で理由がそのまま出る
+      if (!deps.config.get("ttsEnabled")) return fail(409, "tts_disabled");
       if (!ttsGate.tryEnter()) return fail(429, "too_many_requests");
       try {
         const wav = await deps.synthesizePreview(TTS_PREVIEW_TEXT);

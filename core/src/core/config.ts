@@ -598,6 +598,18 @@ export interface ConfigStore {
    *   ユーザーのファイルを丸ごと書き潰す。「無い」と「読めない」を混ぜない。
    */
   readRawFile(): Record<string, unknown> | undefined;
+  /**
+   * 次の読み取りで**必ず**ファイルを読み直す。
+   *
+   * ★★ **書き手（`PATCH /v1/config`）が書いた直後に呼ぶ。** 読み直しの判定は
+   *   `mtimeMs`+`size` のスタンプなので、書き込みが**バイト長を変えず**
+   *   （`ttsSpeedScale: 1.5` → `1.6`）、mtime の粒度が粗いファイルシステム
+   *   （HFS+ / 旧 ext4 は1秒）だと**スタンプが一致して読み飛ばす**。
+   *   そのとき壊れるのはレスポンス（1つ前の値が返る）だけではない ——
+   *   **走行中のサーバーが以後ずっと旧値で合成し続ける**（別の編集でサイズが
+   *   変わるまで直らない）。スタンプの分解能に賭けるより、書いた本人が申告する方が確実。
+   */
+  invalidate(): void;
   readonly filePath: string;
 }
 
@@ -758,5 +770,10 @@ export function createConfigStore(deps: ConfigStoreDeps = {}): ConfigStore {
       return "default";
     },
     readRawFile: readRaw,
+    invalidate() {
+      // ★ `stamp = null` にしないこと。`null` は「ファイルが無い」の意味で、
+      //   次の refresh がそれを「変化なし」と読む余地が残る
+      loaded = false;
+    },
   };
 }

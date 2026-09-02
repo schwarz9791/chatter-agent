@@ -179,13 +179,50 @@ namespace ChatterMascot.Tests
                 Is.EqualTo("これは壊れている"));
         }
 
+        /// <summary>
+        /// ★★ 版とライセンスは<b>設定パネルに出さない</b>（ライセンス本文が長く、
+        ///   設定の項目が埋もれる）。メニューバーの「について」から別ダイアログで開く。
+        /// </summary>
         [Test]
-        public void ShowsTheVersionAndLicense()
+        public void KeepsTheAboutOutOfTheSettingsPanel()
         {
             var items = SettingsSchema.Build(Context());
 
+            Assert.That(Find(items, SettingKeys.Version), Is.Null);
+            Assert.That(Find(items, SettingKeys.License), Is.Null);
+        }
+
+        [Test]
+        public void ShowsTheVersionAndLicenseInTheAboutDialog()
+        {
+            var items = SettingsSchema.BuildAbout(Context());
+
             Assert.That(Find(items, SettingKeys.Version).Value, Does.Contain("1.2.3"));
             Assert.That(Find(items, SettingKeys.License).Value, Is.EqualTo("MIT"));
+        }
+
+        /// <summary>
+        /// ★★ ミュートとテスト要約は出さない（判断の記録）。
+        ///   ミュートはショートカットで切り替えたときにパネルが追従できず、
+        ///   テスト要約は結果を出す場所が note しか無かった。
+        /// </summary>
+        [Test]
+        public void DoesNotOfferMuteOrTheSummaryTest()
+        {
+            var keys = SettingsSchema.Build(Context()).Select(s => s.Key).ToList();
+
+            Assert.That(keys, Has.None.EqualTo("mute"));
+            Assert.That(keys, Has.None.EqualTo("summaryPreview"));
+        }
+
+        /// <summary>★ 大きさは settings.json ではなく「いまの窓」から出す</summary>
+        [Test]
+        public void TakesTheSizeFromTheWindow()
+        {
+            var context = Context();
+            context.WindowScale = 1.5f;
+
+            Assert.That(Find(SettingsSchema.Build(context), SettingKeys.Scale).Value, Is.EqualTo("1.5"));
         }
 
         [Test]

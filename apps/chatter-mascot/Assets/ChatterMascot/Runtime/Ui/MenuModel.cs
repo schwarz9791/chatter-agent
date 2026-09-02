@@ -119,12 +119,11 @@ namespace ChatterMascot.Ui
                 MenuEntry.Of(MenuKeys.Settings, "設定を開く…"),
                 MenuEntry.Separator(),
 
-                // ★ #76 で押せるようになった。押すと設定パネルが開き、末尾に版とライセンスがある。
-                //   版をここに出し続けるのは、Dock に居ないので「どれが動いているか」の
-                //   手掛かりがここしか無いため
-                MenuEntry.Of(
-                    MenuKeys.About,
-                    string.IsNullOrEmpty(state.Version) ? product : $"{product} {state.Version}"),
+                // ★ #76 で押せるようになった。押すと「について」の別ダイアログが開く。
+                //   ★ 版はラベルから外してツールチップへ移した —— ラベルに版を出していたのは
+                //   「Dock に居ないので、どれが動いているかの手掛かりがここしか無い」ためなので、
+                //   pid と同じ場所（ツールチップ）に残せば目的は保てる
+                MenuEntry.Of(MenuKeys.About, $"{product} について"),
                 MenuEntry.Of(MenuKeys.Quit, "終了"),
             };
 
@@ -132,7 +131,11 @@ namespace ChatterMascot.Ui
             {
                 // ★ pid を入れること。 Dock に出ない以上、二重起動は
                 //   「アイコンが2つ並ぶ」でしか気づけない（→ #75 の LSUIElement の代償4）
-                Tooltip = $"{product} (pid {state.Pid})",
+                // ★ 版も入れること（#76 でラベルから外した）。Dock に居ないので、
+                //   「どれが動いているか」の手掛かりはここと二重起動時のアイコンの数だけ
+                Tooltip = string.IsNullOrEmpty(state.Version)
+                    ? $"{product} (pid {state.Pid})"
+                    : $"{product} {state.Version} (pid {state.Pid})",
                 Icon1xPath = state.Icon1xPath,
                 Icon2xPath = state.Icon2xPath,
                 Dimmed = state.Muted,

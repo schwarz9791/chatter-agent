@@ -67,7 +67,7 @@ CM_EXPORT int  CM_HotKeyRegister(int id, unsigned int keyCode, unsigned int modi
 CM_EXPORT void CM_HotKeyUnregister(int id);
 
 /*
- * 設定パネル（#76）。schemaJson は SettingsPanelJson.Write が作ったもの。
+ * パネル（#76）。schemaJson は SettingsPanelJson.Write が作ったもの。
  *
  * ★★ このパネルに設定のキーもラベルも1つも書かないこと。 kind を見てビューを組み、
  *   操作されたら key と value を返すだけ。ボタンの文字（「記録」など）まで JSON の
@@ -77,11 +77,37 @@ CM_EXPORT void CM_HotKeyUnregister(int id);
  *   取りづらく、ショートカットの記録にはキー入力が要る。Show のときに
  *   [NSApp activateIgnoringOtherApps:YES] を呼ぶ。実機では
  *   「スライダーは動くが記録が始まらない」という形で出る。
+ *
+ * ★ panelId で複数枚を同じレンダラで描く（0 = 設定 / 1 = このアプリについて）。
+ *   2枚目のために ObjC を書き足さないための引数。範囲外は無視する。
  */
-CM_EXPORT bool CM_SettingsPanelShow(const char* schemaJson);
-CM_EXPORT bool CM_SettingsPanelUpdate(const char* schemaJson);
-CM_EXPORT void CM_SettingsPanelHide(void);
-CM_EXPORT bool CM_SettingsPanelIsVisible(void);
+CM_EXPORT bool CM_PanelShow(int panelId, const char* schemaJson);
+CM_EXPORT bool CM_PanelUpdate(int panelId, const char* schemaJson);
+CM_EXPORT void CM_PanelHide(int panelId);
+CM_EXPORT bool CM_PanelIsVisible(int panelId);
+
+/*
+ * ファイル選択（#76）。optionsJson は {"key":…,"title":…,"message":…,"button":…,"extensions":[…]}。
+ *
+ * ★★ UniWindowController の FilePanel を使わないこと。 あちらは NSOpenPanel の
+ *   allowedContentTypes に UTType(tag:"vrm", tagClass:.filenameExtension) を渡すが、
+ *   .vrm はシステムに登録された UTI を持たないので dynamic UTType になり、
+ *   **拡張子が一致してもグレーアウトする**（バイナリの逆アセンブルで確認）。
+ *   ここでは allowedContentTypes を使わず、panel:shouldEnableURL: で拡張子を見る。
+ *
+ * ★ 拡張子もタイトルも C# から渡す（ネイティブに "vrm" を書かない）。
+ * ★ 選ばれたら CMEmitSetting(key, パス) を投げる。取り消しなら何も投げない。
+ */
+CM_EXPORT bool CM_OpenFilePanel(const char* optionsJson);
+
+/*
+ * 確認ダイアログ（#76）。optionsJson は {"title":…,"message":…,"ok":…,"cancel":…,"destructive":bool}。
+ * OK が押されたら true。
+ *
+ * ★ 取り消せない操作（ファイルの削除）の前に挟む。文言は C# から渡す。
+ * ★ runModal はメインスレッドを止める。結果を返す関数なのでメインスレッド契約に従う。
+ */
+CM_EXPORT bool CM_Confirm(const char* optionsJson);
 
 /* --- プラグインの内部で共有するもの（C# からは呼ばない） --- */
 

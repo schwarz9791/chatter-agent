@@ -9,42 +9,77 @@ namespace ChatterMascot.Tests
     public sealed class SettingsMappingTests
     {
         /// <summary>
-        /// ★★ <c>headroom</c> は<b>大きいほどキャラが小さい</b>。UI の「大きさ」とは向きが逆で、
-        ///   素直に代入すると<b>スライダーを右に振るほど小さくなる</b>。
+        /// ★★ キャラの大きさは<b>ウィンドウ</b>で変える。<c>VrmStage.headroom</c> は
+        ///   「bounds をどれだけ余裕を持って収めるか」の係数で、1 を下回るとモデルが
+        ///   <b>画面からはみ出す</b>（実機で頭と足が対称に欠けた）。
         /// </summary>
         [Test]
-        public void BiggerScaleMeansSmallerHeadroom()
+        public void BiggerScaleMeansABiggerWindow()
         {
-            Assert.That(
-                SettingsMapping.HeadroomFor(2f),
-                Is.LessThan(SettingsMapping.HeadroomFor(0.5f)));
+            float smallW, smallH, bigW, bigH;
+            SettingsMapping.WindowSizeFor(0.5f, 300f, 480f, out smallW, out smallH);
+            SettingsMapping.WindowSizeFor(2f, 300f, 480f, out bigW, out bigH);
+
+            Assert.That(bigW, Is.GreaterThan(smallW));
+            Assert.That(bigH, Is.GreaterThan(smallH));
+            Assert.That(smallW, Is.EqualTo(150f).Within(0.001f));
+            Assert.That(bigH, Is.EqualTo(960f).Within(0.001f));
         }
 
+        /// <summary>倍率 1.0 は出荷値そのまま</summary>
         [Test]
-        public void ScaleOneKeepsTheShippedHeadroom()
+        public void ScaleOneKeepsTheShippedSize()
         {
-            Assert.That(SettingsMapping.HeadroomFor(1f), Is.EqualTo(SettingsMapping.DefaultHeadroom));
+            float width, height;
+            SettingsMapping.WindowSizeFor(1f, 300f, 480f, out width, out height);
+
+            Assert.That(width, Is.EqualTo(300f).Within(0.001f));
+            Assert.That(height, Is.EqualTo(480f).Within(0.001f));
         }
 
+        /// <summary>★ 縦横を同じ倍率で掛ける（アスペクト比を保つ）</summary>
         [Test]
-        public void HeadroomAndScaleRoundTrip()
+        public void KeepsTheAspectRatio()
+        {
+            float width, height;
+            SettingsMapping.WindowSizeFor(1.4f, 300f, 480f, out width, out height);
+
+            Assert.That(height / width, Is.EqualTo(480f / 300f).Within(0.0001f));
+        }
+
+        /// <summary>★★ 倍率は settings.json に持たない。いまの窓から読み替える</summary>
+        [Test]
+        public void SizeAndScaleRoundTrip()
         {
             foreach (var scale in new[] { 0.5f, 0.8f, 1f, 1.4f, 2f })
             {
+                float width, height;
+                SettingsMapping.WindowSizeFor(scale, 300f, 480f, out width, out height);
+
                 Assert.That(
-                    SettingsMapping.ScaleFor(SettingsMapping.HeadroomFor(scale)),
+                    SettingsMapping.ScaleForWindow(height, 480f),
                     Is.EqualTo(scale).Within(0.0001f),
                     $"scale={scale} が往復しない");
             }
         }
 
-        /// <summary>★ 0 で割らないこと（カメラがモデルの中に入る）</summary>
         [Test]
-        public void ScaleIsClampedBeforeDividing()
+        public void ClampsTheScaleToTheSliderRange()
         {
-            Assert.That(SettingsMapping.HeadroomFor(0f), Is.GreaterThan(0f));
-            Assert.That(SettingsMapping.HeadroomFor(-5f), Is.GreaterThan(0f));
-            Assert.That(SettingsMapping.ScaleFor(0f), Is.EqualTo(1f));
+            float width, height;
+            SettingsMapping.WindowSizeFor(99f, 300f, 480f, out width, out height);
+            Assert.That(height, Is.EqualTo(480f * SettingsMapping.ScaleMax).Within(0.001f));
+
+            SettingsMapping.WindowSizeFor(-5f, 300f, 480f, out width, out height);
+            Assert.That(height, Is.EqualTo(480f * SettingsMapping.ScaleMin).Within(0.001f));
+        }
+
+        /// <summary>★ 0 で割らないこと（窓の大きさが読めないときは等倍に倒す）</summary>
+        [Test]
+        public void FallsBackToUnityScaleForUnreadableSizes()
+        {
+            Assert.That(SettingsMapping.ScaleForWindow(0f, 480f), Is.EqualTo(1f));
+            Assert.That(SettingsMapping.ScaleForWindow(480f, 0f), Is.EqualTo(1f));
         }
 
         /// <summary>★★ スライダーから来る float は 0.7000000119 になりうる</summary>

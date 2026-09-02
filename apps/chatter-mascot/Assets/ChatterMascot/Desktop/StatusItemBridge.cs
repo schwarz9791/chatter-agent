@@ -9,6 +9,7 @@ using ChatterMascot.Ui;
 using ChatterMascot.Vrm;
 using Kirurobo;
 using UnityEngine;
+using UnityEngine.InputSystem;
 using Debug = UnityEngine.Debug;
 
 namespace ChatterMascot.Desktop
@@ -230,14 +231,58 @@ namespace ChatterMascot.Desktop
                 _nextSettingsPollAt = Time.realtimeSinceStartup + SettingsPollSeconds;
                 _activationPolicyAt = Time.realtimeSinceStartup + ActivationPolicyDelaySeconds;
 
+                AllowInputWithoutFocus();
+
                 _panel = new SettingsPanelBridge(this, ResolveServerUrl(), ResolveRunner);
                 _instance = this;
 
-                // ★ 検証用の入口。`LSUIElement` のアプリはメニューバーのアイコンを
-                //   自動で押す手段が無く（アクセシビリティからは見えない。→ docs/mascot.md）、
-                //   右クリックもポインタイベントの配送に依存する。**開いた後**を確かめたいときに、
-                //   その手前を全部飛ばせる経路を1つ持っておく（`-quitProbe` と同じ流儀）
+                // ★ 検証用の入口。メニューバーも右クリックも自動化はできる（→ docs/mascot.md）が、
+                //   どちらもアクセシビリティ権限や合成イベントに依存する。**開いた後**を
+                //   確かめたいときに、その手前を全部飛ばせる経路を1つ持っておく
+                //   （`-quitProbe` と同じ流儀）
                 if (CommandLine.Flag(SettingsProbeFlag)) _panel.Open();
+            }
+
+            /// <summary>
+            /// フォーカスが無くてもポインタ入力を受け取れるようにする。
+            ///
+            /// ★★ <b>これが無いと、キャラの右クリックが効かない。</b> Input System の既定は
+            ///   <c>BackgroundBehavior.ResetAndDisableNonBackgroundDevices</c> で、
+            ///   アプリがフォーカスを失うと <c>Mouse</c>（<c>canRunInBackground == false</c>）が
+            ///   <b>無効化される</b>。<c>runInBackground</c> はイベントストリームの手前の関門を
+            ///   通すだけで、こちらは塞げない。<c>MascotContextClick</c> が読む
+            ///   <c>Mouse.current.rightButton.wasPressedThisFrame</c> はこれで生きる。
+            ///
+            /// ★★ <b>これ「だけ」では足りない。</b> デバイスが生きても、macOS が
+            ///   <c>mouseMoved</c> を配送するのは前面のアプリだけなので<b>座標は古いまま</b>で、
+            ///   <c>IPointerClickHandler</c> は別の場所を撃って呼ばれない。だから
+            ///   当たり判定はクリック透過の状態から取っている（→ <c>ContextClickHandles</c>）。
+            ///
+            /// ★ <b><c>Assets/</c> に <c>InputSettings</c> アセットを置かないこと。</b>
+            ///   あれは <c>EditorBuildSettings</c> 経由でプロジェクト全体に効くので、
+            ///   <b>Android（#25）まで巻き込む</b>。常駐マスコットの都合なので
+            ///   <c>ChatterMascot.Desktop</c> に閉じる。
+            ///
+            /// ★ <c>CursorGazeSource</c> / <c>DragStateGuard</c> の「新しい入力系のマウス状態は
+            ///   使えない」は据え置き。あちらは<b>座標</b>を読む話で、こちらは<b>ボタンの押下</b>。
+            /// </summary>
+            private static void AllowInputWithoutFocus()
+            {
+                try
+                {
+                    var settings = InputSystem.settings;
+                    if (settings == null) return;
+                    if (settings.backgroundBehavior == InputSettings.BackgroundBehavior.IgnoreFocus) return;
+
+                    settings.backgroundBehavior = InputSettings.BackgroundBehavior.IgnoreFocus;
+                    Debug.Log("[Mascot] フォーカスが無くても入力を受け取る設定にしました");
+                }
+                catch (Exception e)
+                {
+                    // ★ ここで落とさないこと。効かなくても「右クリックで開かない」だけで、
+                    //   メニューバーからは開ける
+                    Debug.LogWarning("[Mascot] 入力の設定を変えられませんでした: " + e.Message);
+                }
             }
 
             internal void ToggleSettingsPanel()
@@ -343,8 +388,9 @@ namespace ChatterMascot.Desktop
                         break;
 
                     case MenuKeys.About:
-                        // ★ #76 で押せるようになった。設定パネルの末尾に版とライセンスがある
-                        if (_panel != null) _panel.Open();
+                        // ★ 設定パネルとは**別のダイアログ**。ライセンス本文が長いので、
+                        //   設定に混ぜると項目が埋もれる
+                        if (_panel != null) _panel.OpenAbout();
                         break;
 
                     default:
@@ -549,9 +595,10 @@ namespace ChatterMascot.Desktop
                 var runner = ResolveRunner();
                 if (runner != null) runner.Volume = _settings.Volume;
 
-                var stage = FindFirstObjectByType<ChatterMascot.Vrm.VrmStage>(FindObjectsInactive.Include);
-                if (stage != null) stage.Headroom = SettingsMapping.HeadroomFor(_settings.CharacterScale);
-
+                // ★★ ここで `VrmStage.Headroom` を触らないこと。 あれは「bounds をどれだけ
+                //   余裕を持って収めるか」の係数で、1 を下回るとモデルが画面からはみ出す
+                //   （実機で頭と足が対称に欠けた）。キャラの大きさは**ウィンドウ**で変える
+                //   （→ WindowGeometry.SetSize）。窓が変われば VrmStage が自動で収め直す
                 var character = FindFirstObjectByType<ChatterMascot.Vrm.VrmCharacter>(FindObjectsInactive.Include);
                 if (character != null)
                 {
@@ -583,7 +630,11 @@ namespace ChatterMascot.Desktop
                     RegisterHotKeys();
                 }
                 UpdateMenu();
-                if (_panel != null) _panel.Refresh();
+
+                // ★★ ここでパネルを作り直さないこと。 画面には既に新しい値が出ているし、
+                //   作り直すと**ドラッグ中のスライダーごとビューが破棄される**（実機で
+                //   「つまみが掴めない」として出た）。作り直すのは「外から変わったとき」だけ
+                //   （→ PumpSettings / SettingsPanelBridge.Refresh）
             }
 
             void ISettingsHost.ResetWindow()
@@ -591,17 +642,24 @@ namespace ChatterMascot.Desktop
                 WindowGeometry.Reset();
             }
 
-            /// <summary>
-            /// ★ <b>core の <c>config.json</c> は触らない。</b> 別プロセスの設定を消すのは越権
-            ///   （音声スタイル・話す速さ・要約は残る）。
-            /// ★ <b>ファイルを消すだけにしないこと。</b> その場で既定を適用しないと
-            ///   「押しても効かないボタン」に見える。
-            /// </summary>
-            void ISettingsHost.ResetAll()
+            void ISettingsHost.ResetUnitySettings()
             {
                 ((ISettingsHost)this).ApplySettings(MascotSettings.Defaults);
                 WindowGeometry.Reset();
-                Debug.Log("[Mascot] 設定を既定に戻しました（core の config.json は触っていません）");
+            }
+
+            void ISettingsHost.SetWindowSize(float widthPoints, float heightPoints)
+            {
+                WindowGeometry.SetSize(widthPoints, heightPoints);
+            }
+
+            float ISettingsHost.WindowScale
+            {
+                get
+                {
+                    return SettingsMapping.ScaleForWindow(
+                        WindowGeometry.CurrentSize().y, WindowGeometry.DefaultHeightPoints);
+                }
             }
 
             void ISettingsHost.Quit()

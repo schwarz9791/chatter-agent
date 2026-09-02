@@ -94,6 +94,23 @@ namespace ChatterMascot.Desktop
         ///   その場で既定を適用させる。
         /// ★ <b>core の <c>config.json</c> は触らない。</b> 別プロセスの設定を消すのは越権。
         /// </summary>
+        /// <summary>
+        /// 走っている <see cref="Keeper"/>。
+        ///
+        /// ★★ <b><c>FindFirstObjectByType</c> で探さないこと。</b> <see cref="Install"/> は
+        ///   <c>HideFlags.HideAndDontSave</c> で GameObject を作っており、Unity の
+        ///   <c>FindFirstObjectByType</c> / <c>FindObjectsByType</c> は
+        ///   <b><c>HideFlags.DontSave</c> を持つオブジェクトを返さない</b>（公式ドキュメントに明記）。
+        ///   <c>FindObjectsInactive.Include</c> は「非アクティブを含めるか」だけの指定で、
+        ///   こちらには効かない。
+        ///
+        /// ★ **実際に踏んだ**（#76）—— 「キャラクターの位置のリセット」が常に
+        ///   「管理が動いていません」の枝へ落ち、ファイルを消すだけで終わっていた
+        ///   （症状は「アプリを再起動しないとリセットされない」）。
+        ///   <c>StatusItemBridge</c> は最初から static で持っていて、そちらは動いている。
+        /// </summary>
+        private static Keeper _keeper;
+
         public static void Reset()
         {
             try
@@ -106,13 +123,50 @@ namespace ChatterMascot.Desktop
                 Debug.LogWarning("[Mascot] ウィンドウの保存を消せませんでした: " + e.Message);
             }
 
-            var keeper = UnityEngine.Object.FindFirstObjectByType<Keeper>(FindObjectsInactive.Include);
+            var keeper = _keeper;
             if (keeper == null)
             {
                 Debug.Log("[Mascot] ウィンドウの管理が動いていないので、位置のリセットは次の起動から効きます");
                 return;
             }
             keeper.ResetToDefault();
+        }
+
+        /// <summary>
+        /// ウィンドウの大きさを変える（設定パネルの「大きさ」／#76）。位置は動かさない。
+        ///
+        /// ★★ <b>キャラの大きさは <c>VrmStage.headroom</c> ではなく窓で変えること。</b>
+        ///   <c>headroom</c> は「bounds をどれだけ余裕を持って収めるか」の係数で、
+        ///   1 を下回るとモデルが画面からはみ出す（実機で頭と足が対称に欠けた）。
+        ///   窓を変えれば <c>VrmStage</c> が <c>Screen.width/height</c> の変化を毎フレーム見て
+        ///   自動で収め直す。
+        ///
+        /// ★ <b>ここが唯一の「外から大きさを変える」口。</b> <c>UniWindowController.windowSize</c> に
+        ///   直接代入すると、<c>Keeper</c> が <c>Applying</c> 中だった場合に打ち消される
+        ///   （あちらは目標の矩形に一致するまで最大5回書き直す）。
+        ///
+        /// ★ モニタからはみ出す大きさは <c>WindowPlacement.Resolve</c> が切り詰める。
+        /// </summary>
+        public static void SetSize(float widthPoints, float heightPoints)
+        {
+            var keeper = _keeper;
+            if (keeper == null)
+            {
+                Debug.Log("[Mascot] ウィンドウの管理が動いていないので、大きさは変えられません");
+                return;
+            }
+            keeper.SetSize(widthPoints, heightPoints);
+        }
+
+        /// <summary>
+        /// いまのウィンドウの大きさ（ポイント）。取れなければ既定値。
+        /// 設定パネルがスライダーの初期値に使う（→ <c>Settings.SettingsMapping.ScaleForWindow</c>）。
+        /// </summary>
+        public static Vector2 CurrentSize()
+        {
+            var keeper = _keeper;
+            if (keeper == null) return new Vector2(DefaultWidthPoints, DefaultHeightPoints);
+            return keeper.CurrentSize();
         }
 
         internal static string ResolveStatePath()
@@ -225,6 +279,9 @@ namespace ChatterMascot.Desktop
 
             private void Start()
             {
+                // ★ ここで static に握ること（→ WindowGeometry._keeper の doc）。
+                //   この GameObject は HideAndDontSave なので、後から探し出せない
+                _keeper = this;
                 _controller = FindFirstObjectByType<UniWindowController>();
                 _statePath = ResolveStatePath();
                 _store = new WindowStateStore(ReadState, WriteState, message => Debug.LogWarning("[Mascot] " + message));
@@ -248,6 +305,7 @@ namespace ChatterMascot.Desktop
 
             private void OnDestroy()
             {
+                if (_keeper == this) _keeper = null;
                 if (_controller != null) _controller.OnMonitorChanged -= OnMonitorChanged;
 
                 // 終了以外の経路（自壊・シーンの破棄）で溜めていた変更を投げ切る。
@@ -324,6 +382,33 @@ namespace ChatterMascot.Desktop
             /// ★ <c>_lastPersisted</c> も捨てること。残っていると
             ///   「もう保存済み」と判断されて、戻した位置が書き戻されない。
             /// </summary>
+            /// <summary>
+            /// 位置はそのまま、大きさだけ変える（→ <see cref="WindowGeometry.SetSize"/>）。
+            ///
+            /// ★ <c>BeginApplying</c> を通すこと。直接 <c>Write</c> すると
+            ///   <c>Applying</c> の追従（最大5回の書き直し）と喧嘩する。
+            /// ★ <c>_saved</c> は触らない —— 保存は <c>Applying</c> → <c>Persist</c> が
+            ///   実際に効いた矩形で行う。
+            /// </summary>
+            internal void SetSize(float widthPoints, float heightPoints)
+            {
+                var from = _lastSeen.IsValid ? _lastSeen : Current();
+                if (!from.IsValid)
+                {
+                    Debug.LogWarning("[Mascot] いまのウィンドウを読めないので、大きさを変えられません");
+                    return;
+                }
+                BeginApplying(new WindowState(
+                    new PointRect(from.X, from.Y, widthPoints, heightPoints), _signature));
+            }
+
+            internal Vector2 CurrentSize()
+            {
+                var rect = _lastSeen.IsValid ? _lastSeen : Current();
+                if (!rect.IsValid) return new Vector2(DefaultWidthPoints, DefaultHeightPoints);
+                return new Vector2(rect.Width, rect.Height);
+            }
+
             internal void ResetToDefault()
             {
                 _saved = default(WindowState);

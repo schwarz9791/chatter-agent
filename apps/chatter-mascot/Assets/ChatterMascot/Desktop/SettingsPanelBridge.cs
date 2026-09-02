@@ -8,7 +8,7 @@ using ChatterMascot.Net;
 using ChatterMascot.Settings;
 using ChatterMascot.Ui;
 using ChatterMascot.Vrm;
-using Kirurobo;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 
@@ -31,8 +31,14 @@ namespace ChatterMascot.Desktop
         /// <summary>キャラクターの位置と大きさ（<c>window.json</c>）だけ既定へ戻す</summary>
         void ResetWindow();
 
-        /// <summary><c>mascot/</c> 配下すべてを既定へ戻す。★ core の <c>config.json</c> は触らない</summary>
-        void ResetAll();
+        /// <summary>Unity 側（<c>settings.json</c> と <c>window.json</c>）を既定へ戻す</summary>
+        void ResetUnitySettings();
+
+        /// <summary>ウィンドウの大きさを変える（倍率ではなくポイント）</summary>
+        void SetWindowSize(float widthPoints, float heightPoints);
+
+        /// <summary>いまのウィンドウの倍率（<c>window.json</c> が権威。→ <c>SettingsMapping.ScaleForWindow</c>）</summary>
+        float WindowScale { get; }
 
         void Quit();
     }
@@ -59,13 +65,16 @@ namespace ChatterMascot.Desktop
         /// <summary>スライダーを動かしてから core へ送るまでの猶予</summary>
         private const float PatchDebounceSeconds = 0.3f;
 
-        /// <summary>
-        /// テスト要約の予算。★ サーバー側は <c>aiSummaryTimeoutMs</c>（既定60秒）まで粘るので、
-        /// それより短くすると「サーバーは答えているのにこちらだけ諦める」形になる。
-        /// </summary>
-        private const int SummaryPreviewTimeoutMs = 90_000;
-
         private const int RequestTimeoutMs = 5_000;
+
+        /// <summary>
+        /// ネイティブのパネル ID。<b>同じレンダラで2枚描く</b>（→ <c>CMSettingsPanel.m</c>）。
+        ///
+        /// ★ ライセンス本文が長いので、about を設定と同じパネルに置くと設定の項目が埋もれる。
+        /// </summary>
+        private const int SettingsPanelId = 0;
+
+        private const int AboutPanelId = 1;
 
         private readonly ISettingsHost _host;
         private readonly CoreConfigClient _client;
@@ -78,6 +87,19 @@ namespace ChatterMascot.Desktop
 
         /// <summary>デバウンス待ちの core への変更。key は core の設定キー</summary>
         private readonly Dictionary<string, JToken> _pending = new Dictionary<string, JToken>();
+
+        /// <summary>
+        /// デバウンス待ちの Unity 側の変更。
+        ///
+        /// ★★ <b>スライダーを1ティック動かすたびに保存・適用しないこと。</b> #76 の初版は
+        ///   毎ティックで <c>settings.json</c> の書き込み・シーンへの反映・メニューの更新を
+        ///   走らせていて、実機で「重い」と言われた。特にウィンドウのリサイズは
+        ///   <c>WindowGeometry</c> が最大5回書き直して追従するので効く。
+        /// </summary>
+        private MascotSettings? _pendingSettings;
+
+        /// <summary>デバウンス待ちのウィンドウ倍率（→ <c>ISettingsHost.SetWindowSize</c>）</summary>
+        private float? _pendingScale;
 
         private float _pendingAt = float.PositiveInfinity;
         private bool _refreshing;
@@ -96,7 +118,11 @@ namespace ChatterMascot.Desktop
 
         public bool IsVisible
         {
-            get { return ChatterMascotNative.IsAvailable && ChatterMascotNative.CM_SettingsPanelIsVisible(); }
+            get
+            {
+                return ChatterMascotNative.IsAvailable
+                    && ChatterMascotNative.CM_PanelIsVisible(SettingsPanelId);
+            }
         }
 
         /// <summary>
@@ -130,20 +156,103 @@ namespace ChatterMascot.Desktop
         public void Close()
         {
             _open = false;
-            if (ChatterMascotNative.IsAvailable) ChatterMascotNative.CM_SettingsPanelHide();
+            // ★ 一時的なメッセージは持ち越さないこと。閉じて開き直したときに
+            //   「さっき押した結果」が残っていると、いま起きたことと区別が付かない
+            _notices.Clear();
+            if (ChatterMascotNative.IsAvailable) ChatterMascotNative.CM_PanelHide(SettingsPanelId);
         }
 
-        /// <summary>毎フレーム呼ぶ。デバウンスの締め切りだけを見る</summary>
+        /// <summary>
+        /// 「Chatter Mascot について」を開く。<b>設定とは別のダイアログ</b>。
+        ///
+        /// ★ ライセンス本文だけで数百行あるので、設定パネルに混ぜると項目が埋もれる。
+        /// </summary>
+        public void OpenAbout()
+        {
+            if (!ChatterMascotNative.IsAvailable)
+            {
+                Debug.LogWarning("[Mascot] ネイティブプラグインが無いので「について」を開けません");
+                return;
+            }
+            var json = SettingsPanelJson.Write(
+                _context.ProductName + " について", SettingsSchema.BuildAbout(_context));
+            if (!ChatterMascotNative.CM_PanelShow(AboutPanelId, json))
+            {
+                Debug.LogWarning("[Native]「について」を開けませんでした");
+            }
+        }
+
+        /// <summary>
+        /// 毎フレーム呼ぶ。デバウンスの締め切りだけを見る。
+        ///
+        /// ★ core への <c>PATCH</c>・Unity 側の保存・ウィンドウのリサイズを<b>同じ締め切りに
+        ///   まとめてある</b>。別々に持つと、1回のスライダー操作で締め切りが3つ走る。
+        /// </summary>
         public void Tick()
         {
-            if (_pending.Count == 0) return;
+            WatchWindowSize();
+            if (_pending.Count == 0 && _pendingSettings == null && _pendingScale == null) return;
             if (Time.realtimeSinceStartup < _pendingAt) return;
 
             var batch = new List<KeyValuePair<string, JToken>>(_pending);
+            var settings = _pendingSettings;
+            var scale = _pendingScale;
+
             _pending.Clear();
+            _pendingSettings = null;
+            _pendingScale = null;
             _pendingAt = float.PositiveInfinity;
 
+            if (settings != null) _host.ApplySettings(settings.Value);
+            if (scale != null)
+            {
+                float width;
+                float height;
+                SettingsMapping.WindowSizeFor(
+                    scale.Value, WindowGeometry.DefaultWidthPoints, WindowGeometry.DefaultHeightPoints,
+                    out width, out height);
+                _host.SetWindowSize(width, height);
+            }
             foreach (var entry in batch) _ = PatchAsync(entry.Key, entry.Value);
+        }
+
+        /// <summary>Unity 側の変更を保留する（→ <see cref="Tick"/>）</summary>
+        /// <summary>
+        /// ウィンドウの大きさが<b>外から</b>変わったら「大きさ」を追いつかせる。
+        ///
+        /// ★★ <b>「リセットした直後に読む」では足りない。</b> <c>ResetWindow()</c> の反映は
+        ///   数フレームかかる（<c>WindowGeometry</c> は位置と大きさを何度か書き直して追従する）ので、
+        ///   押した直後の <c>WindowScale</c> は<b>まだ古い倍率</b>を返す。実機で
+        ///   「位置と大きさをリセットしたのにスライダーが 1.5 のまま」を踏んだ。
+        ///
+        /// ★ <b>窓の端を掴んでリサイズしたときにも同じ経路で追いつく。</b> 大きさの権威は
+        ///   <c>window.json</c>（＝ウィンドウそのもの）で、スライダーはその写しでしかない
+        ///   （→ <c>SettingsContext.WindowScale</c>）。
+        ///
+        /// ★ <b>保留中は見送る。</b> つまみをドラッグしている最中に作り直すと、
+        ///   掴んでいるスライダーごと消える（→ <see cref="Push"/>）。
+        /// </summary>
+        private void WatchWindowSize()
+        {
+            if (!_open || _pendingScale != null) return;
+
+            var scale = _host.WindowScale;
+            if (Mathf.Abs(scale - _context.WindowScale) < 0.001f) return;
+
+            _context.WindowScale = scale;
+            Push(update: true);
+        }
+
+        private void Defer(MascotSettings next)
+        {
+            _pendingSettings = next;
+            Postpone();
+        }
+
+        /// <summary>締め切りを（再）設定する。★ 触るたびに延ばす（＝最後の操作から数える）</summary>
+        private void Postpone()
+        {
+            _pendingAt = Time.realtimeSinceStartup + PatchDebounceSeconds;
         }
 
         /// <summary>設定ファイルが外から書き換わったときなど、表示を作り直す</summary>
@@ -166,18 +275,31 @@ namespace ChatterMascot.Desktop
             switch (key)
             {
                 // ── Unity 側 ──────────────────────────────
+                //
+                // ★★ ここから **パネルを作り直さないこと**。画面には既に新しい値が出ている。
+                //   作り直すと、ドラッグ中のスライダーごとビューが破棄されて
+                //   **つまみが掴めなくなる**（実機で踏んだ）。作り直すのは
+                //   「外から変わったとき」だけ（→ Refresh）。
+
                 case SettingKeys.Scale:
-                    _host.ApplySettings(settings.WithCharacterScale(SettingsMapping.Normalize(
-                        SettingsMapping.Parse(value, settings.CharacterScale),
-                        SettingsMapping.ScaleMin, SettingsMapping.ScaleMax, SettingsMapping.ScaleStep)));
+                    // ★ 大きさは settings.json に持たない。**ウィンドウそのものを変える**
+                    //   （→ SettingsMapping.WindowSizeFor / MascotSettings の型 doc）
+                    _pendingScale = SettingsMapping.Normalize(
+                        SettingsMapping.Parse(value, _context.WindowScale),
+                        SettingsMapping.ScaleMin, SettingsMapping.ScaleMax, SettingsMapping.ScaleStep);
+                    _context.WindowScale = _pendingScale.Value;
+                    Postpone();
                     return;
 
                 case SettingKeys.Volume:
-                    _host.ApplySettings(settings.WithVolume(SettingsMapping.Normalize(
+                    // ★ スライダーなのでデバウンスする（1ティックごとに保存しない）
+                    Defer(settings.WithVolume(SettingsMapping.Normalize(
                         SettingsMapping.Parse(value, settings.Volume),
                         SettingsMapping.VolumeMin, SettingsMapping.VolumeMax, SettingsMapping.VolumeStep)));
                     return;
 
+                // ★ チェックボックスは即座に反映する。連打されるものではないし、
+                //   遅らせると「押したのに効いていない」に見える
                 case SettingKeys.IdleMotion:
                     _host.ApplySettings(settings.WithIdleMotion(SettingsPanelJson.ParseBool(value, settings.IdleMotion)));
                     return;
@@ -190,10 +312,6 @@ namespace ChatterMascot.Desktop
                     _host.ApplySettings(settings.WithBlink(SettingsPanelJson.ParseBool(value, settings.Blink)));
                     return;
 
-                case SettingKeys.Mute:
-                    _host.ApplySettings(settings.WithMuted(SettingsPanelJson.ParseBool(value, settings.Muted)));
-                    return;
-
                 case SettingKeys.MuteHotKey:
                     ApplyHotKey(key, value, spec => _host.ApplySettings(_host.Settings.WithMuteHotKey(spec)));
                     return;
@@ -204,6 +322,10 @@ namespace ChatterMascot.Desktop
 
                 case SettingKeys.Vrm:
                     ChooseVrm();
+                    return;
+
+                case SettingKeys.VrmChosen:
+                    InstallVrm(value);
                     return;
 
                 // ── core 側 ───────────────────────────────
@@ -243,21 +365,16 @@ namespace ChatterMascot.Desktop
                     _ = TtsPreviewAsync();
                     return;
 
-                case SettingKeys.SummaryPreview:
-                    Notice(key, "実行中です…");
-                    Push(update: true);
-                    _ = SummaryPreviewAsync();
-                    return;
-
                 case SettingKeys.ResetPosition:
                     _host.ResetWindow();
+                    // ★ ここで WindowScale を読まないこと。反映は数フレーム遅れるので
+                    //   まだ古い倍率が返る。スライダーは WatchWindowSize が追いつかせる
                     Notice(key, "位置と大きさを既定に戻しました");
                     Push(update: true);
                     return;
 
                 case SettingKeys.ResetAll:
-                    _host.ResetAll();
-                    Push(update: true);
+                    _ = ResetAllAsync();
                     return;
 
                 case SettingKeys.Quit:
@@ -438,53 +555,109 @@ namespace ChatterMascot.Desktop
             }
         }
 
-        private async Task SummaryPreviewAsync()
+        /// <summary>
+        /// すべての設定を既定へ戻す。
+        ///
+        /// ★★ <b>取り消せない</b>（<c>models/</c> の <c>.vrm</c> を消す）ので、必ず確認を取る。
+        /// ★ <b>core のぶんは <c>PATCH</c> で戻す。</b> 既定値はサーバーが返す
+        ///   （<c>GET /v1/config</c> の <c>defaults</c>）—— <b>C# に書き写さないこと</b>。
+        ///   写した瞬間に「core を直したのにこちらだけ古い既定に戻す」がありうる。
+        /// ★ <b>サーバーに繋がらないときは、戻らなかったものを言うこと。</b>
+        ///   黙って半分だけ戻すのがいちばん悪い。
+        /// </summary>
+        private async Task ResetAllAsync()
         {
-            try
-            {
-                var result = await _client.SummaryPreviewAsync(SummaryPreviewTimeoutMs);
-                if (!result.Ok)
-                {
-                    Notice(SettingKeys.SummaryPreview, result.Reason);
-                    Push(update: true);
-                    return;
-                }
+            if (!Confirm()) return;
 
-                var root = result.Body as JObject;
-                var outcome = root != null && root["outcome"] != null ? root["outcome"].ToString() : "";
-                var summary = root != null && root["summary"] != null && root["summary"].Type == JTokenType.String
-                    ? root["summary"].Value<string>()
-                    : null;
+            // 1. Unity 側（settings.json + window.json）
+            _host.ResetUnitySettings();
+            _context.WindowScale = _host.WindowScale;
 
-                Notice(SettingKeys.SummaryPreview, DescribeSummary(outcome, summary));
-                Push(update: true);
-            }
-            catch (Exception e)
+            // 2. 選んだモデルのファイル
+            string modelsError;
+            var removedModels = TryRemoveModels(out modelsError);
+
+            // 3. core 側
+            var coreError = await ResetCoreAsync();
+
+            var message = "既定に戻しました";
+            if (removedModels > 0) message += $"（モデル {removedModels} 件を削除）";
+            if (!string.IsNullOrEmpty(modelsError)) message += " / " + modelsError;
+            if (!string.IsNullOrEmpty(coreError)) message += " / " + coreError;
+            Notice(SettingKeys.ResetAll, message);
+
+            await RefreshFromCoreAsync();
+            Push(update: true);
+        }
+
+        private bool Confirm()
+        {
+            if (!ChatterMascotNative.IsAvailable) return false;
+
+            var options = new JObject
             {
-                Notice(SettingKeys.SummaryPreview, "実行できませんでした: " + e.Message);
-                Push(update: true);
-            }
+                ["title"] = "すべての設定をリセットしますか？",
+                ["message"] =
+                    "大きさ・位置・音量・モーション・ショートカット・音声スタイル・話す速さ・要約の設定が既定に戻り、"
+                    + "選んだ VRM モデルのファイルも削除されます。この操作は取り消せません。",
+                ["ok"] = "リセットする",
+                ["cancel"] = "やめる",
+                ["destructive"] = true,
+            };
+            return ChatterMascotNative.CM_Confirm(options.ToString(Formatting.None));
         }
 
         /// <summary>
-        /// 要約の結果を1行にする。
+        /// <c>models/</c> の <c>.vrm</c> を消す。消した件数を返す。
         ///
-        /// ★ <b>「失敗しました」で潰さないこと。</b> 要約が効かない原因は
-        ///   「CLI が無い」「時間切れ」「出力が採用できない」で手当てが全部違う。
+        /// ★ <b>ディレクトリごと消さないこと。</b> <c>animations/</c> と同じ親を共有していないとはいえ、
+        ///   ユーザーが置いた別のものが同居している可能性がある。拡張子で絞る。
         /// </summary>
-        private static string DescribeSummary(string outcome, string summary)
+        private static int TryRemoveModels(out string error)
         {
-            switch (outcome)
+            error = null;
+            var removed = 0;
+            try
             {
-                case "ok": return "要約できました: " + (summary ?? "");
-                case "timeout": return "時間内に終わりませんでした（本番では原文がそのまま読み上げられます）";
-                case "no-command": return "要約に使うコマンドが見つかりません（aiSummaryCommand）";
-                case "invalid": return "要約が返りましたが、採用できる形ではありませんでした";
-                case "overflow": return "出力が大きすぎました";
-                case "error": return "要約コマンドが失敗しました";
-                case "internal": return "要約を開始できませんでした";
-                default: return string.IsNullOrEmpty(outcome) ? "結果を読めませんでした" : outcome;
+                var root = AssetPath.RuntimeDirectory(AssetEnvFactory.Current());
+                if (string.IsNullOrEmpty(root)) return 0;
+
+                var models = Path.Combine(root, "models");
+                if (!Directory.Exists(models)) return 0;
+
+                foreach (var file in Directory.GetFiles(models, "*.vrm"))
+                {
+                    File.Delete(file);
+                    removed++;
+                }
             }
+            catch (Exception e)
+            {
+                error = "モデルを消せませんでした: " + e.Message;
+            }
+            return removed;
+        }
+
+        /// <summary>core 側の3つを既定へ。戻せなかったら理由を返す</summary>
+        private async Task<string> ResetCoreAsync()
+        {
+            var config = await _client.ConfigAsync();
+            if (!config.Ok) return "音声スタイル・話す速さ・要約は戻せませんでした（" + config.Reason + "）";
+
+            var root = config.Body as JObject;
+            var defaults = root != null ? root["defaults"] as JObject : null;
+            if (defaults == null) return "音声スタイル・話す速さ・要約は戻せませんでした（既定値を取れません）";
+
+            foreach (var key in new[]
+                     { CoreConfigKeys.SpeakerId, CoreConfigKeys.SpeedScale, CoreConfigKeys.SummaryEnabled })
+            {
+                var value = defaults[key];
+                if (value == null) continue;
+                var result = await _client.PatchConfigAsync(key, value);
+                // ★ 環境変数で固定されているキーは 409。**失敗ではない**ので、そこで止めない
+                if (!result.Ok && result.Status != 409) return key + " を戻せませんでした（" + result.Reason + "）";
+            }
+            return null;
         }
 
         // ── VRM の選択 ────────────────────────────────────────
@@ -503,32 +676,49 @@ namespace ChatterMascot.Desktop
         /// </summary>
         private void ChooseVrm()
         {
-            var settings = new FilePanel.Settings
+            if (!ChatterMascotNative.IsAvailable)
             {
-                title = "VRM モデルを選ぶ",
-                filters = new[] { new FilePanel.Filter("VRM", "vrm") },
-                flags = FilePanel.Flag.FileMustExist,
+                Notice(SettingKeys.Vrm, "ネイティブプラグインが無いのでファイルを選べません");
+                Push(update: true);
+                return;
+            }
+
+            // ★★ UniWindowController の FilePanel を使わないこと。 あちらは
+            //   NSOpenPanel の allowedContentTypes に UTType(tag:"vrm") を渡すが、
+            //   .vrm はシステム登録の UTI を持たないので dynamic UTI になり、
+            //   **拡張子が一致してもグレーアウトする**（実機で踏み、バイナリで確認した）
+            var options = new JObject
+            {
+                ["key"] = SettingKeys.VrmChosen,
+                ["title"] = "VRM モデルを選ぶ",
+                ["message"] = "選んだファイルは models/ にコピーされます",
+                ["button"] = "選ぶ",
+                // ★ 拡張子は C# が持つ（ネイティブに "vrm" を書かない）
+                ["extensions"] = new JArray("vrm"),
             };
 
-            FilePanel.OpenFilePanel(settings, paths =>
+            // ★ 取り消しは何も返らない（false）。エラーではないので何も出さない
+            ChatterMascotNative.CM_OpenFilePanel(options.ToString(Formatting.None));
+        }
+
+        /// <summary>ネイティブのファイル選択で選ばれたパスを受ける</summary>
+        private void InstallVrm(string source)
+        {
+            if (string.IsNullOrEmpty(source)) return;
+
+            string name;
+            string error;
+            if (!TryInstallVrm(source, out name, out error))
             {
-                if (paths == null || paths.Length == 0) return;
-                var source = paths[0];
-                if (string.IsNullOrEmpty(source)) return;
-
-                string name;
-                string error;
-                if (!TryInstallVrm(source, out name, out error))
-                {
-                    Notice(SettingKeys.Vrm, error);
-                    Push(update: true);
-                    return;
-                }
-
-                Notice(SettingKeys.Vrm, "次に起動したときから反映されます");
-                _host.ApplySettings(_host.Settings.WithVrmFileName(name));
+                Notice(SettingKeys.Vrm, error);
                 Push(update: true);
-            });
+                return;
+            }
+
+            Notice(SettingKeys.Vrm, "次に起動したときから反映されます");
+            _host.ApplySettings(_host.Settings.WithVrmFileName(name));
+            // ★ ここは作り直す。選んだモデル名は note に出るので、画面が自分で追いつけない
+            Push(update: true);
         }
 
         private bool TryInstallVrm(string source, out string name, out string error)
@@ -579,12 +769,14 @@ namespace ChatterMascot.Desktop
             if (!ChatterMascotNative.IsAvailable) return;
 
             _context.Settings = _host.Settings;
+            // ★ 大きさは settings.json ではなく**いまの窓**から出す（権威は window.json）
+            _context.WindowScale = _host.WindowScale;
             var items = SettingsSchema.Build(_context);
             var withNotices = ApplyNotices(items);
             var json = SettingsPanelJson.Write(_context.ProductName + " の設定", withNotices);
 
-            if (update) ChatterMascotNative.CM_SettingsPanelUpdate(json);
-            else if (!ChatterMascotNative.CM_SettingsPanelShow(json))
+            if (update) ChatterMascotNative.CM_PanelUpdate(SettingsPanelId, json);
+            else if (!ChatterMascotNative.CM_PanelShow(SettingsPanelId, json))
             {
                 Debug.LogWarning("[Native] 設定パネルを開けませんでした");
             }

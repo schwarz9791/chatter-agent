@@ -112,18 +112,26 @@ namespace ChatterMascot.Desktop.Native
         /// <summary>0 = 成功。それ以外は OSStatus（-9878 = 他のアプリが取っている）</summary>
         [DllImport(Library)]
         [return: MarshalAs(UnmanagedType.I1)]
-        internal static extern bool CM_SettingsPanelShow([MarshalAs(UnmanagedType.LPUTF8Str)] string schemaJson);
+        internal static extern bool CM_PanelShow(int panelId, [MarshalAs(UnmanagedType.LPUTF8Str)] string schemaJson);
 
         [DllImport(Library)]
         [return: MarshalAs(UnmanagedType.I1)]
-        internal static extern bool CM_SettingsPanelUpdate([MarshalAs(UnmanagedType.LPUTF8Str)] string schemaJson);
+        internal static extern bool CM_PanelUpdate(int panelId, [MarshalAs(UnmanagedType.LPUTF8Str)] string schemaJson);
 
         [DllImport(Library)]
-        internal static extern void CM_SettingsPanelHide();
+        internal static extern void CM_PanelHide(int panelId);
 
         [DllImport(Library)]
         [return: MarshalAs(UnmanagedType.I1)]
-        internal static extern bool CM_SettingsPanelIsVisible();
+        internal static extern bool CM_PanelIsVisible(int panelId);
+
+        [DllImport(Library)]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool CM_OpenFilePanel([MarshalAs(UnmanagedType.LPUTF8Str)] string optionsJson);
+
+        [DllImport(Library)]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool CM_Confirm([MarshalAs(UnmanagedType.LPUTF8Str)] string optionsJson);
 
         [DllImport(Library)]
         internal static extern int CM_HotKeyRegister(int id, uint keyCode, uint modifiers);

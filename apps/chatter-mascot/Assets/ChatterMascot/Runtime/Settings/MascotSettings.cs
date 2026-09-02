@@ -16,6 +16,11 @@ namespace ChatterMascot.Settings
     ///   同じ音量である必要は無い）。話速は<b>合成のパラメータ</b>で、
     ///   <c>audio_query</c> の <c>speedScale</c> を変えない限り WAV が変わらない。
     ///
+    /// ★★ <b>キャラクターの大きさをここに持たないこと。</b> あれは<b>ウィンドウの大きさ</b>で、
+    ///   <c>window.json</c> が既に持っている。両方に持つと権威が2つになり、ユーザーが窓を
+    ///   直接リサイズしたときどちらが勝つのか説明できない
+    ///   （→ <see cref="SettingsMapping.ScaleForWindow"/>）。
+    ///
     /// ★ <b>「キャラクターを隠す」を入れないこと。</b> 隠した状態を永続化すると、
     ///   次の起動で「マスコットが出ない」に化ける。ミュートはアイコンが薄くなるので
     ///   気づけるが、隠れているものは気づきようが無い。
@@ -34,14 +39,13 @@ namespace ChatterMascot.Settings
         /// </summary>
         private MascotSettings(
             bool muted, string muteHotKey, string hideHotKey,
-            float characterScale, float volume,
+            float volume,
             bool idleMotion, bool cursorGaze, bool blink,
             string vrmFileName)
         {
             Muted = muted;
             MuteHotKey = muteHotKey;
             HideHotKey = hideHotKey;
-            CharacterScale = characterScale;
             Volume = volume;
             IdleMotion = idleMotion;
             CursorGaze = cursorGaze;
@@ -67,15 +71,6 @@ namespace ChatterMascot.Settings
         ///   （→ 型の doc）。
         /// </summary>
         public string HideHotKey { get; }
-
-        /// <summary>
-        /// 画面に映るキャラクターの大きさ。1.0 が出荷値。
-        ///
-        /// ★ <b><c>VrmStage.headroom</c> をそのまま持たないこと。</b> あちらは
-        ///   <b>大きいほどキャラが小さい</b>ので、設定ファイルにそのまま入れると
-        ///   人が読んだときに意味が逆に見える。写像は <see cref="SettingsMapping.HeadroomFor"/>。
-        /// </summary>
-        public float CharacterScale { get; }
 
         /// <summary>
         /// 再生音量。<b>0.0〜2.0</b>（1.0 が上限ではない）。
@@ -120,7 +115,7 @@ namespace ChatterMascot.Settings
             {
                 return new MascotSettings(
                     false, HotKeySpec.Default, HotKeySpec.DefaultHide,
-                    1f, 1f,
+                    1f,
                     true, true, true,
                     "");
             }
@@ -135,7 +130,7 @@ namespace ChatterMascot.Settings
         /// </summary>
         private MascotSettings Copy(
             bool? muted = null, string muteHotKey = null, string hideHotKey = null,
-            float? characterScale = null, float? volume = null,
+            float? volume = null,
             bool? idleMotion = null, bool? cursorGaze = null, bool? blink = null,
             string vrmFileName = null)
         {
@@ -143,7 +138,6 @@ namespace ChatterMascot.Settings
                 muted ?? Muted,
                 muteHotKey ?? MuteHotKey,
                 hideHotKey ?? HideHotKey,
-                characterScale ?? CharacterScale,
                 volume ?? Volume,
                 idleMotion ?? IdleMotion,
                 cursorGaze ?? CursorGaze,
@@ -154,7 +148,6 @@ namespace ChatterMascot.Settings
         public MascotSettings WithMuted(bool value) => Copy(muted: value);
         public MascotSettings WithMuteHotKey(string value) => Copy(muteHotKey: value);
         public MascotSettings WithHideHotKey(string value) => Copy(hideHotKey: value);
-        public MascotSettings WithCharacterScale(float value) => Copy(characterScale: value);
         public MascotSettings WithVolume(float value) => Copy(volume: value);
         public MascotSettings WithIdleMotion(bool value) => Copy(idleMotion: value);
         public MascotSettings WithCursorGaze(bool value) => Copy(cursorGaze: value);
@@ -172,7 +165,6 @@ namespace ChatterMascot.Settings
                 && string.Equals(HideHotKey, other.HideHotKey, StringComparison.Ordinal)
                 // ★ float は == で比べてよい。ここで比べているのは「保存された値が変わったか」で、
                 //   両辺とも同じ経路（刻みへの丸め）を通った値なので、近似の一致は要らない
-                && CharacterScale.Equals(other.CharacterScale)
                 && Volume.Equals(other.Volume)
                 && IdleMotion == other.IdleMotion
                 && CursorGaze == other.CursorGaze
@@ -190,7 +182,6 @@ namespace ChatterMascot.Settings
             var hash = Muted ? 1 : 0;
             hash = (hash * 397) ^ (MuteHotKey != null ? MuteHotKey.GetHashCode() : 0);
             hash = (hash * 397) ^ (HideHotKey != null ? HideHotKey.GetHashCode() : 0);
-            hash = (hash * 397) ^ CharacterScale.GetHashCode();
             hash = (hash * 397) ^ Volume.GetHashCode();
             hash = (hash * 397) ^ (IdleMotion ? 1 : 0);
             hash = (hash * 397) ^ (CursorGaze ? 1 : 0);

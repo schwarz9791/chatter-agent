@@ -18,7 +18,6 @@ namespace ChatterMascot.Tests
             Assert.That(defaults.Muted, Is.False);
             Assert.That(defaults.MuteHotKey, Is.EqualTo(HotKeySpec.Default));
             Assert.That(defaults.HideHotKey, Is.EqualTo(HotKeySpec.DefaultHide));
-            Assert.That(defaults.CharacterScale, Is.EqualTo(1f));
             Assert.That(defaults.Volume, Is.EqualTo(1f));
             Assert.That(defaults.IdleMotion, Is.True);
             Assert.That(defaults.CursorGaze, Is.True);

@@ -45,9 +45,10 @@ namespace ChatterMascot.Settings
                 {
                     ["hideHotKey"] = settings.HideHotKey ?? HotKeySpec.DefaultHide,
                 },
+                // ★ ここに「大きさ」は入らない。ウィンドウの大きさは window.json が持つ
+                //   （→ MascotSettings の型 doc）
                 ["character"] = new JObject
                 {
-                    ["scale"] = Round(settings.CharacterScale, SettingsMapping.ScaleStep),
                     ["idleMotion"] = settings.IdleMotion,
                     ["cursorGaze"] = settings.CursorGaze,
                     ["blink"] = settings.Blink,
@@ -216,12 +217,6 @@ namespace ChatterMascot.Settings
             {
                 switch (property.Key)
                 {
-                    case "scale":
-                        settings = settings.WithCharacterScale(ReadNumber(
-                            property.Value, "character.scale", settings.CharacterScale,
-                            SettingsMapping.ScaleMin, SettingsMapping.ScaleMax, SettingsMapping.ScaleStep, warn));
-                        break;
-
                     case "idleMotion":
                         settings = settings.WithIdleMotion(
                             ReadBool(property.Value, "character.idleMotion", settings.IdleMotion, warn));

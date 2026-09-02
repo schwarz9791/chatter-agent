@@ -124,6 +124,12 @@ grep RecreateSurface "$HOME/Library/Logs/schwarz9791/Chatter Mascot/Player.log"
 ★ **`macRetinaSupport` は切らないこと。** 表示がぼやけるうえ、`UniWindowMoveHandle` の
 Retina 座標系の手当てが前提にしている。
 
+★ **設定パネルの「大きさ」もここを動かす**（#76）。倍率 0.5〜2.0 を
+`DefaultWidthPoints x DefaultHeightPoints` に掛けてウィンドウごと変える。
+`VrmStage` が `Screen.width/height` の変化を見てフレーミングし直すので、
+**ウィンドウさえ変えればモデルは勝手に収まる**（カメラの前後＝`Headroom` は触らない。
+触ると頭と足が対称に欠ける）。
+
 ★ **位置と大きさは `~/.config/chatter-agent/mascot/window.json` に
 ポイントで永続化される**（#16）。**`PlayerPrefs` は使っていない** ——
 macOS では `tech.sukima.chatter-mascot.plist` に書かれるので、上の
@@ -356,32 +362,44 @@ cd apps/chatter-mascot
 
 #### 設定パネルまわり（#76）
 
-**キャラクターを右クリック**すると開く。メニューバーの「設定を開く…」と
-「Chatter Mascot 0.1.0」からも同じパネルが開く。
+**キャラクターを右クリック**すると開閉する（もう一度押すと閉じる）。メニューバーの
+「設定を開く…」からも同じパネルが開く。「Chatter Mascot について」は**別のダイアログ**で、
+版とライセンス全文はそちらに出る。
+
+★ **`⌃ + 左クリック`は効かない。** macOS の慣習だが常駐マスコットでは成立しない
+（→ [`../../docs/mascot.md`](../../docs/mascot.md)）。副ボタンを出せない環境では
+メニューバーの「設定を開く…」を使う。
 
 ★ **パネルが開かないときは、まず `Player.log` を見る。**
 
 ```
-[Native] 設定パネル: frame=1041,-1111 606x664 visible=1 key=0 screen={{1041, -1169}, {1800, 1169}}
+[Native] パネル0: frame=1041,-1111 520x664 visible=1 key=0 screen={{1041, -1169}, {1800, 1169}}
 ```
 
-`visible=1` なら**こちらは仕事を終えている** —— 見えないのは
+`パネル0` が設定、`パネル1` が「について」。`visible=1` なら**こちらは仕事を終えている** —— 見えないのは
 「他のウィンドウの背後に居る」か「別のディスプレイに出ている」。
 `frame` と `screen` がそれを教える。
 
 ★ **右クリックが効かないときは、この行が出ているかを見る。**
 
 ```
-[Mascot] 右クリックのハンドルを付けました: ModelPlaceholder
-[Mascot] 右クリックのハンドルを付けました: VRM1
+[Mascot] 右クリックを見張ります
 ```
 
-出ていなければハンドルが付いていない。出ているのに効かないなら、ポインタイベントが
-届いていない（→ `docs/mascot.md`「EventSystem があってもポインタイベントは配送されない」）。
+出ていなければ見張りが据わっていない（`UniWindowController` の居ないシーンでは据えない）。
+出ているのに効かないときは、**キャラクターの不透明な画素の上を押しているか**を疑う ——
+判定はクリック透過の状態そのもの（`isClickThrough`）で、脚の間などの透けている場所では
+下のアプリへ抜ける（→ [`../../docs/mascot.md`](../../docs/mascot.md)）。
 
-★ **パネルの中身だけ確かめたいときは `-settingsProbe`。** `LSUIElement` のアプリは
-メニューバーのアイコンを自動で押せない（アクセシビリティから見えない）ので、
-起動時に開く経路を用意してある（`-quitProbe` / `-windowProbe` と同じ）。
+★ **メニューバーはアクセシビリティから触れる**（`menu bar 2`。ターミナルに権限が要る）。
+
+```bash
+osascript -e 'tell application "System Events" to tell process "Chatter Mascot" \
+  to click menu item "設定を開く…" of menu 1 of menu bar item 1 of menu bar 2'
+```
+
+★ **権限を与えたくないときは `-settingsProbe`。** 起動時にパネルを開く経路を用意してある
+（`-quitProbe` / `-windowProbe` と同じ）。
 
 ```bash
 "Build/ChatterMascot.app/Contents/MacOS/Chatter Mascot" -settingsProbe
@@ -401,7 +419,6 @@ cd apps/chatter-mascot
   "audio": { "mute": false, "muteHotKey": "ctrl+opt+m", "volume": 1.0 },
   "ui": { "hideHotKey": "ctrl+opt+h" },
   "character": {
-    "scale": 1.0,
     "idleMotion": true,
     "cursorGaze": true,
     "blink": true,
@@ -410,7 +427,12 @@ cd apps/chatter-mascot
 }
 ```
 
-★ **音声スタイル・話す速さ・要約の ON/OFF はここに無い。** あれは core の
+★★ **「大きさ」もここに無い。** ウィンドウの大きさは `window.json` が持っていて、
+スライダーはその写しでしかない（**現在の高さ ÷ 480** が倍率）。両方に持つと権威が2つになり、
+ユーザーが窓を直接リサイズしたときにどちらが勝つのか説明できなくなる
+（→ [`../../docs/mascot.md`](../../docs/mascot.md)）。
+
+★ **音声スタイル・話す速さ・要約の ON/OFF もここに無い。** あれは core の
 `~/.config/chatter-agent/config.json` が持ち、設定パネルは `PATCH /v1/config` 経由で書く
 （→ [`../../docs/protocol.md`](../../docs/protocol.md) の「制御 API」）。
 音量が Unity 側で速さが core 側なのは紛らわしいが理由がある —— 音量は**再生側のつまみ**で

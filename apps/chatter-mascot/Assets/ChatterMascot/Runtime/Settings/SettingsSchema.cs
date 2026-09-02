@@ -11,6 +11,14 @@ namespace ChatterMascot.Settings
     public static class SettingKeys
     {
         public const string Vrm = "vrm";
+
+        /// <summary>
+        /// ファイル選択で選ばれたパス（ネイティブ → C#）。
+        ///
+        /// ★ <c>Vrm</c> と分けること。同じキーだと「ボタンが押された」と
+        ///   「ファイルが選ばれた」を区別できず、選んだ直後にもう一度ダイアログが開く。
+        /// </summary>
+        public const string VrmChosen = "vrmChosen";
         public const string Scale = "scale";
 
         public const string Speaker = "speaker";
@@ -23,9 +31,7 @@ namespace ChatterMascot.Settings
         public const string Blink = "blink";
 
         public const string SummaryEnabled = "summaryEnabled";
-        public const string SummaryPreview = "summaryPreview";
 
-        public const string Mute = "mute";
         public const string MuteHotKey = "muteHotKey";
         public const string HideHotKey = "hideHotKey";
 
@@ -70,7 +76,7 @@ namespace ChatterMascot.Settings
                 SettingKeys.Vrm, "VRM モデルを選ぶ…",
                 note: string.IsNullOrEmpty(c.VrmFileName) ? "同梱のモデルを使っています" : c.VrmFileName));
             items.Add(SettingSpec.Slider(
-                SettingKeys.Scale, "大きさ", settings.CharacterScale,
+                SettingKeys.Scale, "大きさ", c.WindowScale,
                 SettingsMapping.ScaleMin, SettingsMapping.ScaleMax, SettingsMapping.ScaleStep));
 
             // ── オーディオ ───────────────────────────────────
@@ -121,13 +127,16 @@ namespace ChatterMascot.Settings
                 enabled: c.CoreReachable && !summaryOverridden,
                 note: CoreNote(c, summaryOverridden, CoreConfigKeys.SummaryEnabled,
                     "要約には時間がかかります（間に合わなければ原文を読み上げます）")));
-            items.Add(SettingSpec.Button(
-                SettingKeys.SummaryPreview, "テスト要約を実行",
-                enabled: c.CoreReachable, note: c.CoreReachable ? "" : c.CoreNote));
+            // ★ **「テスト要約を実行」は出さない。** 結果（要約文）を項目の note に出す形しか
+            //   無く、原文が見えないので「要約されているか」が判断できないうえ、
+            //   長い結果でパネルが伸びた。サーバー側の口
+            //   （`POST /v1/summary/preview`）は残してあるので、確かめたいときは curl で叩く。
 
             // ── ショートカット ────────────────────────────────
             items.Add(SettingSpec.Section("ショートカット"));
-            items.Add(SettingSpec.Bool(SettingKeys.Mute, "ミュート（声だけ消す）", settings.Muted));
+            // ★ **ミュートのチェックボックスは出さない。** ミュートはメニューバー
+            //   （アイコンが薄くなる）とショートカットで操作するもの、と割り切った。
+            //   ここに置くと、ショートカットで切り替えたときに**パネルだけ古い状態のまま**になる。
             // ★ 画面に出すのは記号（⌃⌥M）。**保存される文字列（ctrl+opt+m）ではない。**
             //   パネルが返してくるのは keyCode と修飾マスクの数値なので、
             //   ネイティブは保存形式を一度も見ない
@@ -139,21 +148,41 @@ namespace ChatterMascot.Settings
 
             // ── リセット ─────────────────────────────────────
             items.Add(SettingSpec.Section("リセット"));
-            items.Add(SettingSpec.Button(SettingKeys.ResetPosition, "キャラクターの位置をリセット"));
-            // ★ core の `config.json` は触らない。別プロセスの設定を消すのは越権
+            items.Add(SettingSpec.Button(SettingKeys.ResetPosition, "キャラクターの位置と大きさをリセット"));
+            // ★★ **取り消せない操作。** models/ に置いた .vrm も消えるので、
+            //   ネイティブの確認ダイアログを挟む（→ SettingsPanelBridge）
             items.Add(SettingSpec.Button(
-                SettingKeys.ResetAll, "すべての設定をリセット",
-                note: "音声スタイル・話す速さ・要約の設定は残ります"));
+                SettingKeys.ResetAll, "すべての設定をリセット…",
+                note: "選んだモデルのファイルも消して、完全に初期状態へ戻します"));
 
-            // ── このアプリについて ─────────────────────────────
-            items.Add(SettingSpec.Section("このアプリについて"));
-            items.Add(SettingSpec.Text(
-                SettingKeys.Version, "バージョン",
-                string.IsNullOrEmpty(c.Version) ? c.ProductName : c.ProductName + " " + c.Version));
-            items.Add(SettingSpec.Text(SettingKeys.License, "ライセンス", c.LicenseText));
+            // ★ **「このアプリについて」はここに出さない。** ライセンス本文が長く、
+            //   設定パネルの大半を占めてしまう。メニューバーの「Chatter Mascot について」から
+            //   別のダイアログで開く（→ AboutSchema）。
+
             items.Add(SettingSpec.Button(SettingKeys.Quit, "終了"));
 
             return items;
+        }
+
+        /// <summary>
+        /// 「Chatter Mascot について」の中身。**設定とは別のダイアログ**に出す。
+        ///
+        /// ★ <b>設定パネルに混ぜないこと。</b> ライセンス本文だけで数百行あり、
+        ///   設定の項目がその下に埋もれる。
+        ///
+        /// ★ <b>同じレンダラで描く</b>（<c>CM_PanelShow</c> のパネル ID 違い）。
+        ///   2枚目のために ObjC を書き足さない。
+        /// </summary>
+        public static IReadOnlyList<SettingSpec> BuildAbout(SettingsContext context)
+        {
+            var c = context ?? new SettingsContext();
+            return new List<SettingSpec>
+            {
+                SettingSpec.Text(
+                    SettingKeys.Version, "バージョン",
+                    string.IsNullOrEmpty(c.Version) ? c.ProductName : c.ProductName + " " + c.Version),
+                SettingSpec.Text(SettingKeys.License, "ライセンス", c.LicenseText),
+            };
         }
 
         /// <summary>保存されている文字列を画面用の記号にする。読めなければそのまま出す</summary>

@@ -168,7 +168,6 @@ namespace ChatterMascot.Tests
             var source = MascotSettings.Defaults
                 .WithMuted(true)
                 .WithVolume(0.3f)
-                .WithCharacterScale(1.4f)
                 .WithIdleMotion(false)
                 .WithCursorGaze(false)
                 .WithBlink(false)
@@ -199,11 +198,33 @@ namespace ChatterMascot.Tests
         {
             MascotSettings parsed;
             string error;
-            var raw = "{\"version\":1,\"audio\":{\"volume\":9.0},\"character\":{\"scale\":-3.0}}";
+            var raw = "{\"version\":1,\"audio\":{\"volume\":9.0}}";
 
             Assert.That(SettingsJson.TryParse(raw, out parsed, out error, null), Is.True, error);
             Assert.That(parsed.Volume, Is.EqualTo(SettingsMapping.VolumeMax));
-            Assert.That(parsed.CharacterScale, Is.EqualTo(SettingsMapping.ScaleMin));
+        }
+
+        /// <summary>
+        /// ★★ キャラクターの大きさは <c>window.json</c> が持つ。
+        ///   ここに書くと権威が2つになるので、**書かないし読まない**
+        ///   （前の版が書いた <c>character.scale</c> は未知キーとして警告して無視する）。
+        /// </summary>
+        [Test]
+        public void DoesNotStoreTheCharacterSize()
+        {
+            Assert.That(SettingsJson.Write(MascotSettings.Defaults), Does.Not.Contain("scale"));
+
+            MascotSettings parsed;
+            string error;
+            var warnings = new List<string>();
+            Assert.That(
+                SettingsJson.TryParse(
+                    "{\"version\":1,\"character\":{\"scale\":1.4,\"blink\":false}}",
+                    out parsed, out error, warnings.Add),
+                Is.True, error);
+
+            Assert.That(parsed.Blink, Is.False, "他のキーは読めること");
+            Assert.That(warnings, Has.Some.Contains("scale"));
         }
 
         /// <summary>★ 数値ですらないときは既定に倒す（クランプする先が無い）</summary>

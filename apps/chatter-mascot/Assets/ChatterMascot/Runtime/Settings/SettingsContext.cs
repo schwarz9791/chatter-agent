@@ -28,6 +28,15 @@ namespace ChatterMascot.Settings
             get { return Settings.VrmFileName; }
         }
 
+        /// <summary>
+        /// キャラクターの大きさ（＝<b>ウィンドウの倍率</b>）。1.0 が出荷値。
+        ///
+        /// ★★ <b><see cref="MascotSettings"/> に持たない。</b> ウィンドウの大きさは
+        ///   <c>window.json</c> が持っているので、**いまの窓から読み替えて**ここに入れる
+        ///   （→ <see cref="SettingsMapping.ScaleForWindow"/>）。両方に持つと権威が2つになる。
+        /// </summary>
+        public float WindowScale { get; set; } = 1f;
+
         // ── core 側が権威を持つ値 ─────────────────────────────
 
         /// <summary>

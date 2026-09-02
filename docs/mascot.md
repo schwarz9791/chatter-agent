@@ -2338,29 +2338,127 @@ if (![gPanel setFrameUsingName:gPanel.frameAutosaveName]) [gPanel center];
 Cocoa の `NSEventModifierFlag*` と Carbon の `cmdKey` 等は**ビットが違う**ので、
 `RegisterEventHotKey` が要求する Carbon の形に**ネイティブ側で**直してから渡す。
 
-### ★ 右クリックは `UniWindowMoveHandle` と衝突しない
+### ★★ 常駐マスコットの右クリックは `IPointerClickHandler` では成立しない（#76）
 
-同梱のドラッグハンドルは `OnBeginDrag` の先頭で
-`if (eventData.button != PointerEventData.InputButton.Left) return;` と早期 return するので、
-右ボタンでは `_isDragging` が立たず**窓は動かない**（上流のソースで確認）。
-`IPointerClickHandler` を `Collider` 持ちに足すだけで両立する。
+**症状**: キャラを右クリックしても設定パネルが開かない。左クリックを1回挟むと開くようになる
+——「たまに効く」といういちばん悪い壊れ方をする。
 
-★ **ポインタイベントの配線は #12 の時点で揃っている。** `SceneFixups` が
-`EventSystem` / `InputSystemUIInputModule` / `PhysicsRaycaster` を面倒みており、
-`InputSystem_Actions` の `RightClick` もバインド済み。新しい配線は要らない。
+**原因は2段ある。**
 
-★ **付けたことを1行残すこと。** 右クリックが効かないとき、「ハンドルが付いていない」のか
-「ポインタイベントが届いていない」のかで手当てが全く違う。
+**① Input System の `Mouse` デバイスが、非アクティブの間は無効化される。**
+`InputSettings.backgroundBehavior` の既定は `ResetAndDisableNonBackgroundDevices` で、
+フォーカスを失うと `Mouse`（`canRunInBackground == false`）が
+`TemporaryWhilePlayerIsInBackground` で無効になる。`runInBackground: 1` は
+イベントストリームの手前の関門しか通さず、ここは塞げない。
 
-### ★ `LSUIElement` のアプリは「メニューバーを押す」を自動化できない
+```csharp
+// StatusItemBridge.AllowInputWithoutFocus()
+InputSystem.settings.backgroundBehavior = InputSettings.BackgroundBehavior.IgnoreFocus;
+```
 
-アクセシビリティからステータスバーの項目が見えない（#75 で実測）ので、設定パネルの中身を
-自動で確かめるには**その手前を飛ばす経路**が要る。`-settingsProbe` を足してある
-（`-quitProbe` / `-windowProbe` と同じ位置づけ）。
+★ **`Assets/` に `InputSettings` アセットを置くより実行時に立てる方がよい。** アセットは
+`EditorBuildSettings` の `com.unity.input.settings` に登録が要り、**Android（#25）にも効いてしまう**。
+常駐マスコットの都合なので `Desktop` asmdef に閉じる。
 
-★ 右クリックは自動化できる（`CGEvent` の `rightMouseDown` / `rightMouseUp`）が、
-**それはポインタイベントの経路そのものを試していることになる**ので、
-「パネルの中身」を確かめたいときの手段としては切り分けが混ざる。
+**② それでも `OnPointerClick` は呼ばれない。座標が古いから。**
+macOS が `mouseMoved` を配送するのは**前面のアプリだけ**なので、
+`Mouse.current.position` は**最後にフォーカスがあったときの座標で止まる**。
+右ボタンのイベント自体は届いているのに、UI のレイキャストが**別の場所**を撃つ。
+
+```
+[DIAG] click button=Right ...   ← 窓は 1770,1680 に居るのに
+[DIAG] mouse enabled=True added=True pos=(588.00, 156.00)
+```
+
+同じことがパッケージ側にも書いてある（`UniWindowController.GetClientCursorPosition`）:
+
+> New Input System ではフォーカスが無い場合にマウス座標が取得できないため独自に計算する
+
+**採った形**: **押下はイベント、位置はクリック透過の状態**（`ContextClickHandles.cs`）。
+
+```csharp
+var pressed = (mouse != null && mouse.rightButton.wasPressedThisFrame) || (downNow && !_wasDown);
+...
+if (_controller.isClickThrough) return;   // 不透明な画素の上＝キャラクターの上
+StatusItemBridge.ToggleSettings();
+```
+
+★★ **押下をポーリングだけで取らないこと。** `UniWindowController.GetMouseButtons()`
+（`NSEvent.pressedMouseButtons`）は毎フレーム覗くだけなので、30fps では
+**1フレーム（33ms）より短い押下が丸ごと消える**。トラックパッドの2本指タップはまさにそれで、
+実測でも合成した 60ms の右クリックを **1/4 しか拾えなかった**。イベント側を主にして、
+取りこぼしに備えてポーリングも併せて見る（同じ押下で2回開閉しないよう押しっぱなし扱いに畳む）。
+
+★ **当たり判定は自分で作らない。** `isClickThrough` は**グローバルなカーソル座標**から
+毎フレーム計算されていて（`ReadPixels` によるα判定）フォーカスに依存しない。
+これを使えば**掴める領域と右クリックできる領域が定義上ずれない**。
+コライダーに `IPointerClickHandler` を配る旧実装は、granularity が
+コライダー任せになるうえ、VRM を差し替えるたびに付け直しが要った。
+
+★ **ドラッグとは衝突しない。** 同梱の `UniWindowMoveHandle` は `OnBeginDrag` の先頭で
+`if (eventData.button != PointerEventData.InputButton.Left) return;` と早期 return する。
+
+★ **既知の穴。** 設定パネルがキャラクターに重なっていると、**パネルの上での右クリックでも閉じる**
+（マスコット側からは「不透明な画素の上で右ボタンが押された」と区別がつかない）。
+パネルには右クリックで何かが出る部品が無いので実害は「閉じる」だけ。潰すには
+ネイティブ側にパネルの矩形を問い合わせる口が要るので、割に合わないと判断した。
+
+### ★★ `⌃ + 左クリック`は常駐マスコットでは成立しない（#76）
+
+macOS の慣習だが、**二重に成立しない**（実測）:
+
+1. **修飾キーが読めない。** キーイベントは前面のアプリにしか配送されないので、
+   押していても `Keyboard.current.leftCtrlKey.isPressed` は `false` のまま。
+   `backgroundBehavior = IgnoreFocus` はデバイスを生かすだけで、**OS の配送先は変えられない**
+2. **非アクティブなアプリへの最初の左クリックはアクティブ化に食われる。**
+   右クリックはアクティブ化しないのでそのまま届く
+
+つまり「2回クリックが要り、しかも修飾キーが効かない」ものになる。**押しても何も起きない操作を
+残さない**（→ `SettingsSchema` の同じ方針）。副ボタンを出せない環境の逃げ道は
+**メニューバーの「設定を開く…」**で足りている。
+
+★ `UniWindowController.GetModifierKeys()`（`NSEvent.modifierFlags` 由来）なら 1 は回避できる。
+それでも 2 が残るので採らなかった。
+
+### ★★ `HideFlags.HideAndDontSave` のオブジェクトは `FindFirstObjectByType` から見えない
+
+**症状**: 「キャラクターの位置をリセット」がその場で効かず、アプリを再起動して初めて反映される。
+
+`WindowGeometry` の `Keeper` は `HideFlags.HideAndDontSave` を持つ GameObject に載っている。
+Unity のドキュメントに明記されているとおり、`Object.FindFirstObjectByType` は
+**`HideFlags.DontSave` を持つオブジェクトを返さない**。`WindowGeometry.Reset()` は常に
+「見つからない」枝に落ち、`window.json` を消すだけで終わっていた（ログにも
+`ウィンドウの管理が動いていないので、位置のリセットは次の起動から効きます` が出ていた）。
+
+**手当て**: `StatusItemBridge` と同じ形に揃えて **static フィールドで保持**する
+（`Start` で代入、`OnDestroy` で解除）。`FindFirstObjectByType` を使わない。
+
+### ★ メニューバーの項目はアクセシビリティから触れる（#75 の記述を訂正）
+
+`LSUIElement` のアプリでも、ステータス項目は **`menu bar 2`**（`menu bar 1` はアプリの
+メインメニュー）から見えるし、**名前でクリックできる**。#76 で実測:
+
+```bash
+osascript -e 'tell application "System Events" to tell process "Chatter Mascot" \
+  to return name of every menu item of menu 1 of menu bar item 1 of menu bar 2'
+# → ミュート（⌃⌥J）, キャラクターを隠す（⌃⌥H）, 設定を開く…, missing value, Chatter Mascot について, 終了
+
+osascript -e 'tell application "System Events" to tell process "Chatter Mascot" \
+  to click menu item "Chatter Mascot について" of menu 1 of menu bar item 1 of menu bar 2'
+```
+
+★ **ターミナルにアクセシビリティ権限が要る。** 権限が無いと項目そのものが見えないので、
+#75 の「見えない」はおそらくそれ。**権限の有無で結論が変わる測定**だと分かるように書くこと。
+
+★ `-settingsProbe` は残してある（`-quitProbe` / `-windowProbe` と同じ位置づけ）。
+権限を与えたくない環境や、メニューバー管理ツールが項目を隠している場合に効く。
+
+### ★ 画面のスクリーンショットはディスプレイごとに倍率が違う
+
+`screencapture -R x,y,w,h` の矩形は**ポイント**だが、返る画像は**そのディスプレイの
+バックingスケール**になる。Retina のサブディスプレイでは画像が2倍で返るので、
+**画像上で測った座標をそのままクリックに使うと外す**（#76 の自動確認で踏んだ）。
+画像の幅を矩形の幅で割って倍率を出してから換算すること。
 
 ### ★ VRM の差し替えは次の起動から
 
@@ -2374,28 +2472,121 @@ Cocoa の `NSEventModifierFlag*` と Carbon の `cmdKey` 等は**ビットが違
 ★ **ファイル名も覚える。** `models/*.vrm` の走査は `Ordinal` の先頭が勝つので、
 名前を覚えないと**2つ目を選んでも反映されない**（→ `Runtime/Vrm/AssetPath.cs` の探索順3）。
 
+### ★★ `.vrm` はシステムに UTI が無いので、`allowedContentTypes` では絞れない
+
+**症状**: 「VRM モデルを選ぶ…」でダイアログは開くが、**`.vrm` がグレーアウトして選べない**。
+
+`LibUniWinC`（`FilePanel.OpenFilePanel`）は `NSOpenPanel.allowedContentTypes` に
+`UTType(tag: "vrm", tagClass: .filenameExtension, conformingTo: nil)` を渡す。
+`.vrm` はシステムに登録された UTI を持たない（実測: `kMDItemContentType = "dyn.ah62d4rv4ge81q6xr"`）ため、
+返るのは **dynamic UTType** で、パネルの有効判定に一致しない。
+`setAllowedFileTypes:` はそもそも呼ばれていない（バイナリにセレクタが無い）。
+
+**手当て**: ネイティブプラグインに自前の `NSOpenPanel` を足した（`CM_OpenFilePanel`）。
+
+★★ **`allowedContentTypes` で絞らないこと。** 代わりに `NSOpenPanelDelegate` の
+`panel:shouldEnableURL:` で「ディレクトリ、または拡張子が一致するファイル」だけを有効にする。
+**UTI の登録状況に依存しない**のが要点。
+
+★ **拡張子もタイトルも C# から渡す**（`CM_OpenFilePanel(const char* optionsJson)`）。
+ネイティブに `"vrm"` を書かない。
+
+★ **`runModal` は Unity のメインスレッドを止める。** WebSocket の watchdog が
+「何も届かない」と判断して繋ぎ直すが、それは**正常な復帰**であって異常ではない
+（実測でも `切断されました … 繋ぎ直します` → `接続しました` が出る）。
+
+### ★★ 自分起点の変更でパネルを作り直さない
+
+**症状**: スライダーの**つまみを掴んでドラッグできない**（バーのクリックだけは効く）。重い。
+
+`HandleSetting` → `ApplySettings` → `Refresh()` → `CMApplySchema` が**全ビューを作り直す**ので、
+スライダーの最初のイベント（mouseDown）で**自分自身が破棄される**。
+
+**手当ては3つ**:
+
+1. ★★ **自分起点では作り直さない。** 画面には既に新しい値が出ている（ネイティブが `%g` で
+   追従させている）。作り直すのは**外から変わったとき**だけ
+2. **Unity 側の適用と保存もデバウンスする**（core への `PATCH` と同じ 300ms）。
+   ★ とくに**ウィンドウのリサイズは重い**（`Keeper` が最大5回書き直して追従する）
+3. **ドラッグ中に届いた変更は保留にする**（ネイティブはドラッグ中を投げないが、矢印キーの連打は届く）
+
+### ★★ ウィンドウの反映は数フレーム遅れる —— 直後に読むと古い値が返る
+
+**症状**: 「キャラクターの位置と大きさをリセット」を押しても、**「大きさ」のスライダーが
+1.5 のまま**残る。
+
+`WindowGeometry.Reset()` / `SetSize()` は位置と大きさを何度か書き直して追従するので、
+**押した直後の `CurrentSize()` はまだ古い**。`Notice` と一緒にその場で読むと外す。
+
+**手当て**: `Tick()` で毎フレーム `WindowScale` を見張り、`_context` と食い違ったら追いつかせる
+（`SettingsPanelBridge.WatchWindowSize`）。**窓の端を掴んでリサイズしたときにも同じ経路で追いつく**。
+
+★ **保留中（`_pendingScale != null`）は見送ること。** つまみをドラッグしている最中に
+作り直すと、掴んでいるスライダーごと消える。
+
+### ★★ 「大きさ」の権威は `window.json` ひとつ —— `settings.json` に持たせない
+
+cc-mascot の「キャラクターサイズ」はコンテナ（ウィンドウ）の大きさで、ユーザーの期待もそちら。
+`VrmStage.Headroom`（カメラの前後）を動かす形にすると、`headroom < 1` は
+「bounds が画面からはみ出す」という意味なので**頭と足が対称に欠ける**。
+
+**ウィンドウさえ変えればモデルは勝手に収まる** —— `VrmStage.LateUpdate` が
+`Screen.width/height` の変化を毎フレーム見てフレーミングし直す（`_framedWidth` 比較）。
+
+★★ **`character.scale` を `settings.json` から外した。** ウィンドウの大きさは既に
+`window.json` が持っており、**両方に持つと権威が2つになる**（ユーザーが窓を直接リサイズしたら
+どちらが勝つのかが説明できない）。スライダーの値は**現在のウィンドウの高さ ÷ 480** から出す
+（`SettingsContext.WindowScale`）。
+
+★ 既存の `settings.json` に残る `character.scale` は「知らないキー」として警告のうえ無視される
+（未リリースなので移行は不要）。**その1キーだけ黙って捨てる**分岐は入れない —— 例外を作ると、
+次に消すキーでも同じ判断を迫られる。
+
+### ★ `preferredMaxLayoutWidth` を固定値にしない
+
+折り返す複数行ラベルには `preferredMaxLayoutWidth` が要る（無いと Auto Layout は
+「1行ぶんの幅」を要求し続け、長い note で**ウィンドウごと横に伸びる**）。
+
+だが**固定値にすると、パネルを広げても折り返し位置が動かない**。ライセンス本文のように
+**元から整形済み**の文章では二重の折り返しになり、1文字だけの行が出る。
+
+**手当て**: `-layout` で自分の幅に合わせ直す `CMWrappingLabel` を作り、
+**幅いっぱいに置くラベル（見出し・note・本文）だけ**それにする。行の中に置くラベル
+（項目名・数値・記号）は中身で幅が決まるので**そのまま**にすること
+（変えるとレイアウトが振動する）。
+
+★ **変わったときだけ書くこと。** 毎回書くと `invalidateIntrinsicContentSize` が
+レイアウトを呼び戻して振動する。
+
 ### #76 の実機確認（macOS / `.app` / AivisSpeech 稼働）
+
+**合成イベント（`CGEvent`）とスクリーンショットで自動化した。** 手で触るより再現性が高く、
+「アプリが一度もアクティブになっていない状態」のような**手では作りにくい前提**を固定できる。
 
 | 確認したこと | 結果 |
 |---|---|
-| **キャラの右クリックで開閉** | ★ 動く。`[Mascot] 設定パネル: 開きます / 閉じます` |
-| メニューバーの「設定を開く…」/「Chatter Mascot 0.1.0」 | どちらも同じパネルを開く |
-| 項目の描画 | キャラクター / オーディオ / モーション / AI要約 / ショートカット / リセット / このアプリについて がすべて出る |
+| **非アクティブのままキャラを右クリック** | ★★ 冷えた起動直後から **6/6 で開閉**。以前は「左クリックを1回挟むまで効かない」 |
+| **透明な場所での右クリック** | ★ 3/3 で何も起きない（窓の外も同じ） |
+| **短い押下（50ms）** | ★★ 6/6。ポーリングだけの実装では 1/4 しか拾えなかった |
+| `⌃ + 左クリック` | ✕ **成立しないので落とした**（→ 上の節） |
+| **大きさのスライダー** | ★★ つまみを掴んでドラッグでき、**ウィンドウごと** 300x480 → 450x720 に変わる。フレーミングも追従し**頭が欠けない** |
+| ドラッグ中の再描画 | ★ 起きない（値のラベルだけネイティブが `%g` で追従する） |
+| **VRM を選ぶ** | ★★ `.vrm` が**選べる**（`.vroid` はグレーアウト）。`models/` にコピーされ、note は「次に起動したときから反映されます」 |
+| **位置と大きさのリセット** | ★★ **その場で**効く（450x720 → 300x480、既定位置へ）。スライダーも 1 に戻る |
+| **すべての設定をリセット** | ★★ 確認ダイアログ（`NSAlert`・destructive）→ `settings.json` / `window.json` / `config.json` の3キー / `models/*.vrm` が**すべて**初期状態へ。note に「既定に戻しました（モデル 1 件を削除）」 |
+| **ショートカットの記録** | ★★ `⌃⌥J` を記録。キー押下の直後から連写しても**古い表記（`⌃⌥M`）が出ない**（以前は `CMStopRecording` が成功時にも元の文字列へ戻していた）。`settings.json` に `ctrl+opt+j`、メニューバーの表記もその場で変わる |
+| **「Chatter Mascot について」** | ★★ **別ダイアログ**（680x664）で開き、MIT 全文が読める。折り返しがパネル幅に追従する |
+| 設定パネルの項目 | ★ 「ミュート」「テスト要約を実行」「このアプリについて」が**消えている** |
 | 話者一覧 | ★ 実際のエンジンから取れる（「まお（ノーマル）」等） |
-| **ショートカットの記録** | ★★ `⌃⌥J` を押して記録でき、`settings.json` に `ctrl+opt+j` が入り、その場で再登録される（＝ **キー入力がパネルに届いている**） |
-| **音量 0.3** | ★ `ps` に `/usr/bin/afplay -v 0.3 …` |
-| **音量 1.5** | ★★ `-v 1.5`（`< 1` で判定していたら出ない） |
+| **音量 0.3 / 1.5** | ★ `ps` に `/usr/bin/afplay -v 0.3 …` / `-v 1.5`（`< 1` で判定していたら出ない） |
 | スライダーの刻み | ★ 0.1 に吸着し、`settings.json` にも `0.3` / `1.5`（`0.30000001` ではない） |
-| 話す速さ 2.0 | ★ `config.json` に `ttsSpeedScale: 2`（**Unity は `config.json` を直接書いていない**） |
-| 要約の ON | ★ `config.json` に `aiSummaryEnabled: true` |
-| 音声スタイルの変更 | ★ `config.json` に `ttsSpeakerId: 888753761` |
+| 話す速さ / 要約 / 話者 | ★ `config.json` に `ttsSpeedScale` / `aiSummaryEnabled` / `ttsSpeakerId`（**Unity は `config.json` を直接書いていない**） |
 | テスト音声 | 鳴る（`afplay の実時間 4973ms / WAV の長さ 4031ms`） |
 | **サーバーを止めて開く** | ★★ 話者・速さ・テスト音声が**項目ごと消えず**、「（取得できません）」「サーバーに繋がりません」で無効になる |
-| **再起動しても残る** | ★ 音量 1.5 / 速さ 2 / 話者「まお（ふつー）」/ `⌃⌥J` がそのまま復元される |
-| **about** | ★ UniWindowController の **MIT 全文**（`Copyright (c) 2020 Kirurobo`）がパネル内で読める |
+| **再起動しても残る** | ★ 音量 / 速さ / 話者 / ショートカットがそのまま復元される |
 
-★ **未確認**: VRM の差し替え（ファイル選択ダイアログは自動化していない）、
-リセットの2つ、`⌃⌥J` の実発火。
+★ **未確認**: サーバーを止めた状態での「すべての設定をリセット」（core のぶんが戻らなかったことが
+note に出るか）、`⌃⌥J` の実発火、パネルがキャラに重なっているときの右クリック（→ 既知の穴）。
 
 ## 実装の決めごと
 

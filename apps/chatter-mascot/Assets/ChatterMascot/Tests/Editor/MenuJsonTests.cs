@@ -66,17 +66,25 @@ namespace ChatterMascot.Tests
         }
 
         /// <summary>
-        /// ★ #76 で押せるようになった（設定パネルの末尾に版とライセンスがある）。
-        ///   版をここに出し続けるのは、Dock に居ないので「どれが動いているか」の
-        ///   手掛かりがここしか無いため。
+        /// ★ #76 で押せるようになった（「について」の別ダイアログが開く）。
+        ///   ★ 版はラベルから外してツールチップへ移した —— ラベルに版を出していたのは
+        ///   「Dock に居ないので、どれが動いているかの手掛かりがここしか無い」ためなので、
+        ///   pid と同じ場所に残せば目的は保てる。
         /// </summary>
         [Test]
-        public void TheAboutEntryOpensTheSettingsPanel()
+        public void TheAboutEntryOpensTheAboutDialog()
         {
             var about = MascotMenu.Build(State()).Entries.First(e => e.Key == MenuKeys.About);
 
             Assert.That(about.Enabled, Is.True);
-            Assert.That(about.Label, Does.Contain("1.2.3"));
+            Assert.That(about.Label, Does.Contain("について"));
+        }
+
+        /// <summary>★ 版の手掛かりを失わないこと（→ 上）</summary>
+        [Test]
+        public void PutsTheVersionInTheTooltip()
+        {
+            Assert.That(MascotMenu.Build(State()).Tooltip, Does.Contain("1.2.3"));
         }
 
         /// <summary>★ Dock に出ない以上、二重起動は「アイコンが2つ並ぶ」でしか気づけない。</summary>

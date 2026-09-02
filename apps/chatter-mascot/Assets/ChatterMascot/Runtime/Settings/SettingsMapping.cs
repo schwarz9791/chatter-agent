@@ -12,13 +12,7 @@ namespace ChatterMascot.Settings
     /// </summary>
     public static class SettingsMapping
     {
-        /// <summary>
-        /// <c>VrmStage.headroom</c> の出荷値。<b>写像の基準にする値</b>。
-        /// ★ シーンにシリアライズされた値が実際の初期値なので、あちらを変えたらここも変えること。
-        /// </summary>
-        public const float DefaultHeadroom = 1.1f;
-
-        /// <summary>UI の「キャラクターの大きさ」の範囲と刻み</summary>
+        /// <summary>UI の「キャラクターの大きさ」の範囲と刻み。<b>ウィンドウの倍率</b>（→ <see cref="WindowSizeFor"/>）</summary>
         public const float ScaleMin = 0.5f;
         public const float ScaleMax = 2.0f;
         public const float ScaleStep = 0.1f;
@@ -37,26 +31,41 @@ namespace ChatterMascot.Settings
         public const float SpeedStep = 0.1f;
 
         /// <summary>
-        /// UI の「大きさ」→ <c>VrmStage.headroom</c>。
+        /// UI の「大きさ」→ <b>ウィンドウの大きさ</b>（ポイント）。
         ///
-        /// ★★ <b><c>headroom</c> は大きいほどキャラが小さい</b>（カメラを後ろへ下げる余白の係数）。
-        ///   UI の「大きさ」とは<b>向きが逆</b>なので、素直に代入すると
-        ///   スライダーを右に振るほどキャラが小さくなる。実装を読まないと気づけないので、
-        ///   写像をここに出してテストで固定してある。
+        /// ★★ <b><c>VrmStage.headroom</c> を動かさないこと。</b> あれはカメラを後ろへ下げる
+        ///   余白の係数で、1 を下回ると<b>モデルが画面からはみ出す</b>（実機で頭と足が
+        ///   対称に欠けた）。ウィンドウを変えれば <c>VrmStage</c> が
+        ///   <c>Screen.width/height</c> の変化を毎フレーム見て**自動で収め直す**ので、
+        ///   触るべきなのは窓の方。
         ///
-        /// ★ <b>0 で割らないこと。</b> <paramref name="scale"/> は範囲でクランプしてから使う。
+        /// ★ <b>基準の大きさは引数で受ける。</b> 出荷値を持っているのは
+        ///   <c>Desktop/WindowGeometry.cs</c> で、ここに書き写すと
+        ///   「ウィンドウの大きさが決まる場所」がまた1つ増える（→ <c>docs/mascot.md</c>）。
+        ///
+        /// ★ 縦横を同じ倍率で掛ける（アスペクト比を保つ）。
         /// </summary>
-        public static float HeadroomFor(float scale)
+        public static void WindowSizeFor(
+            float scale, float baseWidth, float baseHeight, out float width, out float height)
         {
-            var clamped = Clamp(scale, ScaleMin, ScaleMax);
-            return DefaultHeadroom / clamped;
+            var clamped = Clamp(RoundToStep(scale, ScaleStep), ScaleMin, ScaleMax);
+            width = baseWidth * clamped;
+            height = baseHeight * clamped;
         }
 
-        /// <summary><see cref="HeadroomFor"/> の逆。既存の <c>headroom</c> を UI の値に読み替える</summary>
-        public static float ScaleFor(float headroom)
+        /// <summary>
+        /// <see cref="WindowSizeFor"/> の逆。**いまのウィンドウの大きさ**を倍率に読み替える。
+        ///
+        /// ★★ <b>倍率を <c>settings.json</c> に持たないための関数。</b> ウィンドウの大きさは
+        ///   既に <c>window.json</c> が持っているので、両方に持つと権威が2つになる
+        ///   （ユーザーが窓を直接リサイズしたとき、どちらが勝つのか説明できない）。
+        ///
+        /// ★ 高さで見る。マスコットの窓は縦長で、横は同じ倍率で付いてくる。
+        /// </summary>
+        public static float ScaleForWindow(float height, float baseHeight)
         {
-            if (!(headroom > 0f)) return 1f;
-            return Clamp(DefaultHeadroom / headroom, ScaleMin, ScaleMax);
+            if (!(baseHeight > 0f) || !(height > 0f)) return 1f;
+            return Clamp(RoundToStep(height / baseHeight, ScaleStep), ScaleMin, ScaleMax);
         }
 
         /// <summary>

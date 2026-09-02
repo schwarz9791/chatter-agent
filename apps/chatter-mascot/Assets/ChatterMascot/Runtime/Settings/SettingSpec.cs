@@ -170,9 +170,19 @@ namespace ChatterMascot.Settings
         /// <summary>無効な理由・補足。空なら出さない</summary>
         public string Note { get; private set; }
 
-        public static SettingSpec Section(string label)
+        /// <summary>
+        /// 見出し。
+        ///
+        /// ★★ <b>節の全部にかかる説明は、1つ目の項目ではなくここに付けること。</b>
+        ///   項目にぶら下げると<b>2つ目以降にはかかっていないように読める</b>
+        ///   （「『記録』を押してキーを押してください」をミュートの行に付けていて、
+        ///   キャラクターの表示切り替えにも同じことが言えるのにそう読めなかった）。
+        /// </summary>
+        public static SettingSpec Section(string label, string note = "")
         {
-            return new SettingSpec(SettingKind.Section, null, label);
+            var spec = new SettingSpec(SettingKind.Section, null, label);
+            spec.Note = note ?? "";
+            return spec;
         }
 
         public static SettingSpec Bool(string key, string label, bool value, bool enabled = true, string note = "")

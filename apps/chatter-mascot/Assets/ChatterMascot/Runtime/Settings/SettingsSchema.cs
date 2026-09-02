@@ -136,7 +136,9 @@ namespace ChatterMascot.Settings
             //   （`POST /v1/summary/preview`）は残してあるので、確かめたいときは curl で叩く。
 
             // ── ショートカット ────────────────────────────────
-            items.Add(SettingSpec.Section("ショートカット"));
+            // ★ 記録の仕方は**節の全部にかかる**ので見出しに付ける（→ SettingSpec.Section の ★★）
+            items.Add(SettingSpec.Section(
+                "ショートカット", note: "「記録」を押してキーを押してください（修飾キーを1つ以上）"));
             // ★ **ミュートのチェックボックスは出さない。** ミュートはメニューバー
             //   （アイコンが薄くなる）とショートカットで操作するもの、と割り切った。
             //   ここに置くと、ショートカットで切り替えたときに**パネルだけ古い状態のまま**になる。
@@ -144,8 +146,7 @@ namespace ChatterMascot.Settings
             //   パネルが返してくるのは keyCode と修飾マスクの数値なので、
             //   ネイティブは保存形式を一度も見ない
             items.Add(SettingSpec.HotKey(
-                SettingKeys.MuteHotKey, "ミュートの切り替え", Symbols(settings.MuteHotKey),
-                note: "「記録」を押してキーを押してください（修飾キーを1つ以上）"));
+                SettingKeys.MuteHotKey, "ミュートの切り替え", Symbols(settings.MuteHotKey)));
             items.Add(SettingSpec.HotKey(
                 SettingKeys.HideHotKey, "キャラクターの表示切り替え", Symbols(settings.HideHotKey)));
 

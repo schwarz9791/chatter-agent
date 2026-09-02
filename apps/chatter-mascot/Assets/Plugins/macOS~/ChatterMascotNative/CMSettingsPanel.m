@@ -449,6 +449,28 @@ static NSStackView *CMRow(NSView *left, NSView *right)
     return row;
 }
 
+/*
+ * 1つの項目を縦に積む（本体 + note）。
+ *
+ * ★★ 子の横幅を明示すること。 縦の NSStackView は alignment=leading だと
+ *   子を「左揃えにするだけ」で幅は内容依存になる。付けないと、
+ *   **note を持つ行だけスライダーが縮む**（note の無い行と幅が揃わない）。
+ */
+static NSView *CMStack(NSArray<NSView *> *rows)
+{
+    if (rows.count == 1) return rows[0];
+
+    NSStackView *group = [NSStackView stackViewWithViews:rows];
+    group.orientation = NSUserInterfaceLayoutOrientationVertical;
+    group.alignment = NSLayoutAttributeLeading;
+    group.spacing = 2;
+
+    for (NSView *row in rows) {
+        [row.widthAnchor constraintEqualToAnchor:group.widthAnchor].active = YES;
+    }
+    return group;
+}
+
 static NSView *CMBuildItem(NSDictionary *item)
 {
     id kind = item[@"kind"];
@@ -459,7 +481,20 @@ static NSView *CMBuildItem(NSDictionary *item)
     NSString *k = (NSString *)kind;
     NSString *text = (NSString *)label;
 
-    if ([k isEqualToString:@"section"]) return CMFlowLabel(text, YES, NO);
+    /*
+     * ★★ 見出しも note を持てる。 節の**全部にかかる**説明を1つ目の項目にぶら下げると、
+     *   2つ目以降にはかかっていないように読める（ショートカットの「『記録』を押して〜」を
+     *   ミュートの行に付けていて、キャラクターの表示切り替えにも同じことが言えるのに
+     *   そう読めない、という指摘で直した）。
+     */
+    if ([k isEqualToString:@"section"]) {
+        NSMutableArray<NSView *> *heading = [NSMutableArray arrayWithObject:CMFlowLabel(text, YES, NO)];
+        id sectionNote = item[@"note"];
+        if ([sectionNote isKindOfClass:[NSString class]] && [(NSString *)sectionNote length] > 0) {
+            [heading addObject:CMFlowLabel((NSString *)sectionNote, NO, YES)];
+        }
+        return CMStack(heading);
+    }
 
     id keyValue = item[@"key"];
     if (![keyValue isKindOfClass:[NSString class]]) return nil;
@@ -610,22 +645,7 @@ static NSView *CMBuildItem(NSDictionary *item)
         [rows addObject:CMFlowLabel((NSString *)note, NO, YES)];
     }
 
-    if (rows.count == 1) return rows[0];
-
-    NSStackView *group = [NSStackView stackViewWithViews:rows];
-    group.orientation = NSUserInterfaceLayoutOrientationVertical;
-    group.alignment = NSLayoutAttributeLeading;
-    group.spacing = 2;
-
-    /*
-     * ★★ 子の横幅を明示すること。 縦の NSStackView は alignment=leading だと
-     *   子を「左揃えにするだけ」で幅は内容依存になる。付けないと、
-     *   **note を持つ行だけスライダーが縮む**（note の無い行と幅が揃わない）。
-     */
-    for (NSView *row in rows) {
-        [row.widthAnchor constraintEqualToAnchor:group.widthAnchor].active = YES;
-    }
-    return group;
+    return CMStack(rows);
 }
 
 static void CMApplySchema(int panelId, NSDictionary *root)

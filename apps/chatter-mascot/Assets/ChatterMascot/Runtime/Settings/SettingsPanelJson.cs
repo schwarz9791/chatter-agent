@@ -71,7 +71,12 @@ namespace ChatterMascot.Settings
                 ["kind"] = KindOf(spec.Kind),
                 ["label"] = spec.Label,
             };
-            if (spec.Kind == SettingKind.Section) return item;
+            // ★ 見出しも note を持てる（→ SettingSpec.Section の ★★）。キーは持たない
+            if (spec.Kind == SettingKind.Section)
+            {
+                if (!string.IsNullOrEmpty(spec.Note)) item["note"] = spec.Note;
+                return item;
+            }
 
             item["key"] = spec.Key;
             item["enabled"] = spec.Enabled;

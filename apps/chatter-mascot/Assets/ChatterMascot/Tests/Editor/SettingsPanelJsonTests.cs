@@ -95,6 +95,20 @@ namespace ChatterMascot.Tests
             Assert.That(item["display"].Value<string>(), Is.EqualTo("percent"));
         }
 
+        /// <summary>
+        /// ★★ <b>節の全部にかかる説明は見出しが持つ</b>（→ <c>SettingSpec.Section</c>）。
+        ///   1つ目の項目にぶら下げると、2つ目以降にはかかっていないように読める。
+        /// </summary>
+        [Test]
+        public void CarriesTheNoteOnASection()
+        {
+            var item = Write(SettingSpec.Section("ショートカット", note: "説明"))["items"][0];
+
+            Assert.That(item["kind"].Value<string>(), Is.EqualTo("section"));
+            Assert.That(item["note"].Value<string>(), Is.EqualTo("説明"));
+            Assert.That(item["key"], Is.Null, "★ 見出しはキーを持たない");
+        }
+
         [Test]
         public void WritesSliderValuesAsNumbers()
         {

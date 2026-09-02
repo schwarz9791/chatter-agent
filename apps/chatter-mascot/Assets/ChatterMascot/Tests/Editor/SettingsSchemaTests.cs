@@ -202,6 +202,24 @@ namespace ChatterMascot.Tests
         }
 
         /// <summary>
+        /// ★★ ショートカットの記録の仕方は<b>見出しに付ける</b>。ミュートの行に付けると、
+        ///   同じことが言える「キャラクターの表示切り替え」にはかかっていないように読める。
+        /// </summary>
+        [Test]
+        public void PutsTheRecordingHintOnTheShortcutSection()
+        {
+            var items = SettingsSchema.Build(new SettingsContext());
+
+            var section = items.First(s => s.Kind == SettingKind.Section && s.Label == "ショートカット");
+            Assert.That(section.Note, Does.Contain("記録"));
+
+            foreach (var key in new[] { SettingKeys.MuteHotKey, SettingKeys.HideHotKey })
+            {
+                Assert.That(Find(items, key).Note, Is.Empty, key);
+            }
+        }
+
+        /// <summary>
         /// ★★ ミュートとテスト要約は出さない（判断の記録）。
         ///   ミュートはショートカットで切り替えたときにパネルが追従できず、
         ///   テスト要約は結果を出す場所が note しか無かった。

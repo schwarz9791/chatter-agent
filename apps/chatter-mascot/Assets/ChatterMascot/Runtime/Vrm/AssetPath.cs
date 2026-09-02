@@ -17,11 +17,12 @@ namespace ChatterMascot.Vrm
         EnvironmentVariable,
 
         /// <summary>
-        /// 設定パネル（#76）で選ばれたモデル。<c>models/&lt;名前&gt;</c> を指す。
+        /// 設定パネル（#76）が置いたモデル。<c>models/</c> の<b>固定名</b>を指す
+        /// （<see cref="AssetPath.SelectedVrmFile"/>）。
         ///
         /// ★ <b><c>UserConfig</c>（<c>models/*.vrm</c> の走査）より前に置くこと。</b>
-        ///   あちらは <c>Ordinal</c> の先頭が勝つので、2つ目のモデルを選んでも
-        ///   反映されない。名前を覚えて<b>名指しで</b>先に出す。
+        ///   あちらは <c>Ordinal</c> の先頭が勝つので、これが無いと
+        ///   <b>2つ目のモデルを選んでも反映されない</b>（実機で踏んだ）。
         /// </summary>
         Settings,
 
@@ -72,18 +73,6 @@ namespace ChatterMascot.Vrm
 
         public IReadOnlyDictionary<string, string> Variables { get; set; } =
             new Dictionary<string, string>(StringComparer.Ordinal);
-
-        /// <summary>
-        /// 設定パネルで選ばれた <c>.vrm</c> のファイル名（<c>models/</c> 配下）。空なら候補を出さない。
-        ///
-        /// ★ <b>絶対パスではなくファイル名。</b> 選んだファイルは <c>models/</c> へコピーするので、
-        ///   元ファイルが消えても動き続ける（→ <c>Settings.MascotSettings.VrmFileName</c>）。
-        ///
-        /// ★ <b><c>.vrma</c> には対応する設定が無い。</b> モーションを選ばせる UI を
-        ///   作っていないため（#70 が入るまで、選ばせる中身が同梱の1本しか無い）。
-        ///   ここが <c>.vrm</c> 専用なのは意図的な非対称。
-        /// </summary>
-        public string SelectedVrmFileName { get; set; } = "";
 
         public string PersistentDataPath { get; set; } = "";
         public string StreamingAssetsPath { get; set; } = "";
@@ -160,6 +149,22 @@ namespace ChatterMascot.Vrm
             : new Spec("-vrma", "CHATTER_MASCOT_VRMA", "idle.vrma", "animations", "*.vrma", "idle_loop.vrma");
 
         /// <summary>
+        /// 設定パネルが選んだモデルを置く<b>固定のファイル名</b>（<c>models/</c> 配下）。
+        ///
+        /// ★★ <b>選んだファイルの名前をそのまま使わないこと。</b> 選び直すたびに
+        ///   <c>models/</c> にファイルが積み上がり、消す責任が誰にも無くなる。
+        ///   固定名なら <c>File.Copy(overwrite: true)</c> が前の1本を必ず置き換える。
+        ///
+        /// ★ <b>元の名前は表示のためだけに覚える</b>（<c>MascotSettings.VrmFileName</c>）。
+        ///   「どのモデルを選んだか」を画面に出すのに要るが、<b>探索には使わない</b>。
+        ///
+        /// ★ <b><c>.vrma</c> には対応する仕組みが無い。</b> モーションを選ばせる UI を
+        ///   作っていないため（#70 が入るまで、選ばせる中身が同梱の1本しか無い）。
+        ///   ここが <c>.vrm</c> 専用なのは意図的な非対称。
+        /// </summary>
+        public const string SelectedVrmFile = "selected.vrm";
+
+        /// <summary>
         /// 候補を優先順に並べる。
         ///
         /// ★ <b>遅延列挙にしないこと。</b> 呼び出し側は、全部読めなかったときの
@@ -176,39 +181,68 @@ namespace ChatterMascot.Vrm
             Add(result, AssetSource.CommandLine, env, CommandLine.Argument(env.CommandLine, spec.Argument));
             Add(result, AssetSource.EnvironmentVariable, env, Variable(env, spec.Variable));
 
-            // ★ 設定で選ばれたモデルを名指しで先に出す（#76）。`models/*.vrm` の走査（下）は
-            //   Ordinal の先頭が勝つので、これが無いと2つ目を選んでも反映されない。
-            //   ★ Android には共有ファイルシステムが無いのでここごと落ちる（下の段と同じ条件）
-            if (kind == AssetKind.Vrm && env.HasUserConfigDirectory && !string.IsNullOrEmpty(env.SelectedVrmFileName))
+            // ★ 共有ファイルシステムがある環境でだけ models/ を舐める。
+            //   ★ Android には無いのでこの段ごと落ちる
+            //   ★ Join は基準が空なら null を返す。ここで弾かずに ListFiles(null, ...) を
+            //     呼ぶと、注入された実装が null をどう扱うかに結果が左右される
+            //     （AssetEnvFactory.SafeListFiles は Directory.Exists(null) で false に
+            //     なるので実害は無いが、それはこの実装の詳細であって契約ではない）
+            var userDirectory = env.HasUserConfigDirectory
+                ? Join(RuntimeDirectory(env), spec.UserDirectory)
+                : null;
+
+            var userFiles = new List<string>();
+            if (!string.IsNullOrEmpty(userDirectory))
             {
-                var selected = Join(Join(RuntimeDirectory(env), spec.UserDirectory), env.SelectedVrmFileName);
-                Add(result, AssetSource.Settings, env, selected);
+                userFiles.AddRange(env.ListFiles(userDirectory, spec.Pattern) ?? Array.Empty<string>());
+                // ★ Ordinal で並べること。既定の比較はカルチャ依存で、
+                //   マシンによって「どのモデルが出るか」が変わる
+                userFiles.Sort(StringComparer.Ordinal);
+            }
+
+            // ★★ 設定パネルが置いたモデルを名指しで先に出す（#76）。走査は Ordinal の
+            //   先頭が勝つので、これが無いと**2つ目を選んでも反映されない**。
+            //
+            // ★★ **設定を見ないこと。** 以前は settings.json のファイル名を
+            //   `AssetEnv.SelectedVrmFileName` に渡す作りだったが、**本番コードが誰も渡して
+            //   いなかった**（テストだけが設定していた）ので候補が一度も出ず、走査の先頭が
+            //   勝ち続けていた。置き場所を固定名にして、**設定と実ファイルがズレる余地ごと**
+            //   無くしてある。
+            //
+            // ★ **走査の結果から引き上げること。** 無条件に足すと、パネルで一度も選んで
+            //   いない人の起動ログに毎回「読めませんでした」が1本増える。
+            if (kind == AssetKind.Vrm)
+            {
+                var at = userFiles.FindIndex(IsSelectedVrm);
+                if (at >= 0)
+                {
+                    var chosen = userFiles[at];
+                    userFiles.RemoveAt(at);
+                    Add(result, AssetSource.Settings, env, chosen);
+                }
             }
 
             Add(result, AssetSource.PersistentData, env, Join(env.PersistentDataPath, spec.PersistentFile));
 
-            // ★ Android には共有ファイルシステムが無いのでここごと落ちる
-            if (env.HasUserConfigDirectory)
-            {
-                var directory = Join(RuntimeDirectory(env), spec.UserDirectory);
-                // ★ Join は基準が空なら null を返すようになった。ここで弾かずに
-                //   ListFiles(null, ...) を呼んでしまうと、注入された実装が null を
-                //   どう扱うかに結果が左右される（AssetEnvFactory.SafeListFiles は
-                //   Directory.Exists(null) で false になるので実害は無いが、それは
-                //   この実装の詳細であって契約ではない）。directory が無ければこの段ごと
-                //   スキップする
-                if (!string.IsNullOrEmpty(directory))
-                {
-                    var files = new List<string>(env.ListFiles(directory, spec.Pattern) ?? Array.Empty<string>());
-                    // ★ Ordinal で並べること。既定の比較はカルチャ依存で、
-                    //   マシンによって「どのモデルが出るか」が変わる
-                    files.Sort(StringComparer.Ordinal);
-                    foreach (var file in files) Add(result, AssetSource.UserConfig, env, file);
-                }
-            }
+            foreach (var file in userFiles) Add(result, AssetSource.UserConfig, env, file);
 
             Add(result, AssetSource.StreamingAssets, env, Join(env.StreamingAssetsPath, spec.BundledFile));
             return result;
+        }
+
+        /// <summary>
+        /// <c>models/</c> の走査結果が、設定パネルが置いたモデルか。
+        ///
+        /// ★ <b>末尾で見ること。</b> <c>ListFiles</c> が返すパスの区切りや前置は
+        ///   注入された実装の都合で決まるので、こちらで組み立てた文字列と
+        ///   完全一致させにいかない。
+        /// </summary>
+        private static bool IsSelectedVrm(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            if (string.Equals(path, SelectedVrmFile, StringComparison.Ordinal)) return true;
+            return path.EndsWith("/" + SelectedVrmFile, StringComparison.Ordinal)
+                || path.EndsWith("\\" + SelectedVrmFile, StringComparison.Ordinal);
         }
 
         /// <summary>

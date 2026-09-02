@@ -97,15 +97,14 @@ namespace ChatterMascot.Settings
         public bool Blink { get; }
 
         /// <summary>
-        /// 選んだ VRM の<b>ファイル名</b>（<c>~/.config/chatter-agent/models/</c> 配下）。空なら未選択。
+        /// 選んだ VRM の<b>元のファイル名</b>（<c>character.vrm</c>）。
         ///
-        /// ★ <b>絶対パスを持たないこと。</b> 選んだファイルは <c>models/</c> へコピーするので、
-        ///   元ファイルが消えても動き続ける。ここに元のパスを残すと、消えた場所を指し続ける
-        ///   候補が探索順に混ざる。
+        /// ★★ <b>これは表示のための札で、探索には使わない。</b> 実ファイルは
+        ///   <c>models/</c> に<b>固定名</b>で置かれる（<c>Vrm.AssetPath.SelectedVrmFile</c>）。
+        ///   ここに名前を持たせて探索させると、<b>設定と実ファイルがズレたときに直せない</b>
+        ///   ——実際に「設定は覚えているのに誰も読んでいない」状態を実機で踏んだ。
         ///
-        /// ★ <b>ファイル名を覚える理由。</b> <c>models/*.vrm</c> の段（探索順4）は
-        ///   <c>Ordinal</c> の先頭が勝つので、2つ目のモデルを選んでも反映されないことがある。
-        ///   名前を覚えて<b>起動引数・環境変数の次</b>に差し込む（→ <c>Vrm.AssetPath</c>）。
+        /// ★ 空なら「同梱のモデルを使っています」と出す。
         /// </summary>
         public string VrmFileName { get; }
 

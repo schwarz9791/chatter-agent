@@ -276,7 +276,7 @@ Editor が UniVRM の型を直接使うなら Editor の asmdef にも `VRM10` �
 |---|---|---|---|---|
 | 1 | 起動引数 | `-vrm <path>` | `-vrma <path>` | 全 |
 | 2 | 環境変数 | `CHATTER_MASCOT_VRM` | `CHATTER_MASCOT_VRMA` | 全 |
-| 3 | **設定パネルで選んだモデル**（#76） | `models/<選んだ名前>` | —— | デスクトップのみ |
+| 3 | **設定パネルで選んだモデル**（#76） | `models/selected.vrm`（**固定名**） | —— | デスクトップのみ |
 | 4 | `Application.persistentDataPath/` | `model.vrm` | `idle.vrma` | 全 |
 | 5 | `${XDG_CONFIG_HOME:-~/.config}/chatter-agent/` | `models/*.vrm` | `animations/*.vrma` | デスクトップのみ |
 | 6 | 同梱（`StreamingAssets/`） | `vita.vrm` | `idle_loop.vrma` | 全 |
@@ -284,8 +284,12 @@ Editor が UniVRM の型を直接使うなら Editor の asmdef にも `VRM10` �
 - 5 は `core/src/core/paths.ts` の `getRuntimeDir` と**同じ規則**。ユーザーから見て
   「chatter-agent の設定はここ1箇所」を保つため。辞書順の先頭を採る
 - ★ **3 が要るのは 5 が辞書順だから。** 設定パネルは選んだファイルを `models/` へ**コピー**する
-  （元ファイルを消しても動く）が、名前を覚えないと `models/` に2つ目を入れたときに
-  **選んだ方が反映されない**。名前を覚えて名指しで先に出す
+  （元ファイルを消しても動く）が、これが無いと `models/` に別のファイルがあるとき
+  **選んだ方が反映されない**
+- ★★ **3 は固定名。** 元の名前でコピーすると選び直すたびに積み上がるので、
+  `models/selected.vrm` に上書きする。**元の名前は表示のためだけ**に
+  `settings.json` の `character.vrm` が覚える（探索には使わない）。
+  手で `models/` に置いたファイルは触らない（→ `docs/mascot.md`）
 - ★ **3 は起動引数・環境変数より下。** `-vrm` は切り分けの逃げ道
   （「設定が壊れていてもこれを付ければ必ず出る」）なので、設定より優先を保つ
 - ★ **`.vrma` に対応する設定は無い。** モーションを選ばせる UI を作っていないため（意図的な非対称）

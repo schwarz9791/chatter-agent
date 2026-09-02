@@ -787,7 +787,12 @@ namespace ChatterMascot.Desktop
                     return false;
                 }
 
-                var destination = Path.Combine(models, fileName);
+                // ★★ **固定名で上書きすること。** 選んだファイルの名前をそのまま使うと、
+                //   選び直すたびに models/ に積み上がって消す責任が誰にも無くなる
+                //   （実機で「元からあったファイルが残る」と報告された）。
+                //   ★ 返す `name` は**元のファイル名**。画面に出すためだけに覚える
+                //     （探索は固定名で行う。→ AssetPath.SelectedVrmFile）
+                var destination = Path.Combine(models, AssetPath.SelectedVrmFile);
                 // ★ 同じ場所を選んだときにコピーしないこと（自分自身への copy は例外になる）
                 if (Path.GetFullPath(source) != Path.GetFullPath(destination))
                 {

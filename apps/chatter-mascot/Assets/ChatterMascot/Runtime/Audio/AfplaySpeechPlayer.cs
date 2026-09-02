@@ -74,7 +74,7 @@ namespace ChatterMascot.Audio
 
         /// <param name="command">再生コマンド。テストで差し替えられるようにしてある</param>
         /// <param name="volume">
-        /// 再生音量（0.0〜2.0。既定 1.0）。<c>null</c> なら等倍。
+        /// 再生音量（0.0〜1.0。既定 1.0）。<c>null</c> なら等倍。
         ///
         /// ★ <b>値ではなく getter で受けること。</b> 設定は実行中に書き換わる
         ///   （設定パネルからも、ファイルを直接編集しても）。値で受けると、
@@ -136,9 +136,12 @@ namespace ChatterMascot.Audio
         /// ★★ <b>等倍のときは <c>-v</c> を足さない。</b> #76 より前の挙動をそのまま保つため
         ///   （引数が増えると <c>ps</c> の見え方も変わる）。
         ///
-        /// ★★ <b>判定を <c>&lt; 1</c> にしないこと。</b> 範囲が 0.0〜2.0 なので、
-        ///   <c>&lt; 1</c> だと<b>大きくする側が黙って効かなくなる</b>
-        ///   （→ <see cref="Settings.SettingsMapping.NeedsVolumeArgument"/>）。
+        /// ★★ <b>判定を <c>&lt; 1</c> にしないこと。</b> 0.1 刻みに丸めた後でも
+        ///   <c>1.0f</c> ちょうどになる保証は無いので、<c>0.9999999</c> に
+        ///   <c>-v 0.9999999</c> が付く（→ <see cref="Settings.SettingsMapping.NeedsVolumeArgument"/>）。
+        ///   ★ 上限が 1.0 に下がった（→ <c>SettingsMapping.VolumeMax</c>）ので
+        ///   「大きくする側が効かなくなる」という以前の理由は消えたが、
+        ///   <b>「単純化」してはいけない理由は残っている</b>。
         ///
         /// ★★ <b>値は <c>InvariantCulture</c> で文字列にすること。</b> 忘れると
         ///   ロケールによって <c>0,5</c> になり、<c>afplay</c> が引数を解釈できずに

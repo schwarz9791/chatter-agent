@@ -149,15 +149,33 @@ namespace ChatterMascot.Tests
         }
 
         /// <summary>
-        /// ★★ <c>&lt; 1</c> で判定すると<b>大きくする側が黙って効かなくなる</b>
-        ///   （範囲が 0.0〜2.0 なので）。
+        /// ★ 小さくするときだけ引数が増える（等倍では増やさない ＝ #76 より前の挙動）。
+        ///
+        /// ★★ <b>上限を 1.0 に下げても <c>&lt; 1</c> の裸の比較にしないこと。</b>
+        ///   以前の理由（大きくする側が効かなくなる）は消えたが、下の
+        ///   <see cref="TreatsNearlyUnityAsUnity"/> が守っているものは残っている。
         /// </summary>
         [Test]
-        public void NeedsTheVolumeArgumentOnBothSidesOfUnity()
+        public void NeedsTheVolumeArgumentOnlyWhenItIsNotUnity()
         {
             Assert.That(SettingsMapping.NeedsVolumeArgument(0.3f), Is.True, "小さくする側");
-            Assert.That(SettingsMapping.NeedsVolumeArgument(1.5f), Is.True, "★ 大きくする側");
             Assert.That(SettingsMapping.NeedsVolumeArgument(1f), Is.False, "等倍では引数を増やさない");
+        }
+
+        /// <summary>
+        /// ★★ <b>音量の上限は 1.0。</b> 1.0 超えが効くのは macOS（<c>afplay -v</c>）だけで、
+        ///   Android の <c>AudioSource.volume</c> は Unity 側で 0〜1 にクランプされる。
+        ///   <c>settings.json</c> は XR（#25）と共有するので、
+        ///   <b>プラットフォームで意味の変わる範囲を持たせない</b>。
+        /// </summary>
+        [Test]
+        public void CapsTheVolumeAtUnity()
+        {
+            Assert.That(SettingsMapping.VolumeMax, Is.EqualTo(1f));
+            Assert.That(
+                SettingsMapping.Normalize(
+                    1.5f, SettingsMapping.VolumeMin, SettingsMapping.VolumeMax, SettingsMapping.VolumeStep),
+                Is.EqualTo(1f), "★ 範囲外は握りつぶさずにクランプする");
         }
 
         /// <summary>★ float の裸の等値比較を書かない（丸めた後でも 1.0f ちょうどとは限らない）</summary>

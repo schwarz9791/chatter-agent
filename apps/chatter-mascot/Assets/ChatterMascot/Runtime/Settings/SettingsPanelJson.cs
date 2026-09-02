@@ -86,6 +86,9 @@ namespace ChatterMascot.Settings
                     item["min"] = spec.Min;
                     item["max"] = spec.Max;
                     item["step"] = spec.Step;
+                    // ★ 既定（Number）のときは出さない。古いバンドルでも壊れないし、
+                    //   JSON に「何も指定していない」がそのまま残る
+                    if (spec.Display == SettingDisplay.Percent) item["display"] = "percent";
                     break;
 
                 case SettingKind.Bool:

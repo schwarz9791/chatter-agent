@@ -62,6 +62,39 @@ namespace ChatterMascot.Tests
         /// ★ スライダーは数値で渡すこと。文字列にすると、ネイティブ側でロケール依存の
         ///   パースが要る。
         /// </summary>
+        /// <summary>
+        /// ★★ <b>見せ方を渡すのはここ</b>（#76）。「音量なら % で出す」を ObjC に書くと、
+        ///   ネイティブに設定のキーを持たせないという作りの前提が崩れる。
+        ///   ★ <b>値そのものは変えない</b> —— 送るのも保存するのも常に生の数（0.0〜1.0）。
+        /// </summary>
+        [Test]
+        public void CarriesThePercentDisplayForSliders()
+        {
+            var item = Write(SettingSpec.Slider(
+                "s", "s", 0.7f, 0f, 1f, 0.1f, display: SettingDisplay.Percent))["items"][0];
+
+            Assert.That(item["display"].Value<string>(), Is.EqualTo("percent"));
+            Assert.That(item["value"].Value<float>(), Is.EqualTo(0.7f), "★ 値は 70 にしない");
+        }
+
+        /// <summary>★ 既定（倍率のスライダー）では出さない。JSON に「指定していない」を残す</summary>
+        [Test]
+        public void OmitsTheDisplayWhenItIsTheDefault()
+        {
+            Assert.That(Write(SettingSpec.Slider("s", "s", 1.5f, 0.5f, 2f, 0.1f))["items"][0]["display"],
+                Is.Null);
+        }
+
+        /// <summary>★ 注記を足しても見せ方は落とさない（→ <c>SettingSpec.WithNote</c>）</summary>
+        [Test]
+        public void KeepsThePercentDisplayThroughWithNote()
+        {
+            var source = SettingSpec.Slider("s", "s", 0.7f, 0f, 1f, 0.1f, display: SettingDisplay.Percent);
+            var item = Write(SettingSpec.WithNote(source, "理由"))["items"][0];
+
+            Assert.That(item["display"].Value<string>(), Is.EqualTo("percent"));
+        }
+
         [Test]
         public void WritesSliderValuesAsNumbers()
         {

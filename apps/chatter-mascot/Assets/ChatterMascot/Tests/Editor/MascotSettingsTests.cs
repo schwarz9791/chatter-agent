@@ -38,8 +38,8 @@ namespace ChatterMascot.Tests
         [Test]
         public void EqualValuesAreEqual()
         {
-            var a = MascotSettings.Defaults.WithMuted(true).WithVolume(1.5f);
-            var b = MascotSettings.Defaults.WithMuted(true).WithVolume(1.5f);
+            var a = MascotSettings.Defaults.WithMuted(true).WithVolume(0.7f);
+            var b = MascotSettings.Defaults.WithMuted(true).WithVolume(0.7f);
 
             Assert.That(a.Equals(b), Is.True);
             Assert.That(a.GetHashCode(), Is.EqualTo(b.GetHashCode()));

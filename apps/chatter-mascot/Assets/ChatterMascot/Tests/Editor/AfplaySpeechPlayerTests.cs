@@ -289,25 +289,27 @@ namespace ChatterMascot.Tests
         }
 
         /// <summary>
-        /// ★★ 判定を <c>&lt; 1</c> にすると<b>大きくする側が黙って効かなくなる</b>
-        ///   （範囲が 0.0〜2.0 なので）。
+        /// ★ 等倍でないときだけ <c>-v</c> が付く。
+        ///   ★★ <b>スライダーが % で出ていても、渡すのは生の数</b>（<c>-v 70</c> にしない。
+        ///   表示の文字列と送る値を分けてある。→ <c>CMSettingsPanel.m</c> の <c>CMSliderText</c>）。
         /// </summary>
         [Test]
-        public void PassesTheVolumeOnBothSidesOfUnity()
+        public void PassesTheVolumeWhenItIsNotUnity()
         {
             Assert.That(
                 AfplaySpeechPlayer.ArgumentsFor(0.3f, "/tmp/a.wav"),
                 Is.EqualTo(new[] { "-v", "0.3", "/tmp/a.wav" }));
             Assert.That(
-                AfplaySpeechPlayer.ArgumentsFor(1.5f, "/tmp/a.wav"),
-                Is.EqualTo(new[] { "-v", "1.5", "/tmp/a.wav" }), "★ 大きくする側");
+                AfplaySpeechPlayer.ArgumentsFor(0.7f, "/tmp/a.wav"),
+                Is.EqualTo(new[] { "-v", "0.7", "/tmp/a.wav" }));
         }
 
         /// <summary>★ 範囲外は握りつぶさずにクランプする（afplay に変な値を渡さない）</summary>
         [Test]
         public void ClampsAndRoundsTheVolume()
         {
-            Assert.That(AfplaySpeechPlayer.ArgumentsFor(99f, "/tmp/a.wav")[1], Is.EqualTo("2"));
+            Assert.That(AfplaySpeechPlayer.ArgumentsFor(99f, "/tmp/a.wav"), Is.EqualTo(new[] { "/tmp/a.wav" }),
+                "★ 上限が 1.0 になったので、大きすぎる値は「等倍」へ丸まって引数が消える");
             Assert.That(AfplaySpeechPlayer.ArgumentsFor(-1f, "/tmp/a.wav")[1], Is.EqualTo("0"));
             Assert.That(AfplaySpeechPlayer.ArgumentsFor(0.7000000119f, "/tmp/a.wav")[1], Is.EqualTo("0.7"));
         }

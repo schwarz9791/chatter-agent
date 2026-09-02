@@ -149,11 +149,8 @@ namespace ChatterMascot
         }
 
         /// <summary>
-        /// 一時ミュートの状態。<b>読み書きの両方に使う</b>（ステータスバーのメニューと
-        /// グローバルショートカットから切り替わる）。
-        /// </summary>
-        /// <summary>
-        /// 再生音量（0.0〜2.0。既定 1.0）。設定パネル（#76）が書き、次の発話から効く。
+        /// 再生音量（<b>0.0〜1.0</b>。既定 1.0）。設定パネル（#76）が書き、次の発話から効く。
+        /// 画面には 0〜100% で出る（→ <c>Settings.SettingDisplay.Percent</c>）。
         ///
         /// ★★ <b>ミュートの代わりにしないこと。</b> <c>0</c> にしても
         ///   <c>afplay</c> のプロセスは起動し、実時間ぶん走る。ミュートは
@@ -164,6 +161,10 @@ namespace ChatterMascot
         ///   （getter を再生側へ渡してある）、Android は<b>テンプレートの
         ///   <see cref="AudioSource.volume"/></b>（voice は発話ごとに作られるので、
         ///   ここを書けば次の発話から効く）。
+        ///
+        /// ★★ <b>上限が 1.0 なのは、その違いを設定に持ち込まないため</b>
+        ///   （→ <c>Settings.SettingsMapping.VolumeMax</c>）。<see cref="AudioSource.volume"/> は
+        ///   Unity 側で 0〜1 にクランプされるので、1.0 超えは Android で黙って no-op になる。
         /// </summary>
         public float Volume
         {
@@ -216,6 +217,10 @@ namespace ChatterMascot
             return await _player.PlayAsync(handle);
         }
 
+        /// <summary>
+        /// 一時ミュートの状態。<b>読み書きの両方に使う</b>（ステータスバーのメニューと
+        /// グローバルショートカットから切り替わる）。
+        /// </summary>
         public MuteState Mute
         {
             get { return _mute; }

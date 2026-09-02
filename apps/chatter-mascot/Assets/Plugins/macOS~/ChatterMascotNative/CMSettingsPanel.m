@@ -198,6 +198,27 @@ static void CMStartRecording(NSButton *button, NSTextField *field, NSString *key
 
 /* ── 操作の受け口 ───────────────────────────────────────────── */
 
+/*
+ * スライダーの読み値。
+ *
+ * ★★ **表示の文字列と、C# へ送る値を同じものにしないこと。** いままでは両方 "%g" で
+ *   済んでいたが、% を付けた瞬間に C# の SettingsMapping.Parse が "70%" を読めず、
+ *   **そのキーだけ既定に戻る**という気づきにくい形で壊れる（ロケールで "0,7" になるのと
+ *   同じ壊れ方）。送る値は常に生の数（→ onSlider:）。
+ *
+ * ★ %g は C ロケール。 %@ で NSNumber を出すとロケール依存になる。
+ * ★ 「音量なら % で出す」を ObjC に書かないこと。 どう見せるかは C# のスキーマが
+ *   display で渡す（→ SettingDisplay）。ここが知っているのは「% かどうか」だけ。
+ */
+static NSString *CMSliderText(NSSlider *slider)
+{
+    NSNumber *percent = (NSNumber *)objc_getAssociatedObject(slider, "cm.percent");
+    if ([percent isKindOfClass:[NSNumber class]] && percent.boolValue) {
+        return [NSString stringWithFormat:@"%.0f%%", slider.doubleValue * 100.0];
+    }
+    return [NSString stringWithFormat:@"%g", slider.doubleValue];
+}
+
 @interface CMPanelTarget : NSObject <NSWindowDelegate, NSOpenSavePanelDelegate>
 @property (nonatomic, strong) NSArray<NSString *> *allowedExtensions;
 - (void)onCheckbox:(id)sender;
@@ -225,12 +246,7 @@ static void CMStartRecording(NSButton *button, NSTextField *field, NSString *key
 
     /* 値の表示は常に更新する（つまみを掴んでいる間も追従させる） */
     NSTextField *readout = (NSTextField *)objc_getAssociatedObject(slider, "cm.readout");
-    /*
-     * ★ %g は C ロケール。 %@ で NSNumber を出すとロケールによって "0,7" になり、
-     *   C# 側のパースが落ちる（そのキーだけ既定に戻る、という気づきにくい形で出る）。
-     */
-    NSString *text = [NSString stringWithFormat:@"%g", slider.doubleValue];
-    if ([readout isKindOfClass:[NSTextField class]]) readout.stringValue = text;
+    if ([readout isKindOfClass:[NSTextField class]]) readout.stringValue = CMSliderText(slider);
 
     /*
      * ★ ドラッグ中は投げないこと。 1操作で数十回の PATCH / 保存が走る。
@@ -240,7 +256,12 @@ static void CMStartRecording(NSButton *button, NSTextField *field, NSString *key
     NSEvent *current = [NSApp currentEvent];
     if (current != nil && current.type == NSEventTypeLeftMouseDragged) return;
 
-    CMEmitSetting([(NSString *)key UTF8String], [text UTF8String]);
+    /*
+     * ★★ 表示の文字列をそのまま送らないこと（→ CMSliderText）。
+     *   %g は C ロケールなので、送る側はこちらで作る。
+     */
+    CMEmitSetting([(NSString *)key UTF8String],
+                  [[NSString stringWithFormat:@"%g", slider.doubleValue] UTF8String]);
 }
 
 - (void)onPopUp:(id)sender
@@ -485,7 +506,12 @@ static NSView *CMBuildItem(NSDictionary *item)
             }
         }
 
-        NSTextField *readout = CMLabel([NSString stringWithFormat:@"%g", slider.doubleValue], NO, NO);
+        /* ★ 見せ方は C# が渡す（→ CMSliderText）。ここに「音量なら %」と書かない */
+        id display = item[@"display"];
+        BOOL percent = [display isKindOfClass:[NSString class]] && [(NSString *)display isEqualToString:@"percent"];
+        objc_setAssociatedObject(slider, "cm.percent", @(percent), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+        NSTextField *readout = CMLabel(CMSliderText(slider), NO, NO);
         [readout.widthAnchor constraintEqualToConstant:44].active = YES;
         readout.alignment = NSTextAlignmentRight;
         objc_setAssociatedObject(slider, "cm.readout", readout, OBJC_ASSOCIATION_RETAIN_NONATOMIC);

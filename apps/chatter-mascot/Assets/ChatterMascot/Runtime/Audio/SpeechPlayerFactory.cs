@@ -28,7 +28,9 @@ namespace ChatterMascot.Audio
         /// 外部プロセスで鳴らす実装では使わない。
         /// </param>
         /// <param name="volume">
-        /// 再生音量（0.0〜2.0）。<c>null</c> なら等倍。
+        /// 再生音量（0.0〜1.0）。<c>null</c> なら等倍。
+        /// ★ 1.0 を上限にしている理由は <c>SettingsMapping.VolumeMax</c> に
+        ///   （Android の <c>AudioSource.volume</c> は 0〜1 にクランプされる）。
         ///
         /// ★★ <b>効かせ方がプラットフォームで違う。</b> macOS は <c>afplay -v</c>、
         ///   Android は<b>テンプレートの <see cref="AudioSource.volume"/></b>

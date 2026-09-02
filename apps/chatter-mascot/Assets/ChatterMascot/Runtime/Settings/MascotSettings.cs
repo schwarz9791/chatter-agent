@@ -73,7 +73,8 @@ namespace ChatterMascot.Settings
         public string HideHotKey { get; }
 
         /// <summary>
-        /// 再生音量。<b>0.0〜2.0</b>（1.0 が上限ではない）。
+        /// 再生音量。<b>0.0〜1.0</b>（画面には 0〜100% で出る）。
+        /// ★ 1.0 を上限にしている理由は <see cref="SettingsMapping.VolumeMax"/> に。
         ///
         /// ★ macOS では <c>afplay -v</c>、Android では <c>AudioSource.volume</c> に効く。
         ///   ★ <b>等倍のときは <c>afplay</c> の引数を増やさない</b>

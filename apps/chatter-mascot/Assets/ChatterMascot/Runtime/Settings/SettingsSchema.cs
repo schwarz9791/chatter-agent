@@ -89,9 +89,12 @@ namespace ChatterMascot.Settings
                 enabled: c.CoreReachable && c.Speakers.Count > 0 && !speakerOverridden,
                 note: SpeakerNote(c, speakerOverridden)));
 
+            // ★ 音量だけ % で出す。倍率のスライダー（大きさ・話す速さ）は生の数のまま ——
+            //   あちらは「1.0 が等倍」に意味があるので、100% と書くとかえって分かりづらい
             items.Add(SettingSpec.Slider(
                 SettingKeys.Volume, "音量", settings.Volume,
-                SettingsMapping.VolumeMin, SettingsMapping.VolumeMax, SettingsMapping.VolumeStep));
+                SettingsMapping.VolumeMin, SettingsMapping.VolumeMax, SettingsMapping.VolumeStep,
+                display: SettingDisplay.Percent));
 
             var speedOverridden = c.IsCoreEnvOverridden(CoreConfigKeys.SpeedScale);
             items.Add(SettingSpec.Slider(

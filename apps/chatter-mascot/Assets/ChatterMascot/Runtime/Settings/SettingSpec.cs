@@ -47,6 +47,25 @@ namespace ChatterMascot.Settings
         Text,
     }
 
+    /// <summary>
+    /// <see cref="SettingKind.Slider"/> の読み値の<b>見せ方</b>。
+    ///
+    /// ★★ <b>値の意味は変えない。</b> スライダーが持つ値も、C# へ返る値も、
+    ///   <c>settings.json</c> に載る値も<b>常に生の数</b>（音量なら 0.0〜1.0）。
+    ///   ここで変えるのは<b>読み値のラベルだけ</b>。
+    ///
+    /// ★ <b>ネイティブに「その項目が何か」を知らせないための形。</b> 「音量なら % で出す」を
+    ///   ObjC に書くと、設定のキーを持たせないという作りの前提が崩れる。
+    /// </summary>
+    public enum SettingDisplay
+    {
+        /// <summary>生の数をそのまま（<c>1.5</c>）。倍率のスライダー（大きさ・話す速さ）はこちら</summary>
+        Number,
+
+        /// <summary>100 倍して <c>%</c> を付ける（<c>0.7</c> → <c>70%</c>）</summary>
+        Percent,
+    }
+
     /// <summary><see cref="SettingKind.Choice"/> の選択肢1件</summary>
     public readonly struct SettingChoice : IEquatable<SettingChoice>
     {
@@ -132,6 +151,12 @@ namespace ChatterMascot.Settings
         /// </summary>
         public float Step { get; private set; }
 
+        /// <summary>
+        /// 読み値の見せ方（<see cref="SettingKind.Slider"/> のときだけ意味がある）。
+        /// ★ 既定は <see cref="SettingDisplay.Number"/>。
+        /// </summary>
+        public SettingDisplay Display { get; private set; }
+
         public IReadOnlyList<SettingChoice> Choices { get; private set; }
 
         /// <summary>
@@ -161,7 +186,7 @@ namespace ChatterMascot.Settings
 
         public static SettingSpec Slider(
             string key, string label, float value, float min, float max, float step,
-            bool enabled = true, string note = "")
+            bool enabled = true, string note = "", SettingDisplay display = SettingDisplay.Number)
         {
             var spec = new SettingSpec(SettingKind.Slider, key, label);
             spec.Value = SettingsMapping.Format(SettingsMapping.RoundToStep(value, step));
@@ -170,6 +195,7 @@ namespace ChatterMascot.Settings
             spec.Step = step;
             spec.Enabled = enabled;
             spec.Note = note ?? "";
+            spec.Display = display;
             return spec;
         }
 
@@ -217,6 +243,8 @@ namespace ChatterMascot.Settings
             spec.Min = source.Min;
             spec.Max = source.Max;
             spec.Step = source.Step;
+            // ★ ここに写し忘れると、注記が付いた瞬間だけ % が消える
+            spec.Display = source.Display;
             spec.Choices = source.Choices;
             spec.Enabled = source.Enabled;
             spec.Note = note ?? "";

@@ -17,9 +17,22 @@ namespace ChatterMascot.Settings
         public const float ScaleMax = 2.0f;
         public const float ScaleStep = 0.1f;
 
-        /// <summary>音量の範囲と刻み。★ <b>0.0〜2.0</b>（1.0 が上限ではない）</summary>
+        /// <summary>
+        /// 音量の範囲と刻み。<b>0.0〜1.0</b>（画面には <b>0〜100%</b> で出る。
+        /// → <see cref="SettingDisplay.Percent"/>）。
+        ///
+        /// ★★ <b>1.0 より上へ戻さないこと。</b> 1.0 超えが効くのは macOS
+        ///   （<c>afplay -v</c>）だけで、Android の <see cref="UnityEngine.AudioSource.volume"/> は
+        ///   <b>Unity 側で 0〜1 にクランプされる</b>（<c>AudioClipPlayer.CopySettings</c> は
+        ///   そのクランプ後の値を写す）。<c>settings.json</c> は XR（#25）と共有する前提なので、
+        ///   <b>プラットフォームによって意味の変わる範囲を持たせない</b> ——
+        ///   大きくしたいなら <c>AudioMixer</c> が要るが、それは<b>両方で効く形にしてから</b>入れる。
+        ///
+        /// ★ 刻みを細かくしたければ <see cref="VolumeStep"/> だけ変えればよい。
+        ///   スライダーの目盛りも <c>settings.json</c> の丸めも <c>-v</c> の許容幅も追従する。
+        /// </summary>
         public const float VolumeMin = 0.0f;
-        public const float VolumeMax = 2.0f;
+        public const float VolumeMax = 1.0f;
         public const float VolumeStep = 0.1f;
 
         /// <summary>
@@ -138,12 +151,14 @@ namespace ChatterMascot.Settings
         /// <summary>
         /// <c>afplay</c> に <c>-v</c> を足すべきか。
         ///
-        /// ★★ <b><c>&lt; 1</c> で判定しないこと。</b> 範囲が 0.0〜2.0 なので、
-        ///   <c>&lt; 1</c> だと<b>大きくする側が黙って効かなくなる</b>。
-        ///   等倍のときだけ引数を増やさない（＝ #76 より前の挙動をそのまま保つ）。
+        /// ★★ <b><c>&lt; 1</c> の裸の比較にしないこと。</b> 0.1 刻みに丸めた後でも
+        ///   <c>1.0f</c> ちょうどになる保証は無いので、<c>0.9999999</c> に
+        ///   <c>-v 0.9999999</c> が付く。刻みの半分を許容幅にする。
+        ///   ★ 上限が 1.0 に下がった（→ <see cref="VolumeMax"/>）ので
+        ///   「大きくする側が効かなくなる」という以前の理由は消えたが、
+        ///   <b>この判定を <c>&lt; 1</c> に「単純化」しない理由は残っている</b>。
         ///
-        /// ★ <b>float の裸の等値比較を書かないこと。</b> 0.1 刻みに丸めた後でも
-        ///   <c>1.0f</c> ちょうどになる保証は無いので、刻みの半分を許容幅にする。
+        /// ★ 等倍のときだけ引数を増やさない（＝ #76 より前の挙動をそのまま保つ）。
         /// </summary>
         public static bool NeedsVolumeArgument(float volume)
         {

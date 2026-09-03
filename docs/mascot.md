@@ -3336,6 +3336,53 @@ cd apps/chatter-mascot
 
 耳で確認するときは `cd core && npm run start:server`（合成エンジンはサーバーが起こす）。
 
+### VRMA の書き出し（VRoid Studio の Humanoid クリップから、#70）
+
+#70 の感情モーションと待機の小ネタは **VRoid Studio 2.14.0 の撮影モードのアセット 13 本**を `.vrma` にして使う。
+VRoid Studio 由来なので**再配布できない** —— `.vrma` は同梱せず `~/.config/chatter-agent/animations/<category>/` にだけ置き、
+リポジトリに入れるのは変換スクリプト `Editor/VrmaExport.cs` だけ。
+
+```bash
+# 1. AssetRipper 2.0.0（Web UI。CLI エクスポートは無い）を headless で起動して HTTP で叩く
+gh release download 2.0.0 -R AssetRipper/AssetRipper -p AssetRipper_mac_arm64.tar.xz && tar xf AssetRipper_mac_arm64.tar.xz
+chmod +x AssetRipper.GUI.Free && xattr -dr com.apple.quarantine .
+./AssetRipper.GUI.Free --headless --port 8765 &
+#    POST /LoadFolder  Path=/Applications/VRoidStudio.app/Contents/Resources/Data   （★ /Commands/ は付かない）
+#    GET  /Search/View?q=<クリップ名>  → 結果 HTML から asset の Path JSON を拾う
+#    GET  /Assets/Yaml?Path=<json>     → そのまま <クリップ名>.anim として保存（エクスポータと同じ YAML）
+# 2. Unity で vita.vrm に当ててサンプリングし .vrma に書く（Editor は閉じておく）
+cd apps/chatter-mascot
+./scripts/run.sh ChatterMascot.EditorTools.VrmaExport.Batch \
+  -vrmaClipDir ../../_workspace/vroid-clips -vrmaOutDir ~/.config/chatter-agent/animations   # [-vrmaClip Hub_Idle01]
+```
+
+- **全体エクスポートは要らない。** `data.unity3d` は 1GB あるが、13 本は `sharedassets0.assets` から検索 API で1本ずつ拾える
+- ★ **`Hub_Idle01/03/04` は同名のクリップが 2 組ある**（pathID 181/183/184 と 186/188/189）。
+  撮影モードの「待機5/7/8」に対応するのは**長さが 11.7 / 10.8 / 18.2 秒の組（186/188/189）**。
+  最初に見つかった方を採ると別のモーションになる
+- AssetRipper は muscle をデコードしない。`.anim` は **Unity 標準の Humanoid クリップ**
+  （`m_FloatCurves` に `RootT` / `RootQ` / `Spine Front-Back` …）のまま出るので、Unity に入れれば
+  `AnimationClip.humanMotion == true` になり、**muscle → ボーン回転は Avatar が解く**。自前で解釈しない
+- 13 本すべてに指の muscle（40 本）が入っていた。書き出した `.vrma` は humanBones **52**
+  （目・顎を除いた全部）で、同梱 `idle_loop.vrma` の 22 本より多い。**指が真っ直ぐ伸びる問題は
+  素材側で解決**した（ControlRig 側の手当ては要らなかった）
+
+**`VrmAnimationExporter` を読んで分かった罠**（`VrmaExport.cs` の順序はこれで決まっている）:
+
+| 罠 | 症状 | 回避 |
+|---|---|---|
+| `Prepare(go)` は階層を **`Instantiate` で複製**し、`Export()` が先頭で呼ぶ `base.Export()` 時点の複製のポーズが rest になる | 非 T ポーズで Prepare すると基準姿勢がずれる | **サンプリングより前、読み込み直後の T ポーズで `Prepare`** |
+| `Renderer` を残す | `.vrma` に VRM 本体（mesh / material / skin）が埋まる | `Transform` とルートの `Animator` 以外を全部 `DestroyImmediate`。正解形は `meshes: 0` |
+| `Vrm10Instance` は `[RequireComponent(Humanoid)]` | `Humanoid` が「依存されている」で外せず残る | 型で順番を決め打ちせず、**消えなくなるまで回す** |
+| channel の対象は `names.IndexOf(node.name)` の**名前逆引き** | 同名ノードがあると別のノードに書かれる | 書き出し前に重複名をリネーム（`vita.vrm` は重複なし） |
+| `AddFrame` が `m_position.Add()` を無条件に呼ぶ | `SetPositionBoneAndParent` を忘れると NRE | hips を必ず設定 |
+| `instance.Runtime` に触る | "Runtime Control Rig" の GameObject 群が階層に生えてノードに混ざる | 触らない（`ControlRigGenerationOption.None` も念のため） |
+| importer 側は `clip.wrapMode = WrapMode.Loop` 固定（`AnimationImporterUtil.cs`） | `-vrma` で1本再生するとワンショットもループする | 目視確認ではそれでよい。ワンショット再生（#70 段3）では `ClampForever` に上書きする |
+
+`.anim` は `Assets/` 配下でないと `AssetDatabase` で読めない（`~` 末尾のフォルダは Unity が無視する）ので、
+スクリプトが `Assets/ChatterMascot/Editor/VRoidClips/` を一時的に作って `finally` で `.meta` ごと消す。
+途中で落ちたときの保険として `.gitignore` にも書いてある。
+
 ### ★ Unity CLI
 
 `unity` コマンド（[Unity CLI](https://unity.com/ja/blog/meet-the-unity-cli)）が
@@ -3380,7 +3427,7 @@ curl -fsSL https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh | UNITY_
 4. **NUnit XML を python3 で集計して `total= passed= failed=` を出すこと**（`test.sh`）
 5. **`unity.sh` の `pgrep -f "Unity.app/Contents/MacOS/Unity.*${PROJECT_PATH}"` による
    「Editor が同プロジェクトを開いていたら中断」**
-6. **`run.sh` の grep フィルタ（`^\[Fixups\]|^\[Build\]|^\[VrmProbe\]|error CS|...`）に
+6. **`run.sh` の grep フィルタ（`^\[Fixups\]|^\[Build\]|^\[VrmProbe\]|^\[VrmaExport\]|error CS|...`）に
    無いプレフィックスのログは、`LogError` であっても画面に出ない**（`run.sh` のコメント
    参照）。この弱点自体を引き継ぐ必要はないが、`unity run` の出力がフィルタ無しで
    全ログを流すのか、移行時に確認すること

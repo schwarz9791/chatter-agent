@@ -110,6 +110,13 @@ static NSString *CMModifierGlyphs(NSEventModifierFlags flags)
  */
 static void CMStopRecording(NSString *shownText)
 {
+    /*
+     * ★★ 記録を止めたら必ず戻すこと。 戻し忘れると**ショートカットが二度と効かない**
+     *   （症状は「設定パネルを1回開いたら ⌃⌥M が死ぬ」）。冪等なので、
+     *   記録していないときに呼ばれても害は無い。
+     */
+    CM_HotKeyResume();
+
     if (gKeyMonitor != nil) {
         [NSEvent removeMonitor:gKeyMonitor];
         gKeyMonitor = nil;
@@ -139,6 +146,14 @@ static void CMStartRecording(NSButton *button, NSTextField *field, NSString *key
     gRecordField = field;
     gRecordKey = key;
     gRecordOriginal = field.stringValue;
+
+    /*
+     * ★★ 記録中はグローバルショートカットを外すこと（→ CMHotKey.m の CM_HotKeySuspend）。
+     *   外さないと、**既存のショートカットと同じ組み合わせを記録できない** ——
+     *   Carbon が先にキーを取るので下のローカルモニタに1つも届かず、
+     *   代わりにその機能（キャラクターを隠す）が動く。
+     */
+    CM_HotKeySuspend();
 
     button.title = CMString(@"cancel", @"Cancel");
     field.stringValue = CMString(@"recording", @"…");

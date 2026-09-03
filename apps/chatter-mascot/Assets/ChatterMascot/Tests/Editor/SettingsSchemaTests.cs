@@ -232,6 +232,37 @@ namespace ChatterMascot.Tests
         }
 
         /// <summary>
+        /// ★★ <b>画面の行は一覧から作ること。</b> ここで直に並べると、ショートカットを
+        ///   1本足すたびに「画面の行」と「重複の判定」の両方に書き足すことになり、
+        ///   片方を忘れた瞬間に<b>「重複を見ていないショートカット」</b>ができる ——
+        ///   症状は「登録したのに効かない」で、どこにも理由が出ない。
+        /// </summary>
+        [Test]
+        public void BuildsTheShortcutRowsFromTheOneList()
+        {
+            var settings = MascotSettings.Defaults;
+            var slots = SettingsSchema.HotKeySlots(settings);
+            var items = SettingsSchema.Build(new SettingsContext { Settings = settings });
+
+            Assert.That(slots.Count, Is.GreaterThanOrEqualTo(2));
+            foreach (var slot in slots)
+            {
+                var spec = Find(items, slot.Key);
+                Assert.That(spec, Is.Not.Null, slot.Key);
+                Assert.That(spec.Label, Is.EqualTo(slot.Label));
+            }
+
+            // ★ 一覧に無いショートカットの行が紛れていないこと（逆向きも見る）
+            var keys = new HashSet<string>();
+            foreach (var slot in slots) keys.Add(slot.Key);
+            foreach (var spec in items)
+            {
+                if (spec.Kind != SettingKind.HotKey) continue;
+                Assert.That(keys.Contains(spec.Key), Is.True, spec.Key);
+            }
+        }
+
+        /// <summary>
         /// ★★ ショートカットの記録の仕方は<b>見出しに付ける</b>。ミュートの行に付けると、
         ///   同じことが言える「キャラクターの表示切り替え」にはかかっていないように読める。
         /// </summary>

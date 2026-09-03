@@ -406,13 +406,12 @@ namespace ChatterMascot.Desktop
                 case SettingKeys.MuteHotKey:
                     // ★ 起点は `settings`（＝保留があるならそれ）。`_host.Settings` を
                     //   読み直すと、同じ窓に居る保留を巻き戻す（→ 上の ★★）
-                    ApplyHotKey(key, value, settings.HideHotKey, "キャラクターの表示切り替え",
-                        spec => Apply(settings.WithMuteHotKey(spec)));
+                    // ★ **重複の相手をここに書かないこと**（→ ApplyHotKey / HotKeySlots）
+                    ApplyHotKey(key, value, settings, spec => Apply(settings.WithMuteHotKey(spec)));
                     return;
 
                 case SettingKeys.HideHotKey:
-                    ApplyHotKey(key, value, settings.MuteHotKey, "ミュートの切り替え",
-                        spec => Apply(settings.WithHideHotKey(spec)));
+                    ApplyHotKey(key, value, settings, spec => Apply(settings.WithHideHotKey(spec)));
                     return;
 
                 case SettingKeys.Vrm:
@@ -511,23 +510,35 @@ namespace ChatterMascot.Desktop
         /// ★ <b>ネイティブの戻り値で判定しないこと。</b> 2つ目は Carbon が
         ///   <c>eventHotKeyExistsErr</c>（-9878）で断るが、その番号は
         ///   <b>他のアプリが取っている</b>ときと同じで、原因を取り違える。
+        ///
+        /// ★★ <b>「もう片方」を引数で受けないこと。</b> 2本のうちは <c>case</c> に相手を
+        ///   書けば済むが、3本目からは組み合わせのぶん増える。<b>一覧
+        ///   （<c>SettingsSchema.HotKeySlots</c>）から自分以外を引く</b>形にしておけば、
+        ///   ショートカットが増えても足すのは<b>あちらの1行だけ</b>。
+        ///
+        /// ★ <b>受け付けないときは音も出す。</b> 記録の直後は<b>視線が押したキーにある</b>ので、
+        ///   離れた場所の注記だけだと気づかれない（実機の指摘）。
+        ///   ★ <c>NSBeep</c> はシステム設定で切れるので、<b>音を唯一の手掛かりにしない</b>。
         /// </summary>
-        private void ApplyHotKey(
-            string key, string recorded, string other, string otherLabel, Action<string> apply)
+        private void ApplyHotKey(string key, string recorded, MascotSettings settings, Action<string> apply)
         {
             HotKeySpec spec;
             string error;
             if (!HotKeySpec.TryParseRecorded(recorded, out spec, out error))
             {
-                Notice(key, error);
-                Push(update: true);
+                Reject(key, error);
                 return;
             }
 
-            if (HotKeySpec.SameCombination(spec.Format(), other))
+            var taken = spec.Format();
+            var slots = SettingsSchema.HotKeySlots(settings);
+            for (var i = 0; i < slots.Count; i++)
             {
-                Notice(key, $"「{otherLabel}」と同じ組み合わせです");
-                Push(update: true);
+                // ★ 自分の行は飛ばす（同じ組み合わせを記録し直すのは重複ではない）
+                if (string.Equals(slots[i].Key, key, StringComparison.Ordinal)) continue;
+                if (!HotKeySpec.SameCombination(taken, slots[i].Value)) continue;
+
+                Reject(key, $"「{slots[i].Label}」と同じ組み合わせです");
                 return;
             }
 
@@ -540,6 +551,21 @@ namespace ChatterMascot.Desktop
             //   記録すると、**⌃⌥J の下にさっきのエラー文が残ったまま**になる（#85 レビュー C-1）。
             //   ★ ここで作り直してよいのは、記録がもう終わっているから（掴んでいるスライダーは無い）
             if (cleared) Push(update: true);
+        }
+
+        /// <summary>
+        /// 入力を受け付けなかったことを伝える。<b>音と注記の両方</b>。
+        ///
+        /// ★★ <b>音だけにしないこと。</b> <c>NSBeep</c> はユーザーのシステム設定
+        ///   （サウンド）で切れるので、切っている人には<b>何も起きていないように見える</b>。
+        /// ★★ <b>注記だけにもしないこと。</b> 記録の直後は視線が押したキーにあるので、
+        ///   離れた場所の1行は読まれない（実機の指摘）。
+        /// </summary>
+        private void Reject(string key, string reason)
+        {
+            if (ChatterMascotNative.IsAvailable) ChatterMascotNative.CM_Beep();
+            Notice(key, reason);
+            Push(update: true);
         }
 
         // ── core とのやり取り ──────────────────────────────────

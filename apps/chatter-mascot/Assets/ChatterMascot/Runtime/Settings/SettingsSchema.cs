@@ -63,8 +63,50 @@ namespace ChatterMascot.Settings
     ///   「今はできない」と「壊れている」がユーザーから区別できない。実装が無いものは
     ///   <b>項目ごと出さず、ここにコメントで場所だけ確保する</b>。
     /// </summary>
+    /// <summary>
+    /// 設定できるショートカット1本ぶん（→ <see cref="SettingsSchema.HotKeySlots"/>）。
+    /// </summary>
+    public readonly struct HotKeySlot
+    {
+        public HotKeySlot(string key, string label, string value)
+        {
+            Key = key;
+            Label = label;
+            Value = value;
+        }
+
+        /// <summary>画面の項目キー（<see cref="SettingKeys"/>）</summary>
+        public string Key { get; }
+
+        public string Label { get; }
+
+        /// <summary>いまの指定（<c>ctrl+opt+m</c>）。<b>保存される形</b></summary>
+        public string Value { get; }
+    }
+
     public static class SettingsSchema
     {
+        /// <summary>
+        /// 設定できるショートカットの一覧。<b>増やすときはここに1行足す</b>。
+        ///
+        /// ★★ <b>読み手が2人いる。</b> 画面の行（<see cref="Build"/>）と、
+        ///   <b>重複の判定</b>（<c>SettingsPanelBridge.ApplyHotKey</c>）。並びを2箇所に持つと、
+        ///   片方にだけ足したときに<b>「重複を見ていないショートカット」</b>ができる ——
+        ///   しかも症状は「登録したのに効かない」で、<b>どこにも理由が出ない</b>。
+        ///
+        /// ★ <b>「もう片方」を呼び出し側に持たせないこと。</b> 2本のうちは <c>case</c> に
+        ///   相手を書けば済むが、3本目からは組み合わせのぶん増える。<b>一覧を配って
+        ///   自分以外と比べさせる</b>形なら、増えるのは<b>この配列の1行だけ</b>。
+        /// </summary>
+        public static IReadOnlyList<HotKeySlot> HotKeySlots(MascotSettings settings)
+        {
+            return new[]
+            {
+                new HotKeySlot(SettingKeys.MuteHotKey, "ミュートの切り替え", settings.MuteHotKey),
+                new HotKeySlot(SettingKeys.HideHotKey, "キャラクターの表示切り替え", settings.HideHotKey),
+            };
+        }
+
         public static IReadOnlyList<SettingSpec> Build(SettingsContext context)
         {
             var c = context ?? new SettingsContext();
@@ -146,19 +188,29 @@ namespace ChatterMascot.Settings
             // ★ 画面に出すのは記号（⌃⌥M）。**保存される文字列（ctrl+opt+m）ではない。**
             //   パネルが返してくるのは keyCode と修飾マスクの数値なので、
             //   ネイティブは保存形式を一度も見ない
-            items.Add(SettingSpec.HotKey(
-                SettingKeys.MuteHotKey, "ミュートの切り替え", Symbols(settings.MuteHotKey)));
+            // ★★ **並びは `HotKeySlots` が持つ**（→ あちらの ★★）。ここで直に並べると、
+            //   ショートカットを1本足すたびに「画面の行」と「重複の判定」の両方に
+            //   書き足すことになり、片方を忘れた瞬間に穴が空く
+            var slots = HotKeySlots(settings);
+            for (var i = 0; i < slots.Count; i++)
+            {
+                // ★★ **重複していたら画面に出すこと（第2層）。** パネルからの記録は
+                //   `SettingsPanelBridge.ApplyHotKey` が保存の手前で弾くので、ここに来るのは
+                //   **`settings.json` を手で編集した場合**だけ。放っておくと同じ表記が並び、
+                //   `RegisterHotKeys` が黙って2つ目を登録せずに戻る ——
+                //   **「押しても何も起きないショートカット」が画面に残る**。
+                //   ★ **後の行にだけ出す。** 登録されないのは後から来た方
+                //   （→ `StatusItemBridge.RegisterHotKeys` の登録順）
+                var clash = -1;
+                for (var j = 0; j < i && clash < 0; j++)
+                {
+                    if (HotKeySpec.SameCombination(slots[i].Value, slots[j].Value)) clash = j;
+                }
 
-            // ★★ **重複していたら画面に出すこと（第2層）。** パネルからの記録は
-            //   `SettingsPanelBridge.ApplyHotKey` が保存の手前で弾くので、ここに来るのは
-            //   **`settings.json` を手で編集した場合**だけ。放っておくと2行とも同じ表記が出て、
-            //   `RegisterHotKeys` が黙って2つ目を登録せずに戻る ——
-            //   **「押しても何も起きないショートカット」が画面に残る**。
-            //   ★ 後の行に出す。登録されないのは2つ目（→ `StatusItemBridge.RegisterHotKeys`）
-            var duplicated = HotKeySpec.SameCombination(settings.MuteHotKey, settings.HideHotKey);
-            items.Add(SettingSpec.HotKey(
-                SettingKeys.HideHotKey, "キャラクターの表示切り替え", Symbols(settings.HideHotKey),
-                note: duplicated ? "「ミュートの切り替え」と同じ組み合わせなので登録できません" : ""));
+                items.Add(SettingSpec.HotKey(
+                    slots[i].Key, slots[i].Label, Symbols(slots[i].Value),
+                    note: clash < 0 ? "" : $"「{slots[clash].Label}」と同じ組み合わせなので登録できません"));
+            }
 
             // ── リセット ─────────────────────────────────────
             items.Add(SettingSpec.Section("リセット"));

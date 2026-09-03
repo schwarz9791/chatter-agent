@@ -129,6 +129,23 @@ CM_EXPORT bool CM_OpenFilePanel(const char* optionsJson);
  */
 CM_EXPORT bool CM_Confirm(const char* optionsJson);
 
+/*
+ * 警告音（#76）。設定パネルが「その入力は受け付けない」を伝えるのに使う。
+ *
+ * ★ 音だけにすること。 ダイアログを出すと、記録のたびに手が止まる。
+ *   NSBeep はユーザーのシステム設定（サウンド）に従うので、切っている人には鳴らない。
+ */
+CM_EXPORT void CM_Beep(void);
+
+/*
+ * ショートカットの記録中だけ、登録済みのグローバルショートカットを外す（#76）。
+ *
+ * ★★ ネイティブの内部から呼ぶ（→ CMHotKey.m）。 記録の開始・終了はネイティブ内で
+ *   完結しているので、「いま記録中か」を C# に知らせる必要は無い。
+ */
+void CM_HotKeySuspend(void);
+void CM_HotKeyResume(void);
+
 /* --- プラグインの内部で共有するもの（C# からは呼ばない） --- */
 
 /* AppKit を触る処理を main thread に載せる。既に main なら直接走る */

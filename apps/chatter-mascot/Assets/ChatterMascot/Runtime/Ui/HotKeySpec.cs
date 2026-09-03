@@ -168,6 +168,86 @@ namespace ChatterMascot.Ui
         }
 
         /// <summary>
+        /// 記録した <c>(keyCode, modifiers)</c> から作る（設定パネルのショートカット記録 / #76）。
+        ///
+        /// ★★ <b>ネイティブ側にキーの名前を持たせないための入口。</b> ObjC が返すのは
+        ///   <c>NSEvent</c> の <b>数値</b>（仮想キーコードと Carbon の修飾マスク）だけで、
+        ///   <c>"ctrl+opt+m"</c> という語彙はここでしか作らない。#75 で決めた
+        ///   「ネイティブに設定の語彙を書かない」をショートカットにも通す。
+        ///
+        /// ★ <b>修飾キーの変換はネイティブがやる。</b> Cocoa（<c>NSEventModifierFlag*</c>）と
+        ///   Carbon（<c>cmdKey</c> 等）でビットが違う。<c>RegisterEventHotKey</c> が要求するのは
+        ///   Carbon の方なので、<b>登録に使う形のまま</b>受け取る。
+        ///
+        /// ★ <b>表に無いキーは受け付けない。</b> 記録できてしまうと
+        ///   <c>settings.json</c> に往復できない値が入る（<see cref="Format"/> が空を返し、
+        ///   次の起動でショートカットが消える）。
+        /// </summary>
+        public static bool TryFromCode(uint keyCode, uint modifierMask, out HotKeySpec spec, out string error)
+        {
+            spec = default(HotKeySpec);
+
+            // ★ 認識できる修飾キー以外のビットは落とす。Caps Lock / Fn / 左右の区別が
+            //   混ざったまま登録すると、同じ組み合わせを打っても一致しない
+            var mask = modifierMask & (ModifierCommand | ModifierShift | ModifierOption | ModifierControl);
+
+            if (mask == 0)
+            {
+                error = "修飾キー（⌃ ⌥ ⇧ ⌘）を一緒に押してください";
+                return false;
+            }
+
+            string keyName = null;
+            foreach (var entry in KeyCodes)
+            {
+                if (entry.Value != keyCode) continue;
+                keyName = entry.Key;
+                break;
+            }
+
+            if (keyName == null)
+            {
+                error = "このキーはショートカットに使えません";
+                return false;
+            }
+
+            spec = new HotKeySpec(keyName, keyCode, mask);
+            error = null;
+            return true;
+        }
+
+        /// <summary>
+        /// ネイティブが送ってくる <c>"&lt;keyCode&gt;,&lt;modifierMask&gt;"</c> を読む。
+        ///
+        /// ★ <b>文字列で運ぶのはイベントの経路が1本だから</b>（→ <c>MenuJson</c>）。
+        ///   種類ごとにコールバックを増やすと、リバース P/Invoke のデリゲートを
+        ///   GC から守る対象が増える（→ <c>CMNative.h</c>）。
+        /// </summary>
+        public static bool TryParseRecorded(string text, out HotKeySpec spec, out string error)
+        {
+            spec = default(HotKeySpec);
+
+            if (string.IsNullOrEmpty(text))
+            {
+                error = "記録の中身が空です";
+                return false;
+            }
+
+            var parts = text.Split(',');
+            uint keyCode;
+            uint mask;
+            if (parts.Length != 2
+                || !uint.TryParse(parts[0].Trim(), out keyCode)
+                || !uint.TryParse(parts[1].Trim(), out mask))
+            {
+                error = $"記録の形が読めません: \"{text}\"";
+                return false;
+            }
+
+            return TryFromCode(keyCode, mask, out spec, out error);
+        }
+
+        /// <summary>
         /// 正規化した表記に戻す。<b><see cref="TryParse"/> と往復する</b>。
         /// 並びは macOS の表記順（⌃⌥⇧⌘）に合わせる。
         /// </summary>
@@ -212,6 +292,29 @@ namespace ChatterMascot.Ui
         public bool Equals(HotKeySpec other)
         {
             return KeyCode == other.KeyCode && ModifierMask == other.ModifierMask;
+        }
+
+        /// <summary>
+        /// 2つの指定が<b>同じ組み合わせ</b>か。読めないもの・空は <c>false</c>。
+        ///
+        /// ★★ <b>重複は C# 側で弾くこと。</b> 2つ目の登録は Carbon が
+        ///   <c>eventHotKeyExistsErr</c>（-9878）で失敗するが、その番号は
+        ///   <b>他のアプリが取っている</b>ときと同じなので、
+        ///   ネイティブの戻り値だけでは<b>原因を取り違える</b>。
+        ///
+        /// ★ <b>文字列で受ける。</b> 比べたいのは <c>settings.json</c> に入る形
+        ///   （<c>ctrl+opt+m</c>）どうしで、呼び出し側にパースを2回書かせない。
+        ///   ★ 表記ゆれ（<c>opt+ctrl+m</c>）は <see cref="TryParse"/> が吸収するので、
+        ///   <b>文字列の比較にしないこと</b>。
+        /// </summary>
+        public static bool SameCombination(string a, string b)
+        {
+            HotKeySpec left;
+            HotKeySpec right;
+            string error;
+            if (!TryParse(a, out left, out error) || !left.IsValid) return false;
+            if (!TryParse(b, out right, out error) || !right.IsValid) return false;
+            return left.Equals(right);
         }
 
         public override bool Equals(object obj)

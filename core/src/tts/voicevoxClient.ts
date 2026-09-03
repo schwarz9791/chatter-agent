@@ -6,11 +6,17 @@
  * cc-mascot も同じ2段構えだが、こちらは公開されている API 仕様を見て書いてある
  * （そのため cc-mascot 由来の帰属表示は付かない → docs/origin.md）。
  *
- * ★ `AudioQuery` の中身は解釈しない。`speedScale` などを触る予定が無いうちは、
- *   エンジンが返した JSON をそのまま返送するのが最も安全（エンジンのバージョン差に強い）。
+ * ★ `AudioQuery` の中身は解釈しない。エンジンが返した JSON をそのまま返送するのが
+ *   最も安全（エンジンのバージョン差に強い）。
+ *
+ * ★★ **例外は `speedScale` だけ**（#76 で入った `ttsSpeedScale`。→ `applySpeedScale`）。
+ *   合成し直さないと話速は変えられず、再生側で伸縮するとリップシンク（#58）が
+ *   WAV から作ったエンベロープとズレるため、ここで触る以外の道が無い。
+ *   **例外をここ1つに留めること** —— `pitchScale` / `intonationScale` を同じ理屈で
+ *   足していくと、「そのまま返送する」という一番安全な形が失われる。
  */
 
-/** エンジンが返す読み仮名クエリ。中身は解釈せずそのまま返送する */
+/** エンジンが返す読み仮名クエリ。中身は解釈せずそのまま返送する（例外は `applySpeedScale`） */
 export type AudioQuery = Record<string, unknown>;
 
 export interface SpeakerStyle {
@@ -41,6 +47,14 @@ export interface VoicevoxClientOptions {
    *   打ち切ることで抑える（→ `server/httpServer.ts`）。エンジンへの上限とは別の話。
    */
   timeoutMs: number;
+  /**
+   * 話速。`audio_query` の応答の `speedScale` を書き換える（→ `applySpeedScale`）。
+   *
+   * ★ **省略は「触らない」。** エンジンの疎通確認（`listSpeakers`）しかしない呼び出し側に
+   *   意味の無い速度を書かせないための省略可で、「既定は 1.0」ではない ——
+   *   等倍にしたいなら `1.0` を明示して渡すこと（エンジン側の既定が 1.0 とは限らない）。
+   */
+  speedScale?: number;
 }
 
 /**
@@ -143,8 +157,27 @@ function looksLikeWav(buffer: ArrayBuffer): boolean {
   return tag(0) === "RIFF" && tag(8) === "WAVE";
 }
 
+/**
+ * `audio_query` が返した JSON の `speedScale` **だけ**を書き換える。**純粋関数。**
+ *
+ * ★ **キーを持たないエンジンには何もしない。** 無いところに作ると、そのエンジンが
+ *   知らないフィールドを載せた JSON を返送することになる。「触る」と「生やす」は別。
+ *
+ * ★ **1.0 でも、キーがあれば書く。** 「既定値なら触らない」形にすると、
+ *   エンジン側の既定が 1.0 でないときに**等倍へ戻せなくなる**。
+ *
+ * ★ **元のオブジェクトを破壊しない。** `audioStore` は single-flight で1つの
+ *   `synthesize` を共有するが、`AudioQuery` はその中で作られて捨てられるので現状は
+ *   共有されない —— それは今の実装の都合であって契約ではない。
+ */
+export function applySpeedScale(query: AudioQuery, speedScale: number | undefined): AudioQuery {
+  if (speedScale === undefined) return query;
+  if (!Object.hasOwn(query, "speedScale")) return query;
+  return { ...query, speedScale };
+}
+
 export function createVoicevoxClient(options: VoicevoxClientOptions): VoicevoxClient {
-  const { baseUrl, speakerId, timeoutMs } = options;
+  const { baseUrl, speakerId, timeoutMs, speedScale } = options;
 
   async function request(op: string, url: string, init: RequestInit): Promise<Response> {
     let res: Response;
@@ -192,7 +225,7 @@ export function createVoicevoxClient(options: VoicevoxClientOptions): VoicevoxCl
       const synthRes = await request("synthesis", `${baseUrl}/synthesis?speaker=${speakerId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(query),
+        body: JSON.stringify(applySpeedScale(query, speedScale)),
       });
 
       let wav: ArrayBuffer;

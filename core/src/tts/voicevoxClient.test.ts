@@ -7,7 +7,14 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as http from "http";
 import type { AddressInfo } from "net";
-import { createVoicevoxClient, flattenStyles, hasStyle, TtsHttpError, TtsTransportError } from "./voicevoxClient";
+import {
+  applySpeedScale,
+  createVoicevoxClient,
+  flattenStyles,
+  hasStyle,
+  TtsHttpError,
+  TtsTransportError,
+} from "./voicevoxClient";
 import type { Speaker } from "./voicevoxClient";
 
 type Handler = (req: http.IncomingMessage, res: http.ServerResponse) => void;
@@ -255,5 +262,40 @@ describe("flattenStyles / hasStyle", () => {
   it("設定した話者 ID が実在するか判定できる", () => {
     expect(hasStyle(SPEAKERS, 888753760)).toBe(true);
     expect(hasStyle(SPEAKERS, 999)).toBe(false);
+  });
+});
+
+describe("applySpeedScale（#76）", () => {
+  /**
+   * ★★ **キーを持たないエンジンには何もしない。** 無いところに作ると、そのエンジンが
+   *   知らないフィールドを載せた JSON を返送することになる（「触る」と「生やす」は別）
+   */
+  it("★★ speedScale を持たないクエリには生やさない", () => {
+    const query = { accent_phrases: [], outputSamplingRate: 24000 };
+    expect(applySpeedScale(query, 1.5)).toEqual(query);
+    expect(Object.hasOwn(applySpeedScale(query, 1.5), "speedScale")).toBe(false);
+  });
+
+  it("speedScale を持つクエリは書き換える", () => {
+    expect(applySpeedScale({ speedScale: 1.0, pitchScale: 0 }, 1.5)).toEqual({ speedScale: 1.5, pitchScale: 0 });
+  });
+
+  /**
+   * ★ 1.0 でも、キーがあれば書く。「既定値なら触らない」形にすると、
+   *   エンジン側の既定が 1.0 でないときに等倍へ戻せなくなる
+   */
+  it("★ 1.0 でもキーがあれば書く", () => {
+    expect(applySpeedScale({ speedScale: 1.4 }, 1.0)).toEqual({ speedScale: 1.0 });
+  });
+
+  it("省略（undefined）なら触らない", () => {
+    const query = { speedScale: 1.4 };
+    expect(applySpeedScale(query, undefined)).toBe(query);
+  });
+
+  it("元のオブジェクトを書き換えない", () => {
+    const query = { speedScale: 1.0 };
+    applySpeedScale(query, 1.5);
+    expect(query.speedScale).toBe(1.0);
   });
 });

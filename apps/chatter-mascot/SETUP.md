@@ -124,6 +124,12 @@ grep RecreateSurface "$HOME/Library/Logs/schwarz9791/Chatter Mascot/Player.log"
 ★ **`macRetinaSupport` は切らないこと。** 表示がぼやけるうえ、`UniWindowMoveHandle` の
 Retina 座標系の手当てが前提にしている。
 
+★ **設定パネルの「大きさ」もここを動かす**（#76）。倍率 0.5〜2.0 を
+`DefaultWidthPoints x DefaultHeightPoints` に掛けてウィンドウごと変える。
+`VrmStage` が `Screen.width/height` の変化を見てフレーミングし直すので、
+**ウィンドウさえ変えればモデルは勝手に収まる**（カメラの前後＝`Headroom` は触らない。
+触ると頭と足が対称に欠ける）。
+
 ★ **位置と大きさは `~/.config/chatter-agent/mascot/window.json` に
 ポイントで永続化される**（#16）。**`PlayerPrefs` は使っていない** ——
 macOS では `tech.sukima.chatter-mascot.plist` に書かれるので、上の
@@ -270,13 +276,24 @@ Editor が UniVRM の型を直接使うなら Editor の asmdef にも `VRM10` �
 |---|---|---|---|---|
 | 1 | 起動引数 | `-vrm <path>` | `-vrma <path>` | 全 |
 | 2 | 環境変数 | `CHATTER_MASCOT_VRM` | `CHATTER_MASCOT_VRMA` | 全 |
-| 3 | `Application.persistentDataPath/` | `model.vrm` | `idle.vrma` | 全 |
-| 4 | `${XDG_CONFIG_HOME:-~/.config}/chatter-agent/` | `models/*.vrm` | `animations/*.vrma` | デスクトップのみ |
-| 5 | 同梱（`StreamingAssets/`） | `vita.vrm` | `idle_loop.vrma` | 全 |
+| 3 | **設定パネルで選んだモデル**（#76） | `models/mascot.vrm`（**固定名**） | —— | デスクトップのみ |
+| 4 | `Application.persistentDataPath/` | `model.vrm` | `idle.vrma` | 全 |
+| 5 | `${XDG_CONFIG_HOME:-~/.config}/chatter-agent/` | `models/*.vrm` | `animations/*.vrma` | デスクトップのみ |
+| 6 | 同梱（`StreamingAssets/`） | `vita.vrm` | `idle_loop.vrma` | 全 |
 
-- 4 は `core/src/core/paths.ts` の `getRuntimeDir` と**同じ規則**。ユーザーから見て
+- 5 は `core/src/core/paths.ts` の `getRuntimeDir` と**同じ規則**。ユーザーから見て
   「chatter-agent の設定はここ1箇所」を保つため。辞書順の先頭を採る
-- ★ **Android には共有ファイルシステムが無い**ので 4 は落ちる
+- ★ **3 が要るのは 5 が辞書順だから。** 設定パネルは選んだファイルを `models/` へ**コピー**する
+  （元ファイルを消しても動く）が、これが無いと `models/` に別のファイルがあるとき
+  **選んだ方が反映されない**
+- ★★ **3 は固定名。** 元の名前でコピーすると選び直すたびに積み上がるので、
+  `models/mascot.vrm` に上書きする。**元の名前は表示のためだけ**に
+  `settings.json` の `character.vrm` が覚える（探索には使わない）。
+  手で `models/` に置いたファイルは触らない（→ `docs/mascot.md`）
+- ★ **3 は起動引数・環境変数より下。** `-vrm` は切り分けの逃げ道
+  （「設定が壊れていてもこれを付ければ必ず出る」）なので、設定より優先を保つ
+- ★ **`.vrma` に対応する設定は無い。** モーションを選ばせる UI を作っていないため（意図的な非対称）
+- ★ **Android には共有ファイルシステムが無い**ので 3 と 5 は落ちる
 - ★ **`.app` を Finder から起動すると環境変数は空**（シェルを継承しない）。2 に頼らない
 - ★ **`~/Downloads` / `~/Desktop` / `~/Documents` は macOS の TCC で止められる。**
   読み込みが返らないので、15秒で打ち切って次の候補へ進む（→ `docs/mascot.md`）
@@ -287,8 +304,9 @@ Editor が UniVRM の型を直接使うなら Editor の asmdef にも `VRM10` �
 スクリーンショットの公開・デモに使えない。**差し替え検証で `-vrm` から読ませるだけ**にする。
 `.gitignore` が `StreamingAssets/` 以外の `.vrm` を落とすようにしてあるが、最後は人の判断。
 
-★ **設定 UI（任意のモデルに差し替え）は [#16](https://github.com/schwarz9791/chatter-agent/issues/16)。**
-ここにあるのは探索順まで。UI は後から 1〜4 に乗る。
+★ **設定パネルからの差し替えは次の起動から効く**（[#76](https://github.com/schwarz9791/chatter-agent/issues/76)）。
+`VrmStage` は起動時に1回だけ読む作りで、差し替えるには spring bone・コライダ・ドラッグハンドル・
+待機モーション・表情の結び直しが要る（→ `docs/mascot.md`）。
 
 **判断は `PlaybackQueue` に集めてある。** イベントを入れるとコマンドの配列が返る純粋な関数で、
 副作用（取得・再生・ack）は `MascotRunner` が実行して結果をイベントとして戻す。
@@ -346,6 +364,55 @@ cd apps/chatter-mascot
 
 ---
 
+#### 設定パネルまわり（#76）
+
+**キャラクターを右クリック**すると開閉する（もう一度押すと閉じる）。メニューバーの
+「設定を開く…」からも同じパネルが開く。「Chatter Mascot について」は**別のダイアログ**で、
+版とライセンス全文はそちらに出る。
+
+★ **`⌃ + 左クリック`は効かない。** macOS の慣習だが常駐マスコットでは成立しない
+（→ [`../../docs/mascot.md`](../../docs/mascot.md)）。副ボタンを出せない環境では
+メニューバーの「設定を開く…」を使う。
+
+★ **パネルが開かないときは、まず `Player.log` を見る。**
+
+```
+[Native] パネル0: frame=1041,-1111 520x664 visible=1 key=0 screen={{1041, -1169}, {1800, 1169}}
+```
+
+`パネル0` が設定、`パネル1` が「について」。`visible=1` なら**こちらは仕事を終えている** —— 見えないのは
+「他のウィンドウの背後に居る」か「別のディスプレイに出ている」。
+`frame` と `screen` がそれを教える。
+
+★ **右クリックが効かないときは、この行が出ているかを見る。**
+
+```
+[Mascot] 右クリックを見張ります
+```
+
+出ていなければ見張りが据わっていない（`UniWindowController` の居ないシーンでは据えない）。
+出ているのに効かないときは、**キャラクターの不透明な画素の上を押しているか**を疑う ——
+判定はクリック透過の状態そのもの（`isClickThrough`）で、脚の間などの透けている場所では
+下のアプリへ抜ける（→ [`../../docs/mascot.md`](../../docs/mascot.md)）。
+
+★ **メニューバーはアクセシビリティから触れる**（`menu bar 2`。ターミナルに権限が要る）。
+
+```bash
+osascript -e 'tell application "System Events" to tell process "Chatter Mascot" \
+  to click menu item "設定を開く…" of menu 1 of menu bar item 1 of menu bar 2'
+```
+
+★ **権限を与えたくないときは `-settingsProbe`。** 起動時にパネルを開く経路を用意してある
+（`-quitProbe` / `-windowProbe` と同じ）。
+
+```bash
+"Build/ChatterMascot.app/Contents/MacOS/Chatter Mascot" -settingsProbe
+```
+
+★ **ショートカットは「記録」ボタンで実際にキーを押して決める。** 修飾キーを1つ以上入れること
+（単独のキーはそのキーが全アプリで入力できなくなるので弾かれる）。
+中止は**修飾キー無しの esc**。
+
 #### 常駐まわり（#75）
 
 設定は `~/.config/chatter-agent/mascot/settings.json`（`window.json` と同じディレクトリ）。
@@ -353,10 +420,31 @@ cd apps/chatter-mascot
 ```json
 {
   "version": 1,
-  "audio": { "mute": false, "muteHotKey": "ctrl+opt+m" },
-  "ui": { "hideHotKey": "ctrl+opt+h" }
+  "audio": { "mute": false, "muteHotKey": "ctrl+opt+m", "volume": 1.0 },
+  "ui": { "hideHotKey": "ctrl+opt+h" },
+  "character": {
+    "idleMotion": true,
+    "cursorGaze": true,
+    "blink": true,
+    "vrm": ""
+  }
 }
 ```
+
+★★ **「大きさ」もここに無い。** ウィンドウの大きさは `window.json` が持っていて、
+スライダーはその写しでしかない（**現在の高さ ÷ 480** が倍率）。両方に持つと権威が2つになり、
+ユーザーが窓を直接リサイズしたときにどちらが勝つのか説明できなくなる
+（→ [`../../docs/mascot.md`](../../docs/mascot.md)）。
+
+★ **音声スタイル・話す速さ・要約の ON/OFF もここに無い。** あれは core の
+`~/.config/chatter-agent/config.json` が持ち、設定パネルは `PATCH /v1/config` 経由で書く
+（→ [`../../docs/protocol.md`](../../docs/protocol.md) の「制御 API」）。
+音量が Unity 側で速さが core 側なのは紛らわしいが理由がある —— 音量は**再生側のつまみ**で
+合成し直さなくても効き、速さは**合成のパラメータ**で `audio_query` を変えない限り WAV が変わらない。
+
+★ **`volume` は 0.0〜1.0**（パネルには 0〜100% で出る）。1.0 超えが効くのは macOS だけで
+Android の `AudioSource.volume` は 0〜1 にクランプされるため、**XR と共有する設定に
+プラットフォームで意味の変わる範囲を持たせない**方を採った（→ [`../../docs/mascot.md`](../../docs/mascot.md)）。
 
 ★ **既定を変えたら、自分の `settings.json` も直すこと。** ファイルの値は既定より優先されるので、
 **コードの既定を変えても、既に書かれているキーには届かない**。しかも保存のたびに全キーが書き出される

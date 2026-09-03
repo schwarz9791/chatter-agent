@@ -23,6 +23,7 @@ import {
   getSpoolDir,
   getSummarizerHomeDir,
   getSummarizerLogPath,
+  getSummarizerSessionsPath,
   getWorkerStatePath,
 } from "../core/paths";
 import { createSpeechLog } from "../core/speechLog";
@@ -83,6 +84,7 @@ function main(): void {
         maxEntries: () => config.get("speechQueueMaxEntries"),
       }),
       workerStatePath: getWorkerStatePath(),
+      summarizerSessionsPath: getSummarizerSessionsPath(),
       speakPrompts: config.get("speakPrompts"),
       spoolMaxAgeMs: config.get("spoolMaxAgeHours") * 60 * 60 * 1000,
       classify: (text) => classifier.classify(text),

@@ -109,6 +109,39 @@ namespace ChatterMascot.Desktop.Native
         [DllImport(Library)]
         internal static extern void CM_StatusItemHide();
 
+        [DllImport(Library)]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool CM_PanelShow(int panelId, [MarshalAs(UnmanagedType.LPUTF8Str)] string schemaJson);
+
+        [DllImport(Library)]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool CM_PanelUpdate(int panelId, [MarshalAs(UnmanagedType.LPUTF8Str)] string schemaJson);
+
+        [DllImport(Library)]
+        internal static extern void CM_PanelHide(int panelId);
+
+        [DllImport(Library)]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool CM_PanelIsVisible(int panelId);
+
+        [DllImport(Library)]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool CM_OpenFilePanel([MarshalAs(UnmanagedType.LPUTF8Str)] string optionsJson);
+
+        [DllImport(Library)]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool CM_Confirm([MarshalAs(UnmanagedType.LPUTF8Str)] string optionsJson);
+
+        /// <summary>
+        /// 警告音（#76）。<b>その入力は受け付けない</b>ことを伝えるのに使う。
+        ///
+        /// ★ 音だけにすること。ダイアログを出すと記録のたびに手が止まる。
+        ///   <c>NSBeep</c> はユーザーのシステム設定に従うので、切っている人には鳴らない
+        ///   —— <b>音を唯一の手掛かりにしないこと</b>（注記も併せて出す）。
+        /// </summary>
+        [DllImport(Library)]
+        internal static extern void CM_Beep();
+
         /// <summary>0 = 成功。それ以外は OSStatus（-9878 = 他のアプリが取っている）</summary>
         [DllImport(Library)]
         internal static extern int CM_HotKeyRegister(int id, uint keyCode, uint modifiers);

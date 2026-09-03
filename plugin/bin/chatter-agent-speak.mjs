@@ -93,6 +93,15 @@ function getWorkerStatePath(e = currentPathEnv()) {
 	return path.join(getRuntimeDir(e), "speak.state.json");
 }
 /**
+* 要約 CLI に渡した `--session-id` の共有レジストリ（→ `core/summarizerSessions.ts`）。
+*
+* ★ **書き手は `chatter-agent-server` だけ、読み手は `chatter-agent-speak` だけ。**
+*   CLI 自身の分は `worker.state.json` に入る（書き手を1人に保つための分割）。
+*/
+function getSummarizerSessionsPath(e = currentPathEnv()) {
+	return path.join(getRuntimeDir(e), "summarizer-sessions.json");
+}
+/**
 * 単一ワーカーのロック。**ディレクトリ**として作る（mkdir が原子的なため）。
 * CLI に npm 依存を持たせられないので、ロックライブラリは使わない。
 */
@@ -143,6 +152,7 @@ function createDefaultConfig() {
 		ttsEnabled: true,
 		ttsBaseUrl: "http://127.0.0.1:10101",
 		ttsSpeakerId: 888753760,
+		ttsSpeedScale: 1,
 		synthesisTimeoutMs: 3e4,
 		ttsSpawn: true,
 		ttsSpawnCommand: "",
@@ -234,6 +244,29 @@ const parseNonNegativeInt = (raw) => {
 	const n = toInt(raw);
 	return n !== void 0 && n >= 0 ? n : void 0;
 };
+/**
+* 範囲付きの**小数**パーサを作る。
+*
+* ★ **`toInt` を流用できない。** あれは `Number.isInteger` で縛っているので、
+*   `1.5` のような値を1つも通さない（このファイルで小数を受けるキーは
+*   `ttsSpeedScale` が初めて）。
+*
+* ★ **`Number(raw)` の素通しにしないこと。** `Number("")` も `Number(" ")` も
+*   `Number(null)` も `0` になる。`toInt` では `Number.isInteger(NaN) === false` が
+*   その分を弾いていたが、`0` は有限なので範囲に入ってしまう。空・空白・非文字列を
+*   明示的に落とす。
+*/
+function makeRangeParser(min, max) {
+	return (raw) => {
+		let n;
+		if (typeof raw === "number") n = raw;
+		else if (typeof raw === "string" && raw.trim()) n = Number(raw.trim());
+		else return void 0;
+		if (!Number.isFinite(n)) return void 0;
+		return n >= min && n <= max ? n : void 0;
+	};
+}
+const parseSpeedScale = makeRangeParser(.5, 2);
 const parseNonEmptyString = (raw) => typeof raw === "string" && raw.trim() ? raw.trim() : void 0;
 const parseStringList = (raw) => {
 	let items;
@@ -364,6 +397,10 @@ const SPECS = {
 	ttsSpeakerId: {
 		env: "CHATTER_AGENT_TTS_SPEAKER_ID",
 		parse: parseNonNegativeInt
+	},
+	ttsSpeedScale: {
+		env: "CHATTER_AGENT_TTS_SPEED_SCALE",
+		parse: parseSpeedScale
 	},
 	synthesisTimeoutMs: {
 		env: "CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS",
@@ -512,6 +549,30 @@ function createConfigStore(deps = {}) {
 			...overrides
 		};
 	}
+	/**
+	* ファイルを `collect()` に通さず生のまま返す。
+	*
+	* ★ `readFileValues()` と重複させたくなるが、**目的が逆**。あちらは
+	*   「既知のキーだけを、パースに通った形で」取り出す（読む側）。こちらは
+	*   「全部のキーを、書かれたまま」取り出す（書き戻すためのベース）。
+	*/
+	function readRaw() {
+		let text;
+		try {
+			text = fs.readFileSync(filePath, "utf-8");
+		} catch (err) {
+			if (err.code === "ENOENT") return {};
+			return;
+		}
+		let parsed;
+		try {
+			parsed = JSON.parse(text);
+		} catch {
+			return;
+		}
+		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return void 0;
+		return parsed;
+	}
 	return {
 		filePath,
 		get(key) {
@@ -521,6 +582,16 @@ function createConfigStore(deps = {}) {
 		snapshot() {
 			refresh();
 			return { ...merged };
+		},
+		originOf(key) {
+			refresh();
+			if (Object.hasOwn(overrides, key)) return "env";
+			if (Object.hasOwn(fileValues, key)) return "file";
+			return "default";
+		},
+		readRawFile: readRaw,
+		invalidate() {
+			loaded = false;
 		}
 	};
 }
@@ -1767,8 +1838,18 @@ function extractSummary(stdout) {
 * 大きくしすぎる意味は無い（毎 delta 起動のプロセス1個がここまで貯め込むことは実運用で無い）。
 */
 const MAX_BUFFER_BYTES = 1048576;
+function ensureHomeDir(homeDir) {
+	try {
+		fs.mkdirSync(homeDir, { recursive: true });
+	} catch {}
+}
+/** stdout/stderr から診断用の1行を作る。長さは 500 文字で頭打ち */
+function detailOf(stderr, fallback) {
+	return (stderr.trim() || fallback).slice(0, 500);
+}
 /**
-* 要約 CLI を実行する。
+* 要約 CLI を実行する。**同期**。呼んでよいのは単発プロセス（`chatter-agent-speak`）だけ
+* （常駐プロセスからは `runClaudeCliAsync` を使う。→ そちらのヘッダ ★★）。
 *
 * ★ タイムアウトの既定（`aiSummaryTimeoutMs`。→ `core/config.ts`）について:
 *   所要時間は**入力の長さから予測できない**。実機実測10件では相関が見られず、短い入力が
@@ -1779,9 +1860,7 @@ const MAX_BUFFER_BYTES = 1048576;
 *   倍率を掛けても意味が無いため）。
 */
 function runClaudeCli(deps) {
-	try {
-		fs.mkdirSync(deps.homeDir, { recursive: true });
-	} catch {}
+	ensureHomeDir(deps.homeDir);
 	try {
 		return {
 			ok: true,
@@ -1802,7 +1881,7 @@ function runClaudeCli(deps) {
 		};
 	} catch (err) {
 		const e = err;
-		const detail = ((typeof e.stderr === "string" ? e.stderr : Buffer.isBuffer(e.stderr) ? e.stderr.toString("utf-8") : "").trim() || e.message || String(err)).slice(0, 500);
+		const detail = detailOf(typeof e.stderr === "string" ? e.stderr : Buffer.isBuffer(e.stderr) ? e.stderr.toString("utf-8") : "", e.message || String(err));
 		if (e.code === "ETIMEDOUT") return {
 			ok: false,
 			reason: "timeout",
@@ -1871,6 +1950,23 @@ const SUMMARY_INSTRUCTION = [
 *   （`getMaxPerDrain`）に読み替えてある。CLI が長時間動かなかった後のドレインでは長文が
 *   複数溜まっていることがあり、全部要約すると `timeoutMs × N` だけ発話が遅れるため。
 */
+/**
+* 要約として採用してよいか。**純粋関数。**
+*
+* ★ 同期の pipeline（ここ）と非同期のプレビュー（`summaryPreview.ts`）が
+*   **同じ規則を見る**ために切り出してある。片方だけ直すと、設定パネルの
+*   「テスト要約」が通るのに本番では原文が読み上げられる（またはその逆）という、
+*   いちばん切り分けにくいズレになる。
+*
+* ★ 上限を `SUMMARY_MAX_CHARS`（120）の2倍にしている根拠は下の判定箇所のコメント参照
+*   （`claude -p` が exit 0 のままレート制限の通知を stdout に出す事故を実測で踏んでいる）。
+*
+* @param spoken 実際に読み上げる形（`toSpeechSentences` を通した後）
+* @param originalLength 比較相手の原文の長さ。**整形済みの長さで比べること**
+*/
+function isAcceptableSummary(spoken, originalLength) {
+	return spoken.length > 0 && spoken.length < originalLength && spoken.length <= 120 * 2;
+}
 /**
 * `Summarize` を作るファクトリ。
 *
@@ -1943,7 +2039,7 @@ function createSummaryPipeline(deps) {
 			}
 			const summary = result.stdout.trim();
 			const spoken = toSpeechSentences(summary).join("\n");
-			if (!spoken || spoken.length >= text.length || spoken.length > 120 * 2) {
+			if (!isAcceptableSummary(spoken, text.length)) {
 				log("invalid", startedAt, text.length, spoken.length);
 				return text;
 			}
@@ -2230,6 +2326,41 @@ function makeLock(lockDir, token) {
 			force: true
 		});
 	} };
+}
+
+//#endregion
+//#region src/core/summarizerSessions.ts
+/**
+* 要約 CLI に渡した `--session-id` の**共有**レジストリ（無限ループ防止の第2層）。
+*
+* 第2層そのものの説明は `cli/workerState.ts` の `summarizerSessionIds` にある。ここは
+* **CLI 以外のプロセスが要約を起こすようになったこと**（#76 の `POST /v1/summary/preview`）で
+* 必要になった、その置き場所の話。
+*
+* ★★ **`worker.state.json` に相乗りさせないこと。** あのファイルは CLI が
+*   「ドレインの先頭で読み、途中と末尾で全体を書き戻す」形で使っている。ロックの外に居る
+*   サーバーが同じファイルを read-modify-write すると、**CLI の tombstone
+*   （`publishedMessageIds`）を巻き添えで消しうる** —— 症状は「同じメッセージを2回喋る」で、
+*   要約のテストボタンを押しただけで起きる。しかも再現条件がタイミングなので追えない。
+*
+* ★ **CLI のロックを取りに行くのも駄目。** あのロックはドレイン全体（要約中は数十秒、
+*   上限は `aiSummaryTimeoutMs × aiSummaryMaxPerDrain`）保持される。テストボタン1つのために
+*   そこまで待つか、待たずに諦めるかの二択になる。
+*
+* → **ファイルを分けて「書き手を1人だけ」にする。** このファイルを書くのは
+*   `chatter-agent-server` だけ、`worker.state.json` を書くのは `chatter-agent-speak` だけ。
+*   CLI は両方を**読んで** or で判定する（`worker.ts` の第2層）。
+*   書き手が1人なら read-modify-write の競合が原理的に起きない。
+*/
+/** 記録されている session_id。読めなければ空（抑制が1回効かないだけ） */
+function readSummarizerSessions(filePath) {
+	try {
+		const parsed = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+		if (!Array.isArray(parsed)) return [];
+		return parsed.filter((item) => typeof item === "string").slice(-16);
+	} catch {
+		return [];
+	}
 }
 
 //#endregion
@@ -2885,6 +3016,7 @@ function drainSpool(deps) {
 	for (; passes < MAX_PASSES; passes++) {
 		const entries = scanSpool(deps.spoolDir);
 		if (entries.length === 0) break;
+		const serverSummarizerSessions = readSummarizerSessions(deps.summarizerSessionsPath);
 		const rawLoaded = entries.map((entry) => entry.kind === "message" ? {
 			entry,
 			content: readMessage(entry.filePaths)
@@ -2901,7 +3033,7 @@ function drainSpool(deps) {
 				continue;
 			}
 			const sessionId = sessionIdOf(item);
-			if (sessionId !== null && isSummarizerSession(state, sessionId)) {
+			if (sessionId !== null && (isSummarizerSession(state, sessionId) || serverSummarizerSessions.includes(sessionId))) {
 				tryRemoveEntry(item.entry);
 				changed = true;
 				continue;
@@ -3301,6 +3433,7 @@ function main() {
 				maxEntries: () => config.get("speechQueueMaxEntries")
 			}),
 			workerStatePath: getWorkerStatePath(),
+			summarizerSessionsPath: getSummarizerSessionsPath(),
 			speakPrompts: config.get("speakPrompts"),
 			spoolMaxAgeMs: config.get("spoolMaxAgeHours") * 60 * 60 * 1e3,
 			classify: (text) => classifier.classify(text),

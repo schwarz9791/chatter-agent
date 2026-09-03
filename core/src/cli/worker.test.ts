@@ -70,6 +70,7 @@ function drain(overrides: Partial<DrainDeps> = {}) {
       return records;
     },
     workerStatePath: path.join(dir, "speak.state.json"),
+    summarizerSessionsPath: path.join(dir, "summarizer-sessions.json"),
     speakPrompts: true,
     spoolMaxAgeMs: 6 * HOUR,
     classify: () => "neutral",
@@ -995,6 +996,47 @@ describe("AI要約", () => {
 
     expect(texts()).toEqual([]);
     expect(fs.readdirSync(spoolDir)).toEqual([]);
+  });
+
+  /**
+   * ★★ #76。サーバー（`POST /v1/summary/preview`）が起こした要約の session_id は
+   *   `worker.state.json` ではなく専用ファイルに入る。**書き手を1人に保つための分割**
+   *   （サーバーがロックの外から `worker.state.json` を read-modify-write すると、
+   *   CLI の tombstone を巻き添えで消しうる。→ `core/summarizerSessions.ts`）。
+   *   CLI は両方を or で見る —— 片方だけ見ていると保険が半分黙って外れる
+   */
+  it("★★ 第2層: サーバー側のレジストリ（summarizer-sessions.json）も効く", () => {
+    fs.writeFileSync(path.join(dir, "summarizer-sessions.json"), JSON.stringify(["server-sess"]));
+
+    appendDelta("m1", 0, "テスト要約プロセス自身の出力です。", true, "server-sess");
+    drain();
+
+    expect(texts()).toEqual([]);
+    expect(fs.existsSync(path.join(spoolDir, "m1.0.json"))).toBe(false);
+  });
+
+  /**
+   * ★★ #76 のレビュー A-1。ドレインはロックを長く握る（AI要約 ON なら
+   *   `aiSummaryTimeoutMs × aiSummaryMaxPerDrain`）ので、**その最中に**サーバーが
+   *   テスト要約を起こすことがある。レジストリをドレインの先頭で1回しか読まないと
+   *   登録がその読み取りより後になり、**要約器自身の出力が読み上げられる**。
+   */
+  it("★★ 第2層: ドレインの走行中に登録されたセッションにも効く", () => {
+    appendDelta("m1", 0, "先に流れているメッセージ。", true);
+
+    drain({
+      summarize: (text) => {
+        // 走行中のサーバーが `POST /v1/summary/preview` を受けた、という状況。
+        // registerSummarizerSession は要約 CLI を spawn する**前**に書く契約なので、
+        // その出力の spool より必ず先に置かれる
+        fs.writeFileSync(path.join(dir, "summarizer-sessions.json"), JSON.stringify(["mid-drain-sess"]));
+        appendDelta("m2", 0, "要約プロセス自身の出力です。", true, "mid-drain-sess");
+        return text;
+      },
+    });
+
+    expect(texts()).toEqual(["先に流れているメッセージ。"]);
+    expect(fs.existsSync(path.join(spoolDir, "m2.0.json"))).toBe(false);
   });
 
   it("★ 第2層の永続化: registerSessionId が呼ばれた時点で speak.state.json に既に書かれている", () => {

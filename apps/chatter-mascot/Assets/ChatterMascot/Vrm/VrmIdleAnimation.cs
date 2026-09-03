@@ -33,13 +33,55 @@ namespace ChatterMascot.Vrm
 
         private Vrm10Instance _target;
         private GameObject _instanceRoot;
+        private Vrm10AnimationInstance _animation;
         private bool _disposed;
+        private bool _enabled = true;
 
         /// <summary>
         /// VRMA を再生中か。<c>false</c> のままなら、呼び出し側（<see cref="VrmCharacter"/>）は
         /// 手続き的アイドルへフォールバックする。
         /// </summary>
         public bool IsPlaying { get; private set; }
+
+        /// <summary>
+        /// 待機モーションを流すか（設定パネル / #76）。
+        ///
+        /// ★★ <b>設定の「待機モーション」は VRMA と手続き的アイドルの<u>両方</u>を止める。</b>
+        ///   ユーザーから見て「待機モーション」は1つの概念で、2実装は
+        ///   「片方が読めないときのフォールバック」でしかない。ここだけ止めて
+        ///   <c>proceduralIdle</c> を放置すると、**チェックを外したのに動き続ける**。
+        ///
+        /// ★ <b><c>Dispose</c> で止めないこと。</b> 破棄すると読み込み直しが要る。
+        ///   <c>Runtime.VrmAnimation</c> を外すだけなら、戻すのも1行で済む。
+        ///
+        /// ★ <b>止めた姿勢はその場で固まる。</b> ニュートラルへ戻す処理は入れていない ——
+        ///   「待機モーションを止める」の意味として、最後の姿勢のまま静止するのは素直な帰結で、
+        ///   戻す先（T ポーズ）の方がむしろ不自然に見える。
+        /// </summary>
+        public bool Enabled
+        {
+            get { return _enabled; }
+            set
+            {
+                if (_enabled == value) return;
+                _enabled = value;
+                Apply();
+            }
+        }
+
+        private void Apply()
+        {
+            if (_disposed || _target == null || _target.Runtime == null || _animation == null) return;
+
+            _target.Runtime.VrmAnimation = _enabled ? _animation : null;
+
+            // ★ Animation そのものも止める。外しただけだと、見えない VRMA を
+            //   毎フレーム再生し続けることになる
+            var animation = _instanceRoot != null ? _instanceRoot.GetComponent<Animation>() : null;
+            if (animation != null) animation.enabled = _enabled;
+
+            IsPlaying = _enabled;
+        }
 
         /// <summary>
         /// ★ <b>例外は内側で全部握る。</b> <c>_ = idle.LoadAsync(...)</c> の形で投げっぱなしにされる
@@ -190,7 +232,12 @@ namespace ChatterMascot.Vrm
 
             _target = target;
             _instanceRoot = vrma.gameObject;
+            _animation = vrma;
             IsPlaying = true;
+
+            // ★ 読み込みが終わる前に設定で止められていることがある（読み込みは非同期）。
+            //   ここで一度適用しないと、チェックを外してあるのに再生が始まる
+            Apply();
         }
 
         /// <summary>
@@ -212,6 +259,7 @@ namespace ChatterMascot.Vrm
 
             if (_instanceRoot != null) UnityEngine.Object.Destroy(_instanceRoot);
             _instanceRoot = null;
+            _animation = null;
             _target = null;
             IsPlaying = false;
         }

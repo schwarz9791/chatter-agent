@@ -66,6 +66,86 @@ CM_EXPORT void CM_StatusItemHide(void);
 CM_EXPORT int  CM_HotKeyRegister(int id, unsigned int keyCode, unsigned int modifiers);
 CM_EXPORT void CM_HotKeyUnregister(int id);
 
+/*
+ * パネル（#76）。schemaJson は SettingsPanelJson.Write が作ったもの。
+ *
+ * ★★ このパネルに設定のキーもラベルも1つも書かないこと。 kind を見てビューを組み、
+ *   操作されたら key と value を返すだけ。ボタンの文字（「記録」など）まで JSON の
+ *   strings で受け取るのは、そこだけ例外にすると必ず増えるため。
+ *
+ * ★★ nonactivatingPanel にしないこと。 LSUIElement のアプリはキーウィンドウを
+ *   取りづらく、ショートカットの記録にはキー入力が要る。Show のときに
+ *   [NSApp activateIgnoringOtherApps:YES] を呼ぶ。実機では
+ *   「スライダーは動くが記録が始まらない」という形で出る。
+ *
+ * ★ panelId で複数枚を同じレンダラで描く（0 = 設定 / 1 = このアプリについて）。
+ *   2枚目のために ObjC を書き足さないための引数。範囲外は無視する。
+ */
+CM_EXPORT bool CM_PanelShow(int panelId, const char* schemaJson);
+CM_EXPORT bool CM_PanelUpdate(int panelId, const char* schemaJson);
+CM_EXPORT void CM_PanelHide(int panelId);
+CM_EXPORT bool CM_PanelIsVisible(int panelId);
+
+/*
+ * ファイル選択（#76）。optionsJson は {"key":…,"title":…,"message":…,"button":…,"extensions":[…]}。
+ *
+ * ★★ UniWindowController の FilePanel を使わないこと。 あちらは NSOpenPanel の
+ *   allowedContentTypes に UTType(tag:"vrm", tagClass:.filenameExtension) を渡すが、
+ *   .vrm はシステムに登録された UTI を持たないので dynamic UTType になり、
+ *   **拡張子が一致してもグレーアウトする**（バイナリの逆アセンブルで確認）。
+ *   ここでは allowedContentTypes を使わず、panel:shouldEnableURL: で拡張子を見る。
+ *
+ * ★ 拡張子もタイトルも C# から渡す（ネイティブに "vrm" を書かない）。
+ * ★ 選ばれたら CMEmitSetting(key, パス) を投げる。取り消しなら何も投げない。
+ *
+ * ★★ runModal は Unity のプレイヤーループごと止める。 これは割り切りだが、
+ *   **何が止まるか**を知っておくこと —— この関数は Bridge.Update() → DrainEvents() →
+ *   HandleSetting の中から呼ばれるので、ユーザーがダイアログを触っている間（ファイル選択なら
+ *   数分になり得る）:
+ *     - フレームが1枚も回らない（キャラが姿勢のまま固まり、リップシンクと瞬きが止まる）
+ *     - **PlaybackQueue が汲まれないので、再生の終わった発話の ack が出ない**
+ *       → サーバーは未 ack とみなして再送し続ける
+ *     - MascotRunner の WebSocket ドレインと、ホットキーのイベントキューも止まる
+ *   閉じれば全部再開する（取りこぼすのは時間だけ）。
+ */
+CM_EXPORT bool CM_OpenFilePanel(const char* optionsJson);
+
+/*
+ * 確認ダイアログ（#76）。optionsJson は {"title":…,"message":…,"ok":…,"cancel":…,"destructive":bool}。
+ * OK が押されたら true。
+ *
+ * ★ 取り消せない操作（ファイルの削除）の前に挟む。文言は C# から渡す。
+ * ★ 結果を返す関数なのでメインスレッド契約に従う。
+ *
+ * ★★ runModal は Unity のプレイヤーループごと止める。 これは割り切りだが、
+ *   **何が止まるか**を知っておくこと —— この関数は Bridge.Update() → DrainEvents() →
+ *   HandleSetting の中から呼ばれるので、ユーザーがダイアログを触っている間（ファイル選択なら
+ *   数分になり得る）:
+ *     - フレームが1枚も回らない（キャラが姿勢のまま固まり、リップシンクと瞬きが止まる）
+ *     - **PlaybackQueue が汲まれないので、再生の終わった発話の ack が出ない**
+ *       → サーバーは未 ack とみなして再送し続ける
+ *     - MascotRunner の WebSocket ドレインと、ホットキーのイベントキューも止まる
+ *   閉じれば全部再開する（取りこぼすのは時間だけ）。
+ */
+CM_EXPORT bool CM_Confirm(const char* optionsJson);
+
+/*
+ * 警告音（#76）。設定パネルが「その入力は受け付けない」を伝えるのに使う。
+ *
+ * ★ 音だけにすること。 ダイアログを出すと、記録のたびに手が止まる。
+ *   NSBeep はユーザーのシステム設定（サウンド）に従うので、切っている人には鳴らない。
+ */
+CM_EXPORT void CM_Beep(void);
+
+/*
+ * ショートカットの記録中だけ、登録済みのグローバルショートカットを外す（#76）。
+ *
+ * ★★ ネイティブの内部から呼ぶ（→ CMHotKey.m）。 記録の開始・終了はネイティブ内で
+ *   完結しているので、「いま記録中か」を C# に知らせる必要は無い。
+ */
+void CM_HotKeySuspend(void);
+void CM_HotKeyResume(void);
+
 /* --- プラグインの内部で共有するもの（C# からは呼ばない） --- */
 
 /* AppKit を触る処理を main thread に載せる。既に main なら直接走る */
@@ -77,8 +157,23 @@ bool CMIsMainThread(void);
 /* { "type": ..., "key": ... } を投げる。key が NULL なら省略する */
 void CMEmitEvent(const char* type, const char* key);
 
+/* { "type": "setting", "key": ..., "value": ... } を投げる（#76） */
+void CMEmitSetting(const char* key, const char* value);
+
 /* { "type": "hotkey", "id": <id> } を投げる */
 void CMEmitHotKey(int hotKeyId);
+
+/*
+ * { "type": "panel", "id": <panelId>, "state": ... } を投げる（#76）。
+ *
+ * ★★ 赤いボタンで閉じたことは、これでしか C# に届かない。 CM_PanelHide（orderOut:）は
+ *   自分で閉じる経路なので通知が要らないが、ユーザーが閉じる経路は誰も知らないまま
+ *   「開いている」状態が C# 側に残る（症状は「数分前の注記が、いま起きたことのように出る」）。
+ * ★ setting に相乗りさせないこと。 あちらは「設定のキー」を運ぶ口で、
+ *   ObjC に設定のキーを書かないという規律がある。これは menu / hotkey / log と同じ
+ *   プロトコルの語彙なので、型を1つ足す方に倒す。
+ */
+void CMEmitPanel(int panelId, const char* state);
 
 /*
  * ★ NSLog を使わないこと。 Unity の Player.log には入らないので、

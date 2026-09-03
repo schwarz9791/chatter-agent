@@ -92,6 +92,16 @@ export function getWorkerStatePath(e: PathEnv = currentPathEnv()): string {
 }
 
 /**
+ * 要約 CLI に渡した `--session-id` の共有レジストリ（→ `core/summarizerSessions.ts`）。
+ *
+ * ★ **書き手は `chatter-agent-server` だけ、読み手は `chatter-agent-speak` だけ。**
+ *   CLI 自身の分は `worker.state.json` に入る（書き手を1人に保つための分割）。
+ */
+export function getSummarizerSessionsPath(e: PathEnv = currentPathEnv()): string {
+  return path.join(getRuntimeDir(e), "summarizer-sessions.json");
+}
+
+/**
  * 単一ワーカーのロック。**ディレクトリ**として作る（mkdir が原子的なため）。
  * CLI に npm 依存を持たせられないので、ロックライブラリは使わない。
  */

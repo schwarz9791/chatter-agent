@@ -16,7 +16,9 @@
 static const OSType kCMHotKeySignature = 'CHMS';
 
 @interface CMHotKeyEntry : NSObject
-@property (nonatomic, assign) EventHotKeyRef ref;
+@property (nonatomic, assign) EventHotKeyRef ref;   /* 中断中は NULL */
+@property (nonatomic, assign) UInt32 keyCode;
+@property (nonatomic, assign) UInt32 modifiers;
 @end
 
 @implementation CMHotKeyEntry
@@ -25,6 +27,9 @@ static const OSType kCMHotKeySignature = 'CHMS';
 /* id（C# が割り当てた整数）→ EventHotKeyRef */
 static NSMutableDictionary<NSNumber *, CMHotKeyEntry *> *gHotKeys = nil;
 static EventHandlerRef gHandler = NULL;
+
+/* ショートカットの記録中か（→ CM_HotKeySuspend） */
+static bool gSuspended = false;
 
 static OSStatus CMHotKeyHandler(EventHandlerCallRef next, EventRef event, void *userData)
 {
@@ -99,6 +104,22 @@ int CM_HotKeyRegister(int id, unsigned int keyCode, unsigned int modifiers)
         hotKeyId.signature = kCMHotKeySignature;
         hotKeyId.id = (UInt32)id;
 
+        CMHotKeyEntry *entry = [[CMHotKeyEntry alloc] init];
+        entry.keyCode = (UInt32)keyCode;
+        entry.modifiers = (UInt32)modifiers;
+        entry.ref = NULL;
+
+        /*
+         * ★★ 中断中は覚えるだけにすること。 ここで実際に登録すると、
+         *   記録中に settings.json が外から書き換わった（PumpSettings → RegisterHotKeys）
+         *   だけで **記録が黙って壊れる**（Carbon がキーを先に取るのでモニタに届かない）。
+         *   登録は CM_HotKeyResume がまとめて行う。
+         */
+        if (gSuspended) {
+            gHotKeys[@(id)] = entry;
+            return;
+        }
+
         EventHotKeyRef ref = NULL;
         OSStatus status = RegisterEventHotKey(
             (UInt32)keyCode, (UInt32)modifiers, hotKeyId,
@@ -109,7 +130,6 @@ int CM_HotKeyRegister(int id, unsigned int keyCode, unsigned int modifiers)
             return;
         }
 
-        CMHotKeyEntry *entry = [[CMHotKeyEntry alloc] init];
         entry.ref = ref;
         gHotKeys[@(id)] = entry;
     });
@@ -123,7 +143,69 @@ void CM_HotKeyUnregister(int id)
         CMHotKeyEntry *entry = gHotKeys[@(id)];
         if (entry == nil) return;
 
-        UnregisterEventHotKey(entry.ref);
+        /* ★ 中断中は ref が無い（覚えているだけ）ので、外すものが無い */
+        if (entry.ref != NULL) UnregisterEventHotKey(entry.ref);
         [gHotKeys removeObjectForKey:@(id)];
+    });
+}
+
+/*
+ * ショートカットの記録中だけ、グローバルショートカットを外す（#76）。
+ *
+ * ★★ ハンドラ側で握り潰すのでは駄目。 登録が残っている限り Carbon が**先に**キーを取り、
+ *   アプリの通常のイベント経路に流れないので、**記録のローカルモニタに1つも届かない**。
+ *   症状は「記録を始めて既存のショートカット（⌃⌥H）を押すと、記録は終わらずに
+ *   キャラクターが隠れる」——押した本人からは「記録が効かない」にしか見えない。
+ *   実際に UnregisterEventHotKey すること。
+ *
+ * ★ 組み合わせは覚えておいて CM_HotKeyResume で登録し直す。C# に登録し直させると、
+ *   「いま記録中か」をあちらが知る必要が出てくる（記録の開始はネイティブ内で完結している）。
+ *
+ * ★ 冪等。CMStartRecording は CMStopRecording を通ってから始まるので、
+ *   中断→中断 / 再開→再開 が普通に起きる。
+ */
+void CM_HotKeySuspend(void)
+{
+    CMRunOnMain(^{
+        if (gSuspended) return;
+        gSuspended = true;
+
+        for (NSNumber *id in gHotKeys) {
+            CMHotKeyEntry *entry = gHotKeys[id];
+            if (entry.ref == NULL) continue;
+            UnregisterEventHotKey(entry.ref);
+            entry.ref = NULL;
+        }
+    });
+}
+
+void CM_HotKeyResume(void)
+{
+    CMRunOnMain(^{
+        if (!gSuspended) return;
+        gSuspended = false;
+
+        for (NSNumber *id in gHotKeys) {
+            CMHotKeyEntry *entry = gHotKeys[id];
+            if (entry.ref != NULL) continue;
+            if (!CMEnsureHandler()) return;
+
+            EventHotKeyID hotKeyId;
+            hotKeyId.signature = kCMHotKeySignature;
+            hotKeyId.id = (UInt32)id.intValue;
+
+            EventHotKeyRef ref = NULL;
+            OSStatus status = RegisterEventHotKey(
+                entry.keyCode, entry.modifiers, hotKeyId,
+                GetApplicationEventTarget(), 0, &ref);
+            if (status != noErr || ref == NULL) {
+                /* ★ ここで消さないこと。次の再開でもう一度試せる */
+                CMEmitLog([[NSString stringWithFormat:
+                    @"ショートカットを戻せませんでした (id=%d status=%d)",
+                    id.intValue, (int)status] UTF8String]);
+                continue;
+            }
+            entry.ref = ref;
+        }
     });
 }

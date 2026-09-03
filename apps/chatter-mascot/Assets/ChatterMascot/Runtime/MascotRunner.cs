@@ -5,6 +5,7 @@ using ChatterMascot.Audio;
 using ChatterMascot.Net;
 using ChatterMascot.Playback;
 using ChatterMascot.Protocol;
+using ChatterMascot.Settings;
 using UnityEngine;
 
 namespace ChatterMascot
@@ -148,6 +149,75 @@ namespace ChatterMascot
         }
 
         /// <summary>
+        /// 再生音量（<b>0.0〜1.0</b>。既定 1.0）。設定パネル（#76）が書き、次の発話から効く。
+        /// 画面には 0〜100% で出る（→ <c>Settings.SettingDisplay.Percent</c>）。
+        ///
+        /// ★★ <b>ミュートの代わりにしないこと。</b> <c>0</c> にしても
+        ///   <c>afplay</c> のプロセスは起動し、実時間ぶん走る。ミュートは
+        ///   <see cref="Audio.MutedSpeechPlayer"/> が「声だけ消す」形で担う
+        ///   （ack は通常経路のまま出す）。
+        ///
+        /// ★ <b>効かせ方がプラットフォームで違う。</b> macOS は <c>afplay -v</c>
+        ///   （getter を再生側へ渡してある）、Android は<b>テンプレートの
+        ///   <see cref="AudioSource.volume"/></b>（voice は発話ごとに作られるので、
+        ///   ここを書けば次の発話から効く）。
+        ///
+        /// ★★ <b>上限が 1.0 なのは、その違いを設定に持ち込まないため</b>
+        ///   （→ <c>Settings.SettingsMapping.VolumeMax</c>）。<see cref="AudioSource.volume"/> は
+        ///   Unity 側で 0〜1 にクランプされるので、1.0 超えは Android で黙って no-op になる。
+        /// </summary>
+        public float Volume
+        {
+            get { return _volume; }
+            set
+            {
+                _volume = SettingsMapping.Normalize(
+                    value, SettingsMapping.VolumeMin, SettingsMapping.VolumeMax, SettingsMapping.VolumeStep);
+                // ★ Android 側はテンプレートに書く。macOS 側は getter 越しに読まれるので何もしない
+                if (audioSource != null) audioSource.volume = _volume;
+            }
+        }
+
+        /// <summary>
+        /// 接続先（<c>ws://host:port</c>）。設定パネル（#76）が制御 API の口を導くのに使う。
+        ///
+        /// ★ 起動引数（<c>-serverUrl</c>）で上書きされた後の<b>実際の値</b>を返すこと。
+        ///   <c>[SerializeField]</c> をそのまま読むと、引数で別のサーバーを指したときに
+        ///   設定パネルだけ元のサーバーを見に行く。
+        /// ★★ <b>その約束は <c>Awake</c> で上書きすることで守られている</b>
+        ///   （→ <see cref="ResolveServerUrl"/>）。読み手（<c>StatusItemBridge</c>）は
+        ///   <c>Start</c> に居るので、上書きを <c>Start</c> でやると<b>順序が未規定になる</b>。
+        /// </summary>
+        public string ServerUrl
+        {
+            get { return serverUrl; }
+        }
+
+        /// <summary>
+        /// 設定パネルのテスト音声を鳴らす（#76）。失敗したら理由、成功なら <c>null</c>。
+        ///
+        /// ★ <b>通常の再生経路をそのまま通す。</b> 別経路で鳴らすと、
+        ///   「テストは鳴るのに本番が鳴らない」（またはその逆）を作ってしまう。
+        ///   ★ その帰結として、<b>ミュート中は鳴らない</b>（<c>MutedSpeechPlayer</c> が
+        ///   声だけ消す）。呼び出し側がミュート中である旨を出すこと。
+        ///
+        /// ★ <b>キューには載せない。</b> 配信された発話ではないので <c>seq</c> も ack も無い。
+        ///   口も表情も動かない（<c>BeginSpeaking</c> を通さない）——
+        ///   確かめたいのは「声と速さ」なので、それで足りる。
+        /// </summary>
+        public async Task<string> PlayPreviewAsync(byte[] wav)
+        {
+            if (_player == null) return "再生の準備ができていません";
+            if (wav == null || wav.Length == 0) return "音声が空です";
+
+            string error;
+            var handle = _player.Prepare(wav, "preview-" + DateTime.UtcNow.Ticks, out error);
+            if (handle == null) return string.IsNullOrEmpty(error) ? "音声を用意できませんでした" : error;
+
+            return await _player.PlayAsync(handle);
+        }
+
+        /// <summary>
         /// 一時ミュートの状態。<b>読み書きの両方に使う</b>（ステータスバーのメニューと
         /// グローバルショートカットから切り替わる）。
         /// </summary>
@@ -190,6 +260,7 @@ namespace ChatterMascot
         ///   <c>StatusItemBridge</c> が読みに来る（実行順は保証されない）。
         /// </summary>
         private readonly MuteState _mute = new MuteState();
+        private float _volume = 1f;
 
         /// <summary>
         /// <see cref="speakingFrameRate"/> の借用。<b>1本だけ取り回す。</b>
@@ -287,6 +358,34 @@ namespace ChatterMascot
             // ★ Awake で読むこと。Start は serverUrl が不正だと最後まで走らない
             _quitProbe = CommandLine.Flag("-quitProbe");
             if (_quitProbe) Debug.Log("[Mascot] -quitProbe: 最初の終了要求を1回だけ強制的に保留します");
+
+            ResolveServerUrl();
+        }
+
+        /// <summary>
+        /// <c>-serverUrl</c> の上書きを <see cref="serverUrl"/> へ焼く。
+        ///
+        /// ★★ <b><c>Start</c> ではなく <c>Awake</c> で行うこと。</b> 設定パネル（#76）は
+        ///   <c>StatusItemBridge.Bridge.Start()</c> から <see cref="ServerUrl"/> を読んで
+        ///   <c>CoreConfigClient</c> の接続先を<b>1回きり</b>捕まえる。あちらも <c>Start</c> なので
+        ///   <b>2つの <c>Start</c> の相対順序は保証されない</b>（どちらにも
+        ///   <c>[DefaultExecutionOrder]</c> は付いていない）。先に走られると
+        ///   <c>[SerializeField]</c> の既定値が焼かれ、<b>再生は正しいサーバーなのに設定パネルだけ
+        ///   別のサーバーを読み書きする</b>状態がセッション中ずっと続く。
+        ///   <c>Bridge</c> は <c>RuntimeInitializeOnLoadMethod(AfterSceneLoad)</c> で生えるので、
+        ///   <b>シーンの <c>Awake</c> はすべて終わった後</b>に <c>Start</c> が来る ——
+        ///   ここへ移せば順序が決まる。
+        ///
+        /// ★ <b>検証（<see cref="IsValidServerUrl"/>）は <c>Start</c> のまま。</b> あちらは
+        ///   「<c>_client</c> を作れるか」の話で、読み手の順序とは別の関心事。
+        /// </summary>
+        private void ResolveServerUrl()
+        {
+            var overridden = CommandLine.Argument("-serverUrl");
+            if (string.IsNullOrEmpty(overridden)) return;
+
+            Debug.Log($"[Mascot] serverUrl をコマンドラインで上書きします: \"{overridden}\"");
+            serverUrl = overridden;
         }
 
         /// <summary>
@@ -428,13 +527,9 @@ namespace ChatterMascot
             //   ただ別のアプリを測っているだけになる）。
             //
             //   open Build/ChatterMascot.app --args -serverUrl ws://127.0.0.1:9
-            var overridden = CommandLine.Argument("-serverUrl");
-            if (!string.IsNullOrEmpty(overridden))
-            {
-                Debug.Log($"[Mascot] serverUrl をコマンドラインで上書きします: \"{overridden}\"");
-                serverUrl = overridden;
-            }
-
+            //
+            // ★★ **上書きそのものは Awake で済ませてある**（→ ResolveServerUrl）。ここに残すと、
+            //   同じ Start パスに居る StatusItemBridge が**先に ServerUrl を読みうる**。
             if (!IsValidServerUrl(serverUrl))
             {
                 Debug.LogError($"[Mascot] serverUrl が不正です: \"{serverUrl}\"。" +
@@ -455,7 +550,7 @@ namespace ChatterMascot
             // ★ ミュートは音の層で実装する（→ MutedSpeechPlayer）。PlaybackQueue には触らない。
             //   包むのはここ1箇所で、CanSuspendOutput も ActiveCount も委譲されるので
             //   下の AudioIdleGate の判定は何も変わらない
-            _player = new MutedSpeechPlayer(SpeechPlayerFactory.Create(audioSource), _mute);
+            _player = new MutedSpeechPlayer(SpeechPlayerFactory.Create(audioSource, () => _volume), _mute);
             _player.Warn += message => Debug.LogWarning("[Mascot] " + message);
             _idleGate = new AudioIdleGate(audioIdleSuspendMs)
             {

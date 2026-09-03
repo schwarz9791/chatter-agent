@@ -4,7 +4,8 @@
     "references": [
         "ChatterMascot.Runtime",
         "ChatterMascot.Vrm",
-        "Kirurobo.UniWindowController"
+        "Kirurobo.UniWindowController",
+        "Unity.InputSystem"
     ],
     "includePlatforms": [
         "Editor",

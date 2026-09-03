@@ -9,6 +9,7 @@ using ChatterMascot.Ui;
 using ChatterMascot.Vrm;
 using Kirurobo;
 using UnityEngine;
+using UnityEngine.InputSystem;
 using Debug = UnityEngine.Debug;
 
 namespace ChatterMascot.Desktop
@@ -101,7 +102,44 @@ namespace ChatterMascot.Desktop
             }
         }
 
-        private sealed class Bridge : MonoBehaviour
+        /// <summary>
+        /// 走っている <see cref="Bridge"/>。<b>右クリック（#76）から呼ぶためだけ</b>に持つ。
+        ///
+        /// ★ <c>FindFirstObjectByType</c> で毎回探さないこと。右クリックのたびに
+        ///   シーン全体を舐めることになる。
+        /// ★ <c>OnDestroy</c> で必ず消すこと。残すと、シーンを跨いだときに
+        ///   破棄済みの <c>MonoBehaviour</c> を触る。
+        /// </summary>
+        private static Bridge _instance;
+
+        /// <summary>
+        /// 起動時に設定パネルを開く（検証用）。
+        ///
+        /// ★ <c>-quitProbe</c> / <c>-windowProbe</c> と同じ位置づけ ——
+        ///   <c>LSUIElement</c> のアプリは「メニューバーを押す」を自動化できないので、
+        ///   パネルの中身を確かめるにはここを通すしかない。
+        /// </summary>
+        internal const string SettingsProbeFlag = "-settingsProbe";
+
+        /// <summary>
+        /// 設定パネルを開閉する。キャラクターの右クリック（<c>MascotContextClick</c>）から呼ばれる。
+        ///
+        /// ★ ネイティブが無い / 常駐物が動いていないときは黙って何もしない ——
+        ///   右クリックは「何かが起きるかもしれない」操作なので、警告を積む場所ではない。
+        /// </summary>
+        internal static void ToggleSettings()
+        {
+            if (_instance == null)
+            {
+                // ★ 右クリックは「何かが起きるかもしれない」操作なので警告は積まないが、
+                //   診断できる1行は残す（常駐物が動いていないのか、パネルが開けないのか）
+                Debug.Log("[Mascot] 設定パネルの常駐物が動いていません");
+                return;
+            }
+            _instance.ToggleSettingsPanel();
+        }
+
+        private sealed class Bridge : MonoBehaviour, ISettingsHost
         {
             /// <summary>設定ファイルの更新を見る間隔。★ 毎フレーム stat しないこと</summary>
             private const float SettingsPollSeconds = 1f;
@@ -127,6 +165,13 @@ namespace ChatterMascot.Desktop
 
             private MascotRunner _runner;
             private Camera _camera;
+
+            /// <summary>
+            /// 設定パネル（#76）。★ <b><see cref="SettingsStore"/> をここが持っているので、
+            /// パネルは <see cref="ISettingsHost"/> 越しに触る</b> —— ストアを2つ作ると
+            /// 同じファイルを2人が read-modify-write して、先に書いた方の変更が消える。
+            /// </summary>
+            private SettingsPanelBridge _panel;
 
             /// <summary>
             /// いま隠しているカメラ。<c>null</c> なら隠していない。
@@ -171,7 +216,10 @@ namespace ChatterMascot.Desktop
                 }
                 ChatterMascotNative.CM_SetEventCallback(Callback);
 
-                ApplyMuteToRunner();
+                // ★ ミュートだけでなく全部を反映すること。#75 の頃は `settings.json` に
+                //   ミュートとショートカットしか無かったが、#76 で大きさ・音量・モーションが
+                //   入った。ここを飛ばすと**起動のたびに既定へ戻って見える**
+                ApplySettingsToScene();
 
                 // ★ メニューより先に登録すること。 ラベルにショートカットの表記が乗るので、
                 //   後にすると初回のメニューだけ表記が抜ける
@@ -182,6 +230,85 @@ namespace ChatterMascot.Desktop
 
                 _nextSettingsPollAt = Time.realtimeSinceStartup + SettingsPollSeconds;
                 _activationPolicyAt = Time.realtimeSinceStartup + ActivationPolicyDelaySeconds;
+
+                AllowInputWithoutFocus();
+
+                _panel = new SettingsPanelBridge(this, ResolveServerUrl(), ResolveRunner);
+                _instance = this;
+
+                // ★ 検証用の入口。メニューバーも右クリックも自動化はできる（→ docs/mascot.md）が、
+                //   どちらもアクセシビリティ権限や合成イベントに依存する。**開いた後**を
+                //   確かめたいときに、その手前を全部飛ばせる経路を1つ持っておく
+                //   （`-quitProbe` と同じ流儀）
+                if (CommandLine.Flag(SettingsProbeFlag)) _panel.Open();
+            }
+
+            /// <summary>
+            /// フォーカスが無くてもポインタ入力を受け取れるようにする。
+            ///
+            /// ★★ <b>これが無いと、キャラの右クリックが効かない。</b> Input System の既定は
+            ///   <c>BackgroundBehavior.ResetAndDisableNonBackgroundDevices</c> で、
+            ///   アプリがフォーカスを失うと <c>Mouse</c>（<c>canRunInBackground == false</c>）が
+            ///   <b>無効化される</b>。<c>runInBackground</c> はイベントストリームの手前の関門を
+            ///   通すだけで、こちらは塞げない。<c>MascotContextClick</c> が読む
+            ///   <c>Mouse.current.rightButton.wasPressedThisFrame</c> はこれで生きる。
+            ///
+            /// ★★ <b>これ「だけ」では足りない。</b> デバイスが生きても、macOS が
+            ///   <c>mouseMoved</c> を配送するのは前面のアプリだけなので<b>座標は古いまま</b>で、
+            ///   <c>IPointerClickHandler</c> は別の場所を撃って呼ばれない。だから
+            ///   当たり判定はクリック透過の状態から取っている（→ <c>ContextClickHandles</c>）。
+            ///
+            /// ★ <b><c>Assets/</c> に <c>InputSettings</c> アセットを置かないこと。</b>
+            ///   あれは <c>EditorBuildSettings</c> 経由でプロジェクト全体に効くので、
+            ///   <b>Android（#25）まで巻き込む</b>。常駐マスコットの都合なので
+            ///   <c>ChatterMascot.Desktop</c> に閉じる。
+            ///
+            /// ★ <c>CursorGazeSource</c> / <c>DragStateGuard</c> の「新しい入力系のマウス状態は
+            ///   使えない」は据え置き。あちらは<b>座標</b>を読む話で、こちらは<b>ボタンの押下</b>。
+            /// </summary>
+            private static void AllowInputWithoutFocus()
+            {
+                try
+                {
+                    var settings = InputSystem.settings;
+                    if (settings == null) return;
+                    if (settings.backgroundBehavior == InputSettings.BackgroundBehavior.IgnoreFocus) return;
+
+                    settings.backgroundBehavior = InputSettings.BackgroundBehavior.IgnoreFocus;
+                    Debug.Log("[Mascot] フォーカスが無くても入力を受け取る設定にしました");
+                }
+                catch (Exception e)
+                {
+                    // ★ ここで落とさないこと。効かなくても「右クリックで開かない」だけで、
+                    //   メニューバーからは開ける
+                    Debug.LogWarning("[Mascot] 入力の設定を変えられませんでした: " + e.Message);
+                }
+            }
+
+            internal void ToggleSettingsPanel()
+            {
+                if (_panel == null) return;
+                Debug.Log("[Mascot] 設定パネル: " + (_panel.IsVisible ? "閉じます" : "開きます"));
+                _panel.Toggle();
+            }
+
+            /// <summary>
+            /// 制御 API の接続先。<c>MascotRunner</c> が持っている値（起動引数で上書き済み）を使う。
+            ///
+            /// ★ ここで既定値を書き写さないこと。<c>-serverUrl</c> で別のサーバーを指したときに、
+            ///   設定パネルだけ元のサーバーを見に行く。
+            ///
+            /// ★★ <b>「上書き済み」が成立するのは、あちらが <c>Awake</c> で焼いているから</b>
+            ///   （→ <c>MascotRunner.ResolveServerUrl</c>）。ここは <c>Start</c> で、
+            ///   <c>MascotRunner.Start</c> との相対順序は保証されない ——
+            ///   <b>あちらを <c>Start</c> に戻すと、この doc の前提がその瞬間に崩れる</b>。
+            ///   <c>CoreConfigClient</c> は接続先を<b>1回きり</b>捕まえるので、
+            ///   ずれるとセッション中ずっと別のサーバーを読み書きし続ける。
+            /// </summary>
+            private string ResolveServerUrl()
+            {
+                var runner = ResolveRunner();
+                return runner != null ? runner.ServerUrl : "ws://127.0.0.1:8570";
             }
 
             private void Update()
@@ -189,10 +316,14 @@ namespace ChatterMascot.Desktop
                 DrainEvents();
                 PumpActivationPolicy();
                 PumpSettings();
+                if (_panel != null) _panel.Tick();
             }
 
             private void OnDestroy()
             {
+                if (_instance == this) _instance = null;
+                if (_panel != null) _panel.Close();
+
                 // ★ この順序を守ること。 逆だと、終了中の menu action が
                 //   もう生きていない Mono ドメインを叩く
                 ChatterMascotNative.CM_SetEventCallback(null);
@@ -226,6 +357,15 @@ namespace ChatterMascot.Desktop
                             else if (value.HotKeyId == HideHotKeyId) Invoke(MenuKeys.Hide);
                             break;
 
+                        case MenuEventKind.Setting:
+                            if (_panel != null) _panel.HandleSetting(value.Key, value.Value);
+                            break;
+
+                        case MenuEventKind.PanelClosed:
+                            // ★ どのパネルかを知っているのはあちら（ネイティブは id しか返さない）
+                            if (_panel != null) _panel.NotifyClosed(value.PanelId);
+                            break;
+
                         case MenuEventKind.Log:
                             // ★ ネイティブの診断はここでしか残らない（NSLog は Player.log に入らない）
                             Debug.Log("[Native] " + value.Message);
@@ -248,7 +388,7 @@ namespace ChatterMascot.Desktop
                         break;
 
                     case MenuKeys.Settings:
-                        OpenSettings();
+                        if (_panel != null) _panel.Toggle();
                         break;
 
                     case MenuKeys.Quit:
@@ -260,7 +400,9 @@ namespace ChatterMascot.Desktop
                         break;
 
                     case MenuKeys.About:
-                        // 押せない項目（→ MascotMenu）。届いたら黙って捨てる
+                        // ★ 設定パネルとは**別のダイアログ**。ライセンス本文が長いので、
+                        //   設定に混ぜると項目が埋もれる
+                        if (_panel != null) _panel.OpenAbout();
                         break;
 
                     default:
@@ -320,44 +462,11 @@ namespace ChatterMascot.Desktop
             }
 
             /// <summary>
-            /// 設定ファイルをテキストエディタで開く。
-            ///
-            /// ★ <b>#76（設定 UI）までの繋ぎ。</b> パネルが入ったらここを差し替える。
-            /// ★ <b>先に書き出すこと。</b> 初回起動では設定ファイルがまだ無く、
-            ///   「開く」を押しても何も起きないように見える。
-            /// </summary>
-            private void OpenSettings()
-            {
-                if (string.IsNullOrEmpty(_settingsPath))
-                {
-                    Debug.LogWarning("[Mascot] 設定ファイルの場所を決められません");
-                    return;
-                }
-
-                if (!File.Exists(_settingsPath) && !_store.Save(_settings)) return;
-
-                try
-                {
-                    var info = new ProcessStartInfo
-                    {
-                        FileName = "/usr/bin/open",
-                        // ★ shell を噛ませないこと（パスに空白が入る）
-                        UseShellExecute = false,
-                    };
-                    info.ArgumentList.Add("-t");
-                    info.ArgumentList.Add(_settingsPath);
-                    Process.Start(info);
-                }
-                catch (Exception e)
-                {
-                    Debug.LogWarning("[Mascot] 設定ファイルを開けませんでした: " +
-                                     ChatterMascotNative.OneLine(e.Message));
-                }
-            }
-
-            /// <summary>
             /// 設定ファイルが外から書き換わっていたら拾う。
-            /// ★ #76 が入るまでは手編集が唯一の変更手段なので、追従できないと直せない。
+            ///
+            /// ★ <b>設定パネル（#76）が入っても、この経路は残す。</b> ファイルを直接編集する人は
+            ///   居るし、パネルが開けない状況（ネイティブのバンドルが無い等）では
+            ///   手編集が唯一の変更手段になる。
             /// </summary>
             private void PumpSettings()
             {
@@ -370,13 +479,15 @@ namespace ChatterMascot.Desktop
                 var previousHide = _settings.HideHotKey;
                 _settings = _store.Current;
 
-                ApplyMuteToRunner();
+                ApplySettingsToScene();
                 if (!string.Equals(previousMute, _settings.MuteHotKey, StringComparison.Ordinal) ||
                     !string.Equals(previousHide, _settings.HideHotKey, StringComparison.Ordinal))
                 {
                     RegisterHotKeys();
                 }
                 UpdateMenu();
+                // ★ 外から書き換えられたぶんもパネルに映すこと（開いている間だけ）
+                if (_panel != null) _panel.Refresh();
             }
 
             /// <summary>→ <see cref="ActivationPolicyDelaySeconds"/></summary>
@@ -396,6 +507,19 @@ namespace ChatterMascot.Desktop
             ///   2つ目が <c>eventHotKeyExistsErr</c>（-9878）で失敗するが、
             ///   その番号は「<b>他のアプリが取っている</b>」ときと同じなので、
             ///   ネイティブからの戻り値だけでは<b>原因を取り違える</b>。
+            ///
+            /// ★★ <b>ここは第2層。</b> 弾いても<b>警告を出して戻るだけ</b>なので、
+            ///   これ1枚だと <c>settings.json</c> に嘘が残り、パネルには2行とも同じ表記が出て
+            ///   note も無効化も出ない —— <c>LSUIElement</c> のアプリなので
+            ///   <c>Player.log</c> は誰も読まない。手当ては2枚ある:
+            ///   <list type="number">
+            ///     <item><b>保存の手前で止める</b>（<c>SettingsPanelBridge.ApplyHotKey</c>）——
+            ///       パネルから記録したときはここに到達しない</item>
+            ///     <item><b>画面に出す</b>（<c>SettingsSchema</c>）—— <c>settings.json</c> を
+            ///       手で編集された場合の受け皿</item>
+            ///   </list>
+            ///   ここが残っているのは、<b>どちらも通らずに登録だけ走る経路</b>
+            ///   （起動時 / ファイルの外部更新）があるため。
             /// </summary>
             private void RegisterHotKeys()
             {
@@ -476,6 +600,106 @@ namespace ChatterMascot.Desktop
                 var runner = ResolveRunner();
                 if (runner == null) return;
                 runner.Mute.Muted = _settings.Muted;
+            }
+
+            /// <summary>
+            /// <c>settings.json</c> の値をシーンへ反映する。
+            ///
+            /// ★★ <b>ここが「設定 → 見た目・音」の唯一の経路。</b> 起動時にも、
+            ///   パネルからの変更でも、ファイルを直接編集したときにも同じものが通る。
+            ///   経路を分けると「パネルからは効くのに、ファイルを直したときだけ効かない」
+            ///   （またはその逆）が生まれる。
+            ///
+            /// ★ <b>対象が居なくても警告しないこと。</b> <c>TransparencyProbe</c> のような
+            ///   VRM を出さないシーンでも同じ常駐物が動く。
+            /// </summary>
+            private void ApplySettingsToScene()
+            {
+                ApplyMuteToRunner();
+
+                var runner = ResolveRunner();
+                if (runner != null) runner.Volume = _settings.Volume;
+
+                // ★★ ここで `VrmStage` の `headroom` を触らないこと。 あれは「bounds をどれだけ
+                //   余裕を持って収めるか」の係数で、1 を下回るとモデルが画面からはみ出す
+                //   （実機で頭と足が対称に欠けた）。キャラの大きさは**ウィンドウ**で変える
+                //   （→ WindowGeometry.SetSize）。窓が変われば VrmStage が自動で収め直す。
+                //   ★ #76 の初版は `VrmStage.Headroom` という setter を生やしていたが、
+                //     大きさを窓で変えることにした時点で呼び出し元が無くなったので消した
+                //     （doc が存在しない `SettingsMapping.HeadroomFor` を指したまま残っていた）
+                var character = FindFirstObjectByType<ChatterMascot.Vrm.VrmCharacter>(FindObjectsInactive.Include);
+                if (character != null)
+                {
+                    character.IdleMotion = _settings.IdleMotion;
+                    character.CursorGazeEnabled = _settings.CursorGaze;
+                    character.BlinkEnabled = _settings.Blink;
+                }
+            }
+
+            // ── ISettingsHost ────────────────────────────────────────
+
+            MascotSettings ISettingsHost.Settings
+            {
+                get { return _settings; }
+            }
+
+            void ISettingsHost.ApplySettings(MascotSettings next)
+            {
+                var previousMute = _settings.MuteHotKey;
+                var previousHide = _settings.HideHotKey;
+
+                _settings = next;
+                ApplySettingsToScene();
+                _store.Save(_settings);
+
+                if (!string.Equals(previousMute, _settings.MuteHotKey, StringComparison.Ordinal) ||
+                    !string.Equals(previousHide, _settings.HideHotKey, StringComparison.Ordinal))
+                {
+                    RegisterHotKeys();
+                }
+                UpdateMenu();
+
+                // ★★ ここでパネルを作り直さないこと。 画面には既に新しい値が出ているし、
+                //   作り直すと**ドラッグ中のスライダーごとビューが破棄される**（実機で
+                //   「つまみが掴めない」として出た）。作り直すのは「外から変わったとき」だけ
+                //   （→ PumpSettings / SettingsPanelBridge.Refresh）
+            }
+
+            void ISettingsHost.ResetWindow()
+            {
+                WindowGeometry.Reset();
+            }
+
+            void ISettingsHost.ResetUnitySettings()
+            {
+                ((ISettingsHost)this).ApplySettings(MascotSettings.Defaults);
+                WindowGeometry.Reset();
+            }
+
+            void ISettingsHost.SetWindowSize(float widthPoints, float heightPoints)
+            {
+                WindowGeometry.SetSize(widthPoints, heightPoints);
+            }
+
+            float ISettingsHost.WindowScale
+            {
+                get
+                {
+                    return SettingsMapping.ScaleForWindow(
+                        WindowGeometry.CurrentSize().y, WindowGeometry.DefaultHeightPoints);
+                }
+            }
+
+            bool ISettingsHost.WindowSizeSettling
+            {
+                get { return WindowGeometry.IsApplying; }
+            }
+
+            void ISettingsHost.Quit()
+            {
+                // ★★ ネイティブから [NSApp terminate:] を呼ばないこと（→ Invoke の Quit）
+                Debug.Log("[Mascot] 設定パネルから終了します");
+                Application.Quit();
             }
 
             private void UpdateMenu()

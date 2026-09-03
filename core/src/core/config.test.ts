@@ -2,7 +2,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { createConfigStore, createDefaultConfig, isSpeakDisabled } from "./config";
+import {
+  configKeys,
+  createConfigStore,
+  createDefaultConfig,
+  isConfigKey,
+  isSpeakDisabled,
+  parseConfigValue,
+} from "./config";
 import type { ChatterAgentConfig } from "./config";
 
 let dir: string;
@@ -20,6 +27,7 @@ const DEFAULTS: ChatterAgentConfig = {
   ttsEnabled: true,
   ttsBaseUrl: "http://127.0.0.1:10101",
   ttsSpeakerId: 888753760,
+  ttsSpeedScale: 1.0,
   synthesisTimeoutMs: 30_000,
   ttsSpawn: true,
   ttsSpawnCommand: "",
@@ -104,6 +112,32 @@ describe("createDefaultConfig", () => {
 });
 
 describe("createConfigStore", () => {
+  /**
+   * ★★ #76 のレビュー B-1。読み直しの判定は `mtimeMs`+`size` のスタンプなので、
+   *   **バイト長を変えない書き換え**（`1.5` → `1.6`）を mtime の粒度が粗い FS
+   *   （HFS+ / 旧 ext4 は1秒）で行うと読み飛ばす。壊れるのはレスポンスだけではなく、
+   *   **走行中のサーバーが以後ずっと旧値で合成し続ける**。書き手が申告して直す
+   */
+  it("★★ invalidate すればスタンプが同じでも読み直す", () => {
+    // 粒度の粗い FS を再現する（`utimesSync` は ms までしか書けないので、
+    // 2回とも**同じ Date** を渡して mtimeMs を完全に一致させる）
+    const frozen = new Date(Date.now() - 10_000);
+
+    write({ ttsSpeakerId: 111 });
+    fs.utimesSync(filePath, frozen, frozen);
+    const c = store();
+    expect(c.get("ttsSpeakerId")).toBe(111);
+
+    write({ ttsSpeakerId: 222 }); // 同じバイト長
+    fs.utimesSync(filePath, frozen, frozen);
+
+    // スタンプが変わらないので読み飛ばす（これが B-1 の症状そのもの）
+    expect(c.get("ttsSpeakerId")).toBe(111);
+
+    c.invalidate();
+    expect(c.get("ttsSpeakerId")).toBe(222);
+  });
+
   it("設定ファイルが無ければ既定値を返す", () => {
     expect(store().snapshot()).toEqual(DEFAULTS);
   });
@@ -410,5 +444,120 @@ describe("aiSummary*（#31）", () => {
   it("aiSummaryEnabled は既存の真偽値パーサと同じトークンを受ける", () => {
     expect(store({ CHATTER_AGENT_AI_SUMMARY_ENABLED: "1" }).get("aiSummaryEnabled")).toBe(true);
     expect(store({ CHATTER_AGENT_AI_SUMMARY_ENABLED: "off" }).get("aiSummaryEnabled")).toBe(false);
+  });
+});
+
+describe("ttsSpeedScale（#76）", () => {
+  /**
+   * ★ このファイルで**小数を受ける最初のキー**。`toInt` は `Number.isInteger` 縛りなので
+   *   流用できず、専用のパーサ（`makeRangeParser`）が要った
+   */
+  it("★ 小数を受ける", () => {
+    write({ ttsSpeedScale: 1.5 });
+    expect(store().get("ttsSpeedScale")).toBe(1.5);
+    expect(store({ CHATTER_AGENT_TTS_SPEED_SCALE: "0.7" }).get("ttsSpeedScale")).toBe(0.7);
+  });
+
+  it("範囲は 0.5〜2.0。外れたら既定値（1.0）に倒れる", () => {
+    write({ ttsSpeedScale: 0.5 });
+    expect(store().get("ttsSpeedScale")).toBe(0.5);
+    touchFuture();
+    write({ ttsSpeedScale: 2.0 });
+    expect(store().get("ttsSpeedScale")).toBe(2.0);
+    write({ ttsSpeedScale: 0.4 });
+    expect(store().get("ttsSpeedScale")).toBe(1.0);
+    write({ ttsSpeedScale: 2.1 });
+    expect(store().get("ttsSpeedScale")).toBe(1.0);
+  });
+
+  /**
+   * ★ `Number("")` も `Number(" ")` も `Number(null)` も `0` になる。`toInt` では
+   *   `Number.isInteger(NaN)` が弾いていた分を、こちらは明示的に落とす必要がある
+   */
+  it("★ 空文字・空白・非数は既定値に倒れる（0 として通さない）", () => {
+    expect(store({ CHATTER_AGENT_TTS_SPEED_SCALE: "" }).get("ttsSpeedScale")).toBe(1.0);
+    expect(store({ CHATTER_AGENT_TTS_SPEED_SCALE: " " }).get("ttsSpeedScale")).toBe(1.0);
+    expect(store({ CHATTER_AGENT_TTS_SPEED_SCALE: "はやい" }).get("ttsSpeedScale")).toBe(1.0);
+    write({ ttsSpeedScale: null });
+    expect(store().get("ttsSpeedScale")).toBe(1.0);
+  });
+});
+
+describe("制御 API 用の口（#76）", () => {
+  it("isConfigKey は SPECS のキーだけを通す", () => {
+    expect(isConfigKey("ttsSpeedScale")).toBe(true);
+    expect(isConfigKey("nope")).toBe(false);
+    // ★ Object.prototype 由来の名前を通さない
+    expect(isConfigKey("constructor")).toBe(false);
+    expect(isConfigKey("__proto__")).toBe(false);
+  });
+
+  it("configKeys は ChatterAgentConfig の全キーを返す", () => {
+    expect([...configKeys()].sort()).toEqual(Object.keys(createDefaultConfig()).sort());
+  });
+
+  /** ★ HTTP 側にパーサを複製しないための口。`SPECS` のパーサそのものを通す */
+  it("★ parseConfigValue は SPECS のパーサそのもの", () => {
+    expect(parseConfigValue("ttsSpeedScale", "1.5")).toBe(1.5);
+    expect(parseConfigValue("ttsSpeedScale", 9)).toBeUndefined();
+    expect(parseConfigValue("ttsBaseUrl", "http://h:1/")).toBe("http://h:1");
+    expect(parseConfigValue("ttsBaseUrl", "localhost:10101")).toBeUndefined();
+  });
+
+  describe("originOf", () => {
+    it("既定値のままなら default", () => {
+      expect(store().originOf("ttsSpeakerId")).toBe("default");
+    });
+
+    it("ファイルに書かれていれば file", () => {
+      write({ ttsSpeakerId: 3 });
+      expect(store().originOf("ttsSpeakerId")).toBe("file");
+    });
+
+    it("環境変数が勝っていれば env", () => {
+      write({ ttsSpeakerId: 3 });
+      expect(store({ CHATTER_AGENT_TTS_SPEAKER_ID: "5" }).originOf("ttsSpeakerId")).toBe("env");
+    });
+
+    /**
+     * ★ 「値が既定値と同じかどうか」では判定できない。既定値と同じ値が明示的に
+     *   書かれていることは普通にある
+     */
+    it("★ 既定値と同じ値が書かれていても file", () => {
+      write({ ttsSpeakerId: 888753760 });
+      expect(store().originOf("ttsSpeakerId")).toBe("file");
+    });
+
+    /** 不正値は採用されないので、出どころも既定に戻る */
+    it("不正な値なら default（採用されていないので）", () => {
+      write({ ttsSpeakerId: -1 });
+      expect(store().originOf("ttsSpeakerId")).toBe("default");
+    });
+  });
+
+  describe("readRawFile", () => {
+    it("ファイルが無ければ空のベースを返す", () => {
+      expect(store().readRawFile()).toEqual({});
+    });
+
+    /** ★★ `collect()` を通さない。未知キーが残ることがこの関数の存在理由 */
+    it("★★ 未知のキーもそのまま返す", () => {
+      write({ ttsSpeakerId: 3, futureKey: "残す" });
+      expect(store().readRawFile()).toEqual({ ttsSpeakerId: 3, futureKey: "残す" });
+    });
+
+    /**
+     * ★★ 壊れているときに `{}` を返さないこと。返すと `PATCH` が
+     *   ユーザーのファイルを丸ごと書き潰す
+     */
+    it("★★ 壊れた JSON では undefined（空オブジェクトではない）", () => {
+      write("{ 壊れている");
+      expect(store().readRawFile()).toBeUndefined();
+    });
+
+    it("トップレベルが配列なら undefined", () => {
+      write([1, 2, 3]);
+      expect(store().readRawFile()).toBeUndefined();
+    });
   });
 });

@@ -43,3 +43,11 @@ void CM_SetActivationPolicy(int policy)
         [NSApp setActivationPolicy:value];
     });
 }
+
+/* → CMNative.h */
+void CM_Beep(void)
+{
+    CMRunOnMain(^{
+        NSBeep();
+    });
+}

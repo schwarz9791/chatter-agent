@@ -60,10 +60,18 @@ export interface AudioStoreDeps {
   maxInFlight?: number;
 }
 
-/** キャッシュキーに混ぜる、声を決める設定 */
+/**
+ * キャッシュキーに混ぜる、声を決める設定。
+ *
+ * ★ **合成結果を変えうる設定はすべてここに載せること。** 載せ忘れると、その設定を
+ *   変えた直後に取り直した文だけ**古い設定の WAV** がキャッシュから返る。
+ *   `ttsSpeedScale`（#76）はこれを踏みかけた —— 話者は入っていたが速度は入っていなかった。
+ */
 export interface Voice {
   baseUrl: string;
   speakerId: number;
+  /** 話速。`audio_query` の `speedScale` に載る（→ `tts/voicevoxClient.ts`） */
+  speedScale: number;
 }
 
 export interface AudioStore {
@@ -104,7 +112,8 @@ const DEFAULT_MAX_IN_FLIGHT = 8;
 
 function keyFor(voice: Voice, epoch: string, seq: number): string {
   // ★ 声をキーに混ぜること。`ttsSpeakerId` を直しても、LRU にいる分は古い声のまま返る
-  return `${voice.baseUrl}|${voice.speakerId}|${epoch}:${seq}`;
+  // ★ `speedScale` も同じ理由で混ぜる（#76）。**`Voice` にフィールドを足したらここにも足す**
+  return `${voice.baseUrl}|${voice.speakerId}|${voice.speedScale}|${epoch}:${seq}`;
 }
 
 export function createAudioStore(deps: AudioStoreDeps): AudioStore {

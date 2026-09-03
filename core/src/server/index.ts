@@ -18,13 +18,15 @@ import * as fs from "fs";
 import * as path from "path";
 import { createConfigStore } from "../core/config";
 import { acquireLock } from "../core/lock";
-import { getServerLockDir, getSpeechQueueDir } from "../core/paths";
+import { getServerLockDir, getSpeechQueueDir, getSummarizerHomeDir, getSummarizerSessionsPath } from "../core/paths";
+import { registerSummarizerSession } from "../core/summarizerSessions";
 import { createSpeechQueue } from "../core/speechQueue";
 import { createVoicevoxClient, flattenStyles, hasStyle } from "../tts/voicevoxClient";
-import { createAudioStore } from "./audioStore";
+import { createAudioStore, type Voice } from "./audioStore";
+import { createControlApi } from "./controlApi";
 import { describeEngineSkip, resolveEngineSpawn, startEngine, type EngineProcess } from "./engineProcess";
 import { createDispatcher, type Dispatcher } from "./dispatcher";
-import { createAudioHttpServer } from "./httpServer";
+import { createHttpServer } from "./httpServer";
 import { createWsServer } from "./wsServer";
 
 /**
@@ -174,9 +176,12 @@ async function main(): Promise<void> {
   //   サーバーを再起動するまで効かない。無音の原因として真っ先に疑ってほしい値なので、
   //   直したらすぐ効く方がよい（クライアント側の警告もそこを名指しする）。
   //   クライアントの生成は object literal と closure だけなので、GET のたびに作って問題ない
-  const currentVoice = () => ({ baseUrl: config.get("ttsBaseUrl"), speakerId: config.get("ttsSpeakerId") });
-  const ttsFor = (voice: { baseUrl: string; speakerId: number }) =>
-    createVoicevoxClient({ ...voice, timeoutMs: config.get("synthesisTimeoutMs") });
+  const currentVoice = (): Voice => ({
+    baseUrl: config.get("ttsBaseUrl"),
+    speakerId: config.get("ttsSpeakerId"),
+    speedScale: config.get("ttsSpeedScale"),
+  });
+  const ttsFor = (voice: Voice) => createVoicevoxClient({ ...voice, timeoutMs: config.get("synthesisTimeoutMs") });
 
   let lastEngineCheckAt = Number.NEGATIVE_INFINITY;
 
@@ -286,15 +291,41 @@ async function main(): Promise<void> {
     synthesize: (text, voice) => ttsFor(voice).synthesize(text),
   });
 
-  const httpServer = createAudioHttpServer({
+  /**
+   * 設定パネル（#76）の制御 API。**書き込み口はループバック限定**（→ `server/httpServer.ts`）。
+   *
+   * ★ 話者一覧と合成は、キュー経由の合成と**同じ声・同じクライアント生成**を通す
+   *   （`ttsFor(currentVoice())`）。別々に組むと、テストボタンだけ通って本番が鳴らない
+   *   （またはその逆）という切り分けにくいズレになる。
+   */
+  const control = createControlApi({
+    config,
+    listSpeakers: async () => flattenStyles(await ttsFor(currentVoice()).listSpeakers()),
+    // ★ `audioStore` を通さない。キューに無い文なので `lookup` が引けない
+    synthesizePreview: (text) => ttsFor(currentVoice()).synthesize(text),
+    summaryPreview: {
+      getCommand: () => config.get("aiSummaryCommand"),
+      getModel: () => config.get("aiSummaryModel"),
+      getTimeoutMs: () => config.get("aiSummaryTimeoutMs"),
+      homeDir: getSummarizerHomeDir(),
+      // ★ 無限ループ防止の第2層。CLI の `worker.state.json` ではなく専用ファイルに書く
+      //   （書き手を1人に保つため。→ `core/summarizerSessions.ts`）
+      registerSessionId: (sessionId) => registerSummarizerSession(getSummarizerSessionsPath(), sessionId),
+    },
+  });
+
+  const httpServer = createHttpServer({
     store: audioStore,
+    control,
     // ★ 本文の権威はキュー。ack / trim で消えた entry の音声は作らない
     lookup: (seq) => queue.read(seq),
     allowedOrigins: config.get("allowedOrigins"),
     disabled: () => !config.get("ttsEnabled"),
     // GET を保留する上限。合成そのものの上限（`synthesisTimeoutMs`）とは別で、
     // ここで打ち切っても合成は続き、終わればキャッシュに入る（→ httpServer.ts）
-    responseTimeoutMs: config.get("synthesisTimeoutMs"),
+    // ★ **関数で渡す**（`disabled` と同じ）。値にすると、`PATCH /v1/config` で
+    //   `synthesisTimeoutMs` を変えてもここだけ再起動まで旧値のまま＝半分しか効かない
+    responseTimeoutMs: () => config.get("synthesisTimeoutMs"),
     onSynthesisFailed: () => void recheckEngine(),
   });
 

@@ -68,6 +68,27 @@ export interface ChatterAgentConfig {
   /** 話者のスタイル ID。既定は AivisSpeech 標準同梱の Anneli（ノーマル）。VOICEVOX は 0 始まりの小さい整数 */
   ttsSpeakerId: number;
   /**
+   * 合成の話速。`audio_query` が返した JSON の `speedScale` **だけ**を書き換えて
+   * `synthesis` に投げる（→ `tts/voicevoxClient.ts`）。
+   *
+   * ★ **`voicevoxClient` の「`AudioQuery` の中身は解釈しない」方針の唯一の例外。**
+   *   例外をここ1つに留めること —— `pitchScale` / `intonationScale` を同じ理屈で足すと、
+   *   「エンジンが返した JSON をそのまま返送する」という最も安全な形が失われる。
+   *   `speedScale` を持たないエンジンには**何もしない**（無いキーを作らない）。
+   *
+   * ★ **再生側（`afplay -r`）でやらないこと。** WAV の長さが変わらないまま再生だけ
+   *   伸縮するので、リップシンク（#58）が WAV から作った振幅エンベロープと必ずズレる。
+   *   Android 側（`AudioClipPlayer`）にも効かない。
+   *
+   * ★ 範囲 0.5〜2.0 は**エンジンの受理範囲ではなく実用の範囲**。VOICEVOX 互換 API は
+   *   もっと広い値も受けるが、0.5 未満は間延びして意味を取りづらく、2.0 超は聞き取れない。
+   *
+   * ★ **効くのは次に合成される文から**（話者の変更と同じ）。すでに WAV になっている文は
+   *   変わらない。`audioStore` のキャッシュキーにも入っているので、変えた直後に取り直した
+   *   文が古い速度で返ることはない。
+   */
+  ttsSpeedScale: number;
+  /**
    * エンジンへの**1リクエストあたり**の上限（`/audio_query` と `/synthesis` にそれぞれ効く）。
    * Node の fetch に既定タイムアウトは無い。
    *
@@ -240,6 +261,7 @@ export function createDefaultConfig(): ChatterAgentConfig {
     ttsEnabled: true,
     ttsBaseUrl: "http://127.0.0.1:10101",
     ttsSpeakerId: 888753760,
+    ttsSpeedScale: 1.0,
     synthesisTimeoutMs: 30_000,
     ttsSpawn: true,
     ttsSpawnCommand: "",
@@ -260,7 +282,7 @@ export function createDefaultConfig(): ChatterAgentConfig {
   };
 }
 
-type ConfigKey = keyof ChatterAgentConfig;
+export type ConfigKey = keyof ChatterAgentConfig;
 
 /** JSON 由来の値と環境変数の文字列の両方を受けるので引数は unknown。不正なら undefined */
 type Parser<T> = (raw: unknown) => T | undefined;
@@ -338,6 +360,39 @@ const parseNonNegativeInt: Parser<number> = (raw) => {
   const n = toInt(raw);
   return n !== undefined && n >= 0 ? n : undefined;
 };
+
+/**
+ * 範囲付きの**小数**パーサを作る。
+ *
+ * ★ **`toInt` を流用できない。** あれは `Number.isInteger` で縛っているので、
+ *   `1.5` のような値を1つも通さない（このファイルで小数を受けるキーは
+ *   `ttsSpeedScale` が初めて）。
+ *
+ * ★ **`Number(raw)` の素通しにしないこと。** `Number("")` も `Number(" ")` も
+ *   `Number(null)` も `0` になる。`toInt` では `Number.isInteger(NaN) === false` が
+ *   その分を弾いていたが、`0` は有限なので範囲に入ってしまう。空・空白・非文字列を
+ *   明示的に落とす。
+ */
+function makeRangeParser(min: number, max: number): Parser<number> {
+  return (raw) => {
+    let n: number;
+    if (typeof raw === "number") n = raw;
+    else if (typeof raw === "string" && raw.trim()) n = Number(raw.trim());
+    else return undefined;
+    if (!Number.isFinite(n)) return undefined;
+    return n >= min && n <= max ? n : undefined;
+  };
+}
+
+/**
+ * 話速の下限・上限。**エンジンの受理範囲ではなく実用の範囲**（→ `ttsSpeedScale`）。
+ * 設定 UI（#76）が出すスライダーの範囲もこれに合わせてあるが、**権威はこちら** ——
+ * UI 側がズレても `PATCH /v1/config` が 400 を返すだけで、黙って効かない値にはならない。
+ */
+const TTS_SPEED_SCALE_MIN = 0.5;
+const TTS_SPEED_SCALE_MAX = 2.0;
+
+const parseSpeedScale: Parser<number> = makeRangeParser(TTS_SPEED_SCALE_MIN, TTS_SPEED_SCALE_MAX);
 
 // trim した値を返すこと。判定にだけ使って生値を返すと、CHATTER_AGENT_HOST=" 127.0.0.1 "
 // のような値がそのまま listen() へ渡る
@@ -463,6 +518,7 @@ const SPECS = {
   ttsEnabled: { env: "CHATTER_AGENT_TTS_ENABLED", parse: parseBoolean },
   ttsBaseUrl: { env: "CHATTER_AGENT_TTS_URL", parse: makeUrlParser(["http:", "https:"]) },
   ttsSpeakerId: { env: "CHATTER_AGENT_TTS_SPEAKER_ID", parse: parseNonNegativeInt },
+  ttsSpeedScale: { env: "CHATTER_AGENT_TTS_SPEED_SCALE", parse: parseSpeedScale },
   synthesisTimeoutMs: { env: "CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS", parse: parseTimeoutMs },
   ttsSpawn: { env: "CHATTER_AGENT_TTS_SPAWN", parse: parseBoolean },
   ttsSpawnCommand: { env: "CHATTER_AGENT_TTS_SPAWN_COMMAND", parse: parseNonEmptyString },
@@ -488,10 +544,72 @@ const SPECS = {
 
 const CONFIG_KEYS = Object.keys(SPECS) as ConfigKey[];
 
+/** 設定キーの一覧。**並び順は `SPECS` の宣言順**（`ChatterAgentConfig` と同じ） */
+export function configKeys(): readonly ConfigKey[] {
+  return CONFIG_KEYS;
+}
+
+/** 文字列が設定キーか。制御 API が未知キーを 400 で弾くのに要る */
+export function isConfigKey(key: string): key is ConfigKey {
+  return Object.hasOwn(SPECS, key);
+}
+
+/**
+ * 1キーぶんの値を `SPECS` のパーサで検証し、正規化した値を返す。不正なら `undefined`。
+ *
+ * ★ **HTTP 側にパーサを複製しないこと。** 複製した瞬間に「HTTP からは通るがファイルからは
+ *   通らない値」（またはその逆）が生まれ、どちらが正しいのかコードから読めなくなる。
+ *   `PATCH /v1/config` はこの関数**だけ**を通す。
+ *
+ * ★ 戻り値が `unknown` なのは、キーがユニオンだと `SPECS[key].parse` の引数型も
+ *   ユニオンになり呼び出せないため（`collect()` が同じ理由でキャストしている）。
+ *   型の担保は `SPECS` の `satisfies` が持っている。
+ */
+export function parseConfigValue(key: ConfigKey, raw: unknown): unknown {
+  return (SPECS[key].parse as Parser<unknown>)(raw);
+}
+
+/** その値がどこから来たか。**優先順位は環境変数 > ファイル > 既定** */
+export type ConfigOrigin = "env" | "file" | "default";
+
 export interface ConfigStore {
   get<K extends ConfigKey>(key: K): ChatterAgentConfig[K];
   /** 起動ログ用のスナップショット */
   snapshot(): Readonly<ChatterAgentConfig>;
+  /**
+   * その値の出どころ。
+   *
+   * ★ 制御 API（`PATCH /v1/config`）が 409 を返すのに要る。環境変数が勝っているキーは
+   *   ファイルに書いても効かないので、**黙って書いて効かないのがいちばん悪い**。
+   *
+   * ★ **「値が既定値と同じかどうか」では判定できない。** ファイルや環境変数に
+   *   既定値と同じ値が明示的に書かれていることは普通にある。実際にどの層から採ったかを
+   *   `collect()` の結果（＝パースに成功したキーだけが載る）で見る。
+   */
+  originOf(key: ConfigKey): ConfigOrigin;
+  /**
+   * `config.json` を**そのまま**返す（`collect()` を通さない）。ファイルが無ければ `{}`、
+   * 読めない・JSON が壊れている・トップレベルがオブジェクトでないときは `undefined`。
+   *
+   * ★ **書き戻しに要る。** `snapshot()` の値で全体を上書きすると、
+   *   **他バイナリ向けの未知キーが消える**（`collect()` は `SPECS` に無いキーを捨てる）。
+   *
+   * ★★ **壊れているときに `{}` を返さないこと。** 返すと `PATCH` が
+   *   ユーザーのファイルを丸ごと書き潰す。「無い」と「読めない」を混ぜない。
+   */
+  readRawFile(): Record<string, unknown> | undefined;
+  /**
+   * 次の読み取りで**必ず**ファイルを読み直す。
+   *
+   * ★★ **書き手（`PATCH /v1/config`）が書いた直後に呼ぶ。** 読み直しの判定は
+   *   `mtimeMs`+`size` のスタンプなので、書き込みが**バイト長を変えず**
+   *   （`ttsSpeedScale: 1.5` → `1.6`）、mtime の粒度が粗いファイルシステム
+   *   （HFS+ / 旧 ext4 は1秒）だと**スタンプが一致して読み飛ばす**。
+   *   そのとき壊れるのはレスポンス（1つ前の値が返る）だけではない ——
+   *   **走行中のサーバーが以後ずっと旧値で合成し続ける**（別の編集でサイズが
+   *   変わるまで直らない）。スタンプの分解能に賭けるより、書いた本人が申告する方が確実。
+   */
+  invalidate(): void;
   readonly filePath: string;
 }
 
@@ -605,6 +723,34 @@ export function createConfigStore(deps: ConfigStoreDeps = {}): ConfigStore {
     merged = { ...defaults, ...fileValues, ...overrides };
   }
 
+  /**
+   * ファイルを `collect()` に通さず生のまま返す。
+   *
+   * ★ `readFileValues()` と重複させたくなるが、**目的が逆**。あちらは
+   *   「既知のキーだけを、パースに通った形で」取り出す（読む側）。こちらは
+   *   「全部のキーを、書かれたまま」取り出す（書き戻すためのベース）。
+   */
+  function readRaw(): Record<string, unknown> | undefined {
+    let text: string;
+    try {
+      text = fs.readFileSync(filePath, "utf-8");
+    } catch (err) {
+      // ★ ファイルが無いのは正常（初回。すべて既定値と環境変数で決まる）。
+      //   空のベースを返して、書き手が新規作成できるようにする
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return {};
+      return undefined;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return undefined;
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
+    return parsed as Record<string, unknown>;
+  }
+
   return {
     filePath,
     get(key) {
@@ -614,6 +760,20 @@ export function createConfigStore(deps: ConfigStoreDeps = {}): ConfigStore {
     snapshot() {
       refresh();
       return { ...merged };
+    },
+    originOf(key) {
+      refresh();
+      // ★ `in` ではなく `hasOwn`。Object.prototype 由来のキー名（"constructor" など）が
+      //   設定キーになることは無いが、判定を形の方に寄せておく
+      if (Object.hasOwn(overrides, key)) return "env";
+      if (Object.hasOwn(fileValues, key)) return "file";
+      return "default";
+    },
+    readRawFile: readRaw,
+    invalidate() {
+      // ★ `stamp = null` にしないこと。`null` は「ファイルが無い」の意味で、
+      //   次の refresh がそれを「変化なし」と読む余地が残る
+      loaded = false;
     },
   };
 }

@@ -49,7 +49,7 @@ namespace ChatterMascot.Tests
         public void RoundTripsThroughSaveAndReload()
         {
             var store = Store();
-            Assert.That(store.Save(new MascotSettings(true, "cmd+shift+m", HotKeySpec.DefaultHide)), Is.True);
+            Assert.That(store.Save(MascotSettings.Defaults.WithMuted(true).WithMuteHotKey("cmd+shift+m")), Is.True);
             Assert.That(_written, Is.Not.Null);
 
             Assert.That(store.Current.Muted, Is.True);
@@ -63,7 +63,7 @@ namespace ChatterMascot.Tests
         [Test]
         public void DoesNotReadAgainWhileTheStampIsUnchanged()
         {
-            _file = SettingsJson.Write(new MascotSettings(true, HotKeySpec.Default, HotKeySpec.DefaultHide));
+            _file = SettingsJson.Write(MascotSettings.Defaults.WithMuted(true));
             _stamp = "1:100";
 
             var store = Store();
@@ -78,13 +78,13 @@ namespace ChatterMascot.Tests
         [Test]
         public void ReadsAgainWhenTheStampChanges()
         {
-            _file = SettingsJson.Write(new MascotSettings(false, HotKeySpec.Default, HotKeySpec.DefaultHide));
+            _file = SettingsJson.Write(MascotSettings.Defaults.WithMuted(false));
             _stamp = "1:100";
 
             var store = Store();
             Assert.That(store.Current.Muted, Is.False);
 
-            _file = SettingsJson.Write(new MascotSettings(true, HotKeySpec.Default, HotKeySpec.DefaultHide));
+            _file = SettingsJson.Write(MascotSettings.Defaults.WithMuted(true));
             _stamp = "2:120";
 
             Assert.That(store.Refresh(), Is.True, "変わったら true");
@@ -95,7 +95,7 @@ namespace ChatterMascot.Tests
         [Test]
         public void ReportsNoChangeWhenTheContentIsTheSame()
         {
-            _file = SettingsJson.Write(new MascotSettings(true, HotKeySpec.Default, HotKeySpec.DefaultHide));
+            _file = SettingsJson.Write(MascotSettings.Defaults.WithMuted(true));
             _stamp = "1:100";
 
             var store = Store();
@@ -112,7 +112,7 @@ namespace ChatterMascot.Tests
         [Test]
         public void KeepsThePreviousValueWhenTheFileBreaks()
         {
-            _file = SettingsJson.Write(new MascotSettings(true, HotKeySpec.Default, HotKeySpec.DefaultHide));
+            _file = SettingsJson.Write(MascotSettings.Defaults.WithMuted(true));
             _stamp = "1:100";
 
             var store = Store();
@@ -149,7 +149,7 @@ namespace ChatterMascot.Tests
                 text => throw new InvalidOperationException("boom"),
                 _warnings.Add);
 
-            Assert.That(store.Save(new MascotSettings(true, HotKeySpec.Default, HotKeySpec.DefaultHide)), Is.False);
+            Assert.That(store.Save(MascotSettings.Defaults.WithMuted(true)), Is.False);
             Assert.That(_warnings, Has.Count.EqualTo(1));
         }
 

@@ -120,6 +120,38 @@ namespace ChatterMascot.Vrm
         [SerializeField] private bool faceDebugLog;
 
         /// <summary>
+        /// 待機モーションを回すか（設定パネル / #76）。
+        ///
+        /// ★★ <b>VRMA と手続き的アイドルの<u>両方</u>に効く。</b> あの2実装は
+        ///   「片方が読めないときのフォールバック」でしかなく、ユーザーから見て
+        ///   「待機モーション」は1つの概念（→ <see cref="VrmIdleAnimation.Enabled"/>）。
+        ///   片方だけ止めると「チェックを外したのに動き続ける」になる。
+        /// </summary>
+        public bool IdleMotion
+        {
+            get { return proceduralIdle; }
+            set
+            {
+                proceduralIdle = value;
+                if (_idle != null) _idle.Enabled = value;
+            }
+        }
+
+        /// <summary>マウスカーソルを目で追うか（設定パネル / #76）</summary>
+        public bool CursorGazeEnabled
+        {
+            get { return cursorGaze; }
+            set { cursorGaze = value; }
+        }
+
+        /// <summary>自動まばたきを回すか（設定パネル / #76）</summary>
+        public bool BlinkEnabled
+        {
+            get { return blinkEnabled; }
+            set { blinkEnabled = value; }
+        }
+
+        /// <summary>
         /// Desktop 側（<c>CursorGazeSource</c>）が刺す。<c>null</c> なら自律的な漂いに倒れる。
         ///
         /// ★ <b>Android にはこの注入元が存在しない</b>（<c>ChatterMascot.Desktop</c> アセンブリごと
@@ -371,6 +403,10 @@ namespace ChatterMascot.Vrm
 
             // ★ 例外は VrmIdleAnimation.LoadAsync の内側で全部握る（VrmStage.Start と同じ形）
             _idle = new VrmIdleAnimation();
+            // ★ 設定を読み込みの**前**に反映しておくこと。ここを飛ばすと、
+            //   チェックを外してあるのに VRMA の再生が始まる（読み込みは非同期なので、
+            //   後から止めるまでの数秒だけ動く、という気づきにくい形で出る）
+            _idle.Enabled = proceduralIdle;
             _ = _idle.LoadAsync(_instance, transform, _cancellation.Token);
 
             // ★★ 診断は**最後**に呼ぶこと。ここは VrmStage.Invoke に呼ばれていて、

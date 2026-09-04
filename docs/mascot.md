@@ -3561,6 +3561,62 @@ cd apps/chatter-mascot
 スクリプトが `Assets/ChatterMascot/Editor/VRoidClips/` を一時的に作って `finally` で `.meta` ごと消す。
 途中で落ちたときの保険として `.gitignore` にも書いてある。
 
+### ワンショット再生とクロスフェード（#70）
+
+起動時に `animations/<category>/*.vrma`（探索順は `persistentDataPath` → `~/.config/chatter-agent` →
+同梱、同名ファイルは先勝ち）を**全部プリロード**して `Animation.enabled = false` で寝かせておく。
+発火したクリップは巻き戻して `Play()` + `Sample()`、`CrossFadeAnimation`（`IVrm10Animation` の自前実装。
+`ControlRig` のレベルで2本を混ぜる合成レイヤー）で待機から 0.5 秒かけて `Slerp` → フェードが終わったら
+クリップそのものを直に差す → `length - 0.5s` の地点で今度は待機へ 0.5 秒フェードして戻す。**発火すべきか
+の判断は Runtime の純粋クラス**（`EmotionMotionTrigger` / `IdleAccentTimer`）に置き、`Vrm/` 側（`VrmMotionPlayer` /
+`VrmCharacter`。VRM10 依存で EditMode テストが当たらない層）は配線だけを持つ。`Runtime.VrmAnimation` への代入は
+`VrmIdleAnimation.Present` の1箇所に寄せてある。
+
+**発火の規則**（ユーザーと決めたこと、2026-09-04）: cc-mascot と同じく**文ごと**。ただし
+**再生中の感情モーションには割り込まない**（最後まで見せる）代わりに、**終了後 5 秒のクールダウン**
+（`MotionParams.CooldownSeconds`）で連発を抑える。感情モーションは待機の小ネタには割り込める。
+`neutral` と `kind: prompt` は感情モーションを出さない。小ネタ（`idle/`）は**発話が止まってから
+30〜60 秒**の乱数間隔で発火し、発話の立ち下がりとモーション終了の両方でタイマーを引き直す。
+
+**踏んだ罠**:
+
+| 罠 | 症状 | 回避 |
+|---|---|---|
+| hips を生の位置で Lerp する | 腰が瞬間的に飛ぶ | `idle_loop.vrma` は cm スケール（hips y≈90）、VRoid 書き出しは m スケール（y≈0.98）で単位が約 100 倍違う。`Vrm10Retarget` は `source.TPose.Hips.y` で割ってスケールするので、差分を高さで正規化してから混ぜ、合成 TPose は Hips だけ `(0,1,0)` を返す（`Retarget` が source の TPose を使うのは Hips だけ。`null` を返すと `.Value` で落ちる） |
+| `animation[animation.clip.name]` で state を引く | VRoid 書き出しはアニメーション名が空で見つからない | `WIN00.vrma` の `animations[0].name` は無し（`idle_loop.vrma` は `"animation"`）。UniVRM 自身と同じ `foreach (AnimationState s in animation) { break; }` で先頭を取る |
+| importer は `wrapMode = Loop` 固定 | ワンショットのつもりが最終フレームで止まらずループする | `Once` は rest に戻ってしまうので `ClampForever` に上書き。`Animation.Play()` は再生中の state を巻き戻さないので `state.time = 0` を明示し、legacy Animation の更新は `LateUpdate` より前なので差した直後に `Sample()` を呼ぶ |
+| 「`Speaking` の立ち上がり」を文の開始と見なす | 先読みが効くと文の切れ目で `Speaking` が `false` に落ちず、モーションが発火しない | `AfplaySpeechPlayer.PlayAsync → End → Dispatch(Played) → 次の Play → BeginSpeaking` が同じ継続で同期に走るため。`SpeakingSet.Entry.Order` を `TryGetSpeaking` の3引数版で出し、その変化で文の開始を取る |
+| `ExpressionMap` を毎回 `new` する | 常駐アプリの GC 予算を削る | `Vrm10Runtime.Process()` が毎フレーム foreach するので、中身が空の `static readonly` Dictionary を1つだけ持つ |
+| 設定「待機モーション」OFF の順序 | 状態がズレる | `VrmMotionPlayer.Stop()` を `_idle.Enabled = false` より**先**に呼ぶ（`Apply()` が blend を上書きするため）。`Present` は `!Enabled` で無条件 no-op、`Play` も `!Enabled` の間は開始しない |
+| `Tick` を `LateUpdate` の早期 return の後ろに置く | VRMA 有効時（通常状態）は到達せず `FadeOut` が終わらないまま感情モーションが Playing に固まる | `UpdateFace` の後・`_instance == null` の前に置く |
+| 混ぜる各ソースに `FingerFallbackPoseProvider.Wrap` を掛け忘れる | 指の無いクリップ側が identity（T ポーズ）へ補間され、「指が真っ直ぐ伸びる」問題が形を変えて戻る | 混ぜる前に各ソースへ掛ける（`CrossFadeAnimation` 自身は掛けない。#88 からの宿題） |
+
+**実機確認（2026-09-04、macOS `.app`、AivisSpeech 稼働、窓 810×810）**: 配信キューに7文
+（neutral / happy / happy / sad / surprised / prompt(surprised) / angry）を直接置いた結果 ——
+neutral は出ない、happy → `super_delicious`、2文目の happy はクールダウンで出ない（意図どおり）、
+sad → `REFLESH00`、**surprised は sad のモーション終了から5秒以内だったので出なかった**
+（クールダウンの仕様どおりだが、短いクリップが続くと1つ飛ぶ。`CooldownSeconds` は実機で調整する
+余地として残す）、prompt は出ない、angry → `determined`。モーション中も `face:` ログで
+`sad=1.00` / `aa=0.35〜0.50` が生きている（`ExpressionMap` を奪っていない）。小ネタは放置中に
+`Hub_Idle03` ×2 / `Hub_Idle01` が 30〜60 秒間隔で出て待機へ戻った。例外0件。`-motionProbe happy`
+で `WIN00`（ジャンプ→敬礼）と `Hub_laugh01` を 0.4 秒間隔のスクリーンショットで目視: 腰の飛び・
+180° ずれ・T ポーズの指は無し、`WIN00` の両腕は窓の上端に収まる。
+
+**CPU の A/B**（同条件: 外部 4K 1x、窓 810×810、30fps、MSAA 4x、`-serverUrl ws://127.0.0.1:9` で
+無発話、`top` 9秒間隔 n=6）: A = main（#90）**28.2%**（28.4 28.3 28.4 27.7 28.0 27.8）、
+B = #70 **27.3%**（26.7 26.8 27.8 28.3 27.3 27.3。途中で小ネタが1本再生された）。15本を寝かせた
+ぶんの回帰は無い。★ #88 の 16.8% より高いのは窓が 540 → 810 だからで、同じ条件では比べていない
+（→「CPU の回帰は A/B で測る」）。
+
+**目視の道具**: `open Build/ChatterMascot.app --args -serverUrl ws://127.0.0.1:9 -motionProbe happy`
+で読み込み完了の3秒後に1本だけ再生する。ログは
+`[Mascot] モーション: idle=5 happy=3 …（読めた 15/15 本）` と
+`[Mascot] モーション開始: Emotion WIN00.vrma（happy、4.0s）` / `モーション終了`。
+
+**残した宿題**: `idle/` の 8.8〜18.2 秒が小ネタとして長いかは耳と目で判断する
+（Issue #70 に持ち越し）。Android の同梱マニフェスト JSON は #25（`AnimationManifest.Build` の
+`bundled` 引数が口）。`__cool` / `__cute` は分類だけで設定なし。
+
 ### ★ Unity CLI
 
 `unity` コマンド（[Unity CLI](https://unity.com/ja/blog/meet-the-unity-cli)）が

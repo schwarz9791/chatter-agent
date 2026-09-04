@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UniVRM10;
@@ -6,7 +7,7 @@ namespace ChatterMascot.Vrm
 {
     /// <summary>
     /// VRMA の <see cref="INormalizedPoseProvider"/> をラップし、ファイルに無い指ボーンだけ
-    /// <see cref="FingerPose.RelaxedCurl"/> に差し替える。#88。
+    /// <see cref="FingerPose.RelaxedCurl(HumanBodyBones, double)"/> に差し替える。#88。
     ///
     /// ★ <b>なぜここが必要か。</b> <c>Vrm10Runtime.Process()</c> は
     ///   <c>Vrm10Retarget.Retarget(VrmAnimation.ControlRig, (ControlRig, ControlRig))</c> を
@@ -28,31 +29,43 @@ namespace ChatterMascot.Vrm
     ///   ファイル側の指があるのに上書きすると、せっかくの原作アニメーションを壊す。
     /// ★ #70 のクロスフェードでは、混ぜる各ソースにこの Wrap をそれぞれ掛けてから合成すること
     ///   （ここは1本の VRMA を対象にした処理で、複数ソースの合成そのものには関与しない）。
+    /// ★ <b>#88 の後続。</b> 補った指は静止した丸めではなく <see cref="FingerPose.RelaxedCurl(HumanBodyBones, double)"/>
+    ///   で時間ぶんだけ揺らす（体のアイドルとは結合しない、独立した時間ベース）。そのため
+    ///   <see cref="_supplied"/> は補うボーンの<b>集合</b>（<c>HashSet</c>）に変わった——
+    ///   角度は毎フレーム引数の <c>now</c> で変わるので、コンストラクタ時点の
+    ///   <c>Quaternion</c> を1つ持ち回る形はもう成立しない。
     /// </summary>
     internal sealed class FingerFallbackPoseProvider : INormalizedPoseProvider
     {
         private readonly INormalizedPoseProvider _inner;
-        private readonly Dictionary<HumanBodyBones, Quaternion> _supplied;
+        private readonly HashSet<HumanBodyBones> _supplied;
+
+        /// <summary>
+        /// 「いま」を読む関数。<b>コンストラクタで注入する</b>——テストが固定値を渡せるようにするため、
+        /// かつ <see cref="Wrap"/> が実体（<c>Time.realtimeSinceStartupAsDouble</c>）を1箇所で決めるため。
+        /// </summary>
+        private readonly Func<double> _clock;
 
         /// <summary>既定の丸めで補ったボーン数。0 なら全ての指をファイルが持っていた（差し替え不要）</summary>
         public int SuppliedCount => _supplied.Count;
 
-        public FingerFallbackPoseProvider(INormalizedPoseProvider inner, ITPoseProvider tpose)
+        public FingerFallbackPoseProvider(INormalizedPoseProvider inner, ITPoseProvider tpose, Func<double> clock)
         {
             _inner = inner;
-            _supplied = new Dictionary<HumanBodyBones, Quaternion>();
+            _clock = clock;
+            _supplied = new HashSet<HumanBodyBones>();
 
             foreach (var bone in FingerPose.FingerBones)
             {
                 if (tpose.GetWorldTransform(bone).HasValue) continue; // ファイルがこのボーンを持っている
-                _supplied[bone] = FingerPose.RelaxedCurl(bone);
+                _supplied.Add(bone);
             }
         }
 
         public Quaternion GetNormalizedLocalRotation(HumanBodyBones bone, HumanBodyBones parentBone)
         {
-            return _supplied.TryGetValue(bone, out var q)
-                ? q
+            return _supplied.Contains(bone)
+                ? FingerPose.RelaxedCurl(bone, _clock())
                 : _inner.GetNormalizedLocalRotation(bone, parentBone);
         }
 
@@ -67,6 +80,10 @@ namespace ChatterMascot.Vrm
         /// ★ 補うボーンが1本も無い（<c>SuppliedCount == 0</c>）ときは <c>ControlRig</c> に触れず
         ///   そのまま返す——差し替える意味が無い薄いラッパーを常に1枚挟むと、将来ここを
         ///   読む人が「何か特別なことをしているはず」と余計に疑う箇所が増えるだけになる。
+        /// ★ <b>時計は <c>Time.realtimeSinceStartupAsDouble</c> に固定してここで注入する。</b>
+        ///   <see cref="VrmCharacter.LateUpdate"/> が手続き的アイドルの <c>now</c> に使っているのと
+        ///   同じ時計——<c>DateTimeOffset.UtcNow</c> は時計が巻き戻るとアイドルが凍る
+        ///   （<c>VrmCharacter.cs:430-432</c> の理由と同じ）ので、こちらも同じ選択に揃える。
         /// </summary>
         public static int Wrap(Vrm10AnimationInstance vrma)
         {
@@ -74,7 +91,7 @@ namespace ChatterMascot.Vrm
 
             if (pose is FingerFallbackPoseProvider existing) return existing.SuppliedCount;
 
-            var provider = new FingerFallbackPoseProvider(pose, tpose);
+            var provider = new FingerFallbackPoseProvider(pose, tpose, () => Time.realtimeSinceStartupAsDouble);
             if (provider.SuppliedCount == 0) return 0;
 
             vrma.ControlRig = (provider, tpose);

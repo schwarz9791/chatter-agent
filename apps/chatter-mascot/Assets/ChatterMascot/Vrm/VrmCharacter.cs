@@ -912,9 +912,12 @@ namespace ChatterMascot.Vrm
             //   （docs/mascot.md「手続き的アイドルは腕を書かないと T ポーズのまま残る」と同じ形の穴）。
             //   このメソッドは _idle.IsPlaying == false のときしか呼ばれない（LateUpdate の早期
             //   return を参照）ので、VRMA 側の FingerFallbackPoseProvider と書き合いにはならない。
+            // ★ #88 の後続。now を渡して揺らす（FingerPose.RelaxedCurl(bone, now)）。sample（体の
+            //   姿勢）とは結合しない、独立した時間ベースの揺れ——VRMA 側の
+            //   FingerFallbackPoseProvider と同じ関数を同じ理由（体のリズムとは別物）で共有する。
             foreach (var bone in FingerPose.FingerBones)
             {
-                SetBoneRotation(rig, bone, FingerPose.RelaxedCurl(bone));
+                SetBoneRotation(rig, bone, FingerPose.RelaxedCurl(bone, now));
             }
 
             var hips = rig.GetBoneTransform(HumanBodyBones.Hips);
@@ -952,7 +955,7 @@ namespace ChatterMascot.Vrm
         }
 
         /// <summary>
-        /// <see cref="SetBoneEuler"/> の <c>Quaternion</c> 版。指の丸め（<see cref="FingerPose.RelaxedCurl"/>）は
+        /// <see cref="SetBoneEuler"/> の <c>Quaternion</c> 版。指の丸め（<see cref="FingerPose.RelaxedCurl(HumanBodyBones, double)"/>）は
         /// オイラー角ではなく <c>Quaternion</c> で持っているので、<c>Quaternion.Euler</c> を経由せずそのまま代入する。
         /// ガード（ボーンが無ければ何もしない）は <see cref="SetBoneEuler"/> と同じ。
         /// </summary>

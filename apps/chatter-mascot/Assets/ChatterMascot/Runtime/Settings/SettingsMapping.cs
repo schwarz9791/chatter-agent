@@ -164,5 +164,40 @@ namespace ChatterMascot.Settings
         {
             return Math.Abs(volume - 1f) > VolumeStep / 2f;
         }
+
+        /// <summary>
+        /// フレームレート上限（<c>display.frameRate</c>、→ #88）の選べる値。
+        ///
+        /// ★ <b>2値しか許さない。</b> 音量や速さのような連続量と違い、中間の値
+        ///   （45fps）に意味が無い —— 合成する側の刻みではなく <c>Application.targetFrameRate</c>
+        ///   にそのまま渡る整数。
+        /// </summary>
+        public static readonly int[] FrameRateChoices = { 30, 60 };
+
+        /// <summary>
+        /// フレームレート上限の既定値。
+        ///
+        /// ★★ <b>既定を変えるならここだけ直すこと。</b> <see cref="MascotSettings.Defaults"/> は
+        ///   この定数を読むだけにしてある —— A/B で既定を測り直すとき（30 か 60 か）に
+        ///   直す場所を1つに保つため。
+        /// </summary>
+        public const int DefaultFrameRate = 30;
+
+        /// <summary>
+        /// <see cref="FrameRateChoices"/> に無い値は既定へ倒す。
+        ///
+        /// ★ <b>クランプ（一番近い値へ丸める）ではないこと。</b> 音量や速さの
+        ///   <see cref="Normalize"/> と違い、選べる値がちょうど2つしか無いので
+        ///   「近い方」に丸める理由が無い（45 が 30 と 60 のどちらの意図か決めようが無い）。
+        ///   壊れた値・古い版の値は素直に既定へ倒す。
+        /// </summary>
+        public static int NormalizeFrameRate(int value)
+        {
+            for (var i = 0; i < FrameRateChoices.Length; i++)
+            {
+                if (FrameRateChoices[i] == value) return value;
+            }
+            return DefaultFrameRate;
+        }
     }
 }

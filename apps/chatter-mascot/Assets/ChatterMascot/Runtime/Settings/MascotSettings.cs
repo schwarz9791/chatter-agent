@@ -41,7 +41,8 @@ namespace ChatterMascot.Settings
             bool muted, string muteHotKey, string hideHotKey,
             float volume,
             bool idleMotion, bool cursorGaze, bool blink,
-            string vrmFileName)
+            string vrmFileName,
+            int frameRate)
         {
             Muted = muted;
             MuteHotKey = muteHotKey;
@@ -51,6 +52,7 @@ namespace ChatterMascot.Settings
             CursorGaze = cursorGaze;
             Blink = blink;
             VrmFileName = vrmFileName;
+            FrameRate = frameRate;
         }
 
         public bool Muted { get; }
@@ -109,6 +111,16 @@ namespace ChatterMascot.Settings
         /// </summary>
         public string VrmFileName { get; }
 
+        /// <summary>
+        /// 表示のフレームレート上限（<b>30 か 60</b>。→ <see cref="SettingsMapping.FrameRateChoices"/>）。
+        ///
+        /// ★ <b>デスクトップだけの項目。</b> 設定パネル（#88）が書き、<c>MascotRunner</c> の
+        ///   <c>FrameRateBudget.SetBaseline</c> に反映される。Android / XR には設定パネルが無いので、
+        ///   この JSON の既定（<see cref="SettingsMapping.DefaultFrameRate"/>）がそのまま使われる
+        ///   （→ <c>MascotRunner.targetFrameRate</c> の doc）。
+        /// </summary>
+        public int FrameRate { get; }
+
         public static MascotSettings Defaults
         {
             get
@@ -117,7 +129,8 @@ namespace ChatterMascot.Settings
                     false, HotKeySpec.Default, HotKeySpec.DefaultHide,
                     1f,
                     true, true, true,
-                    "");
+                    "",
+                    SettingsMapping.DefaultFrameRate);
             }
         }
 
@@ -132,7 +145,8 @@ namespace ChatterMascot.Settings
             bool? muted = null, string muteHotKey = null, string hideHotKey = null,
             float? volume = null,
             bool? idleMotion = null, bool? cursorGaze = null, bool? blink = null,
-            string vrmFileName = null)
+            string vrmFileName = null,
+            int? frameRate = null)
         {
             return new MascotSettings(
                 muted ?? Muted,
@@ -142,7 +156,8 @@ namespace ChatterMascot.Settings
                 idleMotion ?? IdleMotion,
                 cursorGaze ?? CursorGaze,
                 blink ?? Blink,
-                vrmFileName ?? VrmFileName);
+                vrmFileName ?? VrmFileName,
+                frameRate ?? FrameRate);
         }
 
         public MascotSettings WithMuted(bool value) => Copy(muted: value);
@@ -153,6 +168,7 @@ namespace ChatterMascot.Settings
         public MascotSettings WithCursorGaze(bool value) => Copy(cursorGaze: value);
         public MascotSettings WithBlink(bool value) => Copy(blink: value);
         public MascotSettings WithVrmFileName(string value) => Copy(vrmFileName: value);
+        public MascotSettings WithFrameRate(int value) => Copy(frameRate: value);
 
         /// <summary>
         /// ★★ <b>プロパティを足したらここにも足すこと</b>（→ 型の doc）。
@@ -169,7 +185,8 @@ namespace ChatterMascot.Settings
                 && IdleMotion == other.IdleMotion
                 && CursorGaze == other.CursorGaze
                 && Blink == other.Blink
-                && string.Equals(VrmFileName, other.VrmFileName, StringComparison.Ordinal);
+                && string.Equals(VrmFileName, other.VrmFileName, StringComparison.Ordinal)
+                && FrameRate == other.FrameRate;
         }
 
         public override bool Equals(object obj)
@@ -187,6 +204,7 @@ namespace ChatterMascot.Settings
             hash = (hash * 397) ^ (CursorGaze ? 1 : 0);
             hash = (hash * 397) ^ (Blink ? 1 : 0);
             hash = (hash * 397) ^ (VrmFileName != null ? VrmFileName.GetHashCode() : 0);
+            hash = (hash * 397) ^ FrameRate;
             return hash;
         }
     }

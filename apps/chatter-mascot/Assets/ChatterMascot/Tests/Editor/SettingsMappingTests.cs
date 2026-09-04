@@ -196,5 +196,19 @@ namespace ChatterMascot.Tests
             Assert.That(SettingsMapping.NeedsVolumeArgument(1.0000001f), Is.False);
             Assert.That(SettingsMapping.NeedsVolumeArgument(0.9999999f), Is.False);
         }
+
+        /// <summary>
+        /// ★ 30/60 の2値しか無いので、選べる値はそのまま返し、それ以外は「近い方」ではなく
+        ///   既定（<see cref="SettingsMapping.DefaultFrameRate"/>）へ倒す（→ #88）。
+        /// </summary>
+        [Test]
+        public void NormalizesTheFrameRate()
+        {
+            Assert.That(SettingsMapping.NormalizeFrameRate(30), Is.EqualTo(30));
+            Assert.That(SettingsMapping.NormalizeFrameRate(60), Is.EqualTo(60));
+            Assert.That(SettingsMapping.NormalizeFrameRate(45), Is.EqualTo(SettingsMapping.DefaultFrameRate));
+            Assert.That(SettingsMapping.NormalizeFrameRate(0), Is.EqualTo(SettingsMapping.DefaultFrameRate));
+            Assert.That(SettingsMapping.NormalizeFrameRate(-1), Is.EqualTo(SettingsMapping.DefaultFrameRate));
+        }
     }
 }

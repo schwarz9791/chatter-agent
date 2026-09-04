@@ -281,6 +281,9 @@ namespace ChatterMascot.Vrm
             _current = loaded;
             _kind = kind;
             _state = PlayState.FadeIn;
+            // ★ 1本1行。実機で「出た／出ない」を Player.log から判定する唯一の手がかり
+            //   （docs/mascot.md「顔が動かないのが正常と壊れて動かないはログでしか区別できない」と同じ理由）
+            Debug.Log($"[Mascot] モーション開始: {kind} {clip.FileName}（{MotionCategories.DirectoryName(clip.Category)}、{loaded.State.length:F1}s）");
             return true;
         }
 
@@ -334,6 +337,7 @@ namespace ChatterMascot.Vrm
                     {
                         _idle.PresentIdle();
                         if (_current != null) _current.Animation.enabled = false;
+                        Debug.Log($"[Mascot] モーション終了: {_kind} → 待機");
                         _current = null;
                         _fade = null;
                         _state = PlayState.Idle;

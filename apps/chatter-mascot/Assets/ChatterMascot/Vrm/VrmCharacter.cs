@@ -133,6 +133,13 @@ namespace ChatterMascot.Vrm
             set
             {
                 proceduralIdle = value;
+                // ★★ #70。_motion.Stop() を _idle.Enabled より先に呼ぶこと。逆順だと
+                //   _idle.Enabled=false → Apply() が Runtime.VrmAnimation を null にした後、
+                //   まだ FadeIn/Playing/FadeOut の途中だった VrmMotionPlayer が次の Tick で
+                //   idle.Present(...) を呼び、無効化中は no-op とはいえ内部状態がズレたまま
+                //   宙に浮く。Stop() を先に呼べば、そちらが即座に PresentIdle して自分から
+                //   Idle 状態へ畳むので、そのあとで安全に VRMA 経路そのものを止められる
+                if (_motion != null) _motion.Stop();
                 if (_idle != null) _idle.Enabled = value;
             }
         }
@@ -252,12 +259,45 @@ namespace ChatterMascot.Vrm
 
         private Vrm10Instance _instance;
         private VrmIdleAnimation _idle;
+        private VrmMotionPlayer _motion;
         private CancellationTokenSource _cancellation;
         private Vector3 _hipsRestLocalPosition;
         private bool _hipsRestCaptured;
         private bool _warnedNoGazeOrigin;
         private Vector3 _gazeOriginWorld;
         private bool _gazeOriginValid;
+
+        /// <summary>
+        /// 待機が続いたときの小ネタ（<c>idle/</c>）のタイマー。#70。
+        /// ★ <see cref="_blink"/> と同じくフィールド初期化子で作ること（<see cref="LateUpdate"/> は
+        ///   <see cref="Start"/> より先に走りうる決まりに寄りかからないほうが安い）。
+        /// ★ <c>UnityEngine.Random</c> と完全修飾すること。このファイルは <c>using System;</c> を
+        ///   持つので、素の <c>Random</c> は <c>System.Random</c> と曖昧になる（CS0104）。
+        /// </summary>
+        private readonly IdleAccentTimer _accent = new IdleAccentTimer(() => UnityEngine.Random.value, MotionParams.Default);
+
+        /// <summary>
+        /// 鳴り始めた文の emotion から感情モーションを発火すべきか判定する状態機械。#70。
+        /// <see cref="_accent"/> と同じ理由でフィールド初期化子。
+        /// </summary>
+        private readonly EmotionMotionTrigger _trigger = new EmotionMotionTrigger(MotionParams.Default);
+
+        /// <summary>
+        /// 目視確認用の起動引数 <c>-motionProbe &lt;category&gt;</c>（#70）。<c>idle</c> /
+        /// <c>happy</c> / <c>angry</c> / <c>sad</c> / <c>relaxed</c> / <c>surprised</c>。
+        /// <c>null</c>/空なら無効。<see cref="Start"/> で読んで覚える。
+        /// </summary>
+        private string _motionProbeArgument;
+
+        /// <summary>読み込みが揃った（<see cref="_motion"/><c>.Manifest != null &amp;&amp; _idle.IsLoaded</c>）
+        /// 最初のフレームの時刻。まだなら <c>double.NaN</c>。</summary>
+        private double _motionProbeReadyAt = double.NaN;
+
+        /// <summary>1回だけ発火させるためのガード。</summary>
+        private bool _motionProbeFired;
+
+        /// <summary>読み込みが揃ってから <see cref="_motionProbeArgument"/> を再生するまでの待ち秒数。</summary>
+        private const double MotionProbeDelaySeconds = 3.0;
 
         /// <summary>
         /// ★ <b><see cref="Start"/> ではなくフィールド初期化子で作ること。</b>
@@ -369,6 +409,15 @@ namespace ChatterMascot.Vrm
                 Debug.Log($"[Mascot] face ログの間隔をコマンドラインで上書きします: {faceLogMsValue}ms");
             }
 
+            // ★ #70。目視確認用。-motionProbe happy のように渡すと、モーションの読み込みが
+            //   揃った3秒後に1回だけそのカテゴリを再生する（UpdateMotionProbe）
+            _motionProbeArgument = CommandLine.Argument("-motionProbe");
+            if (!string.IsNullOrEmpty(_motionProbeArgument))
+            {
+                Debug.Log($"[Mascot] motionProbe: 起動引数で指定されたカテゴリ '{_motionProbeArgument}' を" +
+                          $"読み込み完了の{MotionProbeDelaySeconds}秒後に再生します");
+            }
+
             // ★ sticky なので購読と読み込みの前後関係に依存しない（VrmStage.AddLoadedHandler）
             if (stage != null)
             {
@@ -409,6 +458,13 @@ namespace ChatterMascot.Vrm
             _idle.Enabled = proceduralIdle;
             _ = _idle.LoadAsync(_instance, transform, _cancellation.Token);
 
+            // ★ #70。_idle を作った直後、LogExpressionDiagnostics より前に置くこと——
+            //   このメソッドの上のコメントと同じ理由（診断が何かで throw しても、
+            //   その下に置いた読み込みが道連れにならないようにする）。
+            //   _idle の読み込みと並走してよい（どちらも同じ CancellationToken を共有する）
+            _motion = new VrmMotionPlayer(_idle, MotionParams.Default);
+            _ = _motion.LoadAsync(transform, _cancellation.Token);
+
             // ★★ 診断は**最後**に呼ぶこと。ここは VrmStage.Invoke に呼ばれていて、
             //   あちらは購読者の例外を LogWarning で握る。途中に置くと、診断が何かで throw した瞬間に
             //   **この下の設定（アイドルモーションの読み込み）が丸ごと走らなくなる** ——
@@ -444,7 +500,10 @@ namespace ChatterMascot.Vrm
             //   ここで単に `Emotion.Neutral` と書くとプロパティ側に解決されてしまい、
             //   「インスタンス参照で static メンバーにアクセスしている」というコンパイルエラーになる
             var emotion = ChatterMascot.Protocol.Emotion.Neutral;
-            Speaking = runner != null && runner.TryGetSpeaking(out kind, out emotion);
+            // ★ #70。order の既定は -1（「鳴っていない」）。runner == null の短絡で
+            //   TryGetSpeaking 自体が呼ばれないときも、この初期値がそのまま残る
+            var order = -1L;
+            Speaking = runner != null && runner.TryGetSpeaking(out kind, out emotion, out order);
             Kind = kind;
             Emotion = emotion;
 
@@ -453,6 +512,16 @@ namespace ChatterMascot.Vrm
             //   あとに置くと表情が一度も走らない（同梱 idle_loop.vrma があるので常にそうなる）。
             //   顔と体は別のチャンネルで、体を止める条件で顔まで止めてはいけない
             UpdateFace(now);
+
+            // ★★ #70。UpdateFace の**後**、下の早期 return より**前**に置くこと。
+            //   「_idle.IsPlaying == false でも Tick は回す」理由: 設定「待機モーション」を OFF に
+            //   した直後の後始末（VrmMotionPlayer.Stop → PresentIdle）は IdleMotion setter が
+            //   同期的に済ませるが、感情モーション再生中に手続き的アイドルへ自然に戻る通常の
+            //   FadeOut は Tick が毎フレーム進めないと終わらない。早期 return より後に置くと、
+            //   `_idle.IsPlaying` が true の間（＝ VRMA 経路が有効な通常状態）は毎フレーム
+            //   このメソッド自体に到達できず、感情モーションが一生 Playing のまま固まる
+            UpdateMotion(now, order);
+            UpdateMotionProbe(now);
 
             // ★ UpdateGaze の中に置かないこと。UpdateGaze は先頭で gazeTarget == null ||
             //   _camera == null を早期 return するので、そこに置くとカメラが無いときに
@@ -468,6 +537,96 @@ namespace ChatterMascot.Vrm
             if (!proceduralIdle) return;
 
             UpdateProceduralIdle(now);
+        }
+
+        /// <summary>
+        /// #70。感情モーション（<see cref="EmotionMotionTrigger"/>）と待機の小ネタ
+        /// （<see cref="IdleAccentTimer"/>）を判定し、<see cref="_motion"/> に発火させる。
+        /// 呼ぶ位置は <see cref="LateUpdate"/> の doc を参照。
+        /// </summary>
+        /// <param name="order">いま鳴っている文の <c>SpeakingSet.Entry.Order</c>。鳴っていなければ -1。</param>
+        private void UpdateMotion(double now, long order)
+        {
+            if (_motion == null) return;
+
+            _motion.Tick(now);
+            if (_motion.ConsumeEnded())
+            {
+                _accent.Reset(now);
+                _trigger.NotifyEnded(now);
+            }
+
+            var category = _trigger.Update(order, Speaking, Emotion, Kind, now, _motion.IsPlayingEmotion);
+            if (category.HasValue)
+            {
+                var clip = _motion.Manifest?.Pick(category.Value, () => UnityEngine.Random.value);
+                if (clip != null && _motion.Play(clip, MotionKind.Emotion, now)) return;
+            }
+
+            // ★ !_motion.IsPlaying を**先に**評価して短絡させること。IdleAccentTimer.ShouldFire は
+            //   true を返すと内部で次の間隔を引き直す（Reset）ので、先に評価順を逆にすると
+            //   再生中の毎フレームで間隔を消費してしまい、感情モーションが終わった直後に
+            //   小ネタがほぼ即座に発火する（意図しない連続）
+            if (!_motion.IsPlaying && _accent.ShouldFire(now, Speaking))
+            {
+                var clip = _motion.Manifest?.Pick(MotionCategory.Idle, () => UnityEngine.Random.value);
+                if (clip != null) _motion.Play(clip, MotionKind.Accent, now);
+            }
+        }
+
+        /// <summary>
+        /// #70。<c>-motionProbe</c> の目視確認。読み込みが揃った最初のフレームから
+        /// <see cref="MotionProbeDelaySeconds"/> 秒後に1回だけ発火する。
+        ///
+        /// ★ <see cref="UpdateMotion"/> の中から呼ばないこと。あちらは感情モーションが開始できたら
+        ///   <c>return</c> するので、その場合ここが呼ばれずに待ちの起点がずれる——独立した
+        ///   呼び出しにして、毎フレーム確実に評価されるようにする。
+        /// </summary>
+        private void UpdateMotionProbe(double now)
+        {
+            if (string.IsNullOrEmpty(_motionProbeArgument) || _motionProbeFired) return;
+            if (_motion == null || _motion.Manifest == null || _idle == null || !_idle.IsLoaded) return;
+
+            if (double.IsNaN(_motionProbeReadyAt)) _motionProbeReadyAt = now;
+            if (now - _motionProbeReadyAt < MotionProbeDelaySeconds) return;
+
+            _motionProbeFired = true;
+
+            var category = ParseMotionProbeCategory(_motionProbeArgument);
+            if (!category.HasValue)
+            {
+                Debug.LogWarning($"[Mascot] motionProbe: '{_motionProbeArgument}' は既知のカテゴリではありません" +
+                                  "（idle / happy / angry / sad / relaxed / surprised）");
+                return;
+            }
+
+            var clip = _motion.Manifest.Pick(category.Value, () => UnityEngine.Random.value);
+            if (clip == null)
+            {
+                Debug.Log($"[Mascot] motionProbe: カテゴリ '{_motionProbeArgument}' にクリップがありません");
+                return;
+            }
+
+            var started = _motion.Play(clip, MotionKind.Emotion, now);
+            Debug.Log($"[Mascot] motionProbe: {clip.FileName} を{(started ? "再生します" : "再生できませんでした")}");
+        }
+
+        /// <summary>
+        /// ★ <see cref="MotionCategories.DirectoryName"/> と同じ文字列（小文字）を受ける。
+        ///   大文字小文字は無視する——実機確認の道具なので、打ち間違いの一部を吸収したほうが親切。
+        /// </summary>
+        private static MotionCategory? ParseMotionProbeCategory(string value)
+        {
+            switch (value.ToLowerInvariant())
+            {
+                case "idle": return MotionCategory.Idle;
+                case "happy": return MotionCategory.Happy;
+                case "angry": return MotionCategory.Angry;
+                case "sad": return MotionCategory.Sad;
+                case "relaxed": return MotionCategory.Relaxed;
+                case "surprised": return MotionCategory.Surprised;
+                default: return null;
+            }
         }
 
         private void UpdateGaze(double now)
@@ -982,10 +1141,18 @@ namespace ChatterMascot.Vrm
         /// ★ <c>finally</c> が走らない経路（ドメインリロード / シーン破棄）の受け皿。
         ///   <see cref="VrmIdleAnimation.Dispose"/> は冪等なので二重解放にならない
         ///   （<c>VrmStage.OnDisable</c> と同じ形）。
+        /// ★★ #70。<see cref="_motion"/> を <see cref="_idle"/> より**先に** Dispose すること。
+        ///   逆順だと、<see cref="_idle"/> が先に破棄されて <c>Runtime.VrmAnimation = null</c> の
+        ///   後始末を済ませた後に <see cref="_motion"/><c>.Dispose()</c> → <c>Stop()</c> →
+        ///   <c>idle.PresentIdle()</c> が走り、破棄済み（<c>_target == null</c>）の
+        ///   <see cref="VrmIdleAnimation"/> を触りに行く（<c>Present</c> 自体は <c>_disposed</c> で
+        ///   no-op なので実害は無いが、破棄済みへ触りに行く経路をわざわざ残す理由が無い）。
         /// </summary>
         private void OnDisable()
         {
             _cancellation?.Cancel();
+            _motion?.Dispose();
+            _motion = null;
             _idle?.Dispose();
             _idle = null;
         }

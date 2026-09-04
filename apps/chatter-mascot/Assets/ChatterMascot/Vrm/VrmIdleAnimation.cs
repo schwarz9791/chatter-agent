@@ -40,8 +40,31 @@ namespace ChatterMascot.Vrm
         /// <summary>
         /// VRMA を再生中か。<c>false</c> のままなら、呼び出し側（<see cref="VrmCharacter"/>）は
         /// 手続き的アイドルへフォールバックする。
+        ///
+        /// ★ 意味は #70 でも変えていない——<b>「VRMA 経路が有効か」</b>であって、
+        ///   いま <see cref="Current"/> に何が差さっているか（待機そのものか、感情モーションの
+        ///   クロスフェード中か）は関係ない。後者を知りたい呼び出し側は
+        ///   <see cref="VrmMotionPlayer.IsPlaying"/> を見る。
         /// </summary>
         public bool IsPlaying { get; private set; }
+
+        /// <summary>
+        /// 読み込み済みの待機 VRMA。<c>null</c> なら未読込（<see cref="IsLoaded"/> も <c>false</c>）。
+        /// <see cref="VrmMotionPlayer"/> がクロスフェードの戻り先（<c>to</c>）に使う。
+        /// </summary>
+        public Vrm10AnimationInstance Idle => _animation;
+
+        /// <summary>
+        /// VRMA が読み込み済みか。★ <see cref="Enabled"/> とは独立
+        ///   （無効化しても読み込みそのものは保持したまま。<see cref="Apply"/> の doc 参照）。
+        /// </summary>
+        public bool IsLoaded => _animation != null && !_disposed;
+
+        /// <summary>
+        /// いま <c>_target.Runtime.VrmAnimation</c> に差さっているもの。<see cref="Present"/> と
+        /// <see cref="Apply"/> の無効化分岐（<c>null</c>）だけが更新する。無効化中は <c>null</c>。
+        /// </summary>
+        public IVrm10Animation Current { get; private set; }
 
         /// <summary>
         /// 待機モーションを流すか（設定パネル / #76）。
@@ -73,7 +96,18 @@ namespace ChatterMascot.Vrm
         {
             if (_disposed || _target == null || _target.Runtime == null || _animation == null) return;
 
-            _target.Runtime.VrmAnimation = _enabled ? _animation : null;
+            if (_enabled)
+            {
+                Present(_animation);
+            }
+            else
+            {
+                // ★ Enabled=false で null にする経路は Present を通さない。Present は
+                //   !_enabled のとき無条件に no-op するので、そちらを経由しては外せない
+                //   （#70 の doc 参照：「代入は Present の1箇所に寄せる」の唯一の例外）。
+                _target.Runtime.VrmAnimation = null;
+                Current = null;
+            }
 
             // ★ Animation そのものも止める。外しただけだと、見えない VRMA を
             //   毎フレーム再生し続けることになる
@@ -81,6 +115,37 @@ namespace ChatterMascot.Vrm
             if (animation != null) animation.enabled = _enabled;
 
             IsPlaying = _enabled;
+        }
+
+        /// <summary>
+        /// <c>_target.Runtime.VrmAnimation</c> への代入を1箇所に寄せたもの（#70）。
+        /// <see cref="VrmMotionPlayer"/> がクロスフェード合成やモーションクリップそのものを
+        /// 差すのにもここを使う。<c>internal</c>——同じ <c>ChatterMascot.Vrm</c> アセンブリから
+        /// だけ呼べれば足りる。
+        ///
+        /// ★★ <b><see cref="Enabled"/><c> == false</c> なら無条件に no-op。</b>
+        ///   「待機モーションを止めている間は、感情モーションも小ネタも見えてはいけない」
+        ///   （<see cref="Enabled"/> の doc）をここ1箇所で守る——呼び出し側
+        ///   （<see cref="VrmMotionPlayer"/>）は毎回 <c>Enabled</c> を確認しなくてよい。
+        ///   代わりに、無効化中に呼ばれた <see cref="VrmMotionPlayer"/> の内部状態機械（フェード等）は
+        ///   「進んではいるが何も表示されない」まま空回りする——それでよい（実害が無いことは
+        ///   <see cref="VrmMotionPlayer"/> 側のコメント参照）。
+        /// </summary>
+        internal void Present(IVrm10Animation animation)
+        {
+            if (_disposed || !_enabled || !IsLoaded || _target?.Runtime == null) return;
+
+            _target.Runtime.VrmAnimation = animation;
+            Current = animation;
+        }
+
+        /// <summary>
+        /// 待機モーションそのものを差す。<see cref="VrmMotionPlayer"/> がフェード完了後に
+        /// 待機へ戻すときに呼ぶ（<c>Present(idle.Idle)</c> と同義の短縮形）。
+        /// </summary>
+        public void PresentIdle()
+        {
+            Present(_animation);
         }
 
         /// <summary>
@@ -102,7 +167,7 @@ namespace ChatterMascot.Vrm
                         var loaded = await VrmAssetLoader.ReadAsync(candidate, ct);
                         if (loaded.IsEmpty) continue;
 
-                        var vrma = await ParseAsync(loaded, ct);
+                        var vrma = await VrmaLoader.ParseAsync(loaded, ct);
                         if (vrma == null) continue;
 
                         // ★ await の後にキャンセルと破棄を再確認すること。ParseAsync が返るまでの間に
@@ -142,70 +207,6 @@ namespace ChatterMascot.Vrm
         }
 
         /// <summary>
-        /// バイト列を VRMA として解釈し、<c>Vrm10AnimationInstance</c> まで確定させる。
-        /// <b>失敗しても投げず <c>null</c> を返す</b>（呼び出し側は普通の <c>continue</c> で次へ進める）。
-        ///
-        /// ★ <b><c>OperationCanceledException</c> だけは通すこと。</b> 握ると、終了時に
-        ///   残りの候補を舐め直したうえで「1つも読めませんでした」と誤ったログを出す
-        ///   （<see cref="VrmStage"/> の候補パースと同じ理由）。
-        ///
-        /// ★ <b>Animation コンポーネントの有無も、この時点（＝ <c>target.Runtime</c> へ組み込む前）で
-        ///   確認する。</b> <see cref="Adopt"/> で組み込んでから気づくと、途中まで進めた配線
-        ///   （<c>VrmAnimation</c> への代入・シーンへの reparent）を巻き戻す必要が出る。
-        ///
-        /// ★ <b>引数の <paramref name="ct"/> は本体で一度も参照しない。</b> <c>awaitCaller.Run(...)</c> も
-        ///   <c>loader.LoadAsync(awaitCaller)</c> も <c>CancellationToken</c> を取らないため、
-        ///   <b>キャンセル済みでもパースは最後まで走り切るのが常態</b>である。<see cref="LoadAsync"/> が
-        ///   <c>Adopt</c> の直前で <c>_disposed</c> / キャンセルを再確認しているのは、狭い競合への
-        ///   保険ではなく、<b>読み込み中に終了すれば普通に通る経路</b>だからである。
-        /// </summary>
-        private static async Task<Vrm10AnimationInstance> ParseAsync(LoadedBytes loaded, CancellationToken ct)
-        {
-            try
-            {
-                var awaitCaller = new RuntimeOnlyAwaitCaller();
-                using (var data = await awaitCaller.Run(() =>
-                           new GlbBinaryParser(loaded.Bytes, loaded.Candidate.Path).Parse()))
-                {
-                    var vrmaData = new VrmAnimationData(data);
-                    using (var loader = new VrmAnimationImporter(vrmaData))
-                    {
-                        var instance = await loader.LoadAsync(awaitCaller);
-
-                        var vrma = instance != null ? instance.GetComponent<Vrm10AnimationInstance>() : null;
-                        if (vrma == null)
-                        {
-                            Debug.LogWarning($"[Mascot] {loaded.Candidate.Path} は VRMA として解釈できませんでした" +
-                                              "（Vrm10AnimationInstance がありません）。次の候補へ進みます");
-                            if (instance != null) UnityEngine.Object.Destroy(instance.gameObject);
-                            return null;
-                        }
-
-                        if (vrma.GetComponent<Animation>() == null)
-                        {
-                            Debug.LogWarning($"[Mascot] {loaded.Candidate.Path} に Animation コンポーネントが" +
-                                              "ありません。次の候補へ進みます");
-                            UnityEngine.Object.Destroy(instance.gameObject);
-                            return null;
-                        }
-
-                        return vrma;
-                    }
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception e)
-            {
-                Debug.LogWarning($"[Mascot] {loaded.Candidate.Path} は VRMA として解釈できませんでした: " +
-                                  $"{e.Message}。次の候補へ進みます");
-                return null;
-            }
-        }
-
-        /// <summary>
         /// 確定した VRMA をモデルへ組み込む。
         ///
         /// ★ <b><c>ShowBoxMan(false)</c> を忘れると箱人間が画面に出る。</b>
@@ -233,16 +234,17 @@ namespace ChatterMascot.Vrm
             var supplied = FingerFallbackPoseProvider.Wrap(vrma);
             Debug.Log($"[Mascot] VRMA に無い指ボーン {supplied} 本を既定の丸めで補います");
 
-            target.Runtime.VrmAnimation = vrma;
             vrma.GetComponent<Animation>().Play();
 
             _target = target;
             _instanceRoot = vrma.gameObject;
             _animation = vrma;
-            IsPlaying = true;
 
             // ★ 読み込みが終わる前に設定で止められていることがある（読み込みは非同期）。
-            //   ここで一度適用しないと、チェックを外してあるのに再生が始まる
+            //   ここで一度適用しないと、チェックを外してあるのに再生が始まる。
+            //   Runtime.VrmAnimation への代入もここ（Apply → Present）を通る——#70 で
+            //   直接代入していた1行（target.Runtime.VrmAnimation = vrma;）を無くした
+            //   （代入は Present の1箇所に寄せる設計。IsPlaying も Apply が立てる）
             Apply();
         }
 
@@ -261,12 +263,14 @@ namespace ChatterMascot.Vrm
             if (_target != null && _target.Runtime != null)
             {
                 _target.Runtime.VrmAnimation = null;
+                Current = null;
             }
 
             if (_instanceRoot != null) UnityEngine.Object.Destroy(_instanceRoot);
             _instanceRoot = null;
             _animation = null;
             _target = null;
+            Current = null;
             IsPlaying = false;
         }
     }

@@ -906,6 +906,17 @@ namespace ChatterMascot.Vrm
             SetBoneEuler(rig, HumanBodyBones.LeftLowerArm, sample.LeftLowerArmEuler);
             SetBoneEuler(rig, HumanBodyBones.RightLowerArm, sample.RightLowerArmEuler);
 
+            // ★ #88 と同じ理由（VRMA 版は FingerFallbackPoseProvider）だが、こちらは VRMA が
+            //   無いときの経路。手続き的アイドルは腕までしか書かないので、指を書かなければ
+            //   ControlRig の identity＝T ポーズの伸びた指のまま残る
+            //   （docs/mascot.md「手続き的アイドルは腕を書かないと T ポーズのまま残る」と同じ形の穴）。
+            //   このメソッドは _idle.IsPlaying == false のときしか呼ばれない（LateUpdate の早期
+            //   return を参照）ので、VRMA 側の FingerFallbackPoseProvider と書き合いにはならない。
+            foreach (var bone in FingerPose.FingerBones)
+            {
+                SetBoneRotation(rig, bone, FingerPose.RelaxedCurl(bone));
+            }
+
             var hips = rig.GetBoneTransform(HumanBodyBones.Hips);
             if (hips == null) return;
 
@@ -938,6 +949,17 @@ namespace ChatterMascot.Vrm
         {
             var t = rig.GetBoneTransform(bone);
             if (t != null) t.localRotation = Quaternion.Euler(euler);
+        }
+
+        /// <summary>
+        /// <see cref="SetBoneEuler"/> の <c>Quaternion</c> 版。指の丸め（<see cref="FingerPose.RelaxedCurl"/>）は
+        /// オイラー角ではなく <c>Quaternion</c> で持っているので、<c>Quaternion.Euler</c> を経由せずそのまま代入する。
+        /// ガード（ボーンが無ければ何もしない）は <see cref="SetBoneEuler"/> と同じ。
+        /// </summary>
+        private static void SetBoneRotation(Vrm10RuntimeControlRig rig, HumanBodyBones bone, Quaternion rotation)
+        {
+            var t = rig.GetBoneTransform(bone);
+            if (t != null) t.localRotation = rotation;
         }
 
         private GazeParams GazeParamsFromInspector()

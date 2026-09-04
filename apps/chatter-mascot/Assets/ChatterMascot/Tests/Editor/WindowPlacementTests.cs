@@ -190,6 +190,75 @@ namespace ChatterMascot.Tests
             Assert.That(placement.Rect.Height, Is.EqualTo(2130f));
         }
 
+        // ── 既定のアスペクト変更の移行（#88。5:8 → 1:1） ────────────────
+
+        /// <summary>
+        /// ★ 移行の判定規則を固定する fixture。既定は 1:1（本番の 540 とは別の値）。
+        ///   上の <see cref="Limits"/>（300:480）は旧既定と同じ比なので、そちらでは移行は起きない。
+        /// </summary>
+        private static readonly PlacementLimits SquareLimits = new PlacementLimits(
+            defaultWidth: 400f, defaultHeight: 400f,
+            minWidth: 120f, minHeight: 120f,
+            minVisibleWidth: 96f, minVisibleHeight: 96f,
+            strictVisibleWidth: 160f, strictVisibleHeight: 160f);
+
+        /// <summary>
+        /// ★ <b>枠なしウィンドウは手でリサイズできない。</b> 保存された矩形が旧既定の比（5:8）
+        ///   なら、以前の既定（かそのスライダー倍率）を保存していたことの痕跡でしかない
+        ///   （→ <c>WindowPlacement.Resolve</c> のコメント）。高さは保ったまま、幅だけ
+        ///   いまの既定の比へ直す。<b>下端中央は動かさない。</b>
+        /// </summary>
+        [Test]
+        public void MigratesALegacyAspectToTheDefaultAspect()
+        {
+            // 250x400 = 5:8（旧既定の 300x480 をスライダーで 5/6 にした形）
+            var rect = new PointRect(1770f, 1598f, 250f, 400f);
+            var placement = WindowPlacement.Resolve(Saved(rect), TwoDisplays, SquareLimits);
+
+            Assert.That(placement.Reason, Is.EqualTo(PlacementReason.Restored));
+            Assert.That(placement.Rect.Width, Is.EqualTo(400f));
+            Assert.That(placement.Rect.Height, Is.EqualTo(400f));
+            Assert.That(placement.Rect.Y, Is.EqualTo(1598f), "下端は動かさない");
+            Assert.That(placement.Rect.X, Is.EqualTo(1770f + (250f - 400f) / 2f), "中心は動かさない");
+        }
+
+        /// <summary>
+        /// ★ <b>「既定と違う比」だけでは移行しない。</b> モニタに収めるクランプで比が
+        ///   変わった矩形（横長のモニタなら何にでもなる）を旧既定と取り違えると、起動のたびに
+        ///   広げ直して収め直す往復になる。旧既定の比と一致するときだけ。
+        /// </summary>
+        [Test]
+        public void LeavesANonLegacyAspectAlone()
+        {
+            var rect = new PointRect(1770f, 1598f, 200f, 480f);
+            var placement = WindowPlacement.Resolve(Saved(rect), TwoDisplays, SquareLimits);
+
+            Assert.That(placement.Reason, Is.EqualTo(PlacementReason.Restored));
+            Assert.That(placement.Rect, Is.EqualTo(rect));
+        }
+
+        /// <summary>★ 1% 以内のズレは旧既定の比とみなす（丸めのノイズ）。</summary>
+        [Test]
+        public void TreatsAnAspectWithinOnePercentAsLegacy()
+        {
+            // 302/480 = 0.629... と 300/480 = 0.625 のズレは相対で 0.67%
+            var rect = new PointRect(1770f, 1598f, 302f, 480f);
+            var placement = WindowPlacement.Resolve(Saved(rect), TwoDisplays, SquareLimits);
+
+            Assert.That(placement.Rect.Width, Is.EqualTo(480f));
+            Assert.That(placement.Rect.Height, Is.EqualTo(480f));
+        }
+
+        /// <summary>★ 既定が旧既定と同じ比なら（移行の要らない構成）、旧既定の矩形もそのまま。</summary>
+        [Test]
+        public void DoesNotMigrateWhenTheDefaultStillHasTheLegacyAspect()
+        {
+            var rect = new PointRect(1770f, 1598f, 250f, 400f);
+            var placement = WindowPlacement.Resolve(Saved(rect), TwoDisplays, Limits);
+
+            Assert.That(placement.Rect, Is.EqualTo(rect));
+        }
+
         // ── モニタが取れない ──────────────────────────────────────────
 
         /// <summary>

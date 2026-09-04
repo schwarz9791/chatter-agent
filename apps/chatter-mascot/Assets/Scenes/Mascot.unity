@@ -152,7 +152,7 @@ MonoBehaviour:
   modelAnchor: {fileID: 573341450}
   placeholder: {fileID: 1482741621}
   autoFrame: 1
-  headroom: 1.1
+  headroom: 1.25
   boneBoundsMarginMeters: 0.1
   loadFrameRate: 120
 --- !u!4 &573341450

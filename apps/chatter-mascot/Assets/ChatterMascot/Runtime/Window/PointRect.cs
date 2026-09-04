@@ -105,6 +105,25 @@ namespace ChatterMascot.Window
         }
 
         /// <summary>
+        /// <b>高さは変えず</b>、<paramref name="width"/> : <paramref name="height"/> の
+        /// アスペクトになるよう<b>幅だけ</b>差し替える。<b>下端中央は動かさない</b>
+        /// （→ #88。既定のアスペクトが変わったとき、保存された矩形を書き換えるための移行用）。
+        ///
+        /// ★ <b>Y はそのまま。</b> <c>Y</c> は最小コーナー（左下・bottom-up）なので、
+        ///   高さを変えないここでは Y を触る必要が無い。<c>X</c> だけ、幅の差の半分を
+        ///   詰める側へ動かして中心を保つ（<see cref="AtBottomCenterOf"/> と同じ発想）。
+        /// ★ <paramref name="width"/> / <paramref name="height"/> が 0 以下なら何もしない
+        ///   （アスペクトが定義できない）。
+        /// </summary>
+        public PointRect WithAspectKeepingHeight(float width, float height)
+        {
+            if (!(width > 0f) || !(height > 0f)) return this;
+            var newWidth = Height * (width / height);
+            var x = X + (Width - newWidth) * 0.5f;
+            return new PointRect(x, Y, newWidth, Height);
+        }
+
+        /// <summary>
         /// <paramref name="bounds"/> の<b>下端中央</b>へ置く。
         ///
         /// ★ cc-mascot の既定位置と同じ。マスコットは足元が下端に接している方が自然で、

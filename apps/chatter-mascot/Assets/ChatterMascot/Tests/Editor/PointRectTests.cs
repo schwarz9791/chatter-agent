@@ -131,6 +131,53 @@ namespace ChatterMascot.Tests
             Assert.That(placed.Y, Is.EqualTo(0f), "作業領域の下端。メニューバーから最も遠い");
         }
 
+        // ── アスペクトの移行（#88。既定が 5:8 → 1:1 に変わったときの保存済み矩形の直し方） ──
+
+        [Test]
+        public void WithAspectKeepingHeightKeepsTheHeight()
+        {
+            var rect = new PointRect(1000f, 500f, 300f, 480f);
+            var migrated = rect.WithAspectKeepingHeight(540f, 540f);
+
+            Assert.That(migrated.Height, Is.EqualTo(480f));
+        }
+
+        [Test]
+        public void WithAspectKeepingHeightMatchesTheGivenAspect()
+        {
+            var rect = new PointRect(1000f, 500f, 300f, 480f);
+            var migrated = rect.WithAspectKeepingHeight(540f, 540f);
+
+            // 540:540 は 1:1 なので、新しい幅は高さ（480）そのままになる
+            Assert.That(migrated.Width, Is.EqualTo(480f).Within(0.001f));
+        }
+
+        /// <summary>
+        /// ★ <b>下端中央は動かさない。</b> <c>Y</c>（最小コーナー・bottom-up）は高さを
+        ///   変えないここでは触らない。中心の X は、幅の差の半分だけ詰める側へ寄せて保つ。
+        /// </summary>
+        [Test]
+        public void WithAspectKeepingHeightKeepsTheBottomCenter()
+        {
+            var rect = new PointRect(1000f, 500f, 300f, 480f);
+            var migrated = rect.WithAspectKeepingHeight(540f, 540f);
+
+            Assert.That(migrated.Y, Is.EqualTo(rect.Y), "下端は動かさない");
+            Assert.That(migrated.X + migrated.Width * 0.5f,
+                        Is.EqualTo(rect.X + rect.Width * 0.5f).Within(0.001f), "中心は動かさない");
+        }
+
+        /// <summary>★ アスペクトが定義できない入力では何もしない。</summary>
+        [Test]
+        public void WithAspectKeepingHeightIsANoOpForDegenerateAspect()
+        {
+            var rect = new PointRect(1000f, 500f, 300f, 480f);
+
+            Assert.That(rect.WithAspectKeepingHeight(0f, 480f), Is.EqualTo(rect));
+            Assert.That(rect.WithAspectKeepingHeight(300f, 0f), Is.EqualTo(rect));
+            Assert.That(rect.WithAspectKeepingHeight(-1f, 480f), Is.EqualTo(rect));
+        }
+
         /// <summary>★ ロケールに引きずられないこと（`0,5` になると指紋の比較が壊れる）。</summary>
         [Test]
         public void ToStringUsesInvariantFormatting()

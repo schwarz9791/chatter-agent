@@ -41,8 +41,15 @@ namespace ChatterMascot.Vrm
         [Tooltip("モデルが画面に収まるようカメラを自動で下がらせる")]
         [SerializeField] private bool autoFrame = true;
 
+        /// <summary>
+        /// ★ <b>#88 で 1.1 → 1.25 に増やした。</b> 腕は <c>VrmBounds.IsFramingBone</c> で
+        ///   フレーミングの箱から除外してあるので、腕を上げる・広げるモーション（#70）の
+        ///   はみ出しはこの垂直方向の余白で吸収する。<c>boneBoundsMarginMeters</c> を
+        ///   増やさないこと —— あちらは Z も一緒に膨らみ、クリック透過の当たり判定の
+        ///   半径まで広がる（→ <c>docs/mascot.md</c>「T ポーズの腕をフレーミングの箱に入れない」）。
+        /// </summary>
         [Tooltip("自動フレーミングの余白。1.0 でぴったり")]
-        [SerializeField] private float headroom = 1.1f;
+        [SerializeField] private float headroom = 1.25f;
 
         /// <summary>
         /// ボーンから測った bounds を膨らませる余白（メートル）。

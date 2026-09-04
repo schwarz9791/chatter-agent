@@ -73,7 +73,7 @@ namespace ChatterMascot.Settings
         ///   既に <c>window.json</c> が持っているので、両方に持つと権威が2つになる
         ///   （ユーザーが窓を直接リサイズしたとき、どちらが勝つのか説明できない）。
         ///
-        /// ★ 高さで見る。マスコットの窓は縦長で、横は同じ倍率で付いてくる。
+        /// ★ 高さで見る。窓の縦横比が変わっても（#88）権威は高さのままで、幅は同じ倍率で付いてくる。
         /// </summary>
         public static float ScaleForWindow(float height, float baseHeight)
         {

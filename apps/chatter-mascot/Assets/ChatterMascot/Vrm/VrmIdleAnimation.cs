@@ -227,6 +227,12 @@ namespace ChatterMascot.Vrm
 
             vrma.transform.SetParent(parent, false);
 
+            // ★ #88。ファイルに無い指ボーンは Retarget が identity（T ポーズ＝伸びた指）を
+            //   要求してくる。VrmAnimation へ組み込む前に差し替えないと、最初の1フレームから
+            //   指だけ伸びたまま出てしまう。詳細は FingerFallbackPoseProvider のコメント参照
+            var supplied = FingerFallbackPoseProvider.Wrap(vrma);
+            Debug.Log($"[Mascot] VRMA に無い指ボーン {supplied} 本を既定の丸めで補います");
+
             target.Runtime.VrmAnimation = vrma;
             vrma.GetComponent<Animation>().Play();
 

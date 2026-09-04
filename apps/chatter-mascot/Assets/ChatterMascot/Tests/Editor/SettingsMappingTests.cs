@@ -9,6 +9,17 @@ namespace ChatterMascot.Tests
     public sealed class SettingsMappingTests
     {
         /// <summary>
+        /// <c>WindowGeometry.DefaultWidthPoints/DefaultHeightPoints</c> の写し。
+        ///
+        /// ★ <b>参照できない。</b> <c>WindowGeometry</c> は <c>ChatterMascot.Desktop</c> にあり、
+        ///   <c>ChatterMascot.Tests</c> の asmdef は <c>ChatterMascot.Runtime</c> しか参照していない
+        ///   （Desktop は macOS/Windows 限定のプラットフォーム縛りがあり、Editor だけの
+        ///   テストアセンブリに素直には足せない）。値がズレたら、ここと本番の両方を直すこと。
+        /// </summary>
+        private const float BaseWidth = 540f;
+        private const float BaseHeight = 540f;
+
+        /// <summary>
         /// ★★ キャラの大きさは<b>ウィンドウ</b>で変える。<c>VrmStage.headroom</c> は
         ///   「bounds をどれだけ余裕を持って収めるか」の係数で、1 を下回るとモデルが
         ///   <b>画面からはみ出す</b>（実機で頭と足が対称に欠けた）。
@@ -17,13 +28,13 @@ namespace ChatterMascot.Tests
         public void BiggerScaleMeansABiggerWindow()
         {
             float smallW, smallH, bigW, bigH;
-            SettingsMapping.WindowSizeFor(0.5f, 300f, 480f, out smallW, out smallH);
-            SettingsMapping.WindowSizeFor(2f, 300f, 480f, out bigW, out bigH);
+            SettingsMapping.WindowSizeFor(0.5f, BaseWidth, BaseHeight, out smallW, out smallH);
+            SettingsMapping.WindowSizeFor(2f, BaseWidth, BaseHeight, out bigW, out bigH);
 
             Assert.That(bigW, Is.GreaterThan(smallW));
             Assert.That(bigH, Is.GreaterThan(smallH));
-            Assert.That(smallW, Is.EqualTo(150f).Within(0.001f));
-            Assert.That(bigH, Is.EqualTo(960f).Within(0.001f));
+            Assert.That(smallW, Is.EqualTo(BaseWidth * 0.5f).Within(0.001f));
+            Assert.That(bigH, Is.EqualTo(BaseHeight * 2f).Within(0.001f));
         }
 
         /// <summary>倍率 1.0 は出荷値そのまま</summary>
@@ -31,10 +42,10 @@ namespace ChatterMascot.Tests
         public void ScaleOneKeepsTheShippedSize()
         {
             float width, height;
-            SettingsMapping.WindowSizeFor(1f, 300f, 480f, out width, out height);
+            SettingsMapping.WindowSizeFor(1f, BaseWidth, BaseHeight, out width, out height);
 
-            Assert.That(width, Is.EqualTo(300f).Within(0.001f));
-            Assert.That(height, Is.EqualTo(480f).Within(0.001f));
+            Assert.That(width, Is.EqualTo(BaseWidth).Within(0.001f));
+            Assert.That(height, Is.EqualTo(BaseHeight).Within(0.001f));
         }
 
         /// <summary>★ 縦横を同じ倍率で掛ける（アスペクト比を保つ）</summary>
@@ -42,9 +53,9 @@ namespace ChatterMascot.Tests
         public void KeepsTheAspectRatio()
         {
             float width, height;
-            SettingsMapping.WindowSizeFor(1.4f, 300f, 480f, out width, out height);
+            SettingsMapping.WindowSizeFor(1.4f, BaseWidth, BaseHeight, out width, out height);
 
-            Assert.That(height / width, Is.EqualTo(480f / 300f).Within(0.0001f));
+            Assert.That(height / width, Is.EqualTo(BaseHeight / BaseWidth).Within(0.0001f));
         }
 
         /// <summary>★★ 倍率は settings.json に持たない。いまの窓から読み替える</summary>
@@ -54,10 +65,10 @@ namespace ChatterMascot.Tests
             foreach (var scale in new[] { 0.5f, 0.8f, 1f, 1.4f, 2f })
             {
                 float width, height;
-                SettingsMapping.WindowSizeFor(scale, 300f, 480f, out width, out height);
+                SettingsMapping.WindowSizeFor(scale, BaseWidth, BaseHeight, out width, out height);
 
                 Assert.That(
-                    SettingsMapping.ScaleForWindow(height, 480f),
+                    SettingsMapping.ScaleForWindow(height, BaseHeight),
                     Is.EqualTo(scale).Within(0.0001f),
                     $"scale={scale} が往復しない");
             }
@@ -67,19 +78,19 @@ namespace ChatterMascot.Tests
         public void ClampsTheScaleToTheSliderRange()
         {
             float width, height;
-            SettingsMapping.WindowSizeFor(99f, 300f, 480f, out width, out height);
-            Assert.That(height, Is.EqualTo(480f * SettingsMapping.ScaleMax).Within(0.001f));
+            SettingsMapping.WindowSizeFor(99f, BaseWidth, BaseHeight, out width, out height);
+            Assert.That(height, Is.EqualTo(BaseHeight * SettingsMapping.ScaleMax).Within(0.001f));
 
-            SettingsMapping.WindowSizeFor(-5f, 300f, 480f, out width, out height);
-            Assert.That(height, Is.EqualTo(480f * SettingsMapping.ScaleMin).Within(0.001f));
+            SettingsMapping.WindowSizeFor(-5f, BaseWidth, BaseHeight, out width, out height);
+            Assert.That(height, Is.EqualTo(BaseHeight * SettingsMapping.ScaleMin).Within(0.001f));
         }
 
         /// <summary>★ 0 で割らないこと（窓の大きさが読めないときは等倍に倒す）</summary>
         [Test]
         public void FallsBackToUnityScaleForUnreadableSizes()
         {
-            Assert.That(SettingsMapping.ScaleForWindow(0f, 480f), Is.EqualTo(1f));
-            Assert.That(SettingsMapping.ScaleForWindow(480f, 0f), Is.EqualTo(1f));
+            Assert.That(SettingsMapping.ScaleForWindow(0f, BaseHeight), Is.EqualTo(1f));
+            Assert.That(SettingsMapping.ScaleForWindow(BaseHeight, 0f), Is.EqualTo(1f));
         }
 
         /// <summary>★★ スライダーから来る float は 0.7000000119 になりうる</summary>
@@ -184,6 +195,20 @@ namespace ChatterMascot.Tests
         {
             Assert.That(SettingsMapping.NeedsVolumeArgument(1.0000001f), Is.False);
             Assert.That(SettingsMapping.NeedsVolumeArgument(0.9999999f), Is.False);
+        }
+
+        /// <summary>
+        /// ★ 30/60 の2値しか無いので、選べる値はそのまま返し、それ以外は「近い方」ではなく
+        ///   既定（<see cref="SettingsMapping.DefaultFrameRate"/>）へ倒す（→ #88）。
+        /// </summary>
+        [Test]
+        public void NormalizesTheFrameRate()
+        {
+            Assert.That(SettingsMapping.NormalizeFrameRate(30), Is.EqualTo(30));
+            Assert.That(SettingsMapping.NormalizeFrameRate(60), Is.EqualTo(60));
+            Assert.That(SettingsMapping.NormalizeFrameRate(45), Is.EqualTo(SettingsMapping.DefaultFrameRate));
+            Assert.That(SettingsMapping.NormalizeFrameRate(0), Is.EqualTo(SettingsMapping.DefaultFrameRate));
+            Assert.That(SettingsMapping.NormalizeFrameRate(-1), Is.EqualTo(SettingsMapping.DefaultFrameRate));
         }
     }
 }

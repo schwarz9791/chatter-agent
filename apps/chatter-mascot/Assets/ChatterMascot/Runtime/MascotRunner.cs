@@ -38,9 +38,17 @@ namespace ChatterMascot
         /// ★ <b>この 30 はデスクトップ限定の値。</b> Android XR ではヘッドセットの
         ///   リフレッシュレートに合わせる必要がある（→ #25）。VRM のリップシンクと
         ///   spring bone が入ったら見直す（→ #17）。
+        ///
+        /// ★ <b>デスクトップでは設定パネルの <c>display.frameRate</c>（#88）がこの値を上書きする</b>
+        ///   —— <see cref="SetTargetFrameRate"/> 経由で、<c>Awake</c> の後（設定を読み終えたところ）
+        ///   から効く。<b>Android / XR には設定パネルが無い</b>ので、この <c>[SerializeField]</c> の
+        ///   既定（＝ <c>settings.json</c> を読めなかったときの既定でもある。→
+        ///   <c>Settings.SettingsMapping.DefaultFrameRate</c>）がそのまま使われる。
+        ///   ヘッドセットのリフレッシュレートに合わせる話（#25）が入るまではここが権威。
         /// </summary>
         [Header("表示")]
-        [Tooltip("フレームレートの上限。常駐アプリなので電力に直接効く。0 以下なら制限しない")]
+        [Tooltip("フレームレートの上限。常駐アプリなので電力に直接効く。0 以下なら制限しない。" +
+                 "デスクトップでは設定パネルの display.frameRate（SetTargetFrameRate）がこれを上書きする")]
         [SerializeField] private int targetFrameRate = 30;
 
         [Header("再生")]
@@ -360,6 +368,19 @@ namespace ChatterMascot
             if (_quitProbe) Debug.Log("[Mascot] -quitProbe: 最初の終了要求を1回だけ強制的に保留します");
 
             ResolveServerUrl();
+        }
+
+        /// <summary>
+        /// 表示のフレームレート上限を変える（設定パネル、#88）。<see cref="targetFrameRate"/> の doc。
+        ///
+        /// ★ <b><c>Application.targetFrameRate</c> を直接書かないこと</b>（→ <c>FrameRateBudget</c>）。
+        ///   ここは「戻す先」を宣言し直すだけで、VRM 読み込み中などの一時的な引き上げ
+        ///   （<see cref="FrameRateBudget.Boost"/>）が効いている間は、借用が終わってから反映される。
+        /// </summary>
+        public void SetTargetFrameRate(int frameRate)
+        {
+            targetFrameRate = frameRate;
+            FrameRateBudget.SetBaseline(targetFrameRate);
         }
 
         /// <summary>

@@ -39,12 +39,21 @@ namespace ChatterMascot.Desktop
         ///   だから<b>定数で持つ</b>。<c>ProjectSettings</c> の
         ///   <c>defaultScreenWidth/Height</c> は、ここが効くまでの一瞬しか効かない。
         /// ★ <b>食い違ったら <c>SceneFixups</c> が警告する。</b>
+        ///
+        /// ★★ <b>1:1 は #70 が増やした、腕を広げる・上げるモーションのため</b>（#88）。
+        ///   5:8 の窓では横に逃げる余地が無く、腕が窓からはみ出していた。フレーミングは
+        ///   垂直 FOV が支配する（<see cref="ChatterMascot.Vrm.VrmFraming"/>）ので、
+        ///   1:1 にしても同じカメラ距離のまま<b>横方向の余裕だけ増える</b>。
+        ///   縦は <c>VrmStage.headroom</c> の既定を上げて、腕を上げる・跳ぶモーションを
+        ///   余裕を持って収める。<b>既に大きさを変えていた窓は移行で高さが保たれる</b>
+        ///   （<c>WindowPlacement</c>）ので、そこでは <c>headroom</c> のぶんキャラが少し
+        ///   小さく収まる。これは意図どおり——「以前と同じ大きさ」より「見切れない」を取った。
         /// </summary>
-        public const float DefaultWidthPoints = 300f;
-        public const float DefaultHeightPoints = 480f;
+        public const float DefaultWidthPoints = 540f;
+        public const float DefaultHeightPoints = 540f;
 
         /// <summary>これ以上小さくはしない。手で潰して二度と掴めなくなるのを防ぐ。</summary>
-        private const float MinWidthPoints = 120f;
+        private const float MinWidthPoints = 160f;
         private const float MinHeightPoints = 160f;
 
         /// <summary>

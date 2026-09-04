@@ -332,5 +332,29 @@ namespace ChatterMascot.Tests
         {
             Assert.That(SettingsSchema.Build(null), Is.Not.Empty);
         }
+
+        // ── #88 フレームレート ─────────────────────────────────
+
+        [Test]
+        public void OffersTheFrameRateChoice()
+        {
+            var spec = Find(SettingsSchema.Build(Context()), SettingKeys.FrameRate);
+
+            Assert.That(spec, Is.Not.Null);
+            Assert.That(spec.Kind, Is.EqualTo(SettingKind.Choice));
+            Assert.That(spec.Value, Is.EqualTo("30"));
+            Assert.That(spec.Choices.Count, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void ReflectsTheFrameRateSetting()
+        {
+            var context = Context();
+            context.Settings = MascotSettings.Defaults.WithFrameRate(60);
+
+            var spec = Find(SettingsSchema.Build(context), SettingKeys.FrameRate);
+
+            Assert.That(spec.Value, Is.EqualTo("60"));
+        }
     }
 }

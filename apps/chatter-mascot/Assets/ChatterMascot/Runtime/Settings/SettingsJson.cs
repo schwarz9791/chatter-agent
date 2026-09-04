@@ -54,6 +54,13 @@ namespace ChatterMascot.Settings
                     ["blink"] = settings.Blink,
                     ["vrm"] = settings.VrmFileName ?? "",
                 },
+                // ★ いまはデスクトップの設定パネルからしか書かない項目（→ MascotSettings.FrameRate
+                //   の doc）。settings.json 自体は XR（#25）と共有する前提なので、キーの置き場所は
+                //   ここでよい —— ヘッドセットのリフレッシュレートに合わせる話が入るまでは既定のまま
+                ["display"] = new JObject
+                {
+                    ["frameRate"] = settings.FrameRate,
+                },
             };
             return root.ToString(Formatting.Indented) + "\n";
         }
@@ -127,6 +134,10 @@ namespace ChatterMascot.Settings
 
                     case "character":
                         result = ReadCharacter(property.Value, result, warn);
+                        break;
+
+                    case "display":
+                        result = ReadDisplay(property.Value, result, warn);
                         break;
 
                     default:
@@ -245,6 +256,36 @@ namespace ChatterMascot.Settings
             return settings;
         }
 
+        /// <summary>
+        /// ★ デスクトップだけの項目（→ MascotSettings.FrameRate の doc）。<b>audio / ui / character
+        ///   と同じ作法</b>：オブジェクトでなければ既定を使い、未知キーは警告して無視する。
+        /// </summary>
+        private static MascotSettings ReadDisplay(JToken raw, MascotSettings settings, Action<string> warn)
+        {
+            var display = raw as JObject;
+            if (display == null)
+            {
+                Warn(warn, $"display がオブジェクトではありません（{Describe(raw)}）。既定を使います");
+                return settings;
+            }
+
+            foreach (var property in display)
+            {
+                switch (property.Key)
+                {
+                    case "frameRate":
+                        settings = settings.WithFrameRate(
+                            ReadFrameRate(property.Value, "display.frameRate", settings.FrameRate, warn));
+                        break;
+
+                    default:
+                        Warn(warn, $"知らないキー \"display.{property.Key}\" は無視します");
+                        break;
+                }
+            }
+            return settings;
+        }
+
         private static bool ReadBool(JToken value, string key, bool fallback, Action<string> warn)
         {
             if (value.Type == JTokenType.Boolean) return value.Value<bool>();
@@ -279,6 +320,30 @@ namespace ChatterMascot.Settings
             if (Math.Abs(normalized - raw) > step / 2f)
             {
                 Warn(warn, $"{key} を {SettingsMapping.Format(normalized)} に丸めました（元の値: {SettingsMapping.Format(raw)}）");
+            }
+            return normalized;
+        }
+
+        /// <summary>
+        /// フレームレートを読んで、<b>選べる値（30 / 60）でなければ既定へ倒す</b>。
+        ///
+        /// ★ <b>クランプしないこと</b>（→ <see cref="SettingsMapping.NormalizeFrameRate"/>）。
+        ///   選べる値がちょうど2つしか無いので、範囲外の値を「近い方」に丸める <see cref="ReadNumber"/>
+        ///   の作法はここでは採らない。
+        /// </summary>
+        private static int ReadFrameRate(JToken value, string key, int fallback, Action<string> warn)
+        {
+            if (value.Type != JTokenType.Integer)
+            {
+                Warn(warn, $"{key} が整数ではありません（{value}）。既定を使います");
+                return fallback;
+            }
+
+            var raw = value.Value<int>();
+            var normalized = SettingsMapping.NormalizeFrameRate(raw);
+            if (normalized != raw)
+            {
+                Warn(warn, $"{key} は 30 か 60 です（{raw}）。既定の {SettingsMapping.DefaultFrameRate} を使います");
             }
             return normalized;
         }

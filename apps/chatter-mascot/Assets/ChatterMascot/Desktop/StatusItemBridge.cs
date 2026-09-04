@@ -618,7 +618,14 @@ namespace ChatterMascot.Desktop
                 ApplyMuteToRunner();
 
                 var runner = ResolveRunner();
-                if (runner != null) runner.Volume = _settings.Volume;
+                if (runner != null)
+                {
+                    runner.Volume = _settings.Volume;
+                    // ★ #88。デスクトップだけの項目（→ MascotSettings.FrameRate の doc）。
+                    //   FrameRateBudget.SetBaseline 経由なので、VRM 読み込み中の一時的な
+                    //   引き上げ（Boost）を踏み荒らさない
+                    runner.SetTargetFrameRate(_settings.FrameRate);
+                }
 
                 // ★★ ここで `VrmStage` の `headroom` を触らないこと。 あれは「bounds をどれだけ
                 //   余裕を持って収めるか」の係数で、1 を下回るとモデルが画面からはみ出す

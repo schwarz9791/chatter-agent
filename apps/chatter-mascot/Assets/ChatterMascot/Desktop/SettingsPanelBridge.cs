@@ -403,6 +403,18 @@ namespace ChatterMascot.Desktop
                     Apply(settings.WithBlink(SettingsPanelJson.ParseBool(value, settings.Blink)));
                     return;
 
+                case SettingKeys.FrameRate:
+                {
+                    // ★ 選択肢（Choice）だが、チェックボックスと同じ理由で即座に反映する。
+                    //   「押しても効いていない」ように見せないため
+                    int parsed;
+                    var frameRate = SettingsPanelJson.TryParseInt(value, out parsed)
+                        ? SettingsMapping.NormalizeFrameRate(parsed)
+                        : settings.FrameRate;
+                    Apply(settings.WithFrameRate(frameRate));
+                    return;
+                }
+
                 case SettingKeys.MuteHotKey:
                     // ★ 起点は `settings`（＝保留があるならそれ）。`_host.Settings` を
                     //   読み直すと、同じ窓に居る保留を巻き戻す（→ 上の ★★）

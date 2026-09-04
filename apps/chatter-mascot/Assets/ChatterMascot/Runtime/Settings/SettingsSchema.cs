@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Globalization;
 using ChatterMascot.Ui;
 
 namespace ChatterMascot.Settings
@@ -30,6 +31,7 @@ namespace ChatterMascot.Settings
         public const string IdleMotion = "idleMotion";
         public const string CursorGaze = "cursorGaze";
         public const string Blink = "blink";
+        public const string FrameRate = "frameRate";
 
         public const string SummaryEnabled = "summaryEnabled";
 
@@ -159,6 +161,13 @@ namespace ChatterMascot.Settings
             items.Add(SettingSpec.Bool(SettingKeys.IdleMotion, "待機モーション", settings.IdleMotion));
             items.Add(SettingSpec.Bool(SettingKeys.CursorGaze, "カーソルを目で追う", settings.CursorGaze));
             items.Add(SettingSpec.Bool(SettingKeys.Blink, "まばたき", settings.Blink));
+            // ★ 倍率を UI 文言に持ち込まない。マシン・MSAA・電源状態で変わる数値で、
+            //   同じ PR の実測とすら食い違っていた。数字は docs/mascot.md 側で持つ。
+            items.Add(SettingSpec.Choice(
+                SettingKeys.FrameRate, "フレームレート",
+                settings.FrameRate.ToString(CultureInfo.InvariantCulture),
+                FrameRateChoices(),
+                note: "60 fps は CPU 使用率が上がります"));
 
             // ★ **「発話モーション」「クール系 / かわいい系」は出さない。** cc-mascot には
             //   あるが、chatter-agent に対応する実装が無い（#70 が未実装）。
@@ -249,6 +258,24 @@ namespace ChatterMascot.Settings
                     string.IsNullOrEmpty(c.Version) ? c.ProductName : c.ProductName + " " + c.Version),
                 SettingSpec.Text(SettingKeys.License, "ライセンス", c.LicenseText),
             };
+        }
+
+        /// <summary>
+        /// フレームレートの選択肢。
+        ///
+        /// ★ <b><see cref="SettingsMapping.FrameRateChoices"/> から作ること</b> —— 選べる値の
+        ///   一覧をここと <c>SettingsMapping</c> の2箇所に書くと、増減したときに片方だけ直して
+        ///   選択肢と検証（<c>NormalizeFrameRate</c>）がズレる。
+        /// </summary>
+        private static IReadOnlyList<SettingChoice> FrameRateChoices()
+        {
+            var choices = new SettingChoice[SettingsMapping.FrameRateChoices.Length];
+            for (var i = 0; i < choices.Length; i++)
+            {
+                var fps = SettingsMapping.FrameRateChoices[i].ToString(CultureInfo.InvariantCulture);
+                choices[i] = new SettingChoice(fps, fps + " fps");
+            }
+            return choices;
         }
 
         /// <summary>保存されている文字列を画面用の記号にする。読めなければそのまま出す</summary>

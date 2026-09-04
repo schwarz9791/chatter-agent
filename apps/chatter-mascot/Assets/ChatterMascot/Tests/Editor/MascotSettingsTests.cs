@@ -23,6 +23,7 @@ namespace ChatterMascot.Tests
             Assert.That(defaults.CursorGaze, Is.True);
             Assert.That(defaults.Blink, Is.True);
             Assert.That(defaults.VrmFileName, Is.Empty);
+            Assert.That(defaults.FrameRate, Is.EqualTo(SettingsMapping.DefaultFrameRate));
         }
 
         [Test]
@@ -126,6 +127,7 @@ namespace ChatterMascot.Tests
             if (type == typeof(bool)) return !(bool)current;
             if (type == typeof(float)) return (float)current + 0.5f;
             if (type == typeof(string)) return (string)current + "-changed";
+            if (type == typeof(int)) return (int)current + 1;
 
             Assert.Fail($"知らない型です: {type.Name}。DifferentValue に「違う値」の作り方を足すこと");
             return null;

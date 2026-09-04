@@ -42,7 +42,9 @@ namespace ChatterMascot.Tests
 
         /// <summary>
         /// ★ <b>縦長のウィンドウでは垂直側が支配する。</b> W/H は 0.214 で、
-        ///   ウィンドウのアスペクト（300/480 = 0.625）より細いため。
+        ///   ここで検査に使う 300/480 = 0.625 という縦長のアスペクトより細いため
+        ///   （既定のウィンドウは #88 で 1:1 になったが、垂直支配の分岐を検査するには
+        ///   ここでは意図的に縦長のアスペクトを渡している）。
         /// ★ <b>ここが <c>Horizontal</c> に戻ったら、腕の除外
         ///   （<c>VrmBounds.IsFramingBone</c>）が壊れたと考えること。</b> #59 より前は
         ///   T ポーズの腕が箱に入っていたので水平が支配していた。
@@ -125,6 +127,33 @@ namespace ChatterMascot.Tests
             Assert.That(VrmFraming.Solve(Vita(), Fov, 0f, 1f, out _), Is.EqualTo(0f));
             Assert.That(VrmFraming.Solve(Vita(), 0f, 0.625f, 1f, out _), Is.EqualTo(0f));
             Assert.That(VrmFraming.Solve(Vita(), 180f, 0.625f, 1f, out _), Is.EqualTo(0f));
+        }
+
+        /// <summary>
+        /// ★ <b>出荷済みの正方形ウィンドウ（#88）でもなお垂直側が支配することを固定する。</b>
+        ///   アスペクト 1:1・ヘッドルーム 1.25 は #88 で決まった実際の既定値。この設定は
+        ///   <c>PortraitWindowIsDominatedByHeight</c>（意図的に細い縦長を渡す検査）とは別で、
+        ///   出荷値そのものを直に検査する。もし将来 <c>VrmBounds.IsFramingBone</c> が腕を
+        ///   フレーミングの箱に戻すと、T ポーズの幅で水平側が支配するように反転し、
+        ///   このテストが落ちて気づける。
+        ///
+        /// ★ <b>ここの引数は出荷値の写しなので、出荷値を変えたらここも直すこと。</b>
+        ///   <c>ChatterMascot.Tests</c> の asmdef からは <c>WindowGeometry</c>（<c>ChatterMascot.Desktop</c>）も
+        ///   <c>VrmStage.headroom</c>（private な <c>[SerializeField]</c>）も見えないため、
+        ///   <b>参照ではなくリテラルで持つしかない</b>。しかも <c>headroom</c> の実際の権威は
+        ///   <c>Mascot.unity</c> にシリアライズされた値で、<c>[Tooltip]</c> 付きの
+        ///   <c>[SerializeField]</c> である以上<b>調整の自然な手段は Inspector</b>——そこで動かすと
+        ///   変わるのはシーンだけで、<c>VrmStage</c> の初期化子もここも黙って古い値のまま残る。
+        ///   <b>そうなってもこのテストは通り続ける</b>が、検査しているのは「出荷構成」ではなく
+        ///   「かつて出荷構成だった値」になる。
+        /// </summary>
+        [Test]
+        public void ShippedSquareWindowIsStillDominatedByHeight()
+        {
+            var distance = VrmFraming.Solve(Vita(), Fov, 1f, 1.25f, out var axis);
+
+            Assert.That(axis, Is.EqualTo(FramingAxis.Vertical));
+            Assert.That(distance, Is.GreaterThan(0f));
         }
 
         /// <summary>カメラは回転なしで +Z を見る。モデルの中心の手前に置く。</summary>

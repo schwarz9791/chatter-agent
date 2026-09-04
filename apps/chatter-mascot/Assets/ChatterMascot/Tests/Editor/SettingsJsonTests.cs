@@ -311,5 +311,72 @@ namespace ChatterMascot.Tests
             Assert.That(parsed.Volume, Is.EqualTo(1f), "新しいキーは既定のまま");
             Assert.That(parsed.IdleMotion, Is.True);
         }
+
+        // ── #88 で増えた display.frameRate ───────────────────
+
+        [Test]
+        public void RoundTripsTheFrameRate()
+        {
+            var written = SettingsJson.Write(MascotSettings.Defaults.WithFrameRate(60));
+            var parsed = Parse(written);
+
+            Assert.That(parsed.FrameRate, Is.EqualTo(60));
+            Assert.That(_warnings, Is.Empty);
+        }
+
+        /// <summary>★ 30/60 の2値しか無いので、範囲外は「近い方」ではなく既定へ倒す</summary>
+        [Test]
+        public void FallsBackToTheDefaultFrameRateForAnUnknownValue()
+        {
+            var parsed = Parse("{\"display\":{\"frameRate\":45}}");
+
+            Assert.That(parsed.FrameRate, Is.EqualTo(SettingsMapping.DefaultFrameRate));
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        [Test]
+        public void ReadsTheDefaultFrameRateWhenDisplayIsMissing()
+        {
+            var parsed = Parse("{\"audio\":{\"mute\":true}}");
+
+            Assert.That(parsed.FrameRate, Is.EqualTo(SettingsMapping.DefaultFrameRate));
+            Assert.That(_warnings, Is.Empty);
+        }
+
+        /// <summary>型が違う値は、そのキーだけ既定に倒す（他のキーと同じ作法）</summary>
+        [Test]
+        public void FallsBackToTheDefaultFrameRateWhenTheValueIsAString()
+        {
+            var parsed = Parse("{\"display\":{\"frameRate\":\"60\"}}");
+
+            Assert.That(parsed.FrameRate, Is.EqualTo(SettingsMapping.DefaultFrameRate));
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        [Test]
+        public void WarnsWhenDisplayIsNotAnObject()
+        {
+            var parsed = Parse("{\"display\": 1}");
+
+            Assert.That(parsed.FrameRate, Is.EqualTo(SettingsMapping.DefaultFrameRate));
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        [Test]
+        public void IgnoresUnknownKeysUnderDisplay()
+        {
+            Parse("{\"display\":{\"nope\":1}}");
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        /// <summary>★ 書式のバージョンを見るまでもなく、既定値がそのまま読める形で出ていること</summary>
+        [Test]
+        public void WritesTheDisplaySection()
+        {
+            var written = SettingsJson.Write(MascotSettings.Defaults);
+
+            Assert.That(written, Does.Contain("\"display\""));
+            Assert.That(written, Does.Contain("\"frameRate\": 30"));
+        }
     }
 }

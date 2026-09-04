@@ -106,6 +106,17 @@ namespace ChatterMascot.Window
         /// </summary>
         public const int NoMonitor = -1;
 
+        /// <summary>
+        /// #88 より前の既定の縦横比（300×480 = 5:8）。<see cref="Resolve"/> が保存済みの矩形を
+        /// 今の既定の比へ移行するときの「旧既定だった」判定に使う。
+        /// ★ 移行の分岐が要らなくなったら、この定数ごと消す。
+        /// </summary>
+        internal const float LegacyDefaultAspect = 300f / 480f;
+
+        /// <summary>相対 1% 以内なら同じ比とみなす（丸めのノイズを拾わない）。</summary>
+        private static bool IsNear(float aspect, float reference) =>
+            Math.Abs(aspect - reference) <= reference * 0.01f;
+
         public static Placement Resolve(WindowState saved, DisplayLayout now, PlacementLimits limits)
         {
             var hasMonitors = now != null && now.HasMonitors;
@@ -121,7 +132,33 @@ namespace ChatterMascot.Window
                     PlacementReason.Defaulted, DisplayLayout.PrimaryIndex);
             }
 
-            var wanted = saved.Rect.WithMinimumSize(limits.MinWidth, limits.MinHeight);
+            // ★★ 旧既定（5:8、#88 で 1:1 に変える前）で保存された矩形を移行する。
+            //   枠なしウィンドウは手でリサイズできないので、保存された矩形の比は
+            //   ①既定そのまま ②大きさスライダー（SettingsMapping.WindowSizeFor は縦横に
+            //   同じ倍率を掛ける）③モニタに収めたときのクランプ —— のどれか。③があるので
+            //   「既定と違う比＝旧既定」とは決めつけられない（横長のモニタに収めた矩形は
+            //   何にでもなりうる）。だから<b>旧既定の比と一致するときだけ</b>、高さを保って
+            //   幅を今の既定の比へ直す。旧既定の比が今の既定と同じなら（＝この移行が要らない
+            //   構成）何もしない。
+            //
+            //   ★ 最小サイズの前に置くこと。後ろに置くと、最小まで広げた幅を比に合わせて
+            //   また縮めてしまい、下限が効かなくなる。
+            //   ★ 1% は丸めのノイズを拾わないための遊び。
+            //   ★ <c>window.json</c> の <c>version</c> は<b>意図的に上げない</b>。
+            //   <c>WindowStateJson</c> は未知の <c>version</c> を拒否して既定配置へ落とす
+            //   （→ <c>WindowStateJson.CurrentVersion</c>）ので、ここでバージョンを上げると
+            //   アップグレードした瞬間にユーザーの位置そのものが失われる。矩形の形だけ
+            //   静かに直すのがこの分岐の役目。旧既定の矩形がもう誰の手元にも無くなったら
+            //   <see cref="LegacyDefaultAspect"/> ごと消してよい。
+            var migrated = saved.Rect;
+            var defaultAspect = limits.DefaultWidth / limits.DefaultHeight;
+            var savedAspect = saved.Rect.Width / saved.Rect.Height;
+            if (IsNear(savedAspect, LegacyDefaultAspect) && !IsNear(defaultAspect, LegacyDefaultAspect))
+            {
+                migrated = saved.Rect.WithAspectKeepingHeight(limits.DefaultWidth, limits.DefaultHeight);
+            }
+
+            var wanted = migrated.WithMinimumSize(limits.MinWidth, limits.MinHeight);
 
             if (!hasMonitors)
             {

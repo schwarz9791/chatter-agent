@@ -19,6 +19,10 @@ namespace ChatterMascot.Vrm
         /// ★ cc-mascot と違い、<b>再生中の感情モーションには割り込まない</b>（最後まで見せる）
         ///   ぶん、終了後のクールダウンで連発を抑える（ユーザーと決めたこと。2026-09-04）。
         ///   起点は <c>EmotionMotionTrigger.NotifyEnded</c>。
+        /// ★ <b>既定は 1 秒。</b> 最初は 5 秒だったが、実機で 1 メッセージ内の感情が 1 本しか
+        ///   出なかった——文の間隔が 3〜4 秒なのに、<c>Hub_laugh01</c>（7.9 秒）＋フェード＋5 秒で
+        ///   13 秒余りが空白になる。「割り込まない」規則だけで連発は十分抑えられているので、
+        ///   クールダウンは同じ文に二重で反応しないための最小限にとどめる（ユーザー決定、同日）。
         /// </summary>
         public readonly double CooldownSeconds;
 
@@ -42,7 +46,7 @@ namespace ChatterMascot.Vrm
 
         public static MotionParams Default => new MotionParams(
             fadeSeconds: 0.5f,
-            cooldownSeconds: 5.0,
+            cooldownSeconds: 1.0,
             accentMinSeconds: 30.0,
             accentMaxSeconds: 60.0);
     }

@@ -3573,8 +3573,8 @@ cd apps/chatter-mascot
 `VrmIdleAnimation.Present` の1箇所に寄せてある。
 
 **発火の規則**（ユーザーと決めたこと、2026-09-04）: cc-mascot と同じく**文ごと**。ただし
-**再生中の感情モーションには割り込まない**（最後まで見せる）代わりに、**終了後 5 秒のクールダウン**
-（`MotionParams.CooldownSeconds`）で連発を抑える。感情モーションは待機の小ネタには割り込める。
+**再生中の感情モーションには割り込まない**（最後まで見せる）代わりに、**終了後 1 秒のクールダウン**
+（`MotionParams.CooldownSeconds`。最初は 5 秒だったが、下の実機確認で 1 メッセージに 1 本しか出なかったので縮めた）で連発を抑える。感情モーションは待機の小ネタには割り込める。
 `neutral` と `kind: prompt` は感情モーションを出さない。小ネタ（`idle/`）は**発話が止まってから
 30〜60 秒**の乱数間隔で発火し、発話の立ち下がりとモーション終了の両方でタイマーを引き直す。
 
@@ -3595,8 +3595,8 @@ cd apps/chatter-mascot
 （neutral / happy / happy / sad / surprised / prompt(surprised) / angry）を直接置いた結果 ——
 neutral は出ない、happy → `super_delicious`、2文目の happy はクールダウンで出ない（意図どおり）、
 sad → `REFLESH00`、**surprised は sad のモーション終了から5秒以内だったので出なかった**
-（クールダウンの仕様どおりだが、短いクリップが続くと1つ飛ぶ。`CooldownSeconds` は実機で調整する
-余地として残す）、prompt は出ない、angry → `determined`。モーション中も `face:` ログで
+（当時のクールダウンは 5 秒。その後 hook 経由の本番でも happy → `Hub_laugh01` 7.9 秒の後ろで sad と surprised が
+両方潰れたので、**クールダウンを 1 秒に縮めた**。「割り込まない」規則で連発は十分抑えられる）、prompt は出ない、angry → `determined`。モーション中も `face:` ログで
 `sad=1.00` / `aa=0.35〜0.50` が生きている（`ExpressionMap` を奪っていない）。小ネタは放置中に
 `Hub_Idle03` ×2 / `Hub_Idle01` が 30〜60 秒間隔で出て待機へ戻った。例外0件。`-motionProbe happy`
 で `WIN00`（ジャンプ→敬礼）と `Hub_laugh01` を 0.4 秒間隔のスクリーンショットで目視: 腰の飛び・

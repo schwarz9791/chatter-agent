@@ -108,11 +108,32 @@ namespace ChatterMascot.Audio
         ///   （<c>SpeakingView.TryRead</c> から移送した。<c>VrmCharacter.LateUpdate</c> が
         ///   この契約に寄りかかっていて、呼び出し側で <c>Speaking ? kind : 既定</c> と
         ///   書き直していない）。
+        ///
+        /// ★ <c>order</c> が要らない呼び出し側のための2引数版。<see cref="TryGetFace(out Emotion, out SpeechKind, out long)"/>
+        ///   へ委譲する（#70。<c>EmotionMotionTrigger</c> が文の開始検出に <c>order</c> を使う）。
         /// </summary>
         public bool TryGetFace(out Emotion emotion, out SpeechKind kind)
         {
+            long order;
+            return TryGetFace(out emotion, out kind, out order);
+        }
+
+        /// <summary>
+        /// <see cref="TryGetFace(out Emotion, out SpeechKind)"/> に、鳴っている文の
+        /// <see cref="Entry.Order"/> を足したもの（#70）。
+        ///
+        /// ★★ <b><c>order</c> が文の開始検出の唯一の手がかり。</b> 先読みが効いていると、
+        ///   文の切れ目で <c>Speaking</c>（<see cref="Count"/><c> &gt; 0</c>）は <c>false</c> に
+        ///   落ちない（<c>AfplaySpeechPlayer.PlayAsync → End → Dispatch(Played) → 次の Play →
+        ///   BeginSpeaking</c> が同じ継続で同期に走るため）。だから「新しい文が鳴り始めた」は
+        ///   <c>Speaking</c> の立ち上がりではなく <c>Order</c> の変化でしか取れない。
+        /// ★ 無ければ <c>order = -1</c>（他のフィールドと同じく既定値へ倒す契約）。
+        /// </summary>
+        public bool TryGetFace(out Emotion emotion, out SpeechKind kind, out long order)
+        {
             emotion = Emotion.Neutral;
             kind = SpeechKind.Assistant;
+            order = -1;
 
             Entry latest = null;
             foreach (var entry in _entries)
@@ -123,6 +144,7 @@ namespace ChatterMascot.Audio
 
             emotion = latest.Emotion;
             kind = latest.Kind;
+            order = latest.Order;
             return true;
         }
 

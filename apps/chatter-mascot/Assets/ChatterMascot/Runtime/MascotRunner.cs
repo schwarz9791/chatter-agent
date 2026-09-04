@@ -151,9 +151,27 @@ namespace ChatterMascot
         /// </summary>
         public bool TryGetSpeaking(out SpeechKind kind, out Emotion emotion)
         {
+            long order;
+            return TryGetSpeaking(out kind, out emotion, out order);
+        }
+
+        /// <summary>
+        /// <see cref="TryGetSpeaking(out SpeechKind, out Emotion)"/> に、鳴っている文の
+        /// 開始順（<c>order</c>）を足したもの（#70。<c>EmotionMotionTrigger.Update</c> に渡す）。
+        ///
+        /// ★★ <b>なぜ <c>order</c> が要るか。</b> 先読みが効いていると、文の切れ目で
+        ///   <c>Speaking</c> は <c>false</c> に落ちない——<c>AfplaySpeechPlayer.PlayAsync → End →
+        ///   Dispatch(Played) → 次の Play → BeginSpeaking</c> が<b>同じ継続で同期に走る</b>ため、
+        ///   1文が終わって次の文が始まる境目でも <see cref="SpeakingSet"/> の <c>Count</c> は
+        ///   0 に落ちる隙が無い。だから「新しい文が鳴り始めた」を <c>Speaking</c> の立ち上がりでは
+        ///   検出できず、<c>SpeakingSet.Entry.Order</c>（<c>Begin</c> するたび進む通し番号）の
+        ///   変化でしか取れない。無ければ <c>-1</c>。
+        /// </summary>
+        public bool TryGetSpeaking(out SpeechKind kind, out Emotion emotion, out long order)
+        {
             // ★ 引数の順が逆（TryGetFace は emotion が先）。呼び出し側の並びは
             //   VrmCharacter が使っているものなので、こちらで受け替える
-            return _speaking.TryGetFace(out emotion, out kind);
+            return _speaking.TryGetFace(out emotion, out kind, out order);
         }
 
         /// <summary>

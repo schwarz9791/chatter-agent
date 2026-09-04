@@ -136,6 +136,16 @@ namespace ChatterMascot.Tests
         ///   出荷値そのものを直に検査する。もし将来 <c>VrmBounds.IsFramingBone</c> が腕を
         ///   フレーミングの箱に戻すと、T ポーズの幅で水平側が支配するように反転し、
         ///   このテストが落ちて気づける。
+        ///
+        /// ★ <b>ここの引数は出荷値の写しなので、出荷値を変えたらここも直すこと。</b>
+        ///   <c>ChatterMascot.Tests</c> の asmdef からは <c>WindowGeometry</c>（<c>ChatterMascot.Desktop</c>）も
+        ///   <c>VrmStage.headroom</c>（private な <c>[SerializeField]</c>）も見えないため、
+        ///   <b>参照ではなくリテラルで持つしかない</b>。しかも <c>headroom</c> の実際の権威は
+        ///   <c>Mascot.unity</c> にシリアライズされた値で、<c>[Tooltip]</c> 付きの
+        ///   <c>[SerializeField]</c> である以上<b>調整の自然な手段は Inspector</b>——そこで動かすと
+        ///   変わるのはシーンだけで、<c>VrmStage</c> の初期化子もここも黙って古い値のまま残る。
+        ///   <b>そうなってもこのテストは通り続ける</b>が、検査しているのは「出荷構成」ではなく
+        ///   「かつて出荷構成だった値」になる。
         /// </summary>
         [Test]
         public void ShippedSquareWindowIsStillDominatedByHeight()

@@ -18,13 +18,13 @@ namespace ChatterMascot.Vrm
     public static class FingerPose
     {
         /// <summary>人差し指〜小指、第1関節（付け根）の丸め角（度）</summary>
-        public const float ProximalDegrees = 25f;
+        public const float ProximalDegrees = 18f;
 
         /// <summary>人差し指〜小指、第2関節の丸め角（度）</summary>
-        public const float IntermediateDegrees = 30f;
+        public const float IntermediateDegrees = 22f;
 
         /// <summary>人差し指〜小指、第3関節（指先）の丸め角（度）</summary>
-        public const float DistalDegrees = 20f;
+        public const float DistalDegrees = 15f;
 
         /// <summary>
         /// 親指、第1関節の丸め角（度）。

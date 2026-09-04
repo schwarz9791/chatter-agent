@@ -41,6 +41,16 @@
 ★ **「リップシンクが入ったら 30fps で足りるか見直す」という宿題は #58 で閉じた。
 結論は 30fps 据え置き。** → 下の「30fps で口が足りるかの決着（#58）」
 
+★ **#88 で表示側にフレームレート上限を選ぶ設定を足した。** `settings.json` の
+`display.frameRate`（`30` か `60` のみ。既定 `SettingsMapping.DefaultFrameRate = 30`）を
+設定パネル「モーション」の「フレームレート」で切り替えると、
+`StatusItemBridge.ApplySettingsToScene` → `MascotRunner.SetTargetFrameRate` →
+`FrameRateBudget.SetBaseline` の経路で反映される。`Application.targetFrameRate` へ直接
+書かないのは、VRM 読み込み中の一時的な引き上げ（`FrameRateBudget.Boost`）を上書きで
+消さないため。選択肢に無い値（`settings.json` を手で壊した場合など）は**クランプではなく
+既定へフォールバック**（警告ログつき）。Android/XR には設定パネルが無いので、この JSON の
+既定がそのまま使われる（→ #25）。
+
 ### #59 時点の実測: フレームレート上限ありでの常駐 CPU
 
 冒頭の「Cube 1個で無制限なら CPU 261%」と対比できる値。**VRM 表示 + VRMA（待機モーション）+
@@ -57,8 +67,39 @@ spring bone + 毎フレームの手続き計算（呼吸・重心移動・視線
 ウィンドウの既定サイズは #59 で **250x400 → 300x480** に変更した（縦横比 5:8 は維持）。
 この文書の他の節にある「250x400」の実測値は、変更前に取った記録としてそのまま残してある。
 
+さらに #88 で **300x480 → 540x540**（1:1）に変えた。#70 の VRoid モーションは腕を
+広げる・上げる動きを持ち、5:8 の窓では横に逃げ場がなく腕が窓からはみ出していたため
+（詳細は下の「ウィンドウの大きさは3箇所で決まる」節と「T ポーズの腕をフレーミングの箱に
+入れない」節）。この文書の他の節にある「250x400」「300x480」の実測値は、それぞれの
+変更前に取った記録としてそのまま残してある。
+
 EditMode テストは #59 で件数が増えた（**具体的な件数はここには書かない**——
 件数は変わっていくので `./scripts/test.sh` の `total=` を都度確認すること）。
+
+### #88 時点の実測: 窓の拡大・アンチエイリアス・60fps の CPU コスト
+
+同じ条件（アイドル・`idle_loop.vrma`・無発話・外部 4K ディスプレイ scale 1x・Apple M1 Max・
+`top` の CPU% を9秒間隔で n=6・中央値。上の「#59 時点の実測」と同じ方法）で、
+ウィンドウ 540x540（#88 の新既定）を基準に MSAA off/4x × 30/60fps の4通りを測った:
+
+| | MSAA off | MSAA 4x |
+|---|---|---|
+| 30 fps | 14.6%（11.8 14.4 14.9 14.7 14.1 14.7） | 16.8%（14.0 16.8 16.7 17.2 16.7 16.8） |
+| 60 fps | 22.8%（19.6 22.6 22.4 23.0 23.1 23.3） | 27.6%（26.6 31.2 29.0 26.7 27.7 27.4） |
+
+旧記録（300x480 / 30fps / MSAA off）の **13.2%** と比べると:
+
+- **窓の拡大**（300x480 → 540x540）だけで **+1.4pt**
+- **MSAA 4x** は 30fps で **+2.2pt**、60fps で **+4.8pt**
+- **60fps** は MSAA off で **+8.2pt**、MSAA 4x で **+10.8pt**（30fps 比で約 **1.6倍**）
+
+★ **この 1.6倍を、#58（リップシンク）で測った 2.1倍と単純比較しないこと。** 「リップシンクが
+入ったら 30fps で足りるか見直す」の宿題は #58 で 30fps 据え置きと決着したが、その判断材料
+だった倍率とはリップシンクの有無・窓の大きさ・MSAA の有無のすべてが条件として違う。
+「軽くなった」と読める数字ではない。
+
+★ **既定のフレームレートは 30fps のまま。** ここまでの実測は「決める材料」であって
+「決めた結果」ではない——#88 では数字を残すところまでで、既定を上げるかどうかは別途判断する。
 
 ### ★ Unity は無音でも macOS の出力デバイスを掴み続ける
 
@@ -503,6 +544,14 @@ VRMA が適用されて腕が下りるまでのあいだだけ広い箱のまま
 - ★ **測り直しの窓（読み込み後5秒間・毎秒）は残すこと。** 腕を外しても、髪や裾の
   spring bone が落ち着くまでの微差はあるし、ユーザーが別の `.vrma` を置いたときの保険になる
 
+★ **#88 でこの引き換えを緩和した。** 窓を 5:8 → 1:1 に、`VrmStage.Headroom` の既定を
+1.1 → 1.25 に広げたことで、同じカメラ距離のまま横方向の余裕は 1.6倍、腕を上げる動きの
+縦方向の逃げ場も増えた。実機で #70 の VRoid モーション（`WIN00` の敬礼など、腕を上げる・
+広げるクリップ）を確認し、はみ出しは解消した。★ **`boneBoundsMarginMeters` 自体は
+変えていない。** これを広げると余白は**カメラの前後（Z）方向にも**効き、クリック透過の
+当たり判定の半径まで一緒に広がってしまうため——縦方向だけを広げたいときの調整つまみは
+`headroom` の方（→ 下の「『大きさ』の権威は `window.json` ひとつ」節）。
+
 ### ★ `VrmProbe` の出力は「ランタイムと同じ関数」でなければならない
 
 `Tests/Editor/VrmFramingTests.cs` の定数 `Vita()` は **`VrmProbe.Report` の出力を貼ったもの**で、
@@ -943,6 +992,31 @@ prefab にもシーンにも override が無く、`SetWindowSize` を呼ぶの�
 `osascript` の「名前で最初に見つかったプロセス」がそちらを掴む。**pid で引くこと**。
 `forceSingleInstance: 1` は**別パスの `.app` の同時起動を防がない**（実際に2つ動いた）。
 
+★★ **#88 で既定を 300x480 → 540x540（1:1）に変えた。** 起動直後の大きさ
+（`DefaultWidthPoints` / `DefaultHeightPoints`）は `WindowGeometry.cs` の定数のまま
+持つ——ここは変わらない。変わったのは**保存済み `window.json` の移行**
+（`WindowPlacement.Resolve`）: 保存されていた矩形の縦横比が**旧既定（300/480 = 5:8）と
+1%以内で一致するときだけ**、高さを保って幅を新しい既定の比へ直す
+（`PointRect.WithAspectKeepingHeight`）。それ以外の矩形（モニタに収めるクランプで比が
+変わったものを含む）はそのまま触らない。
+
+★ **「既定と違う比＝旧既定」と決めつけると壊れる。** 最初の実装は縦横比が今の既定と違う
+だけで移行対象にしていて、既存の `WindowPlacementTests` を6件壊した——モニタの外へ
+はみ出した矩形をクランプで収めた結果として非既定の比になっている場合が正当にあり、
+「比が既定と違う」は「旧既定で保存された」ことの証明にならない。**旧既定の比そのものと
+一致するかだけを見る**のが手当て（`WindowPlacement.LegacyDefaultAspect`）。そうしないと、
+クランプで比が変わった矩形を毎起動で「移行」と誤認して広げ直すことになる。
+
+★ **`window.json` の `version` はここでは上げない。** `WindowStateJson` は未知の `version`
+を拒否して既定配置へ落とすので、上げた瞬間にユーザーの位置そのものが失われる。矩形の
+形だけ静かに直すのがこの移行の役目。
+
+実機（2026-09-04）: 保存されていた `129,-61 450x720`（旧既定 5:8 の比）は
+`-6,-61 720x720` へ移行された（`Player.log`: `ウィンドウ: Restored … rect=-6,-61 720x720
+保存=129,-61 450x720`）。既定サイズでの起動では `フレーミング: 540x540 aspect=1.000 …
+支配軸=垂直` で、腕を上げる `WIN00` の敬礼モーションでも頭上に約10%の余白が残った
+（`Hub_laugh01`、`Hub_Idle01` も問題なし）。
+
 ### ★ Unity 6 の URP で透過しないのは `Supports HDR` のせい
 
 `Is Transparent` を入れても**背景が黒いまま**になる。枠なしウィンドウにはなるので、
@@ -967,6 +1041,36 @@ prefab にもシーンにも override が無く、`SetWindowSize` を呼ぶの�
 > （[kirurobo/UniWindowController#92](https://github.com/kirurobo/UniWindowController/issues/92)）。
 > HDR との相性なので、**Unity や URP のバージョンが上がったら再確認すること。**
 > 「効いた組み合わせ」を仕様として扱わない。
+
+### アンチエイリアス — 今まで何も効いていなかった（#88）
+
+**#88 まで、ジャギーを抑える設定は何ひとつ有効になっていなかった。** `PC_RPAsset.asset` は
+`m_MSAA: 1`（オフ）、カメラに `UniversalAdditionalCameraData` を明示的に持たせていないので
+URP の既定（`antialiasing = None`、`renderPostProcessing = false`）のまま、
+`m_RenderScale` も等倍の `1`。
+
+★ **`QualitySettings.antiAliasing` を上げても効かない。** Unity 6 の URP では**この値は
+無視される**——**権威は URP Asset の `m_MSAA`**（Inspector の `Anti Aliasing (MSAA)`）。
+`PC_RPAsset.asset` に `m_MSAA: 4` と書いて 4x MSAA を有効にした。
+
+★ **MSAA はポストプロセスのスタックを通らないので、透過の罠（→ 上の「Unity 6 の URP で
+透過しないのは `Supports HDR` のせい」）に触れない。** `Supports HDR` はオフのまま、カメラの
+Post Processing も無効のまま——**カメラの post-processing を有効にした瞬間に透過が壊れる**
+という既存の制約はそのまま活きている。実機（macOS）で透過が保たれたまま輪郭が目に見えて
+滑らかになり、Metal のバリデーションエラーも出ないことを確認した。
+
+★ **もし MSAA が将来どこかで透過を壊したら、次に試す順は** `m_RenderScale: 1.5`
+（スーパーサンプリング）→ `UniversalAdditionalCameraData` 経由の FXAA（最後の手段。
+ポストプロセス扱いになるぶん透過との相性リスクが上がる）。
+
+`Mobile_RPAsset`（Android / XR）は触っていない（→ #25）。
+
+★ **効果が実機で目立ったのは、常用ディスプレイが 4K パネルの等倍（1x）運用のため。**
+`3840x2130 pt = px` で1ピクセル=1ポイントなので、Retina（2x）でスケーリングされる場合より
+ジャギーがそのまま見える。
+
+**CPU コストは上の「#88 時点の実測」に含めてある**——MSAA 4x は 30fps で **+2.2pt**、
+60fps で **+4.8pt**。
 
 ### ★ `EventSystem` があってもポインタイベントは配送されない
 
@@ -2581,6 +2685,14 @@ cc-mascot の「キャラクターサイズ」はコンテナ（ウィンドウ�
 （未リリースなので移行は不要）。**その1キーだけ黙って捨てる**分岐は入れない —— 例外を作ると、
 次に消すキーでも同じ判断を迫られる。
 
+★ **`headroom` は「大きさ」の権威ではなく、縦方向の余白の調整つまみ。** 腕はフレーミングの
+箱から除外されている（→ 上の「T ポーズの腕をフレーミングの箱に入れない」節）ので、敬礼や
+万歳のように腕を上げる VRMA が入っても箱そのものは動かない。上に伸びる動きを窓からはみ
+出させずに収める余地を持っているのは `VrmStage.Headroom` の値だけ。#88 で既定を 1.1 → 1.25
+に上げたのはこのためで、「『大きさ』の権威は `window.json` ひとつ」という上の原則とは
+矛盾しない——**キャラそのものを大きく／小さくするのは窓、腕の可動域に余白を残すのは
+`headroom`** と役割が分かれている。
+
 ### ★ `preferredMaxLayoutWidth` を固定値にしない
 
 折り返す複数行ラベルには `preferredMaxLayoutWidth` が要る（無いと Auto Layout は
@@ -3336,6 +3448,52 @@ cd apps/chatter-mascot
 
 耳で確認するときは `cd core && npm run start:server`（合成エンジンはサーバーが起こす）。
 
+### ★ VRMA に無い指ボーンは identity（T ポーズ）になる — Retarget はモデル側の全ボーンを回す
+
+**症状**: 腕は VRMA どおり下りているのに、指だけ真っ直ぐ伸びきって見える。同梱
+`idle_loop.vrma`（22 ボーン、指を持たない）を当てたときに出る。
+
+**原因**: `Vrm10Runtime.Process()` は毎フレーム
+`Vrm10Retarget.Retarget(VrmAnimation.ControlRig, (ControlRig, ControlRig))` を呼ぶ。
+`Retarget` が走査するのは**モデル側**（`sink.TPose.EnumerateBoneParentPairs()`。指30本を
+含む全ボーン）で、各ボーンについて**VRMA 側**の
+`INormalizedPoseProvider.GetNormalizedLocalRotation` に回転を問い合わせる。ファイルに無い
+ボーンに対して UniVRM の既定実装（`InitRotationPoseProvider`）が返すのは
+`Quaternion.identity`——**正規化空間での identity は VRM 1.0 の T ポーズ**、つまり指が
+真っ直ぐ伸びた状態そのもの。「アニメーションが指を動かしていない」のではなく、**問い合わせ
+に答えが無いので T ポーズの値がそのまま出てくる**、という仕組みの結果。
+
+★ **`LateUpdate` で直接 ControlRig に書いてはいけない。** `Retarget` は
+`Vrm10Instance.LateUpdate`（実行順 11000）の内部で ControlRig を毎フレーム上書きする
+（`VrmPoseAccent` が実行順 11005 に置いてある理由と同じ罠）。書いてもその場で消される。
+
+**手当て**: `LateUpdate` の後ろで上書きするのではなく、**Retarget が問い合わせる相手そのもの**
+を差し替える。`Vrm10AnimationInstance.ControlRig` に public setter があるので、
+`INormalizedPoseProvider` をラップする `FingerFallbackPoseProvider`
+（`Vrm/FingerFallbackPoseProvider.cs`）を作り、`ITPoseProvider.GetWorldTransform(bone)`
+が `HasValue == false`（＝ファイルにこのボーンが無い）を返すときだけ既定の丸めに差し替える
+——**これは `Retarget` 自身が「ファイルにあるかどうか」を判定するのと同じ述語**なので、
+判定がズレる余地が無い。挿入点は `VrmIdleAnimation.Adopt` の
+`target.Runtime.VrmAnimation = vrma` の**手前**と、`VrmCharacter.UpdateProceduralIdle` の
+VRMA 不在時のフォールバック経路の両方。52 ボーンの VRoid クリップ（#70 の素材）は指を
+自前で持つので `HasValue == true` となり、差し替えは 0 本——**ファイル側の指があるのに
+上書きして原作アニメーションを壊す**ことはない。ログ:
+`[Mascot] VRMA に無い指ボーン 30 本を既定の丸めで補います`（VRoid クリップでは `0 本`）。
+
+角度は人差し指〜小指で第1関節 25° / 第2関節 30° / 第3関節 20°、Z 軸まわり、**右手が負・
+左手が正**（`IdlePose.Evaluate` の腕と同じ符号の約束）。符号は実機のスクリーンショットで
+確認済み——指は掌側に丸まる。**親指はいまのところ 0°**（他の4指と可動軸の向きが違い、
+同じ Z 軸の回転をそのまま当てると不自然に曲がりかねないため。実機で軸を確定できるまで
+「伸びたまま」にとどめてある。有効化は #88 の後続に委ねる）。
+
+★ **#70 のクロスフェードに引き継ぐ宿題。** 複数の VRMA を混ぜるとき、混ぜる**各ソース**を
+このラッパーで包んでから合成すること。片方だけ指を持つクリップ同士をそのまま混ぜると、
+「指が無い側は identity へ補間される」問題が形を変えて戻ってくる。
+
+`FingerPoseTests`（8件）が純粋部分（`FingerPose.cs`）を確認する。`ChatterMascot.Tests` の
+asmdef からは `ChatterMascot.Runtime` しか見えないため、値のテーブル（`FingerPose.cs`）と
+差し替えの仕組み（`FingerFallbackPoseProvider.cs`、Vrm レイヤー）を分けてある。
+
 ### VRMA の書き出し（VRoid Studio の Humanoid クリップから、#70）
 
 #70 の感情モーションと待機の小ネタは **VRoid Studio 2.14.0 の撮影モードのアセット 13 本**を `.vrma` にして使う。
@@ -3364,8 +3522,11 @@ cd apps/chatter-mascot
   （`m_FloatCurves` に `RootT` / `RootQ` / `Spine Front-Back` …）のまま出るので、Unity に入れれば
   `AnimationClip.humanMotion == true` になり、**muscle → ボーン回転は Avatar が解く**。自前で解釈しない
 - 13 本すべてに指の muscle（40 本）が入っていた。書き出した `.vrma` は humanBones **52**
-  （目・顎を除いた全部）で、同梱 `idle_loop.vrma` の 22 本より多い。**指が真っ直ぐ伸びる問題は
-  素材側で解決**した（ControlRig 側の手当ては要らなかった）
+  （目・顎を除いた全部）で、同梱 `idle_loop.vrma` の 22 本より多い。★ **「指が真っ直ぐ伸びる
+  問題は素材側で解決した（ControlRig 側の手当ては要らなかった）」は、この 13 本の VRoid
+  クリップに限った話だった。** 同梱 `idle_loop.vrma`（22 本、指を持たない）や、ユーザーが
+  置く 22 本構成の `.vrma` は今も ControlRig 側の手当てが要る——詳しくは上の
+  「VRMA に無い指ボーンは identity（T ポーズ）になる」節（#88）
 
 **`VrmAnimationExporter` を読んで分かった罠**（`VrmaExport.cs` の順序はこれで決まっている）:
 

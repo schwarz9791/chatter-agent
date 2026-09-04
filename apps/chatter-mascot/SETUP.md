@@ -88,8 +88,8 @@ UniWindowController の Inspector にある「Player Settings を直す」ボタ
 | `Default Is Full Screen` | **オフ** | 同上 |
 | `Allow Fullscreen Switch` | **オフ** | 同上 |
 | **`Default Is Native Resolution`** | **オフ** | ★ **オンだと下2行がそもそも効かない**（Inspector でもグレーアウトする） |
-| `Default Screen Width` | **300** | ★ 下記 |
-| `Default Screen Height` | **480** | 同上 |
+| `Default Screen Width` | **540** | ★ 下記 |
+| `Default Screen Height` | **540** | 同上 |
 | `Run In Background` | **オン** | 常駐して背面でも喋る。フォーカスを失って止まると発話が止まる |
 | `Use Mac App Store Validation` | オフ | 透過をブロックしうる |
 | `Mac App Sandbox` | オフ | 同上（Unity のビルドは entitlements を付けないので既定でオフ） |
@@ -297,6 +297,11 @@ Editor が UniVRM の型を直接使うなら Editor の asmdef にも `VRM10` �
 - ★ **5 の `animations/*.vrma` は非再帰。** `animations/<category>/*.vrma`（`idle` / `happy` / `angry` /
   `sad` / `relaxed` / `surprised`。#70 の感情モーションと小ネタの置き場）は待機ループの候補に**混ざらない**。
   素材は VRoid Studio 由来で再配布できないので同梱せず、ここにだけ置く（作り方は `docs/mascot.md`「VRMA の書き出し」）
+- ★★ **`animations/` の直下に `.vrma` を1本置くと、それが待機ループ（同梱 `idle_loop.vrma`）の
+  代わりに使われる。** 上の表の「5」の実体はこれ——**`<category>` サブディレクトリではなく
+  `animations/` そのものの直下**でないと辞書順探索に入らない。カテゴリ別に置いた素材
+  （`animations/idle/*.vrma` など）は #70 の感情モーション用の置き場で、待機ループの候補には
+  ならない
 - ★ **Android には共有ファイルシステムが無い**ので 3 と 5 は落ちる
 - ★ **`.app` を Finder から起動すると環境変数は空**（シェルを継承しない）。2 に頼らない
 - ★ **`~/Downloads` / `~/Desktop` / `~/Documents` は macOS の TCC で止められる。**
@@ -431,12 +436,23 @@ osascript -e 'tell application "System Events" to tell process "Chatter Mascot" 
     "cursorGaze": true,
     "blink": true,
     "vrm": ""
+  },
+  "display": {
+    "frameRate": 30
   }
 }
 ```
 
+★ **`display.frameRate` は #88 で追加した。** `30` か `60` のみ（既定 `30`）。
+`Application.targetFrameRate` の上限を設定パネルの「モーション」→「フレームレート」から
+変えられる。**その2値以外は既定へフォールバックする**（クランプではない）。デスクトップ
+だけの項目——Android / XR には設定パネルが無いので、この JSON の既定がそのまま使われる
+（→ [#25](https://github.com/schwarz9791/chatter-agent/issues/25)）。60 fps の CPU コストは
+[`../../docs/mascot.md`](../../docs/mascot.md) の「#88 時点の実測」に実測がある。
+
 ★★ **「大きさ」もここに無い。** ウィンドウの大きさは `window.json` が持っていて、
-スライダーはその写しでしかない（**現在の高さ ÷ 480** が倍率）。両方に持つと権威が2つになり、
+スライダーはその写しでしかない（**現在の高さ ÷ 540** が倍率。既定の高さは #88 で
+480 → 540 に変わった）。両方に持つと権威が2つになり、
 ユーザーが窓を直接リサイズしたときにどちらが勝つのか説明できなくなる
 （→ [`../../docs/mascot.md`](../../docs/mascot.md)）。
 

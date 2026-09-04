@@ -125,8 +125,16 @@ namespace ChatterMascot.Vrm
         private static readonly HumanBodyBones[] _fingerBones = BuildFingerBones();
         private static readonly Dictionary<HumanBodyBones, BoneInfo> _boneInfo = BuildBoneInfo();
 
-        /// <summary>指ボーン30本の全列挙（親指〜小指 × Proximal/Intermediate/Distal × 左右）</summary>
-        public static IEnumerable<HumanBodyBones> FingerBones => _fingerBones;
+        /// <summary>
+        /// 指ボーン30本の全列挙（親指〜小指 × Proximal/Intermediate/Distal × 左右）。
+        ///
+        /// ★ <c>IEnumerable</c> ではなく <c>IReadOnlyList</c>。<c>IEnumerable</c> への <c>foreach</c>
+        ///   はループのたびに列挙子をボックス化する——ここは <c>VrmCharacter.UpdateProceduralIdle</c>
+        ///   のような毎フレーム経路から呼ばれるので無視できない。呼び出し側は <c>for (var i = 0; i
+        ///   &lt; bones.Count; i++)</c> のようにインデックスで回すこと（<c>IReadOnlyList</c> への
+        ///   <c>foreach</c> も、配列と違って列挙子はインターフェース経由でありボックス化される）。
+        /// </summary>
+        public static IReadOnlyList<HumanBodyBones> FingerBones => _fingerBones;
 
         /// <summary>指ボーン（30本のいずれか）かどうか</summary>
         public static bool IsFinger(HumanBodyBones bone) => _boneInfo.ContainsKey(bone);

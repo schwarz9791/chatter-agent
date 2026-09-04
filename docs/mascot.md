@@ -3480,17 +3480,34 @@ VRMA 不在時のフォールバック経路の両方。52 ボーンの VRoid �
 上書きして原作アニメーションを壊す**ことはない。ログ:
 `[Mascot] VRMA に無い指ボーン 30 本を既定の丸めで補います`（VRoid クリップでは `0 本`）。
 
-角度は人差し指〜小指で第1関節 25° / 第2関節 30° / 第3関節 20°、Z 軸まわり、**右手が負・
-左手が正**（`IdlePose.Evaluate` の腕と同じ符号の約束）。符号は実機のスクリーンショットで
-確認済み——指は掌側に丸まる。**親指はいまのところ 0°**（他の4指と可動軸の向きが違い、
-同じ Z 軸の回転をそのまま当てると不自然に曲がりかねないため。実機で軸を確定できるまで
-「伸びたまま」にとどめてある。有効化は #88 の後続に委ねる）。
+角度は `FingerPose` の定数（`ProximalDegrees` / `IntermediateDegrees` / `DistalDegrees`）が
+権威で、**ここには数字を書かない**（実機で調整するたびに文書側が古くなる。この PR の中でも
+一度ずれた）。Z 軸まわり、**右手が負・左手が正**（`IdlePose.Evaluate` の腕と同じ符号の約束）。
+符号は実機のスクリーンショットで確認済み——指は掌側に丸まる。**親指は基準角 0**
+（`ThumbProximalDegrees` 等。他の4指と可動軸の向きが違い、同じ Z 軸の回転をそのまま当てると
+不自然に曲がりかねないため。実機で軸を確定できるまで「伸びたまま」にとどめてある）。
+
+**補った指は静止せず、呼吸と同じ桁の周期で微動する**（`FingerPose.RelaxedCurl(bone, now)`）。
+基準の丸め角に `SwayDegrees` の sin を乗せ、周期は `SwaySeconds`、指ごとに
+`SwayLagPerFingerRadians` × 指番号（人差し指 0 〜 小指 3）だけ位相をずらして一枚板に見せない。
+
+- ★ **周期は `IdleParams.Default` の呼吸と同じ値だが、意図して独立した定数。** VRMA の待機
+  ループは外部データで内部の周期を読めないので、合わせられるのは「桁が近い」まで。
+  **位相を合わせることは目標にしていない**
+- ★ **体の姿勢（`IdlePoseSample`）とは結合しない、時間だけの揺れ。** 次に触る人が
+  `sample` に混ぜたくなる箇所だが、VRMA 経路には `sample` が存在しない（VRMA が体を
+  動かしている）ので、両経路で同じ関数を使える形は時間ベースしか無い
+- ★ **基準角 0 のボーンは揺れない。** 揺れは「既にある丸めを揺らす」もので、揺れが丸めを
+  作ってはいけない。親指の定数を 0 以外にすれば、それだけで自動的に揺れ始める
+- 時計は `Time.realtimeSinceStartupAsDouble` を `FingerFallbackPoseProvider` のコンストラクタに
+  注入（`Wrap` が決める。`VrmCharacter.LateUpdate` と同じ時計）。位相は `Oscillator.Phase`
+  で周期に畳んでから float にする（常駐して日単位で `now` が伸びても止まらない）
 
 ★ **#70 のクロスフェードに引き継ぐ宿題。** 複数の VRMA を混ぜるとき、混ぜる**各ソース**を
 このラッパーで包んでから合成すること。片方だけ指を持つクリップ同士をそのまま混ぜると、
 「指が無い側は identity へ補間される」問題が形を変えて戻ってくる。
 
-`FingerPoseTests`（8件）が純粋部分（`FingerPose.cs`）を確認する。`ChatterMascot.Tests` の
+`FingerPoseTests` が純粋部分（`FingerPose.cs`）を確認する。`ChatterMascot.Tests` の
 asmdef からは `ChatterMascot.Runtime` しか見えないため、値のテーブル（`FingerPose.cs`）と
 差し替えの仕組み（`FingerFallbackPoseProvider.cs`、Vrm レイヤー）を分けてある。
 

@@ -43,9 +43,11 @@ namespace ChatterMascot.Desktop
         /// ★★ <b>1:1 は #70 が増やした、腕を広げる・上げるモーションのため</b>（#88）。
         ///   5:8 の窓では横に逃げる余地が無く、腕が窓からはみ出していた。フレーミングは
         ///   垂直 FOV が支配する（<see cref="ChatterMascot.Vrm.VrmFraming"/>）ので、
-        ///   1:1 にしても同じカメラ距離のまま<b>横方向の余裕だけ 1.6 倍</b>になる。
-        ///   <b>キャラの画面上の高さは変わらない</b>ように、<c>VrmStage.headroom</c> の
-        ///   既定も 1.1 → 1.25 にして揃えてある（540 / 1.25 ≈ 480 / 1.1）。
+        ///   1:1 にしても同じカメラ距離のまま<b>横方向の余裕だけ増える</b>。
+        ///   縦は <c>VrmStage.headroom</c> の既定を上げて、腕を上げる・跳ぶモーションを
+        ///   余裕を持って収める。<b>既に大きさを変えていた窓は移行で高さが保たれる</b>
+        ///   （<c>WindowPlacement</c>）ので、そこでは <c>headroom</c> のぶんキャラが少し
+        ///   小さく収まる。これは意図どおり——「以前と同じ大きさ」より「見切れない」を取った。
         /// </summary>
         public const float DefaultWidthPoints = 540f;
         public const float DefaultHeightPoints = 540f;

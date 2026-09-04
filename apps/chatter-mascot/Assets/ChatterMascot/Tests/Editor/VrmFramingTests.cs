@@ -129,6 +129,23 @@ namespace ChatterMascot.Tests
             Assert.That(VrmFraming.Solve(Vita(), 180f, 0.625f, 1f, out _), Is.EqualTo(0f));
         }
 
+        /// <summary>
+        /// ★ <b>出荷済みの正方形ウィンドウ（#88）でもなお垂直側が支配することを固定する。</b>
+        ///   アスペクト 1:1・ヘッドルーム 1.25 は #88 で決まった実際の既定値。この設定は
+        ///   <c>PortraitWindowIsDominatedByHeight</c>（意図的に細い縦長を渡す検査）とは別で、
+        ///   出荷値そのものを直に検査する。もし将来 <c>VrmBounds.IsFramingBone</c> が腕を
+        ///   フレーミングの箱に戻すと、T ポーズの幅で水平側が支配するように反転し、
+        ///   このテストが落ちて気づける。
+        /// </summary>
+        [Test]
+        public void ShippedSquareWindowIsStillDominatedByHeight()
+        {
+            var distance = VrmFraming.Solve(Vita(), Fov, 1f, 1.25f, out var axis);
+
+            Assert.That(axis, Is.EqualTo(FramingAxis.Vertical));
+            Assert.That(distance, Is.GreaterThan(0f));
+        }
+
         /// <summary>カメラは回転なしで +Z を見る。モデルの中心の手前に置く。</summary>
         [Test]
         public void CameraSitsInFrontOfTheModelCentre()

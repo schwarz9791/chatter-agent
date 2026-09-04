@@ -55,8 +55,12 @@ namespace ChatterMascot.Vrm
             _clock = clock;
             _supplied = new HashSet<HumanBodyBones>();
 
-            foreach (var bone in FingerPose.FingerBones)
+            // ★ IReadOnlyList をインデックスで回す（FingerPose.FingerBones のドキュメント参照）。
+            //   ここは1回きり（コンストラクタ）だが、呼び方の形は毎フレーム経路と揃えておく。
+            var fingerBones = FingerPose.FingerBones;
+            for (var i = 0; i < fingerBones.Count; i++)
             {
+                var bone = fingerBones[i];
                 if (tpose.GetWorldTransform(bone).HasValue) continue; // ファイルがこのボーンを持っている
                 _supplied.Add(bone);
             }

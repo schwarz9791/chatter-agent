@@ -161,11 +161,13 @@ namespace ChatterMascot.Settings
             items.Add(SettingSpec.Bool(SettingKeys.IdleMotion, "待機モーション", settings.IdleMotion));
             items.Add(SettingSpec.Bool(SettingKeys.CursorGaze, "カーソルを目で追う", settings.CursorGaze));
             items.Add(SettingSpec.Bool(SettingKeys.Blink, "まばたき", settings.Blink));
+            // ★ 倍率を UI 文言に持ち込まない。マシン・MSAA・電源状態で変わる数値で、
+            //   同じ PR の実測とすら食い違っていた。数字は docs/mascot.md 側で持つ。
             items.Add(SettingSpec.Choice(
                 SettingKeys.FrameRate, "フレームレート",
                 settings.FrameRate.ToString(CultureInfo.InvariantCulture),
                 FrameRateChoices(),
-                note: "60 fps は CPU を約 2 倍使います"));
+                note: "60 fps は CPU 使用率が上がります"));
 
             // ★ **「発話モーション」「クール系 / かわいい系」は出さない。** cc-mascot には
             //   あるが、chatter-agent に対応する実装が無い（#70 が未実装）。

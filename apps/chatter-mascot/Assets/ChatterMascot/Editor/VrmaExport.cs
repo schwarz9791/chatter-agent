@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using ChatterMascot.Vrm;
 using UniGLTF;
 using UnityEditor;
 using UnityEngine;
@@ -156,11 +157,12 @@ namespace ChatterMascot.EditorTools
             if (!clip.humanMotion) throw new InvalidOperationException("Humanoid クリップではありません（muscle カーブが無い）");
 
             Vrm10Instance instance = null;
+            GameObject root = null;
             var animationModeStarted = false;
             try
             {
                 instance = LoadRig();
-                var root = instance.gameObject;
+                root = instance.gameObject;
                 var animator = root.GetComponent<Animator>();
                 if (animator == null || animator.avatar == null || !animator.avatar.isHuman)
                 {
@@ -245,7 +247,10 @@ namespace ChatterMascot.EditorTools
                         written.Add(path);
                     }
 
-                    var movedFingers = moved.Count(IsFingerBone);
+                    // ★ 「指ボーンかどうか」の判定は FingerPose.IsFinger 1本だけを使う。ここに
+                    //   別実装（名前文字列の Contains 判定）を持つと、指の定義を変えたときに
+                    //   片側だけ直し忘れて FingerFallbackPoseProvider 側とズレる余地ができる。
+                    var movedFingers = moved.Count(FingerPose.IsFinger);
                     Debug.Log($"[VrmaExport] {clipName}: {frames} frames ({clip.length:F3}s @ {clip.frameRate}fps), " +
                               $"{bones} bones ({moved.Count} moved, fingers {movedFingers}), {bytes.Length} bytes → {string.Join(", ", written)}");
                 }
@@ -253,7 +258,13 @@ namespace ChatterMascot.EditorTools
             finally
             {
                 if (animationModeStarted) AnimationMode.StopAnimationMode();
-                if (instance != null) UnityEngine.Object.DestroyImmediate(instance.gameObject);
+                // ★ ここは instance ではなく root で判定する。StripToSkeleton が Vrm10Instance を
+                //   DestroyImmediate すると、instance（コンポーネント参照）は Unity の疑似 null に
+                //   落ちて instance != null が常に false になり、以後は instance.gameObject にも
+                //   触れない——結果として GameObject が解放されず、Batch() が回すクリップの数
+                //   （13本）ぶん、mesh / material / texture を抱えた階層がエディタのシーンに
+                //   溜まり続けていた。root は GameObject そのものへの参照なので影響を受けない。
+                if (root != null) UnityEngine.Object.DestroyImmediate(root);
             }
         }
 
@@ -363,13 +374,6 @@ namespace ChatterMascot.EditorTools
                 bone = parentBone;
             }
             return null;
-        }
-
-        private static bool IsFingerBone(HumanBodyBones bone)
-        {
-            var name = bone.ToString();
-            return name.Contains("Thumb") || name.Contains("Index") || name.Contains("Middle")
-                || name.Contains("Ring") || name.Contains("Little");
         }
 
         /// <summary>先頭の <c>~/</c> だけ展開する（Unity は展開しない）。</summary>

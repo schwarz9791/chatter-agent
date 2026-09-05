@@ -71,7 +71,6 @@ crashlytics-build.properties
 !/[Aa]ssets/[Ss]treamingAssets/*.vrm
 !/[Aa]ssets/[Ss]treamingAssets/*.vrma
 
-# #70 の変換スクリプト（Editor/VrmaExport.cs）が .anim を一時的に置く場所。
-# ★ スクリプトは終了時に自分で消すが、途中で落ちたときの保険。VRoid Studio 由来なので絶対にコミットしない
-/[Aa]ssets/ChatterMascot/Editor/VRoidClips/
-/[Aa]ssets/ChatterMascot/Editor/VRoidClips.meta
+# VRoid Studio 由来の .anim を Assets/ 配下に置いても絶対にコミットしない（保険。抽出は private の vroid-motion-exporter で行う）
+/[Aa]ssets/**/*.anim
+/[Aa]ssets/**/*.anim.meta

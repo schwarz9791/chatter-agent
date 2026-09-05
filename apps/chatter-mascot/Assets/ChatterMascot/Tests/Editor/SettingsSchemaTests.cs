@@ -1,7 +1,9 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using ChatterMascot.Settings;
 using ChatterMascot.Ui;
+using ChatterMascot.Vrm;
 using NUnit.Framework;
 
 namespace ChatterMascot.Tests
@@ -137,6 +139,22 @@ namespace ChatterMascot.Tests
 
             Assert.That(spec.Enabled, Is.False);
             Assert.That(spec.Note, Does.Contain("CHATTER_AGENT_TTS_SPEAKER_ID"));
+        }
+
+        /// <summary>
+        /// ★ 表示と「再生」が同じ解決を通ること。一度も選び直していない（空）なら先頭、
+        ///   一覧に無い id なら先頭、一覧が無ければ空文字（実機で「選べるモーションがありません」を踏んだ）。
+        /// </summary>
+        [Test]
+        public void EffectiveMotionPreviewFallsBackToTheFirstChoice()
+        {
+            var choices = new[] { new SettingChoice("idle/a.vrma", "idle/a.vrma"), new SettingChoice("sad/b.vrma", "sad/b.vrma") };
+
+            Assert.That(SettingsSchema.EffectiveMotionPreview(choices, ""), Is.EqualTo("idle/a.vrma"));
+            Assert.That(SettingsSchema.EffectiveMotionPreview(choices, "sad/b.vrma"), Is.EqualTo("sad/b.vrma"));
+            Assert.That(SettingsSchema.EffectiveMotionPreview(choices, "gone/x.vrma"), Is.EqualTo("idle/a.vrma"));
+            Assert.That(SettingsSchema.EffectiveMotionPreview(null, "sad/b.vrma"), Is.EqualTo(""));
+            Assert.That(SettingsSchema.EffectiveMotionPreview(new SettingChoice[0], ""), Is.EqualTo(""));
         }
 
         /// <summary>
@@ -355,6 +373,153 @@ namespace ChatterMascot.Tests
             var spec = Find(SettingsSchema.Build(context), SettingKeys.FrameRate);
 
             Assert.That(spec.Value, Is.EqualTo("60"));
+        }
+
+        // ── #70 派生: モーションを確認 ─────────────────────────────
+
+        private static readonly MotionClip Idle01 =
+            new MotionClip(MotionCategory.Idle, "/x/idle/Hub_Idle01.vrma", "Hub_Idle01.vrma", MotionStyle.Natural);
+
+        private static readonly MotionClip Idle02 =
+            new MotionClip(MotionCategory.Idle, "/x/idle/Hub_Idle02.vrma", "Hub_Idle02.vrma", MotionStyle.Natural);
+
+        private static readonly MotionClip Wave =
+            new MotionClip(MotionCategory.Happy, "/x/happy/Wave.vrma", "Wave.vrma", MotionStyle.Natural);
+
+        /// <summary>★ 置き場所は「待機モーション」の項目のすぐ後ろ</summary>
+        [Test]
+        public void PutsMotionPreviewRightAfterIdleMotion()
+        {
+            var context = Context();
+            context.MotionClips = SettingsSchema.MotionPreviewChoices(new[] { Idle01 });
+
+            var items = SettingsSchema.Build(context).ToList();
+            var idleIndex = items.FindIndex(s => s.Key == SettingKeys.IdleMotion);
+
+            Assert.That(items[idleIndex + 1].Key, Is.EqualTo(SettingKeys.MotionPreview));
+            Assert.That(items[idleIndex + 1].Kind, Is.EqualTo(SettingKind.Choice));
+            Assert.That(items[idleIndex + 2].Key, Is.EqualTo(SettingKeys.MotionPreviewPlay));
+            Assert.That(items[idleIndex + 2].Kind, Is.EqualTo(SettingKind.Button));
+            Assert.That(items[idleIndex + 2].Label, Is.EqualTo("再生"));
+        }
+
+        /// <summary>
+        /// ★ id もラベルも <c>"&lt;カテゴリ&gt;/&lt;ファイル名&gt;"</c>。ファイル名と実際の
+        ///   モーションが一致しているかを確かめるのがこの項目の目的なので、見せる文言を
+        ///   作り込まない。
+        /// ★ 並びはカテゴリ順・ファイル名順（呼び出し側——<c>VrmCharacter.MotionClips</c>——が
+        ///   <c>MotionCategories.All</c> の順に連結する。ここではその連結済みの一覧を渡すだけ）。
+        /// </summary>
+        [Test]
+        public void ConvertsMotionClipsToChoicesInCategoryAndFileOrder()
+        {
+            var choices = SettingsSchema.MotionPreviewChoices(new[] { Idle01, Idle02, Wave });
+
+            Assert.That(choices.Count, Is.EqualTo(3));
+            Assert.That(choices[0].Value, Is.EqualTo("idle/Hub_Idle01.vrma"));
+            Assert.That(choices[0].Label, Is.EqualTo("idle/Hub_Idle01.vrma"));
+            Assert.That(choices[1].Value, Is.EqualTo("idle/Hub_Idle02.vrma"));
+            Assert.That(choices[2].Value, Is.EqualTo("happy/Wave.vrma"));
+        }
+
+        /// <summary>
+        /// ★★ <c>null</c> を <c>null</c> のまま返すこと。「読み込み中」（一覧が無い）と
+        ///   「読み込み済みだが1本も無い」を区別するための契約（→ <c>SettingsContext.MotionClips</c>）。
+        /// </summary>
+        [Test]
+        public void MotionPreviewChoicesKeepsTheLoadingStateDistinctFromEmpty()
+        {
+            Assert.That(SettingsSchema.MotionPreviewChoices(null), Is.Null);
+            Assert.That(SettingsSchema.MotionPreviewChoices(Array.Empty<MotionClip>()), Is.Empty);
+        }
+
+        [Test]
+        public void DisablesMotionPreviewWhileTheManifestIsLoading()
+        {
+            var context = Context();
+            context.MotionClips = null; // 読み込み中
+
+            var choice = Find(SettingsSchema.Build(context), SettingKeys.MotionPreview);
+            var button = Find(SettingsSchema.Build(context), SettingKeys.MotionPreviewPlay);
+
+            Assert.That(choice.Enabled, Is.False);
+            Assert.That(choice.Note, Does.Contain("読み込み中"));
+            Assert.That(button.Enabled, Is.False);
+        }
+
+        [Test]
+        public void DisablesMotionPreviewWhenThereAreNoClips()
+        {
+            var context = Context();
+            context.MotionClips = Array.Empty<SettingChoice>();
+
+            var choice = Find(SettingsSchema.Build(context), SettingKeys.MotionPreview);
+            var button = Find(SettingsSchema.Build(context), SettingKeys.MotionPreviewPlay);
+
+            Assert.That(choice.Enabled, Is.False);
+            Assert.That(choice.Note, Does.Contain("animations"));
+            Assert.That(button.Enabled, Is.False);
+        }
+
+        /// <summary>★ VrmMotionPlayer.Play は待機モーション OFF の間は常に拒否するので、押しても何も起きない</summary>
+        [Test]
+        public void DisablesMotionPreviewWhenIdleMotionIsOff()
+        {
+            var context = Context();
+            context.MotionClips = SettingsSchema.MotionPreviewChoices(new[] { Idle01 });
+            context.Settings = MascotSettings.Defaults.WithIdleMotion(false);
+
+            var choice = Find(SettingsSchema.Build(context), SettingKeys.MotionPreview);
+            var button = Find(SettingsSchema.Build(context), SettingKeys.MotionPreviewPlay);
+
+            Assert.That(choice.Enabled, Is.False);
+            Assert.That(choice.Note, Does.Contain("待機モーション"));
+            Assert.That(button.Enabled, Is.False);
+        }
+
+        /// <summary>★ 選択済みの値が無ければ先頭を既定にする（→ ChoiceValuesExistInTheirChoices の不変条件）</summary>
+        [Test]
+        public void DefaultsMotionPreviewToTheFirstClip()
+        {
+            var context = Context();
+            context.MotionClips = SettingsSchema.MotionPreviewChoices(new[] { Idle01, Idle02 });
+
+            var choice = Find(SettingsSchema.Build(context), SettingKeys.MotionPreview);
+
+            Assert.That(choice.Value, Is.EqualTo("idle/Hub_Idle01.vrma"));
+        }
+
+        [Test]
+        public void KeepsTheChosenMotionPreview()
+        {
+            var context = Context();
+            context.MotionClips = SettingsSchema.MotionPreviewChoices(new[] { Idle01, Idle02 });
+            context.MotionPreview = "idle/Hub_Idle02.vrma";
+
+            var choice = Find(SettingsSchema.Build(context), SettingKeys.MotionPreview);
+
+            Assert.That(choice.Value, Is.EqualTo("idle/Hub_Idle02.vrma"));
+        }
+
+        /// <summary>
+        /// ★★ #70 レビュー #5。<c>MotionPlayResult</c> の6分岐すべてに文言が割り当たっていること
+        /// （<c>VrmMotionPlayer.Play</c> の拒否条件と1対1）。
+        /// </summary>
+        [Test]
+        public void MotionPlayNoticeCoversAllSixResults()
+        {
+            Assert.That(SettingsSchema.MotionPlayNotice(MotionPlayResult.Started, "happy/a.vrma"),
+                Is.EqualTo("happy/a.vrma を再生します"));
+            Assert.That(SettingsSchema.MotionPlayNotice(MotionPlayResult.Busy, "happy/a.vrma"),
+                Is.EqualTo("再生中です。終わってからもう一度押してください"));
+            Assert.That(SettingsSchema.MotionPlayNotice(MotionPlayResult.IdleNotLoaded, "happy/a.vrma"),
+                Is.EqualTo("待機モーションの VRMA が読めていないので再生できません"));
+            Assert.That(SettingsSchema.MotionPlayNotice(MotionPlayResult.IdleDisabled, "happy/a.vrma"),
+                Is.EqualTo("待機モーションが OFF です"));
+            Assert.That(SettingsSchema.MotionPlayNotice(MotionPlayResult.NotLoaded, "happy/a.vrma"),
+                Is.EqualTo("このモーションは読み込めていません"));
+            Assert.That(SettingsSchema.MotionPlayNotice(MotionPlayResult.Disposed, "happy/a.vrma"),
+                Is.EqualTo("キャラクターが無効です"));
         }
     }
 }

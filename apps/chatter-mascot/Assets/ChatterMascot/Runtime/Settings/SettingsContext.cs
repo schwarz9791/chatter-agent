@@ -37,6 +37,29 @@ namespace ChatterMascot.Settings
         /// </summary>
         public float WindowScale { get; set; } = 1f;
 
+        /// <summary>
+        /// 「モーションを確認」（#70 派生）の選択肢。<c>SettingsSchema.MotionPreviewChoices</c> が
+        /// <c>ISettingsHost.MotionClips</c> から変換したものをそのまま持つ（<see cref="Speakers"/> と
+        /// 同じ、他所が権威を持つ値の写し方）。
+        ///
+        /// ★★ <b>既定は <c>null</c>。空配列にしないこと。</b> <c>null</c> は「マニフェストが
+        ///   まだ読み込まれていない」、空配列は「読み込んだが1本も無い」——別の状態で、
+        ///   出す note も無効化の理由も違う（→ <c>SettingsSchema</c> の doc）。
+        /// </summary>
+        public IReadOnlyList<SettingChoice> MotionClips { get; set; }
+
+        /// <summary>
+        /// 「モーションを確認」で選択中の id（<c>"idle/Hub_Idle01.vrma"</c> の形）。
+        ///
+        /// ★★ <b>保存しない。</b> <c>settings.json</c> にも core の <c>config.json</c> にも
+        ///   書かない——ここは確認用の一時的な選択で、本番の再生（文の <c>emotion</c> から
+        ///   自動で選ぶ）とは別物。パネルを閉じたら忘れてよい（<c>SettingsPanelBridge</c> は
+        ///   <c>Close</c> / <c>NotifyClosed</c> で <c>_notices</c> は消すが、この値は
+        ///   <c>_context</c> ごと次に開くときまで残る——それでよい。値の行き先が3つある
+        ///   （→ このクラスの doc）のに、これは<b>そのどれでもない4つ目</b>）。
+        /// </summary>
+        public string MotionPreview { get; set; } = "";
+
         // ── core 側が権威を持つ値 ─────────────────────────────
 
         /// <summary>

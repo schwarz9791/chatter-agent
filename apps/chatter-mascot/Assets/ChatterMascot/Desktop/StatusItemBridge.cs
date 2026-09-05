@@ -1,6 +1,7 @@
 #if UNITY_STANDALONE_OSX || UNITY_EDITOR_OSX
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using ChatterMascot.Desktop.Native;
@@ -165,6 +166,7 @@ namespace ChatterMascot.Desktop
 
             private MascotRunner _runner;
             private Camera _camera;
+            private ChatterMascot.Vrm.VrmCharacter _character;
 
             /// <summary>
             /// 設定パネル（#76）。★ <b><see cref="SettingsStore"/> をここが持っているので、
@@ -634,13 +636,26 @@ namespace ChatterMascot.Desktop
                 //   ★ #76 の初版は `VrmStage.Headroom` という setter を生やしていたが、
                 //     大きさを窓で変えることにした時点で呼び出し元が無くなったので消した
                 //     （doc が存在しない `SettingsMapping.HeadroomFor` を指したまま残っていた）
-                var character = FindFirstObjectByType<ChatterMascot.Vrm.VrmCharacter>(FindObjectsInactive.Include);
+                var character = ResolveCharacter();
                 if (character != null)
                 {
                     character.IdleMotion = _settings.IdleMotion;
                     character.CursorGazeEnabled = _settings.CursorGaze;
                     character.BlinkEnabled = _settings.Blink;
                 }
+            }
+
+            /// <summary>
+            /// ★ <c>ResolveRunner</c> / <c>ResolveCamera</c> と同じ理由で1回引いたら使い回す。
+            ///   #70 派生の「モーションを確認」は <c>ISettingsHost.MotionClips</c> をパネルの
+            ///   <c>Tick</c>（毎フレーム）から見に行くので、ここを毎回シーン走査にすると
+            ///   常駐アプリの電力予算に効く。
+            /// </summary>
+            private ChatterMascot.Vrm.VrmCharacter ResolveCharacter()
+            {
+                if (_character != null) return _character;
+                _character = FindFirstObjectByType<ChatterMascot.Vrm.VrmCharacter>(FindObjectsInactive.Include);
+                return _character;
             }
 
             // ── ISettingsHost ────────────────────────────────────────
@@ -700,6 +715,23 @@ namespace ChatterMascot.Desktop
             bool ISettingsHost.WindowSizeSettling
             {
                 get { return WindowGeometry.IsApplying; }
+            }
+
+            IReadOnlyList<MotionClip> ISettingsHost.MotionClips
+            {
+                get
+                {
+                    var character = ResolveCharacter();
+                    return character != null ? character.MotionClips : null;
+                }
+            }
+
+            MotionPlayResult ISettingsHost.PlayMotion(MotionClip clip)
+            {
+                var character = ResolveCharacter();
+                // ★ #70 レビュー #5。character == null（VRM 未読込・シーン切り替え中）は
+                //   NotLoaded に倒す——PreviewMotion 自身の _motion == null 判定と同じ理由
+                return character != null ? character.PreviewMotion(clip) : MotionPlayResult.NotLoaded;
             }
 
             void ISettingsHost.Quit()

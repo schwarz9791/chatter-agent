@@ -208,6 +208,38 @@ namespace ChatterMascot.Tests
             Assert.That(set.Mouth(0.0, 0.01, 0), Is.EqualTo(0.5f).Within(1e-6f));
         }
 
+        // ---- order（#70。EmotionMotionTrigger の文の開始検出） ----
+
+        /// <summary>
+        /// ★★ <c>order</c> は文の開始検出の唯一の手がかり（<c>MascotRunner.TryGetSpeaking</c> の
+        ///   3引数版の doc 参照）。最後に始まったものの <c>Order</c> を返す。
+        /// </summary>
+        [Test]
+        public void TryGetFaceWithOrderReturnsTheLatestEntrysOrder()
+        {
+            var set = new SpeakingSet();
+            set.Begin(1, 1, Emotion.Happy, SpeechKind.Assistant, null, FrameMs, 0.0);
+            set.Begin(2, 1, Emotion.Sad, SpeechKind.Assistant, null, FrameMs, 1.0);
+
+            Emotion emotion;
+            SpeechKind kind;
+            long order;
+            Assert.That(set.TryGetFace(out emotion, out kind, out order), Is.True);
+            Assert.That(order, Is.EqualTo(1), "2件目（Sad）が最後に Begin されたので Order は1件目より大きい");
+        }
+
+        [Test]
+        public void TryGetFaceWithOrderFallsBackToMinusOneWhenNothingIsSpeaking()
+        {
+            var set = new SpeakingSet();
+
+            Emotion emotion;
+            SpeechKind kind;
+            long order;
+            Assert.That(set.TryGetFace(out emotion, out kind, out order), Is.False);
+            Assert.That(order, Is.EqualTo(-1));
+        }
+
         // ---- 後始末 ----
 
         [Test]

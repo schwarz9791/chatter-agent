@@ -3511,55 +3511,104 @@ VRMA 不在時のフォールバック経路の両方。52 ボーンの VRoid �
 asmdef からは `ChatterMascot.Runtime` しか見えないため、値のテーブル（`FingerPose.cs`）と
 差し替えの仕組み（`FingerFallbackPoseProvider.cs`、Vrm レイヤー）を分けてある。
 
-### VRMA の書き出し（VRoid Studio の Humanoid クリップから、#70）
+### 素材の `.vrma` は別リポジトリで作る（#70）
 
-#70 の感情モーションと待機の小ネタは **VRoid Studio 2.14.0 の撮影モードのアセット 13 本**を `.vrma` にして使う。
-VRoid Studio 由来なので**再配布できない** —— `.vrma` は同梱せず `~/.config/chatter-agent/animations/<category>/` にだけ置き、
-リポジトリに入れるのは変換スクリプト `Editor/VrmaExport.cs` だけ。
+#70 の感情モーションと待機の小ネタは **VRoid Studio 2.14.0 の AnimationClip** を `.vrma` にして使う。
+VRoid Studio 由来なので**再配布できない** —— `.vrma` は同梱せず `~/.config/chatter-agent/animations/<category>/` にだけ置く。
+抽出と変換の道具（AssetRipper の headless API を叩く `rip.py` と、Humanoid の `.anim` を `vita.vrm` に当てて
+サンプリングし `.vrma` に書く Editor スクリプト）は、抽出そのものがグレーゾーンなので
+**このリポジトリには置かず、private の `vroid-motion-exporter`** に切り出してある（#91）。
+手順・AssetRipper の API の癖・`VrmAnimationExporter` の罠・同名クリップの扱いは、すべてそちらの README にある。
 
-```bash
-# 1. AssetRipper 2.0.0（Web UI。CLI エクスポートは無い）を headless で起動して HTTP で叩く
-gh release download 2.0.0 -R AssetRipper/AssetRipper -p AssetRipper_mac_arm64.tar.xz && tar xf AssetRipper_mac_arm64.tar.xz
-chmod +x AssetRipper.GUI.Free && xattr -dr com.apple.quarantine .
-./AssetRipper.GUI.Free --headless --port 8765 &
-#    POST /LoadFolder  Path=/Applications/VRoidStudio.app/Contents/Resources/Data   （★ /Commands/ は付かない）
-#    GET  /Search/View?q=<クリップ名>  → 結果 HTML から asset の Path JSON を拾う
-#    GET  /Assets/Yaml?Path=<json>     → そのまま <クリップ名>.anim として保存（エクスポータと同じ YAML）
-# 2. Unity で vita.vrm に当ててサンプリングし .vrma に書く（Editor は閉じておく）
-cd apps/chatter-mascot
-./scripts/run.sh ChatterMascot.EditorTools.VrmaExport.Batch \
-  -vrmaClipDir ../../_workspace/vroid-clips -vrmaOutDir ~/.config/chatter-agent/animations   # [-vrmaClip Hub_Idle01]
-```
+このリポジトリ側に残る事実だけ書いておく:
 
-- **全体エクスポートは要らない。** `data.unity3d` は 1GB あるが、13 本は `sharedassets0.assets` から検索 API で1本ずつ拾える
-- ★ **`Hub_Idle01/03/04` は同名のクリップが 2 組ある**（pathID 181/183/184 と 186/188/189）。
-  撮影モードの「待機5/7/8」に対応するのは**長さが 11.7 / 10.8 / 18.2 秒の組（186/188/189）**。
-  最初に見つかった方を採ると別のモーションになる
-- AssetRipper は muscle をデコードしない。`.anim` は **Unity 標準の Humanoid クリップ**
-  （`m_FloatCurves` に `RootT` / `RootQ` / `Spine Front-Back` …）のまま出るので、Unity に入れれば
-  `AnimationClip.humanMotion == true` になり、**muscle → ボーン回転は Avatar が解く**。自前で解釈しない
-- 13 本すべてに指の muscle（40 本）が入っていた。書き出した `.vrma` は humanBones **52**
-  （目・顎を除いた全部）で、同梱 `idle_loop.vrma` の 22 本より多い。★ **「指が真っ直ぐ伸びる
-  問題は素材側で解決した（ControlRig 側の手当ては要らなかった）」は、この 13 本の VRoid
-  クリップに限った話だった。** 同梱 `idle_loop.vrma`（22 本、指を持たない）や、ユーザーが
-  置く 22 本構成の `.vrma` は今も ControlRig 側の手当てが要る——詳しくは上の
+- 変換した `.vrma` は humanBones **52**（目・顎を除いた全部。指の muscle 40 本を含む）で、同梱
+  `idle_loop.vrma` の 22 本より多い。★ **「指が真っ直ぐ伸びる問題は素材側で解決した（ControlRig 側の
+  手当ては要らなかった）」は VRoid クリップに限った話。** 同梱 `idle_loop.vrma`（22 本、指を持たない）や、
+  ユーザーが置く 22 本構成の `.vrma` は今も ControlRig 側の手当てが要る——詳しくは上の
   「VRMA に無い指ボーンは identity（T ポーズ）になる」節（#88）
+- 目・顎は書き出しから外してある。**視線は #59 の `LookAt` が持つ**ので、VRMA に目を書くと奪い合う。
+  素材を別の道具で作るときも同じ除外にすること（除外の一覧は exporter 側と
+  `FingerFallbackPoseProvider` の両方にあり、片側だけ直すとズレる）
+- importer 側は `clip.wrapMode = WrapMode.Loop` 固定（`AnimationImporterUtil.cs`）。`-vrma` で1本再生すると
+  ワンショットもループする。目視確認ではそれでよく、ワンショット再生（下の節）では `ClampForever` に上書きする
+- 同名のクリップは `__<pathID>` 付きで出てくる（`Hub_Idle01〜04` は 2 組ある）。設定パネルの
+  「モーションを確認」で見比べて、残す方だけカテゴリに置く
 
-**`VrmAnimationExporter` を読んで分かった罠**（`VrmaExport.cs` の順序はこれで決まっている）:
+### ワンショット再生とクロスフェード（#70）
+
+起動時に `animations/<category>/*.vrma`（探索順は `persistentDataPath` → `~/.config/chatter-agent` →
+同梱、同名ファイルは先勝ち）を**全部プリロード**して `Animation.Stop()` で寝かせておく（`enabled = false` ではない。下の罠）。
+発火したクリップは巻き戻して `Play()` + `Sample()`、`CrossFadeAnimation`（`IVrm10Animation` の自前実装。
+`ControlRig` のレベルで2本を混ぜる合成レイヤー）で待機から 0.5 秒かけて `Slerp` → フェードが終わったら
+クリップそのものを直に差す → `length - 0.5s` の地点で今度は待機へ 0.5 秒フェードして戻す。**発火すべきか
+の判断は Runtime の純粋クラス**（`EmotionMotionTrigger` / `IdleAccentTimer`）に置き、`Vrm/` 側（`VrmMotionPlayer` /
+`VrmCharacter`。VRM10 依存で EditMode テストが当たらない層）は配線だけを持つ。`Runtime.VrmAnimation` への代入は
+`VrmIdleAnimation.Present` の1箇所に寄せてある。
+
+**発火の規則**（ユーザーと決めたこと、2026-09-04）: cc-mascot と同じく**文ごと**。ただし
+**再生中の感情モーションには割り込まない**（最後まで見せる）代わりに、**終了後 1 秒のクールダウン**
+（`MotionParams.CooldownSeconds`。最初は 5 秒だったが、下の実機確認で 1 メッセージに 1 本しか出なかったので縮めた）で連発を抑える。感情モーションは待機の小ネタには割り込める。
+`neutral` と `kind: prompt` は感情モーションを出さない。小ネタ（`idle/`）は**発話が止まってから
+30〜60 秒**の乱数間隔で発火し、発話の立ち下がりとモーション終了の両方でタイマーを引き直す。
+
+**踏んだ罠**:
 
 | 罠 | 症状 | 回避 |
 |---|---|---|
-| `Prepare(go)` は階層を **`Instantiate` で複製**し、`Export()` が先頭で呼ぶ `base.Export()` 時点の複製のポーズが rest になる | 非 T ポーズで Prepare すると基準姿勢がずれる | **サンプリングより前、読み込み直後の T ポーズで `Prepare`** |
-| `Renderer` を残す | `.vrma` に VRM 本体（mesh / material / skin）が埋まる | `Transform` とルートの `Animator` 以外を全部 `DestroyImmediate`。正解形は `meshes: 0` |
-| `Vrm10Instance` は `[RequireComponent(Humanoid)]` | `Humanoid` が「依存されている」で外せず残る | 型で順番を決め打ちせず、**消えなくなるまで回す** |
-| channel の対象は `names.IndexOf(node.name)` の**名前逆引き** | 同名ノードがあると別のノードに書かれる | 書き出し前に重複名をリネーム（`vita.vrm` は重複なし） |
-| `AddFrame` が `m_position.Add()` を無条件に呼ぶ | `SetPositionBoneAndParent` を忘れると NRE | hips を必ず設定 |
-| `instance.Runtime` に触る | "Runtime Control Rig" の GameObject 群が階層に生えてノードに混ざる | 触らない（`ControlRigGenerationOption.None` も念のため） |
-| importer 側は `clip.wrapMode = WrapMode.Loop` 固定（`AnimationImporterUtil.cs`） | `-vrma` で1本再生するとワンショットもループする | 目視確認ではそれでよい。ワンショット再生（#70 段3）では `ClampForever` に上書きする |
+| hips を生の位置で Lerp する | 腰が瞬間的に飛ぶ | `idle_loop.vrma` は cm スケール（hips y≈90）、VRoid 書き出しは m スケール（y≈0.98）で単位が約 100 倍違う。`Vrm10Retarget` は `source.TPose.Hips.y` で割ってスケールするので、差分を高さで正規化してから混ぜ、合成 TPose は Hips だけ `(0,1,0)` を返す（`Retarget` が source の TPose を使うのは Hips だけ。`null` を返すと `.Value` で落ちる） |
+| `animation[animation.clip.name]` で state を引く | VRoid 書き出しはアニメーション名が空で見つからない | `WIN00.vrma` の `animations[0].name` は無し（`idle_loop.vrma` は `"animation"`）。UniVRM 自身と同じ `foreach (AnimationState s in animation) { break; }` で先頭を取る |
+| importer は `wrapMode = Loop` 固定 | ワンショットのつもりが最終フレームで止まらずループする | `Once` は rest に戻ってしまうので `ClampForever` に上書き。`Animation.Play()` は再生中の state を巻き戻さないので `state.time = 0` を明示し、legacy Animation の更新は `LateUpdate` より前なので差した直後に `Sample()` を呼ぶ |
+| 「`Speaking` の立ち上がり」を文の開始と見なす | 先読みが効くと文の切れ目で `Speaking` が `false` に落ちず、モーションが発火しない | `AfplaySpeechPlayer.PlayAsync → End → Dispatch(Played) → 次の Play → BeginSpeaking` が同じ継続で同期に走るため。`SpeakingSet.Entry.Order` を `TryGetSpeaking` の3引数版で出し、その変化で文の開始を取る |
+| `ExpressionMap` を毎回 `new` する | 常駐アプリの GC 予算を削る | `Vrm10Runtime.Process()` が毎フレーム foreach するので、中身が空の `static readonly` Dictionary を1つだけ持つ |
+| 設定「待機モーション」OFF の順序 | 状態がズレる | `VrmMotionPlayer.Stop()` を `_idle.Enabled = false` より**先**に呼ぶ（`Apply()` が blend を上書きするため）。`Present` は `!Enabled` で無条件 no-op、`Play` も `!Enabled` の間は開始しない |
+| `Tick` を `LateUpdate` の早期 return の後ろに置く | VRMA 有効時（通常状態）は到達せず `FadeOut` が終わらないまま感情モーションが Playing に固まる | `UpdateFace` の後・`_instance == null` の前に置く |
+| 寝かせたクリップを `Animation.enabled = false` で止める | **2 回目以降の再生が前回の終端から始まり、0.5 秒で待機に戻る**（実機: `time` が 3.98 のまま起き、3 回目は 6.65） | 無効化した legacy `Animation` は有効化し直しても**最初の更新まで state への操作（`time = 0` / `Rewind()` / `wrapMode`）を捨てる**。有効化直後に何を書いても効かない。寝かせるのは `Stop()`（止めて先頭へ巻き戻す契約）、起こすのは `Stop()` → `Play()` → `wrapMode = ClampForever`。止まっている `Animation` 15 本の CPU コストは測って無し（A/B と同じ条件で 23.6%） |
+| 混ぜる各ソースに `FingerFallbackPoseProvider.Wrap` を掛け忘れる | 指の無いクリップ側が identity（T ポーズ）へ補間され、「指が真っ直ぐ伸びる」問題が形を変えて戻る | 混ぜる前に各ソースへ掛ける（`CrossFadeAnimation` 自身は掛けない。#88 からの宿題） |
+| 設定の適用は毎回 `IdleMotion` を代入する | 同値ガード無しでは、この項目と無関係な設定変更（音量スライダー等）のたびに再生中の感情モーション・小ネタが問答無用で待機へ畳まれる | setter の先頭で `proceduralIdle == value` を確かめて同値なら何もしない（PR #91 レビュー） |
+| `Pick`（母集合）と `Play`（実際に再生できる集合）を分けない | 走査はできたが読み込みに失敗した／まだプリロード中のクリップを選んでしまい、`Play` が黙って失敗する（壊れた `.vrma` があっても気づけない） | 走査結果は `Manifest`、実際に読み込めた集合は `Loaded`（`AnimationManifest.FromClips` で組み直す）に分け、`Pick` は必ず `Loaded` から（PR #91 レビュー） |
 
-`.anim` は `Assets/` 配下でないと `AssetDatabase` で読めない（`~` 末尾のフォルダは Unity が無視する）ので、
-スクリプトが `Assets/ChatterMascot/Editor/VRoidClips/` を一時的に作って `finally` で `.meta` ごと消す。
-途中で落ちたときの保険として `.gitignore` にも書いてある。
+**実機確認（2026-09-04、macOS `.app`、AivisSpeech 稼働、窓 810×810）**: 配信キューに7文
+（neutral / happy / happy / sad / surprised / prompt(surprised) / angry）を直接置いた結果 ——
+neutral は出ない、happy → `super_delicious`、2文目の happy はクールダウンで出ない（意図どおり）、
+sad → `REFLESH00`、**surprised は sad のモーション終了から5秒以内だったので出なかった**
+（当時のクールダウンは 5 秒。その後 hook 経由の本番でも happy → `Hub_laugh01` 7.9 秒の後ろで sad と surprised が
+両方潰れたので、**クールダウンを 1 秒に縮めた**。「割り込まない」規則で連発は十分抑えられる）、prompt は出ない、angry → `determined`。モーション中も `face:` ログで
+`sad=1.00` / `aa=0.35〜0.50` が生きている（`ExpressionMap` を奪っていない）。小ネタは放置中に
+`Hub_Idle03` ×2 / `Hub_Idle01` が 30〜60 秒間隔で出て待機へ戻った。例外0件。`-motionProbe happy`
+で `WIN00`（ジャンプ→敬礼）と `Hub_laugh01` を 0.4 秒間隔のスクリーンショットで目視: 腰の飛び・
+180° ずれ・T ポーズの指は無し、`WIN00` の両腕は窓の上端に収まる。
+
+**CPU の A/B**（同条件: 外部 4K 1x、窓 810×810、30fps、MSAA 4x、`-serverUrl ws://127.0.0.1:9` で
+無発話、`top` 9秒間隔 n=6）: A = main（#90）**28.2%**（28.4 28.3 28.4 27.7 28.0 27.8）、
+B = #70 **27.3%**（26.7 26.8 27.8 28.3 27.3 27.3。途中で小ネタが1本再生された）。15本を寝かせた
+ぶんの回帰は無い。★ #88 の 16.8% より高いのは窓が 540 → 810 だからで、同じ条件では比べていない
+（→「CPU の回帰は A/B で測る」）。
+
+**設定パネルの「モーションを確認」**: 「待機モーション」の下に、読み込んだ全クリップを
+`カテゴリ/ファイル名`（`idle/Hub_Idle01.vrma`）で並べた Select と「再生」ボタン。本番と同じ経路
+（`VrmMotionPlayer.Play` → クロスフェード → 待機へ）で 1 本流すので、ファイル名とモーションの対応と
+実際の見え方を同時に確かめられる。**選択は保存しない**（`settings.json` にも core にも書かない。
+値の行き先が 3 つある設定の中で、これだけがそのどれでもない）。読み込み中・一覧が空・
+「待機モーション」OFF はそれぞれ無効化して理由を note に出す。踏んだ罠 2 つ:
+一度も選び直していないと `SettingsContext.MotionPreview` は空で、表示だけを先頭に倒すと
+「再生」が「選べるモーションがありません」になる（表示と押下の解決を
+`SettingsSchema.EffectiveMotionPreview` の 1 関数に寄せた）。「待機モーション」を切り替えても
+自分起点なのでパネルは作り直されず、この項目の有効/無効が古いまま残る（チェックボックスは
+引きずるものではないので、この 1 箇所だけ `Push(update: true)` で出し直す）。「再生」を押した
+結果は `MotionPlayResult`（`Started` / `Disposed` / `IdleNotLoaded` / `IdleDisabled` / `NotLoaded` /
+`Busy`）で返り、`SettingsSchema.MotionPlayNotice` が文言に変換する——読み込み中で押せない
+（`NotLoaded`）ともう鳴っている（`Busy`）は別の文言で出る（PR #91 レビュー #5。以前は両方
+「再生中です」に潰れていた）。
+
+**目視の道具**: `open Build/ChatterMascot.app --args -serverUrl ws://127.0.0.1:9 -motionProbe happy`
+で読み込み完了の3秒後に1本だけ再生する。ログは
+`[Mascot] モーション: idle=5 happy=3 …（読めた 15/15 本）` と
+`[Mascot] モーション開始: Emotion WIN00.vrma（happy、4.0s）` / `モーション終了`。
+
+**残した宿題**: `idle/` の 8.8〜18.2 秒が小ネタとして長いかは耳と目で判断する
+（Issue #70 に持ち越し）。Android の同梱マニフェスト JSON は #25（`AnimationManifest.Build` の
+`bundled` 引数が口）。`__cool` / `__cute` は分類だけで設定なし。
 
 ### ★ Unity CLI
 
@@ -3605,7 +3654,7 @@ curl -fsSL https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh | UNITY_
 4. **NUnit XML を python3 で集計して `total= passed= failed=` を出すこと**（`test.sh`）
 5. **`unity.sh` の `pgrep -f "Unity.app/Contents/MacOS/Unity.*${PROJECT_PATH}"` による
    「Editor が同プロジェクトを開いていたら中断」**
-6. **`run.sh` の grep フィルタ（`^\[Fixups\]|^\[Build\]|^\[VrmProbe\]|^\[VrmaExport\]|error CS|...`）に
+6. **`run.sh` の grep フィルタ（`^\[Fixups\]|^\[Build\]|^\[VrmProbe\]|error CS|...`）に
    無いプレフィックスのログは、`LogError` であっても画面に出ない**（`run.sh` のコメント
    参照）。この弱点自体を引き継ぐ必要はないが、`unity run` の出力がフィルタ無しで
    全ログを流すのか、移行時に確認すること

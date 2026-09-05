@@ -384,5 +384,55 @@ namespace ChatterMascot.Tests
                 AssetPath.Enumerate(env, AssetKind.Vrma).ToList().Exists(c => c.Source == AssetSource.Settings),
                 Is.False);
         }
+
+        // ── AnimationRoots（#70。AnimationManifest のルート探索） ────────────────────
+
+        /// <summary>
+        /// <see cref="AssetPath.Enumerate"/> と違い、ここは「ファイル1本」ではなく
+        /// 「カテゴリ別ディレクトリの親」を返す。順序は persistentDataPath → ユーザー設定 → 同梱。
+        /// </summary>
+        [Test]
+        public void AnimationRootsAreOrderedPersistentThenUserThenBundled()
+        {
+            var env = Env();
+            Assert.That(AssetPath.AnimationRoots(env), Is.EqualTo(new[]
+            {
+                "/persist/animations",
+                "/home/u/.config/chatter-agent/animations",
+                "/streaming/animations",
+            }));
+        }
+
+        /// <summary>★ Android には共有ファイルシステムが無いので、ユーザー段が丸ごと落ちる。</summary>
+        [Test]
+        public void AnimationRootsDropTheUserStepWithoutASharedFileSystem()
+        {
+            var env = Env(desktop: false);
+            Assert.That(AssetPath.AnimationRoots(env), Is.EqualTo(new[]
+            {
+                "/persist/animations",
+                "/streaming/animations",
+            }));
+        }
+
+        /// <summary>★ .vrm / .vrma の探索と同じ規則で XDG_CONFIG_HOME が効くこと。</summary>
+        [Test]
+        public void AnimationRootsHonourXdgConfigHome()
+        {
+            var env = Env(variables: new Dictionary<string, string> { { "XDG_CONFIG_HOME", "/xdg" } });
+            Assert.That(AssetPath.AnimationRoots(env), Is.EqualTo(new[]
+            {
+                "/persist/animations",
+                "/xdg/chatter-agent/animations",
+                "/streaming/animations",
+            }));
+        }
+
+        /// <summary>★ <c>env == null</c> は空（<see cref="AssetPath.Enumerate"/> と同じ契約）。</summary>
+        [Test]
+        public void AnimationRootsIsEmptyForNullEnv()
+        {
+            Assert.That(AssetPath.AnimationRoots(null), Is.Empty);
+        }
     }
 }

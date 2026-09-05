@@ -295,12 +295,55 @@ namespace ChatterMascot.Vrm
         ///   <b>消すどころか基準を変えるだけ</b>になっていた（PR #69 の再レビューで判明。
         ///   プロジェクトルートに <c>model.vrm</c> を置いて再現済み）。
         ///   <see cref="Add"/> の空文字チェックと同じ思想を、こちらの左辺にも当てる。
+        ///
+        /// ★ <c>internal</c>。<see cref="AnimationRoots"/> と <c>AnimationManifest.Build</c>（#70。
+        ///   同じ <c>ChatterMascot.Runtime</c> アセンブリ）が同じ規則でパスを組み立てるのに使う。
+        ///   <c>ChatterMascot.Tests</c> は <c>internal</c> を素通しで見られない設計（friend 化していない）
+        ///   なので、テストから直接この関数を呼ぶことはできない——それでよい。テストは
+        ///   <see cref="Enumerate"/> / <see cref="AnimationRoots"/> / <c>AnimationManifest.Build</c> の
+        ///   結果で固定する。
         /// </summary>
-        private static string Join(string left, string right)
+        internal static string Join(string left, string right)
         {
             if (string.IsNullOrEmpty(left)) return null;
             if (string.IsNullOrEmpty(right)) return left;
             return left.TrimEnd('/', '\\') + "/" + right.TrimStart('/', '\\');
+        }
+
+        /// <summary>
+        /// <c>.vrma</c> の「カテゴリ別ディレクトリ」の探索起点（#70。<see cref="AnimationManifest"/> 用）。
+        ///
+        /// | 順 | 出どころ | 対象 |
+        /// |---|---|---|
+        /// | 1 | <c>persistentDataPath/animations/</c> | 全 |
+        /// | 2 | <c>${XDG_CONFIG_HOME:-~/.config}/chatter-agent/animations/</c> | デスクトップのみ |
+        /// | 3 | <c>streamingAssetsPath/animations/</c>（同梱） | 全 |
+        ///
+        /// ★ <see cref="Enumerate"/> と違い、ここは「ファイル1本」ではなく「ルートディレクトリ」を
+        ///   返す。<c>AnimationManifest.Build</c> が各ルート × 6カテゴリ（<c>MotionCategories.All</c>）で
+        ///   <c>ListFiles(Join(root, カテゴリ名), "*.vrma")</c> を呼ぶ。
+        /// ★ <c>env == null</c> は空。<c>Join</c> が <c>null</c> を返した段（基準が空）は飛ばす——
+        ///   <see cref="Enumerate"/> の <c>Add</c> と同じ思想。
+        /// ★ ユーザー段（2）は <see cref="AssetEnv.HasUserConfigDirectory"/> のときだけ。
+        ///   Android には共有ファイルシステムが無い。
+        /// </summary>
+        public static IReadOnlyList<string> AnimationRoots(AssetEnv env)
+        {
+            var result = new List<string>(3);
+            if (env == null) return result;
+
+            AddRoot(result, Join(env.PersistentDataPath, "animations"));
+            if (env.HasUserConfigDirectory)
+            {
+                AddRoot(result, Join(RuntimeDirectory(env), "animations"));
+            }
+            AddRoot(result, Join(env.StreamingAssetsPath, "animations"));
+            return result;
+        }
+
+        private static void AddRoot(List<string> into, string path)
+        {
+            if (!string.IsNullOrEmpty(path)) into.Add(path);
         }
 
         /// <summary>

@@ -57,6 +57,19 @@ namespace ChatterMascot.Desktop
         /// </summary>
         bool WindowSizeSettling { get; }
 
+        /// <summary>
+        /// 読み込み済みモーションの一覧（設定パネルの「モーションを確認」用、#70 派生）。
+        /// <c>null</c> なら読み込み中（→ <c>SettingsSchema</c> が無効化して理由を出す）。
+        /// </summary>
+        IReadOnlyList<MotionClip> MotionClips { get; }
+
+        /// <summary>
+        /// 選ばれた1本を本番と同じ経路で再生する（→ <c>VrmCharacter.PreviewMotion</c>）。
+        /// 開始できたか・できなかったならその理由を <see cref="MotionPlayResult"/> で返す
+        /// （#70 レビュー #5。<c>SettingsSchema.MotionPlayNotice</c> がこれを文言にする）。
+        /// </summary>
+        MotionPlayResult PlayMotion(MotionClip clip);
+
         void Quit();
     }
 
@@ -126,6 +139,12 @@ namespace ChatterMascot.Desktop
 
         /// <summary>注記を消したが、まだ画面に反映していない（→ <see cref="Queue"/>）</summary>
         private bool _noticesStale;
+
+        /// <summary>
+        /// 直近の <see cref="Push"/> 時点での <c>_host.MotionClips</c> の本数。<c>null</c> なら
+        /// 読み込み中（→ <see cref="WatchMotionClips"/>）。
+        /// </summary>
+        private int? _lastMotionClipCount;
 
         private bool _refreshing;
         private bool _open;
@@ -244,6 +263,7 @@ namespace ChatterMascot.Desktop
         public void Tick()
         {
             WatchWindowSize();
+            WatchMotionClips();
             if (!_pending.Due(Time.realtimeSinceStartup)) return;
             Flush();
         }
@@ -315,6 +335,29 @@ namespace ChatterMascot.Desktop
             if (Mathf.Abs(scale - _context.WindowScale) < 0.001f) return;
 
             _context.WindowScale = scale;
+            Push(update: true);
+        }
+
+        /// <summary>
+        /// モーションの読み込みが、パネルを開いている間に終わったら選択肢を埋め直す。
+        ///
+        /// ★ #70 派生。<c>_host.MotionClips</c> は起動直後 <c>null</c>（読み込み中）で、
+        ///   実測 約1.6秒後に実際の一覧へ切り替わる。設定パネルを開けっぱなしにしていた場合、
+        ///   ここで拾わないと「読み込み中です」のまま選択肢が空で固まる。
+        /// ★ <b>件数の変化だけを見る。</b> <c>_host.MotionClips</c> は毎回新しい配列を返しうる
+        ///   （<c>VrmCharacter.MotionClips</c> はキャッシュするので実際は同じ参照だが、
+        ///   契約としてそこに寄りかからない）ので、参照比較ではなく本数で見る。
+        /// ★ <b>「自分起点の変更ではパネルを作り直さない」に反しない。</b> ここは
+        ///   ユーザー操作ではなく<b>外から状態が変わった</b>ケース（→ <see cref="WatchWindowSize"/>
+        ///   と同じ扱い）。<c>update: true</c> の経路で済ませる——掴んでいるスライダーは無い。
+        /// </summary>
+        private void WatchMotionClips()
+        {
+            if (!_open) return;
+
+            var count = _host.MotionClips?.Count;
+            if (count == _lastMotionClipCount) return;
+
             Push(update: true);
         }
 
@@ -393,6 +436,12 @@ namespace ChatterMascot.Desktop
                 //   `_host.ApplySettings` を直接呼ぶと権威が2つになる（→ Apply の ★★）
                 case SettingKeys.IdleMotion:
                     Apply(settings.WithIdleMotion(SettingsPanelJson.ParseBool(value, settings.IdleMotion)));
+                    // ★ #70 派生。「モーションを確認」の有効/無効と note はこの値に依存する。
+                    //   チェックボックスは掴んで引きずるものではないので、作り直しても
+                    //   「自分起点の変更でパネルを作り直さない」（スライダーの罠）には当たらない。
+                    //   「再生」の古い注記（「再生中です」など）は理由を隠すので消してから出し直す
+                    Notice(SettingKeys.MotionPreviewPlay, "");
+                    Push(update: true);
                     return;
 
                 case SettingKeys.CursorGaze:
@@ -414,6 +463,17 @@ namespace ChatterMascot.Desktop
                     Apply(settings.WithFrameRate(frameRate));
                     return;
                 }
+
+                // ★ #70 派生。「モーションを確認」——ここだけは Unity 側でも core 側でもない、
+                //   保存しない一時的な選択（→ SettingsContext.MotionPreview の doc）。
+                //   Defer/Apply を経由しない（残すものが無いので、締め切りを待つ理由が無い）
+                case SettingKeys.MotionPreview:
+                    _context.MotionPreview = value;
+                    return;
+
+                case SettingKeys.MotionPreviewPlay:
+                    PlayMotionPreview();
+                    return;
 
                 case SettingKeys.MuteHotKey:
                     // ★ 起点は `settings`（＝保留があるならそれ）。`_host.Settings` を
@@ -777,6 +837,47 @@ namespace ChatterMascot.Desktop
         }
 
         /// <summary>
+        /// 「モーションを確認」の「再生」（#70 派生）。選択中の id から <c>MotionClip</c> を
+        /// 引いて、本番と同じ経路（<c>VrmCharacter.PreviewMotion</c>）で再生する。
+        ///
+        /// ★ 感情モーション再生中は割り込めない（<c>VrmMotionPlayer.Play</c> の拒否条件。
+        ///   感情モーション同士は割り込まない、ユーザーと決めたこと）。押しても何も起きない
+        ///   ように見せないため、理由を note で出す。
+        /// ★★ #70 レビュー #5。文言は <c>SettingsSchema.MotionPlayNotice</c>（純粋関数）に
+        ///   寄せてある。ここでは <c>_host.PlayMotion</c> の <see cref="MotionPlayResult"/> を
+        ///   渡すだけ——以前は <c>bool</c> の <c>false</c> 一色だったので、「読み込み中」も
+        ///   「もう鳴っている」も同じ「再生中です」になっていた。
+        /// </summary>
+        private void PlayMotionPreview()
+        {
+            // ★ 生の _context.MotionPreview を引かないこと（→ SettingsSchema.EffectiveMotionPreview の doc）。
+            //   一度も選び直していないときは空で、表示だけが先頭に倒っている
+            var id = SettingsSchema.EffectiveMotionPreview(_context.MotionClips, _context.MotionPreview);
+            var clip = FindMotionClip(_host.MotionClips, id);
+            if (clip == null)
+            {
+                Notice(SettingKeys.MotionPreviewPlay, "選べるモーションがありません");
+                Push(update: true);
+                return;
+            }
+
+            var result = _host.PlayMotion(clip);
+            Notice(SettingKeys.MotionPreviewPlay, SettingsSchema.MotionPlayNotice(result, id));
+            Push(update: true);
+        }
+
+        /// <summary>id（<see cref="SettingsSchema.MotionPreviewId"/> の形）から <c>MotionClip</c> を引く</summary>
+        private static MotionClip FindMotionClip(IReadOnlyList<MotionClip> clips, string id)
+        {
+            if (clips == null || string.IsNullOrEmpty(id)) return null;
+            foreach (var clip in clips)
+            {
+                if (string.Equals(SettingsSchema.MotionPreviewId(clip), id, StringComparison.Ordinal)) return clip;
+            }
+            return null;
+        }
+
+        /// <summary>
         /// すべての設定を既定へ戻す。
         ///
         /// ★★ <b>取り消せない</b>（<c>models/</c> の <c>.vrm</c> を消す）ので、必ず確認を取る。
@@ -1005,6 +1106,10 @@ namespace ChatterMascot.Desktop
             _context.Settings = _host.Settings;
             // ★ 大きさは settings.json ではなく**いまの窓**から出す（権威は window.json）
             _context.WindowScale = _host.WindowScale;
+            // ★ #70 派生。null（読み込み中）は null のまま渡す（→ SettingsSchema.MotionPreviewChoices の doc）
+            var motionClips = _host.MotionClips;
+            _context.MotionClips = SettingsSchema.MotionPreviewChoices(motionClips);
+            _lastMotionClipCount = motionClips?.Count;
             var items = SettingsSchema.Build(_context);
             var withNotices = ApplyNotices(items);
             var json = SettingsPanelJson.Write(_context.ProductName + " の設定", withNotices);

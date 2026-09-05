@@ -3564,7 +3564,7 @@ cd apps/chatter-mascot
 ### ワンショット再生とクロスフェード（#70）
 
 起動時に `animations/<category>/*.vrma`（探索順は `persistentDataPath` → `~/.config/chatter-agent` →
-同梱、同名ファイルは先勝ち）を**全部プリロード**して `Animation.enabled = false` で寝かせておく。
+同梱、同名ファイルは先勝ち）を**全部プリロード**して `Animation.Stop()` で寝かせておく（`enabled = false` ではない。下の罠）。
 発火したクリップは巻き戻して `Play()` + `Sample()`、`CrossFadeAnimation`（`IVrm10Animation` の自前実装。
 `ControlRig` のレベルで2本を混ぜる合成レイヤー）で待機から 0.5 秒かけて `Slerp` → フェードが終わったら
 クリップそのものを直に差す → `length - 0.5s` の地点で今度は待機へ 0.5 秒フェードして戻す。**発火すべきか
@@ -3589,6 +3589,7 @@ cd apps/chatter-mascot
 | `ExpressionMap` を毎回 `new` する | 常駐アプリの GC 予算を削る | `Vrm10Runtime.Process()` が毎フレーム foreach するので、中身が空の `static readonly` Dictionary を1つだけ持つ |
 | 設定「待機モーション」OFF の順序 | 状態がズレる | `VrmMotionPlayer.Stop()` を `_idle.Enabled = false` より**先**に呼ぶ（`Apply()` が blend を上書きするため）。`Present` は `!Enabled` で無条件 no-op、`Play` も `!Enabled` の間は開始しない |
 | `Tick` を `LateUpdate` の早期 return の後ろに置く | VRMA 有効時（通常状態）は到達せず `FadeOut` が終わらないまま感情モーションが Playing に固まる | `UpdateFace` の後・`_instance == null` の前に置く |
+| 寝かせたクリップを `Animation.enabled = false` で止める | **2 回目以降の再生が前回の終端から始まり、0.5 秒で待機に戻る**（実機: `time` が 3.98 のまま起き、3 回目は 6.65） | 無効化した legacy `Animation` は有効化し直しても**最初の更新まで state への操作（`time = 0` / `Rewind()` / `wrapMode`）を捨てる**。有効化直後に何を書いても効かない。寝かせるのは `Stop()`（止めて先頭へ巻き戻す契約）、起こすのは `Stop()` → `Play()` → `wrapMode = ClampForever`。止まっている `Animation` 15 本の CPU コストは測って無し（A/B と同じ条件で 23.6%） |
 | 混ぜる各ソースに `FingerFallbackPoseProvider.Wrap` を掛け忘れる | 指の無いクリップ側が identity（T ポーズ）へ補間され、「指が真っ直ぐ伸びる」問題が形を変えて戻る | 混ぜる前に各ソースへ掛ける（`CrossFadeAnimation` 自身は掛けない。#88 からの宿題） |
 
 **実機確認（2026-09-04、macOS `.app`、AivisSpeech 稼働、窓 810×810）**: 配信キューに7文

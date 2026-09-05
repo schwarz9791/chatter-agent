@@ -55,13 +55,26 @@ namespace ChatterMascot.Vrm
         {
             public readonly Vrm10AnimationInstance Instance;
             public readonly Animation Animation;
-            public readonly AnimationState State;
 
-            public LoadedClip(Vrm10AnimationInstance instance, Animation animation, AnimationState state)
+            public LoadedClip(Vrm10AnimationInstance instance, Animation animation)
             {
                 Instance = instance;
                 Animation = animation;
-                State = state;
+            }
+
+            /// <summary>
+            /// 先頭の <c>AnimationState</c>。<b>毎回取り直す。</b>
+            ///
+            /// ★ 読み込み時に掴んだ参照を持ち回らない（安い。1 件の列挙）。名前で引かないのは
+            ///   VRoid 書き出しのアニメーション名が空だから（UniVRM 自身と同じ foreach）。
+            /// </summary>
+            public AnimationState State
+            {
+                get
+                {
+                    foreach (AnimationState s in Animation) return s;
+                    return null;
+                }
             }
         }
 
@@ -75,6 +88,7 @@ namespace ChatterMascot.Vrm
         private LoadedClip _current;
         private CrossFadeAnimation _fade;
         private bool _ended;
+        private double _startedAt;
 
         public VrmMotionPlayer(VrmIdleAnimation idle, MotionParams p)
         {
@@ -216,8 +230,11 @@ namespace ChatterMascot.Vrm
             //   ワンショットで最終フレームを保持するには ClampForever に上書きする（Once は rest に戻る）
             state.wrapMode = WrapMode.ClampForever;
 
-            // ★ 読み込み直後は寝かせておく。再生は Play() が明示的に起こす
-            animation.enabled = false;
+            // ★★ 寝かせるのは Stop() で。enabled = false にしないこと。無効化した legacy Animation は
+            //   有効化し直しても最初の更新まで state への操作（time = 0 / Rewind / wrapMode）を捨てる
+            //   ——実機で 2 回目の再生が前回の終端から始まり 0.5 秒で待機に戻った（3 回目は time=6.65）。
+            //   Stop() は「止めて先頭へ巻き戻す」契約で、止まっている Animation のコストは無い
+            animation.Stop();
 
             var animator = vrma.GetComponent<Animator>();
             if (animator != null) animator.enabled = false;
@@ -228,7 +245,7 @@ namespace ChatterMascot.Vrm
                                   "emotion とリップシンクが上書きされます");
             }
 
-            _loaded[clip] = new LoadedClip(vrma, animation, state);
+            _loaded[clip] = new LoadedClip(vrma, animation);
             return true;
         }
 
@@ -241,7 +258,7 @@ namespace ChatterMascot.Vrm
         /// <paramref name="kind"/><c> == Accent</c> で既に何か再生中。
         ///
         /// ★ <b>感情モーションは小ネタ（<c>Accent</c>）に割り込める。</b> 割り込まれた小ネタの
-        ///   クリップは <c>Animation.enabled = false</c> に戻す（寝かせ直す）。感情モーション同士は
+        ///   クリップは <c>Animation.Stop()</c> で寝かせ直す。感情モーション同士は
         ///   割り込まない（上の拒否条件どおり）。
         /// </summary>
         public bool Play(MotionClip clip, MotionKind kind, double now)
@@ -261,12 +278,21 @@ namespace ChatterMascot.Vrm
             //   （上のガードにより、Accent は何も再生中でないときしか開始できない）
             if (_current != null)
             {
-                _current.Animation.enabled = false;
+                _current.Animation.Stop();
             }
 
-            loaded.State.time = 0;
-            loaded.Animation.enabled = true;
+            // ★ Stop() → Play() で先頭から。enabled は触らない（TryAdopt の ★★ 参照）。
+            //   wrapMode は Play() の後に毎回立て直す（importer は Loop 固定で、Stop/Play が
+            //   state を作り直しても困らないように）
+            loaded.Animation.Stop();
             loaded.Animation.Play();
+            var state = loaded.State;
+            if (state != null)
+            {
+                state.wrapMode = WrapMode.ClampForever;
+                state.time = 0;
+            }
+            _startedAt = now;
             // ★ legacy Animation の更新は LateUpdate より前なので、差した最初のフレームは
             //   前回の最終姿勢／T ポーズを Retarget が読んでしまう。Sample() で即座に反映させる
             loaded.Animation.Sample();
@@ -283,7 +309,7 @@ namespace ChatterMascot.Vrm
             _state = PlayState.FadeIn;
             // ★ 1本1行。実機で「出た／出ない」を Player.log から判定する唯一の手がかり
             //   （docs/mascot.md「顔が動かないのが正常と壊れて動かないはログでしか区別できない」と同じ理由）
-            Debug.Log($"[Mascot] モーション開始: {kind} {clip.FileName}（{MotionCategories.DirectoryName(clip.Category)}、{loaded.State.length:F1}s）");
+            Debug.Log($"[Mascot] モーション開始: {kind} {clip.FileName}（{MotionCategories.DirectoryName(clip.Category)}、{(loaded.State != null ? loaded.State.length : 0f):F1}s）");
             return true;
         }
 
@@ -314,7 +340,7 @@ namespace ChatterMascot.Vrm
                     //   （Enabled のトグルで Apply() に上書きされた等）Idle に戻してクリップを寝かせる
                     if (!ReferenceEquals(_idle.Current, _current.Instance))
                     {
-                        _current.Animation.enabled = false;
+                        _current.Animation.Stop();
                         _current = null;
                         _fade = null;
                         _state = PlayState.Idle;
@@ -322,8 +348,13 @@ namespace ChatterMascot.Vrm
                     }
 
                     // ★ length まで待つと最終フレームを FadeSeconds ぶん保持してから戻る
-                    if (_current.State.time >= _current.State.length - _params.FadeSeconds)
+                    var state = _current.State;
+                    if (state == null || state.time >= state.length - _params.FadeSeconds)
                     {
+                        if (state != null)
+                        {
+                            Debug.Log($"[Mascot] モーション: フェードアウト開始 time={state.time:F2} length={state.length:F2} 経過={now - _startedAt:F2}s");
+                        }
                         _fade = new CrossFadeAnimation(
                             _current.Instance.ControlRig, _idle.Idle.ControlRig, now, _params.FadeSeconds);
                         _idle.Present(_fade);
@@ -336,7 +367,7 @@ namespace ChatterMascot.Vrm
                     if (_fade.IsDone)
                     {
                         _idle.PresentIdle();
-                        if (_current != null) _current.Animation.enabled = false;
+                        if (_current != null) _current.Animation.Stop();
                         Debug.Log($"[Mascot] モーション終了: {_kind} → 待機");
                         _current = null;
                         _fade = null;
@@ -357,7 +388,7 @@ namespace ChatterMascot.Vrm
         {
             if (_current != null)
             {
-                _current.Animation.enabled = false;
+                _current.Animation.Stop();
             }
             _current = null;
             _fade = null;

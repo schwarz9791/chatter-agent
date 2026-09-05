@@ -1,6 +1,8 @@
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using ChatterMascot.Ui;
+using ChatterMascot.Vrm;
 
 namespace ChatterMascot.Settings
 {
@@ -29,6 +31,16 @@ namespace ChatterMascot.Settings
         public const string TtsPreview = "ttsPreview";
 
         public const string IdleMotion = "idleMotion";
+
+        /// <summary>
+        /// 「モーションを確認」（#70 派生）の選択中の1本。<b>保存しない</b>
+        /// （→ <see cref="SettingsContext.MotionPreview"/> の doc）。
+        /// </summary>
+        public const string MotionPreview = "motionPreview";
+
+        /// <summary>「モーションを確認」の「再生」ボタン。押した瞬間だけ意味を持つ</summary>
+        public const string MotionPreviewPlay = "motionPreviewPlay";
+
         public const string CursorGaze = "cursorGaze";
         public const string Blink = "blink";
         public const string FrameRate = "frameRate";
@@ -159,6 +171,20 @@ namespace ChatterMascot.Settings
             // ── モーション ───────────────────────────────────
             items.Add(SettingSpec.Section("モーション"));
             items.Add(SettingSpec.Bool(SettingKeys.IdleMotion, "待機モーション", settings.IdleMotion));
+
+            // ★ #70 派生。ファイル名と実際に再生されるモーションが一致しているかを、
+            //   本番と同じ経路（VrmMotionPlayer.Play）で確かめられるようにする。
+            //   ★★ 保存しない。settings.json にも core にも書かない
+            //   （→ SettingsContext.MotionPreview の doc）——本番の発話に連動する再生と
+            //   混同しないため、確認用の選択はパネルを閉じたら忘れてよい
+            var motionClips = c.MotionClips;
+            var motionEnabled = settings.IdleMotion && motionClips != null && motionClips.Count > 0;
+            var motionValue = EffectiveMotionPreview(motionClips, c.MotionPreview);
+            items.Add(SettingSpec.Choice(
+                SettingKeys.MotionPreview, "モーションを確認", motionValue, motionClips,
+                enabled: motionEnabled, note: MotionPreviewNote(motionClips, settings.IdleMotion)));
+            items.Add(SettingSpec.Button(SettingKeys.MotionPreviewPlay, "再生", enabled: motionEnabled));
+
             items.Add(SettingSpec.Bool(SettingKeys.CursorGaze, "カーソルを目で追う", settings.CursorGaze));
             items.Add(SettingSpec.Bool(SettingKeys.Blink, "まばたき", settings.Blink));
             // ★ 倍率を UI 文言に持ち込まない。マシン・MSAA・電源状態で変わる数値で、
@@ -276,6 +302,92 @@ namespace ChatterMascot.Settings
                 choices[i] = new SettingChoice(fps, fps + " fps");
             }
             return choices;
+        }
+
+        /// <summary>
+        /// <see cref="MotionClip"/> 1本の選択肢 id / ラベル。<b>"&lt;カテゴリ&gt;/&lt;ファイル名&gt;"</b>
+        /// （例: <c>"idle/Hub_Idle01.vrma"</c>）。
+        ///
+        /// ★ <b>id とラベルを同じ文字列にすること。</b> この項目の目的は「ファイル名と
+        ///   モーションが一致しているか」を確かめることなので、見せる文言を作り込むと
+        ///   かえって確かめにくくなる。
+        /// ★ <b><see cref="SettingsPanelBridge.HandleSetting"/> 側の id → <c>MotionClip</c> 引き当ても
+        ///   ここを使うこと。</b> 変換を2箇所に書くと、片方だけ直したときに一致しなくなる。
+        /// </summary>
+        public static string MotionPreviewId(MotionClip clip)
+        {
+            return MotionCategories.DirectoryName(clip.Category) + "/" + clip.FileName;
+        }
+
+        /// <summary>
+        /// #70 派生。<see cref="MotionClip"/> 一覧 → 選択肢一覧への<b>純粋</b>変換。
+        ///
+        /// ★★ <b><c>null</c> を <c>null</c> のまま返すこと。</b> 空配列にすると
+        ///   「読み込み中」（まだ一覧が無い）と「読み込み済みだが1本も無い」が
+        ///   区別できなくなる（→ <see cref="SettingsContext.MotionClips"/> の doc）。
+        /// ★ <c>MotionClip</c> は Runtime の型（<c>Assets/ChatterMascot/Runtime/Vrm/AnimationManifest.cs</c>）
+        ///   なのでここから使ってよいが、<c>ChatterMascot.Vrm</c> アセンブリ（VRM10 依存）の型
+        ///   （<c>VrmCharacter</c> など）は持ち込まないこと——テストが1行も当たらなくなる。
+        /// </summary>
+        public static IReadOnlyList<SettingChoice> MotionPreviewChoices(IReadOnlyList<MotionClip> clips)
+        {
+            if (clips == null) return null;
+
+            var choices = new SettingChoice[clips.Count];
+            for (var i = 0; i < clips.Count; i++)
+            {
+                var id = MotionPreviewId(clips[i]);
+                choices[i] = new SettingChoice(id, id);
+            }
+            return choices;
+        }
+
+        /// <summary>
+        /// 「モーションを確認」の無効化の理由。優先順は
+        /// <b>待機モーション OFF → 読み込み中 → 一覧が空</b>。
+        ///
+        /// ★ OFF を先に見ること。OFF にした本人にとっては「読み込み中」や「一覧が空」より
+        ///   こちらが直接の理由——<c>VrmMotionPlayer.Play</c> は待機モーション OFF の間
+        ///   常に拒否するので、一覧の状態に関わらず押しても何も起きない。
+        /// </summary>
+        private static string MotionPreviewNote(IReadOnlyList<SettingChoice> clips, bool idleMotionEnabled)
+        {
+            if (!idleMotionEnabled) return "待機モーションが OFF の間は再生できません";
+            if (clips == null) return "モーションを読み込み中です";
+            if (clips.Count == 0) return "~/.config/chatter-agent/animations/<感情>/ に .vrma を置くと選べます";
+            return "";
+        }
+
+        /// <summary>
+        /// 「モーションを確認」で<b>実際に</b>選ばれている id。<see cref="SettingsContext.MotionPreview"/> が
+        /// 空（一度も触っていない）か一覧に無ければ先頭、一覧が無ければ空文字。
+        ///
+        /// ★★ <b>表示（<see cref="Build"/>）と「再生」の解決（<c>SettingsPanelBridge.PlayMotionPreview</c>）の
+        ///   両方がここを通ること。</b> 表示だけ先頭に倒して、押した側が生の
+        ///   <c>MotionPreview</c>（空）を引くと、<b>一度も選び直していないときに「再生」が
+        ///   「選べるモーションがありません」になる</b>（実機で踏んだ。2026-09-05）。
+        /// </summary>
+        public static string EffectiveMotionPreview(IReadOnlyList<SettingChoice> choices, string selected)
+        {
+            if (choices == null || choices.Count == 0) return "";
+            return ContainsChoiceValue(choices, selected) ? selected : choices[0].Value;
+        }
+
+        /// <summary>
+        /// ★ <see cref="SettingsContext.MotionPreview"/> が古い一覧の id を持ち越していても
+        ///   壊れないための保険。一覧が変わった直後（マニフェストの読み込み完了・
+        ///   ファイルの追加）に、存在しない id を選択済みのまま出すと
+        ///   <c>SettingsSchemaTests.ChoiceValuesExistInTheirChoices</c> が固定した不変条件
+        ///   （選択中の値は選択肢の中にあること）が破れる。
+        /// </summary>
+        private static bool ContainsChoiceValue(IReadOnlyList<SettingChoice> choices, string value)
+        {
+            if (string.IsNullOrEmpty(value)) return false;
+            for (var i = 0; i < choices.Count; i++)
+            {
+                if (string.Equals(choices[i].Value, value, StringComparison.Ordinal)) return true;
+            }
+            return false;
         }
 
         /// <summary>保存されている文字列を画面用の記号にする。読めなければそのまま出す</summary>

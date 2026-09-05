@@ -159,6 +159,56 @@ namespace ChatterMascot.Vrm
         }
 
         /// <summary>
+        /// 全カテゴリを連結した読み込み済みモーション一覧（設定パネルの「モーションを確認」用、
+        /// #70 派生）。<c>null</c> なら読み込みがまだ終わっていない（<see cref="_motion"/> が
+        /// 無いか、その <c>Manifest</c> がまだ無い）。
+        ///
+        /// ★ <b><see cref="MotionCategories.All"/> の順 × カテゴリ内はファイル名順。</b>
+        ///   <c>AnimationManifest.Build</c> がルートごとに <c>Ordinal</c> でソート済みの並びを
+        ///   そのまま連結するだけで、ここでは並び替えない——設定パネルの選択肢の並びと
+        ///   一致させるため。
+        /// ★ <b>1回作ったら使い回す。</b> <c>Manifest</c> は起動時に1回だけ組まれて以後変わらない
+        ///   （このセッション中に <c>.vrma</c> を足しても再走査はしない）ので、毎フレーム
+        ///   （設定パネルを開いている間、<c>SettingsPanelBridge.Tick</c> がここを見に来る）
+        ///   新しい <c>List</c> を作り直す理由が無い。
+        /// </summary>
+        public IReadOnlyList<MotionClip> MotionClips
+        {
+            get
+            {
+                if (_motionClipsCache != null) return _motionClipsCache;
+
+                var manifest = _motion?.Manifest;
+                if (manifest == null) return null;
+
+                var clips = new List<MotionClip>();
+                foreach (var category in MotionCategories.All) clips.AddRange(manifest.Clips(category));
+                _motionClipsCache = clips;
+                return _motionClipsCache;
+            }
+        }
+
+        private List<MotionClip> _motionClipsCache;
+
+        /// <summary>
+        /// 設定パネルの「モーションを確認」（#70 派生）。選ばれた1本を本番と同じ経路
+        /// （<see cref="VrmMotionPlayer.Play"/>）で再生する。開始できたら <c>true</c>。
+        ///
+        /// ★ <b><see cref="MotionKind.Emotion"/> で再生すること。</b> <see cref="MotionKind.Accent"/>
+        ///   にすると、小ネタが鳴っている間は割り込めず「押しても何も起きない」に見える
+        ///   経路が増える——<c>Emotion</c> は <c>Accent</c> に割り込める（<c>Accent</c> は
+        ///   何も再生中でないときしか始まらない）。
+        /// ★ 感情モーション再生中（<c>_motion.IsPlayingEmotion</c>）は <see cref="VrmMotionPlayer.Play"/>
+        ///   自身が拒否する（感情モーション同士は割り込まない、ユーザーと決めたこと）。
+        ///   呼び出し側（<c>SettingsPanelBridge</c>）はこの戻り値を見て「再生中です」を出し分ける。
+        /// </summary>
+        public bool PreviewMotion(MotionClip clip)
+        {
+            return _motion != null && clip != null
+                && _motion.Play(clip, MotionKind.Emotion, Time.realtimeSinceStartupAsDouble);
+        }
+
+        /// <summary>
         /// Desktop 側（<c>CursorGazeSource</c>）が刺す。<c>null</c> なら自律的な漂いに倒れる。
         ///
         /// ★ <b>Android にはこの注入元が存在しない</b>（<c>ChatterMascot.Desktop</c> アセンブリごと

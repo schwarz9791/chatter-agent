@@ -248,7 +248,6 @@ Assets/ChatterMascot/
     MacPostBuild.cs                 ★ Info.plist に LSUIElement を書く（Dock に出さない）
     NativePluginSettings.cs         PluginImporter を出荷値にする
     BuildScript.cs / VrmProbe.cs
-    VrmaExport.cs                   ★ Humanoid の .anim → .vrma（#70 の素材。→ docs/mascot.md「VRMA の書き出し」）
   Tests/Editor/                     EditMode テスト（状態機械が主）
 ```
 
@@ -296,7 +295,7 @@ Editor が UniVRM の型を直接使うなら Editor の asmdef にも `VRM10` �
 - ★ **`.vrma` に対応する設定は無い。** モーションを選ばせる UI を作っていないため（意図的な非対称）
 - ★ **5 の `animations/*.vrma` は非再帰。** `animations/<category>/*.vrma`（`idle` / `happy` / `angry` /
   `sad` / `relaxed` / `surprised`。#70 の感情モーションと小ネタの置き場）は待機ループの候補に**混ざらない**。
-  素材は VRoid Studio 由来で再配布できないので同梱せず、ここにだけ置く（作り方は `docs/mascot.md`「VRMA の書き出し」）
+  素材は VRoid Studio 由来で再配布できないので同梱せず、ここにだけ置く（作り方は private の `vroid-motion-exporter`。→ `docs/mascot.md`「素材の `.vrma` は別リポジトリで作る」）
 - ★★ **`animations/` の直下に `.vrma` を1本置くと、それが待機ループ（同梱 `idle_loop.vrma`）の
   代わりに使われる。** 上の表の「5」の実体はこれ——**`<category>` サブディレクトリではなく
   `animations/` そのものの直下**でないと辞書順探索に入らない。カテゴリ別に置いた素材

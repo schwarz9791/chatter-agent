@@ -13,4 +13,4 @@ shift || true
 #   `Failed to resolve` / `Cannot perform upm operation` はパッケージ解決の失敗
 #   （UniVRM を manifest.json に足した直後の初回解決で踏む）。
 run_unity -quit -executeMethod "$METHOD" "$@" 2>&1 \
-  | grep -E "^\[Fixups\]|^\[Build\]|^\[Native\]|^\[VrmProbe\]|^\[VrmaExport\]|error CS|Aborting batchmode|Unhandled exception|Failed to resolve|Cannot perform upm operation" || true
+  | grep -E "^\[Fixups\]|^\[Build\]|^\[Native\]|^\[VrmProbe\]|error CS|Aborting batchmode|Unhandled exception|Failed to resolve|Cannot perform upm operation" || true

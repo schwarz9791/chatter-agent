@@ -1,7 +1,7 @@
 namespace ChatterMascot.Vrm
 {
     /// <summary>
-    /// <see cref="VrmMotionPlayer.Play"/>（および <see cref="VrmCharacter.PreviewMotion"/> /
+    /// <c>VrmMotionPlayer.Play</c>（および <c>VrmCharacter.PreviewMotion</c> /
     /// <c>ISettingsHost.PlayMotion</c>）が返す、再生を開始できたか・できなかったならその理由。
     ///
     /// ★ <c>VrmMotionPlayer.Play</c> の拒否条件と 1 対 1 で対応する（#70 レビュー #5）。
@@ -14,7 +14,7 @@ namespace ChatterMascot.Vrm
         /// <summary>再生を開始した。</summary>
         Started,
 
-        /// <summary><see cref="VrmMotionPlayer"/> が既に破棄されている。</summary>
+        /// <summary><c>VrmMotionPlayer</c> が既に破棄されている。</summary>
         Disposed,
 
         /// <summary>待機モーション（<c>VrmIdleAnimation</c>）がまだ読み込めていない。</summary>

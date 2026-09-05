@@ -179,7 +179,7 @@ namespace ChatterMascot.Vrm
         }
 
         /// <summary>
-        /// 読み込みが終わった集合から組み直す（<see cref="VrmMotionPlayer.Loaded"/> 用、#70 レビュー #2）。
+        /// 読み込みが終わった集合から組み直す（<c>VrmMotionPlayer.Loaded</c> 用、#70 レビュー #2）。
         ///
         /// ★★ <b><see cref="Build"/> と違い、ルートの優先順位・同名ファイルの勝敗は判定しない。</b>
         ///   渡された <paramref name="clips"/> をカテゴリで仕分けるだけ——呼び出し側

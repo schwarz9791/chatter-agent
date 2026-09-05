@@ -3529,8 +3529,15 @@ chmod +x AssetRipper.GUI.Free && xattr -dr com.apple.quarantine .
 cd apps/chatter-mascot
 ./scripts/run.sh ChatterMascot.EditorTools.VrmaExport.Batch \
   -vrmaClipDir ../../_workspace/vroid-clips -vrmaOutDir ~/.config/chatter-agent/animations   # [-vrmaClip Hub_Idle01]
+# 棚卸し: 対応表を無視して .anim を全部 1 カテゴリへ（設定パネルの「モーションを確認」で見比べる）
+./scripts/run.sh ChatterMascot.EditorTools.VrmaExport.Batch -vrmaClipDir <全 .anim> -vrmaOutDir ~/.config/chatter-agent/animations -vrmaAll idle
 ```
 
+- **VRoid Studio 2.14.0 の AnimationClip は 129 本（同名を除いて 123）。** 名前の一覧は UnityPy で `data.unity3d` を舐めれば取れる。
+  `-vrmaAll idle` で全部通すと **82 本が変換でき、47 本は弾かれる**——UI 用（`Expander*` / `GroupTransform*`）、
+  手のポーズ（`L_Hand_*`）、既定ポーズ（`VRoid_*` / `Take 001`）、撮影モードの**静止ポーズ**（`shot_*` / `spot_*` 28 本。
+  「ボーンが一度も動きませんでした」）。ポーズは 1 フレームなのでモーションとしては使えない。
+  同名のクリップ（`Hub_Idle01〜04` は 2 組、`Take 001`、`VRoid_F00_DefaultPose`）は `__<pathID>` を付けて両方書く
 - **全体エクスポートは要らない。** `data.unity3d` は 1GB あるが、13 本は `sharedassets0.assets` から検索 API で1本ずつ拾える
 - ★ **`Hub_Idle01/03/04` は同名のクリップが 2 組ある**（pathID 181/183/184 と 186/188/189）。
   撮影モードの「待機5/7/8」に対応するのは**長さが 11.7 / 10.8 / 18.2 秒の組（186/188/189）**。

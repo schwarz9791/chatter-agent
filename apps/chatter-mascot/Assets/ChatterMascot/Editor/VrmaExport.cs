@@ -13,7 +13,7 @@ namespace ChatterMascot.EditorTools
 {
     /// <summary>
     /// Unity の Humanoid <c>AnimationClip</c>（<c>.anim</c>。muscle カーブ）を <c>.vrma</c> に変換する。
-    /// <c>./scripts/run.sh ChatterMascot.EditorTools.VrmaExport.Batch -vrmaClipDir &lt;dir&gt; -vrmaOutDir &lt;dir&gt; [-vrmaClip &lt;name&gt;]</c>
+    /// <c>./scripts/run.sh ChatterMascot.EditorTools.VrmaExport.Batch -vrmaClipDir &lt;dir&gt; -vrmaOutDir &lt;dir&gt; [-vrmaClip &lt;name&gt; | -vrmaAll &lt;category&gt;]</c>
     ///
     /// <b>#70 の素材を VRoid Studio から起こすための道具</b>（→ <c>_workspace/vroid-clips/README.md</c>）。
     /// 出力は再配布できないので <c>~/.config/chatter-agent/animations/&lt;category&gt;/</c> にだけ置く。
@@ -74,6 +74,9 @@ namespace ChatterMascot.EditorTools
             var clipDir = ExpandHome(CommandLine.Argument("-vrmaClipDir"));
             var outDir = ExpandHome(CommandLine.Argument("-vrmaOutDir"));
             var only = CommandLine.Argument("-vrmaClip");
+            // ★ 対応表を無視して clipDir の .anim を全部 1 つのカテゴリへ書く（素材の棚卸し用。
+            //   VRoid Studio の全クリップを idle/ に並べて設定パネルの「モーションを確認」で見る）
+            var all = CommandLine.Argument("-vrmaAll");
 
             if (string.IsNullOrEmpty(clipDir) || string.IsNullOrEmpty(outDir))
             {
@@ -88,10 +91,15 @@ namespace ChatterMascot.EditorTools
                 return;
             }
 
-            var targets = Table.Where(row => string.IsNullOrEmpty(only) || row.Clip == only).ToList();
+            var targets = string.IsNullOrEmpty(all)
+                ? Table.Where(row => string.IsNullOrEmpty(only) || row.Clip == only).ToList()
+                : Directory.GetFiles(clipDir, "*.anim")
+                    .Select(f => (Clip: Path.GetFileNameWithoutExtension(f), Categories: new[] { all }))
+                    .OrderBy(row => row.Clip, StringComparer.Ordinal)
+                    .ToList();
             if (targets.Count == 0)
             {
-                Debug.LogError($"[VrmaExport] -vrmaClip {only} は対応表にありません");
+                Debug.LogError($"[VrmaExport] -vrmaClip {only} は対応表にありません（-vrmaAll なら .anim が 1 本も無い）");
                 EditorApplication.Exit(2);
                 return;
             }

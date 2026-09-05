@@ -65,9 +65,10 @@ namespace ChatterMascot.Desktop
 
         /// <summary>
         /// 選ばれた1本を本番と同じ経路で再生する（→ <c>VrmCharacter.PreviewMotion</c>）。
-        /// 開始できたら <c>true</c>。
+        /// 開始できたか・できなかったならその理由を <see cref="MotionPlayResult"/> で返す
+        /// （#70 レビュー #5。<c>SettingsSchema.MotionPlayNotice</c> がこれを文言にする）。
         /// </summary>
-        bool PlayMotion(MotionClip clip);
+        MotionPlayResult PlayMotion(MotionClip clip);
 
         void Quit();
     }
@@ -842,6 +843,10 @@ namespace ChatterMascot.Desktop
         /// ★ 感情モーション再生中は割り込めない（<c>VrmMotionPlayer.Play</c> の拒否条件。
         ///   感情モーション同士は割り込まない、ユーザーと決めたこと）。押しても何も起きない
         ///   ように見せないため、理由を note で出す。
+        /// ★★ #70 レビュー #5。文言は <c>SettingsSchema.MotionPlayNotice</c>（純粋関数）に
+        ///   寄せてある。ここでは <c>_host.PlayMotion</c> の <see cref="MotionPlayResult"/> を
+        ///   渡すだけ——以前は <c>bool</c> の <c>false</c> 一色だったので、「読み込み中」も
+        ///   「もう鳴っている」も同じ「再生中です」になっていた。
         /// </summary>
         private void PlayMotionPreview()
         {
@@ -856,9 +861,8 @@ namespace ChatterMascot.Desktop
                 return;
             }
 
-            Notice(SettingKeys.MotionPreviewPlay, _host.PlayMotion(clip)
-                ? id + " を再生します"
-                : "再生中です。終わってからもう一度押してください");
+            var result = _host.PlayMotion(clip);
+            Notice(SettingKeys.MotionPreviewPlay, SettingsSchema.MotionPlayNotice(result, id));
             Push(update: true);
         }
 

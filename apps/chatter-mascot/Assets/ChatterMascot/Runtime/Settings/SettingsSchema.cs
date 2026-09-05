@@ -390,6 +390,28 @@ namespace ChatterMascot.Settings
             return false;
         }
 
+        /// <summary>
+        /// 「モーションを確認」の「再生」ボタンの結果通知（#70 レビュー #5）。
+        /// <c>VrmMotionPlayer.Play</c> の拒否条件と 1 対 1 で対応する<b>純粋関数</b>——
+        /// <c>SettingsPanelBridge.PlayMotionPreview</c> はこれを呼ぶだけにして、文言をここの
+        /// テストで固定する。
+        /// </summary>
+        /// <param name="result">再生を試みた結果</param>
+        /// <param name="id">試みたモーションの id（<see cref="MotionPreviewId"/> の形。<see cref="MotionPlayResult.Started"/> の文言にだけ使う）</param>
+        public static string MotionPlayNotice(MotionPlayResult result, string id)
+        {
+            switch (result)
+            {
+                case MotionPlayResult.Started: return id + " を再生します";
+                case MotionPlayResult.Busy: return "再生中です。終わってからもう一度押してください";
+                case MotionPlayResult.IdleNotLoaded: return "待機モーションの VRMA が読めていないので再生できません";
+                case MotionPlayResult.IdleDisabled: return "待機モーションが OFF です";
+                case MotionPlayResult.NotLoaded: return "このモーションは読み込めていません";
+                case MotionPlayResult.Disposed: return "キャラクターが無効です";
+                default: return "";
+            }
+        }
+
         /// <summary>保存されている文字列を画面用の記号にする。読めなければそのまま出す</summary>
         private static string Symbols(string hotKey)
         {

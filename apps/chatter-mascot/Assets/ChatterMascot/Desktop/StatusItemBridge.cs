@@ -726,10 +726,12 @@ namespace ChatterMascot.Desktop
                 }
             }
 
-            bool ISettingsHost.PlayMotion(MotionClip clip)
+            MotionPlayResult ISettingsHost.PlayMotion(MotionClip clip)
             {
                 var character = ResolveCharacter();
-                return character != null && character.PreviewMotion(clip);
+                // ★ #70 レビュー #5。character == null（VRM 未読込・シーン切り替え中）は
+                //   NotLoaded に倒す——PreviewMotion 自身の _motion == null 判定と同じ理由
+                return character != null ? character.PreviewMotion(clip) : MotionPlayResult.NotLoaded;
             }
 
             void ISettingsHost.Quit()

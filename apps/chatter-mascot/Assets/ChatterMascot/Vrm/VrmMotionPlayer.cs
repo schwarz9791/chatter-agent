@@ -96,8 +96,32 @@ namespace ChatterMascot.Vrm
             _params = p;
         }
 
-        /// <summary>全カテゴリ × 全ルートの一覧。<see cref="LoadAsync"/> の完了後は非 <c>null</c>。</summary>
+        /// <summary>
+        /// 全カテゴリ × 全ルートの<b>走査結果</b>。<see cref="LoadAsync"/> の先頭で組まれるので、
+        /// 個々のクリップの読み込みが終わる前から非 <c>null</c>。
+        ///
+        /// ★★ <b>起動ログ（<see cref="Describe"/> / <see cref="AnimationManifest.TotalCount"/>）
+        ///   専用。<see cref="Pick"/> にはこちらを使わないこと</b>（#70 レビュー #2）。
+        ///   走査は「ファイルが在るか」しか見ておらず、個々の <c>.vrma</c> の読み込みが
+        ///   壊れた <c>.vrma</c> やタイミングで失敗しても <see cref="Manifest"/> はそれを知らない
+        ///   ——<c>Pick</c> の母集合には <see cref="Loaded"/> を使うこと。
+        /// </summary>
         public AnimationManifest Manifest { get; private set; }
+
+        /// <summary>
+        /// 実際に読み込めた（<c>_loaded</c> に載った）クリップだけの一覧。読み込み中は <c>null</c>。
+        ///
+        /// ★★ <b><see cref="Play"/> で再生できる集合と一致させること</b>（#70 レビュー #2）。
+        ///   <see cref="Manifest"/> から <c>Pick</c> すると、走査はできたが読み込みに失敗した
+        ///   クリップ（壊れた <c>.vrma</c> 等）や、まだプリロードの途中のクリップを選んでしまい、
+        ///   <see cref="Play"/> が黙って <see cref="MotionPlayResult.NotLoaded"/> を返す
+        ///   （無言の no-op に見える）。設定パネルの一覧（<c>VrmCharacter.MotionClips</c>）も
+        ///   ここから組む——一覧に出ているのに押しても再生できない、を無くすため。
+        /// ★ <c>LoadAsync</c> の完了直後、<see cref="Manifest"/> の各カテゴリの並びを保って
+        ///   <c>_loaded.ContainsKey</c> で絞り込んで組む（<see cref="BuildLoadedManifest"/>）。
+        ///   例外・中断で終わっても「そこまでに読めた分」で組む（<c>_disposed</c> のときを除く）。
+        /// </summary>
+        public AnimationManifest Loaded { get; private set; }
 
         /// <summary>いま <c>Idle</c> 以外の状態か（フェード中も含む）。</summary>
         public bool IsPlaying => _state != PlayState.Idle;
@@ -107,11 +131,19 @@ namespace ChatterMascot.Vrm
 
         /// <summary>
         /// 直前の <see cref="Tick"/> で待機へ戻り切ったら1回だけ <c>true</c>。呼ぶと消費する。
+        /// 終わったのがどちらの種別かを <paramref name="kind"/> に返す（<c>false</c> のときの
+        /// 値は不定——呼び出し側は戻り値が <c>true</c> のときだけ見ること）。
         /// <see cref="VrmCharacter"/> はこれを見て <c>IdleAccentTimer.Reset</c> /
         /// <c>EmotionMotionTrigger.NotifyEnded</c> を呼ぶ。
+        ///
+        /// ★★ <b>小ネタ（<see cref="MotionKind.Accent"/>）の終了でも <c>NotifyEnded</c> を
+        ///   呼んではいけない</b>（#70 レビュー #3）。<c>EmotionMotionTrigger.NotifyEnded</c> は
+        ///   感情モーションのクールダウンの起点で、小ネタの終了はそれとは無関係——
+        ///   呼び出し側が <paramref name="kind"/><c> == MotionKind.Emotion</c> を確かめてから呼ぶ。
         /// </summary>
-        public bool ConsumeEnded()
+        public bool ConsumeEnded(out MotionKind kind)
         {
+            kind = _kind;
             if (!_ended) return false;
             _ended = false;
             return true;
@@ -187,7 +219,39 @@ namespace ChatterMascot.Vrm
                     // ★ 握ること。ここから漏らすと理由が残らない（VrmIdleAnimation.LoadAsync と同じ理由）
                     Debug.LogError("[Mascot] モーションの読み込みで例外が出ました: " + e);
                 }
+                finally
+                {
+                    // ★★ #70 レビュー #2。正常完了・早期 return（_disposed / キャンセル）・例外の
+                    //   どの経路でも通る場所に置くこと。「そこまでに読めた分」で Loaded を組んでおかないと、
+                    //   1本目の読み込みが失敗しただけで Loaded が永久に null のまま残り、
+                    //   MotionClips が「読み込み中」から一生変わらない。
+                    // ★ _disposed のときは組まない——Dispose() が既に _loaded を Clear 済みで、
+                    //   ここで組んでも空になるだけ（そして誰も読まない）
+                    if (!_disposed && Manifest != null) Loaded = BuildLoadedManifest();
+                }
             }
+        }
+
+        /// <summary>
+        /// <see cref="Loaded"/> の組み立て。<see cref="Manifest"/> の各カテゴリを
+        /// <see cref="AnimationManifest.Clips"/> の並びのまま回し、<c>_loaded.ContainsKey</c> で
+        /// 絞り込む。
+        ///
+        /// ★ <c>_loaded.Keys</c> を直接 <c>AnimationManifest.FromClips</c> に渡さないこと——
+        ///   <c>Dictionary</c> の列挙順は挿入順の保証が無く、設定パネルの一覧がファイル名順から
+        ///   崩れうる。
+        /// </summary>
+        private AnimationManifest BuildLoadedManifest()
+        {
+            var loadedClips = new List<MotionClip>();
+            foreach (var category in MotionCategories.All)
+            {
+                foreach (var clip in Manifest.Clips(category))
+                {
+                    if (_loaded.ContainsKey(clip)) loadedClips.Add(clip);
+                }
+            }
+            return AnimationManifest.FromClips(loadedClips);
         }
 
         /// <summary>
@@ -250,29 +314,35 @@ namespace ChatterMascot.Vrm
         }
 
         /// <summary>
-        /// 再生を開始する。開始できたら <c>true</c>。
+        /// 再生を開始する。開始できたら <see cref="MotionPlayResult.Started"/>。
         ///
-        /// 拒否する条件: 待機 VRMA が未読込（<see cref="VrmIdleAnimation.IsLoaded"/>）／
-        /// <paramref name="clip"/> が <c>null</c> か読めていない／
-        /// <paramref name="kind"/><c> == Emotion</c> で既に感情モーション再生中／
-        /// <paramref name="kind"/><c> == Accent</c> で既に何か再生中。
+        /// 拒否する条件と戻り値（#70 レビュー #5。1 対 1 で対応する）:
+        /// 既に破棄されている（<see cref="MotionPlayResult.Disposed"/>）／
+        /// 待機 VRMA が未読込（<see cref="VrmIdleAnimation.IsLoaded"/>、
+        /// <see cref="MotionPlayResult.IdleNotLoaded"/>）／
+        /// 設定「待機モーション」が OFF（<see cref="MotionPlayResult.IdleDisabled"/>）／
+        /// <paramref name="clip"/> が <c>null</c> か読めていない
+        /// （<see cref="MotionPlayResult.NotLoaded"/>）／
+        /// <paramref name="kind"/><c> == Emotion</c> で既に感情モーション再生中、または
+        /// <paramref name="kind"/><c> == Accent</c> で既に何か再生中
+        /// （どちらも <see cref="MotionPlayResult.Busy"/>）。
         ///
         /// ★ <b>感情モーションは小ネタ（<c>Accent</c>）に割り込める。</b> 割り込まれた小ネタの
         ///   クリップは <c>Animation.Stop()</c> で寝かせ直す。感情モーション同士は
         ///   割り込まない（上の拒否条件どおり）。
         /// </summary>
-        public bool Play(MotionClip clip, MotionKind kind, double now)
+        public MotionPlayResult Play(MotionClip clip, MotionKind kind, double now)
         {
-            if (_disposed) return false;
-            if (!_idle.IsLoaded) return false;
+            if (_disposed) return MotionPlayResult.Disposed;
+            if (!_idle.IsLoaded) return MotionPlayResult.IdleNotLoaded;
             // ★ 設定「待機モーション」OFF の間は始めない。Present が no-op なので見えないまま
             //   クリップの Animation だけ走り、FadeIn の後に Playing の防御で畳まれる——
             //   1本ぶん無駄に再生するだけで実害は無いが、その経路を最初から作らない
-            if (!_idle.Enabled) return false;
-            if (clip == null) return false;
-            if (!_loaded.TryGetValue(clip, out var loaded)) return false;
-            if (kind == MotionKind.Emotion && IsPlayingEmotion) return false;
-            if (kind == MotionKind.Accent && IsPlaying) return false;
+            if (!_idle.Enabled) return MotionPlayResult.IdleDisabled;
+            if (clip == null) return MotionPlayResult.NotLoaded;
+            if (!_loaded.TryGetValue(clip, out var loaded)) return MotionPlayResult.NotLoaded;
+            if (kind == MotionKind.Emotion && IsPlayingEmotion) return MotionPlayResult.Busy;
+            if (kind == MotionKind.Accent && IsPlaying) return MotionPlayResult.Busy;
 
             // ★ ここに来る「_current != null」は、感情モーションが小ネタへ割り込むケースだけ
             //   （上のガードにより、Accent は何も再生中でないときしか開始できない）
@@ -309,8 +379,10 @@ namespace ChatterMascot.Vrm
             _state = PlayState.FadeIn;
             // ★ 1本1行。実機で「出た／出ない」を Player.log から判定する唯一の手がかり
             //   （docs/mascot.md「顔が動かないのが正常と壊れて動かないはログでしか区別できない」と同じ理由）
-            Debug.Log($"[Mascot] モーション開始: {kind} {clip.FileName}（{MotionCategories.DirectoryName(clip.Category)}、{(loaded.State != null ? loaded.State.length : 0f):F1}s）");
-            return true;
+            // ★★ #70 レビュー #8。上で取った state をそのまま使うこと。loaded.State を
+            //   もう一度引くと LoadedClip.State の doc どおり foreach を二重に走らせる無駄がある
+            Debug.Log($"[Mascot] モーション開始: {kind} {clip.FileName}（{MotionCategories.DirectoryName(clip.Category)}、{(state != null ? state.length : 0f):F1}s）");
+            return MotionPlayResult.Started;
         }
 
         /// <summary>

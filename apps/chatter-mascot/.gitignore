@@ -70,3 +70,7 @@ crashlytics-build.properties
 *.vrma
 !/[Aa]ssets/[Ss]treamingAssets/*.vrm
 !/[Aa]ssets/[Ss]treamingAssets/*.vrma
+
+# VRoid Studio 由来の .anim を Assets/ 配下に置いても絶対にコミットしない（保険。抽出は private の vroid-motion-exporter で行う）
+/[Aa]ssets/**/*.anim
+/[Aa]ssets/**/*.anim.meta

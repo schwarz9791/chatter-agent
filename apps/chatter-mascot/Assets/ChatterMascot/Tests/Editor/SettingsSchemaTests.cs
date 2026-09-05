@@ -142,11 +142,6 @@ namespace ChatterMascot.Tests
         }
 
         /// <summary>
-        /// ★★ 実装が無い項目を出さないこと。押しても何も起きない項目は
-        ///   「動いて見える死体」で、グレーアウトでも「今はできない」と「壊れている」を
-        ///   ユーザーが区別できない。
-        /// </summary>
-        /// <summary>
         /// ★ 表示と「再生」が同じ解決を通ること。一度も選び直していない（空）なら先頭、
         ///   一覧に無い id なら先頭、一覧が無ければ空文字（実機で「選べるモーションがありません」を踏んだ）。
         /// </summary>
@@ -162,6 +157,11 @@ namespace ChatterMascot.Tests
             Assert.That(SettingsSchema.EffectiveMotionPreview(new SettingChoice[0], ""), Is.EqualTo(""));
         }
 
+        /// <summary>
+        /// ★★ 実装が無い項目を出さないこと。押しても何も起きない項目は
+        ///   「動いて見える死体」で、グレーアウトでも「今はできない」と「壊れている」を
+        ///   ユーザーが区別できない。
+        /// </summary>
         [Test]
         public void DoesNotOfferFeaturesThatDoNotExistYet()
         {
@@ -499,6 +499,27 @@ namespace ChatterMascot.Tests
             var choice = Find(SettingsSchema.Build(context), SettingKeys.MotionPreview);
 
             Assert.That(choice.Value, Is.EqualTo("idle/Hub_Idle02.vrma"));
+        }
+
+        /// <summary>
+        /// ★★ #70 レビュー #5。<c>MotionPlayResult</c> の6分岐すべてに文言が割り当たっていること
+        /// （<c>VrmMotionPlayer.Play</c> の拒否条件と1対1）。
+        /// </summary>
+        [Test]
+        public void MotionPlayNoticeCoversAllSixResults()
+        {
+            Assert.That(SettingsSchema.MotionPlayNotice(MotionPlayResult.Started, "happy/a.vrma"),
+                Is.EqualTo("happy/a.vrma を再生します"));
+            Assert.That(SettingsSchema.MotionPlayNotice(MotionPlayResult.Busy, "happy/a.vrma"),
+                Is.EqualTo("再生中です。終わってからもう一度押してください"));
+            Assert.That(SettingsSchema.MotionPlayNotice(MotionPlayResult.IdleNotLoaded, "happy/a.vrma"),
+                Is.EqualTo("待機モーションの VRMA が読めていないので再生できません"));
+            Assert.That(SettingsSchema.MotionPlayNotice(MotionPlayResult.IdleDisabled, "happy/a.vrma"),
+                Is.EqualTo("待機モーションが OFF です"));
+            Assert.That(SettingsSchema.MotionPlayNotice(MotionPlayResult.NotLoaded, "happy/a.vrma"),
+                Is.EqualTo("このモーションは読み込めていません"));
+            Assert.That(SettingsSchema.MotionPlayNotice(MotionPlayResult.Disposed, "happy/a.vrma"),
+                Is.EqualTo("キャラクターが無効です"));
         }
     }
 }

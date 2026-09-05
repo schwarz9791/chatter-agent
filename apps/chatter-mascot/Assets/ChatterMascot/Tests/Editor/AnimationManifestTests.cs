@@ -252,6 +252,39 @@ namespace ChatterMascot.Tests
             Assert.That(manifest.Pick(MotionCategory.Surprised, () => 0.0), Is.Null);
         }
 
+        /// <summary>
+        /// ★★ #70 レビュー #2。<see cref="VrmMotionPlayer.Loaded"/> はこれで組む——
+        /// 渡した並び順をカテゴリごとに保ったまま仕分けることを固定する。
+        /// </summary>
+        [Test]
+        public void FromClipsGroupsByCategoryAndPreservesOrder()
+        {
+            var happy1 = new MotionClip(MotionCategory.Happy, "/a/happy1.vrma", "happy1.vrma", MotionStyle.Natural);
+            var happy2 = new MotionClip(MotionCategory.Happy, "/a/happy2.vrma", "happy2.vrma", MotionStyle.Natural);
+            var sad1 = new MotionClip(MotionCategory.Sad, "/a/sad1.vrma", "sad1.vrma", MotionStyle.Natural);
+
+            var manifest = AnimationManifest.FromClips(new[] { happy1, sad1, happy2 });
+
+            var happyClips = manifest.Clips(MotionCategory.Happy);
+            Assert.That(happyClips.Count, Is.EqualTo(2));
+            Assert.That(happyClips[0], Is.SameAs(happy1));
+            Assert.That(happyClips[1], Is.SameAs(happy2));
+            Assert.That(manifest.Clips(MotionCategory.Sad).Count, Is.EqualTo(1));
+            Assert.That(manifest.TotalCount, Is.EqualTo(3));
+        }
+
+        [Test]
+        public void FromClipsOfAnEmptySequenceHasZeroTotalCount()
+        {
+            var manifest = AnimationManifest.FromClips(Array.Empty<MotionClip>());
+
+            foreach (var category in MotionCategories.All)
+            {
+                Assert.That(manifest.Clips(category), Is.Empty, category.ToString());
+            }
+            Assert.That(manifest.TotalCount, Is.EqualTo(0));
+        }
+
         [Test]
         public void DescribeListsAllCategoriesWithCounts()
         {

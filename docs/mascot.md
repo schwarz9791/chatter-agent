@@ -3565,6 +3565,8 @@ VRoid Studio 由来なので**再配布できない** —— `.vrma` は同梱�
 | `Tick` を `LateUpdate` の早期 return の後ろに置く | VRMA 有効時（通常状態）は到達せず `FadeOut` が終わらないまま感情モーションが Playing に固まる | `UpdateFace` の後・`_instance == null` の前に置く |
 | 寝かせたクリップを `Animation.enabled = false` で止める | **2 回目以降の再生が前回の終端から始まり、0.5 秒で待機に戻る**（実機: `time` が 3.98 のまま起き、3 回目は 6.65） | 無効化した legacy `Animation` は有効化し直しても**最初の更新まで state への操作（`time = 0` / `Rewind()` / `wrapMode`）を捨てる**。有効化直後に何を書いても効かない。寝かせるのは `Stop()`（止めて先頭へ巻き戻す契約）、起こすのは `Stop()` → `Play()` → `wrapMode = ClampForever`。止まっている `Animation` 15 本の CPU コストは測って無し（A/B と同じ条件で 23.6%） |
 | 混ぜる各ソースに `FingerFallbackPoseProvider.Wrap` を掛け忘れる | 指の無いクリップ側が identity（T ポーズ）へ補間され、「指が真っ直ぐ伸びる」問題が形を変えて戻る | 混ぜる前に各ソースへ掛ける（`CrossFadeAnimation` 自身は掛けない。#88 からの宿題） |
+| 設定の適用は毎回 `IdleMotion` を代入する | 同値ガード無しでは、この項目と無関係な設定変更（音量スライダー等）のたびに再生中の感情モーション・小ネタが問答無用で待機へ畳まれる | setter の先頭で `proceduralIdle == value` を確かめて同値なら何もしない（PR #91 レビュー） |
+| `Pick`（母集合）と `Play`（実際に再生できる集合）を分けない | 走査はできたが読み込みに失敗した／まだプリロード中のクリップを選んでしまい、`Play` が黙って失敗する（壊れた `.vrma` があっても気づけない） | 走査結果は `Manifest`、実際に読み込めた集合は `Loaded`（`AnimationManifest.FromClips` で組み直す）に分け、`Pick` は必ず `Loaded` から（PR #91 レビュー） |
 
 **実機確認（2026-09-04、macOS `.app`、AivisSpeech 稼働、窓 810×810）**: 配信キューに7文
 （neutral / happy / happy / sad / surprised / prompt(surprised) / angry）を直接置いた結果 ——
@@ -3593,7 +3595,11 @@ B = #70 **27.3%**（26.7 26.8 27.8 28.3 27.3 27.3。途中で小ネタが1本再
 「再生」が「選べるモーションがありません」になる（表示と押下の解決を
 `SettingsSchema.EffectiveMotionPreview` の 1 関数に寄せた）。「待機モーション」を切り替えても
 自分起点なのでパネルは作り直されず、この項目の有効/無効が古いまま残る（チェックボックスは
-引きずるものではないので、この 1 箇所だけ `Push(update: true)` で出し直す）。
+引きずるものではないので、この 1 箇所だけ `Push(update: true)` で出し直す）。「再生」を押した
+結果は `MotionPlayResult`（`Started` / `Disposed` / `IdleNotLoaded` / `IdleDisabled` / `NotLoaded` /
+`Busy`）で返り、`SettingsSchema.MotionPlayNotice` が文言に変換する——読み込み中で押せない
+（`NotLoaded`）ともう鳴っている（`Busy`）は別の文言で出る（PR #91 レビュー #5。以前は両方
+「再生中です」に潰れていた）。
 
 **目視の道具**: `open Build/ChatterMascot.app --args -serverUrl ws://127.0.0.1:9 -motionProbe happy`
 で読み込み完了の3秒後に1本だけ再生する。ログは

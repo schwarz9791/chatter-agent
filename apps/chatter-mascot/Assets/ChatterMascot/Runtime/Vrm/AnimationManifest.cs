@@ -178,6 +178,38 @@ namespace ChatterMascot.Vrm
             return MotionStyle.Natural;
         }
 
+        /// <summary>
+        /// 読み込みが終わった集合から組み直す（<see cref="VrmMotionPlayer.Loaded"/> 用、#70 レビュー #2）。
+        ///
+        /// ★★ <b><see cref="Build"/> と違い、ルートの優先順位・同名ファイルの勝敗は判定しない。</b>
+        ///   渡された <paramref name="clips"/> をカテゴリで仕分けるだけ——呼び出し側
+        ///   （<c>VrmMotionPlayer</c>）が既に <see cref="Clips"/> の並びで渡してくる前提で、
+        ///   ここでは並び替えない（同一カテゴリ内の順序をそのまま保つ）。
+        /// ★ <c>ChatterMascot.Tests.asmdef</c> に <c>InternalsVisibleTo</c> が無いので
+        ///   <c>public</c>（本来のスコープは <c>VrmMotionPlayer</c> だけで足りる）。
+        /// </summary>
+        public static AnimationManifest FromClips(IEnumerable<MotionClip> clips)
+        {
+            var byCategory = new Dictionary<MotionCategory, List<MotionClip>>();
+            foreach (var category in MotionCategories.All) byCategory[category] = new List<MotionClip>();
+
+            if (clips != null)
+            {
+                foreach (var clip in clips)
+                {
+                    if (clip == null) continue;
+                    if (!byCategory.TryGetValue(clip.Category, out var list))
+                    {
+                        list = new List<MotionClip>();
+                        byCategory[clip.Category] = list;
+                    }
+                    list.Add(clip);
+                }
+            }
+
+            return new AnimationManifest(byCategory);
+        }
+
         /// <summary>指定カテゴリのクリップ一覧。無ければ空（<c>null</c> を返さない）。</summary>
         public IReadOnlyList<MotionClip> Clips(MotionCategory category)
         {

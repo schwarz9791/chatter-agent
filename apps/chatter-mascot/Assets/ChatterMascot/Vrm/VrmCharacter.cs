@@ -132,6 +132,13 @@ namespace ChatterMascot.Vrm
             get { return proceduralIdle; }
             set
             {
+                // ★★ #70 レビュー #1。同値なら何もしないこと。ApplySettingsToScene は設定が
+                //   変わるたびに（音量スライダーなど、この項目と無関係な変更でも）毎回この setter に
+                //   代入する。同値ガードが無いと、そのたびに下の無条件 _motion.Stop() が走り、
+                //   再生中の感情モーション・小ネタが問答無用で待機へ畳まれる（音量スライダーの
+                //   デバウンス確定でクロスフェード無しに飛ぶ。PR #91 のレビューで指摘）。
+                if (proceduralIdle == value) return;
+
                 proceduralIdle = value;
                 // ★★ #70。_motion.Stop() を _idle.Enabled より先に呼ぶこと。逆順だと
                 //   _idle.Enabled=false → Apply() が Runtime.VrmAnimation を null にした後、
@@ -161,38 +168,45 @@ namespace ChatterMascot.Vrm
         /// <summary>
         /// 全カテゴリを連結した読み込み済みモーション一覧（設定パネルの「モーションを確認」用、
         /// #70 派生）。<c>null</c> なら読み込みがまだ終わっていない（<see cref="_motion"/> が
-        /// 無いか、その <c>Manifest</c> がまだ無い）。
+        /// 無いか、その <see cref="VrmMotionPlayer.Loaded"/> がまだ無い）。
         ///
         /// ★ <b><see cref="MotionCategories.All"/> の順 × カテゴリ内はファイル名順。</b>
         ///   <c>AnimationManifest.Build</c> がルートごとに <c>Ordinal</c> でソート済みの並びを
         ///   そのまま連結するだけで、ここでは並び替えない——設定パネルの選択肢の並びと
         ///   一致させるため。
-        /// ★ <b>1回作ったら使い回す。</b> <c>Manifest</c> は起動時に1回だけ組まれて以後変わらない
-        ///   （このセッション中に <c>.vrma</c> を足しても再走査はしない）ので、毎フレーム
-        ///   （設定パネルを開いている間、<c>SettingsPanelBridge.Tick</c> がここを見に来る）
-        ///   新しい <c>List</c> を作り直す理由が無い。
+        /// ★★ <b><c>Manifest</c>（走査結果）ではなく <c>Loaded</c>（実際に読み込めた集合）から
+        ///   組むこと</b>（#70 レビュー #2）。<c>Manifest</c> は走査直後から非 <c>null</c> なので、
+        ///   それを使うと「読み込み中」の窓が実際より短く見え、まだ読み込めていない・壊れた
+        ///   <c>.vrma</c> も一覧に出てしまう（押しても再生できない項目になる）。
+        /// ★★ <b>キャッシュの鍵は <c>Loaded</c> の参照</b>（#70 レビュー #6）。以前は初回アクセスで
+        ///   作った <c>List</c> を無条件に使い回していたので、<see cref="OnDisable"/> で
+        ///   <see cref="_motion"/> を捨てても古い一覧を返し続けた。<c>Loaded</c> が別のインスタンスに
+        ///   なった（読み込み直した）か <c>null</c> に戻ったら作り直す。キャッシュ自体を無くさないのは、
+        ///   設定パネルを開いている間 <c>SettingsPanelBridge.Tick</c> が毎フレームここを見に来るため
+        ///   （常駐アプリで毎フレーム <c>List</c> を確保しない）。
         /// </summary>
         public IReadOnlyList<MotionClip> MotionClips
         {
             get
             {
-                if (_motionClipsCache != null) return _motionClipsCache;
-
-                var manifest = _motion?.Manifest;
-                if (manifest == null) return null;
+                var loaded = _motion?.Loaded;
+                if (loaded == null) return null;
+                if (_motionClipsCache != null && ReferenceEquals(_motionClipsSource, loaded)) return _motionClipsCache;
 
                 var clips = new List<MotionClip>();
-                foreach (var category in MotionCategories.All) clips.AddRange(manifest.Clips(category));
+                foreach (var category in MotionCategories.All) clips.AddRange(loaded.Clips(category));
+                _motionClipsSource = loaded;
                 _motionClipsCache = clips;
                 return _motionClipsCache;
             }
         }
 
         private List<MotionClip> _motionClipsCache;
+        private AnimationManifest _motionClipsSource;
 
         /// <summary>
         /// 設定パネルの「モーションを確認」（#70 派生）。選ばれた1本を本番と同じ経路
-        /// （<see cref="VrmMotionPlayer.Play"/>）で再生する。開始できたら <c>true</c>。
+        /// （<see cref="VrmMotionPlayer.Play"/>）で再生する。
         ///
         /// ★ <b><see cref="MotionKind.Emotion"/> で再生すること。</b> <see cref="MotionKind.Accent"/>
         ///   にすると、小ネタが鳴っている間は割り込めず「押しても何も起きない」に見える
@@ -200,12 +214,20 @@ namespace ChatterMascot.Vrm
         ///   何も再生中でないときしか始まらない）。
         /// ★ 感情モーション再生中（<c>_motion.IsPlayingEmotion</c>）は <see cref="VrmMotionPlayer.Play"/>
         ///   自身が拒否する（感情モーション同士は割り込まない、ユーザーと決めたこと）。
-        ///   呼び出し側（<c>SettingsPanelBridge</c>）はこの戻り値を見て「再生中です」を出し分ける。
+        /// ★★ 戻り値は <see cref="MotionPlayResult"/>（#70 レビュー #5）。呼び出し側
+        ///   （<c>SettingsPanelBridge</c>）はこれを <c>SettingsSchema.MotionPlayNotice</c> に渡すだけで
+        ///   拒否理由ごとの文言を出す——以前は全部 <c>bool</c> の <c>false</c> にまとめていたため、
+        ///   「読み込み中で押せない」も「もう鳴っている」も同じ「再生中です」になっていた。
+        /// ★ <c>_motion == null</c>（読み込みの前段——<see cref="OnLoaded"/> がまだ走っていない、
+        ///   または <see cref="OnDisable"/> 済み）は <see cref="MotionPlayResult.NotLoaded"/>。
+        ///   <paramref name="clip"/><c> == null</c> も同じ値に落ちる（<c>VrmMotionPlayer.Play</c> の
+        ///   拒否条件どおり）。
         /// </summary>
-        public bool PreviewMotion(MotionClip clip)
+        public MotionPlayResult PreviewMotion(MotionClip clip)
         {
-            return _motion != null && clip != null
-                && _motion.Play(clip, MotionKind.Emotion, Time.realtimeSinceStartupAsDouble);
+            return _motion == null
+                ? MotionPlayResult.NotLoaded
+                : _motion.Play(clip, MotionKind.Emotion, Time.realtimeSinceStartupAsDouble);
         }
 
         /// <summary>
@@ -339,7 +361,7 @@ namespace ChatterMascot.Vrm
         /// </summary>
         private string _motionProbeArgument;
 
-        /// <summary>読み込みが揃った（<see cref="_motion"/><c>.Manifest != null &amp;&amp; _idle.IsLoaded</c>）
+        /// <summary>読み込みが揃った（<see cref="_motion"/><c>.Loaded != null &amp;&amp; _idle.IsLoaded</c>）
         /// 最初のフレームの時刻。まだなら <c>double.NaN</c>。</summary>
         private double _motionProbeReadyAt = double.NaN;
 
@@ -600,17 +622,23 @@ namespace ChatterMascot.Vrm
             if (_motion == null) return;
 
             _motion.Tick(now);
-            if (_motion.ConsumeEnded())
+            if (_motion.ConsumeEnded(out var endedKind))
             {
+                // ★★ #70 レビュー #3。IdleAccentTimer.Reset は種別を問わず両方で呼んでよい
+                //   （待機の小ネタ間隔は「何か再生し終えた」で引き直す）が、
+                //   EmotionMotionTrigger.NotifyEnded は感情モーションのクールダウン専用——
+                //   小ネタ（Accent）の終了で呼ぶと、クールダウンの起点が本来より早く進む
                 _accent.Reset(now);
-                _trigger.NotifyEnded(now);
+                if (endedKind == MotionKind.Emotion) _trigger.NotifyEnded(now);
             }
 
             var category = _trigger.Update(order, Speaking, Emotion, Kind, now, _motion.IsPlayingEmotion);
             if (category.HasValue)
             {
-                var clip = _motion.Manifest?.Pick(category.Value, () => UnityEngine.Random.value);
-                if (clip != null && _motion.Play(clip, MotionKind.Emotion, now)) return;
+                // ★★ #70 レビュー #2。Pick は Manifest ではなく Loaded から
+                //   （→ VrmMotionPlayer.Loaded の doc）
+                var clip = _motion.Loaded?.Pick(category.Value, () => UnityEngine.Random.value);
+                if (clip != null && _motion.Play(clip, MotionKind.Emotion, now) == MotionPlayResult.Started) return;
             }
 
             // ★ !_motion.IsPlaying を**先に**評価して短絡させること。IdleAccentTimer.ShouldFire は
@@ -619,7 +647,7 @@ namespace ChatterMascot.Vrm
             //   小ネタがほぼ即座に発火する（意図しない連続）
             if (!_motion.IsPlaying && _accent.ShouldFire(now, Speaking))
             {
-                var clip = _motion.Manifest?.Pick(MotionCategory.Idle, () => UnityEngine.Random.value);
+                var clip = _motion.Loaded?.Pick(MotionCategory.Idle, () => UnityEngine.Random.value);
                 if (clip != null) _motion.Play(clip, MotionKind.Accent, now);
             }
         }
@@ -635,7 +663,11 @@ namespace ChatterMascot.Vrm
         private void UpdateMotionProbe(double now)
         {
             if (string.IsNullOrEmpty(_motionProbeArgument) || _motionProbeFired) return;
-            if (_motion == null || _motion.Manifest == null || _idle == null || !_idle.IsLoaded) return;
+            // ★★ #70 レビュー #2。Manifest ではなく Loaded で「揃った」を判定すること
+            //   （→ VrmMotionPlayer.Loaded の doc）。Manifest は走査直後から非 null なので、
+            //   それで判定するとプリロード中に Pick してしまい、まだ _loaded に無いクリップを
+            //   選んで Play が黙って失敗する
+            if (_motion == null || _motion.Loaded == null || _idle == null || !_idle.IsLoaded) return;
 
             if (double.IsNaN(_motionProbeReadyAt)) _motionProbeReadyAt = now;
             if (now - _motionProbeReadyAt < MotionProbeDelaySeconds) return;
@@ -650,15 +682,15 @@ namespace ChatterMascot.Vrm
                 return;
             }
 
-            var clip = _motion.Manifest.Pick(category.Value, () => UnityEngine.Random.value);
+            var clip = _motion.Loaded.Pick(category.Value, () => UnityEngine.Random.value);
             if (clip == null)
             {
                 Debug.Log($"[Mascot] motionProbe: カテゴリ '{_motionProbeArgument}' にクリップがありません");
                 return;
             }
 
-            var started = _motion.Play(clip, MotionKind.Emotion, now);
-            Debug.Log($"[Mascot] motionProbe: {clip.FileName} を{(started ? "再生します" : "再生できませんでした")}");
+            var result = _motion.Play(clip, MotionKind.Emotion, now);
+            Debug.Log($"[Mascot] motionProbe: {clip.FileName} を{(result == MotionPlayResult.Started ? "再生します" : "再生できませんでした")}");
         }
 
         /// <summary>

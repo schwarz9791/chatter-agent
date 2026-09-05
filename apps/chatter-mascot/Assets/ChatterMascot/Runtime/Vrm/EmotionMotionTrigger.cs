@@ -35,6 +35,12 @@ namespace ChatterMascot.Vrm
         /// ★ <paramref name="order"/><c>== -1</c>（鳴っていない）は、「前回と違っても」評価しない——
         ///   といっても特別扱いしているわけではなく、<paramref name="speaking"/> が
         ///   <c>false</c> になるので下の条件で自然に落ちる。
+        /// ★★ <b><paramref name="order"/> が前回より<u>小さく</u>戻ったときは、新しい文の開始とは
+        ///   見なさない</b>（#70 レビュー #7）。<c>SpeakingSet</c> は鳴っている中で最大の
+        ///   <c>Order</c> を返すので、孤児（旧 epoch の音）と新しい文が重なり、新しい方が先に
+        ///   鳴り終わると、まだ鳴っている孤児の小さい <c>Order</c> へ戻る。<c>!=</c> だとそれを
+        ///   新しい文と誤認して、とっくに始まっている孤児の emotion で発火する。
+        ///   <c>_nextOrder</c> はプロセス内で単調増加なので<b>厳密に大きいときだけ</b>新規と判定する。
         /// </summary>
         /// <param name="order">いま鳴っている文の <c>SpeakingSet</c> の <c>Order</c>。鳴っていなければ -1</param>
         /// <param name="speaking">いま何か鳴っているか</param>
@@ -45,7 +51,7 @@ namespace ChatterMascot.Vrm
         public MotionCategory? Update(
             long order, bool speaking, Emotion emotion, SpeechKind kind, double now, bool playingEmotion)
         {
-            var isNewOrder = order != _lastOrder;
+            var isNewOrder = order > _lastOrder;
             _lastOrder = order;
             if (!isNewOrder) return null;
 

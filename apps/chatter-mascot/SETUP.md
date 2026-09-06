@@ -196,7 +196,7 @@ Bluetooth イヤホンの電池を食う。macOS には手放す API が無い�
 Assets/StreamingAssets/
   vita.vrm                          同梱モデル（CC0。→ ../../NOTICE）
   idle_loop.vrma                    同梱アイドル（使うのは #59）
-  trayTemplate.png / @2x            メニューバーのアイコン（cc-mascot 由来。→ ../../NOTICE）
+  trayTemplate.png / @2x            メニューバーのアイコン（自作。#93 で差し替え）
 
 Assets/Plugins/
   macOS~/ChatterMascotNative/       ★ `~` 付き。Unity は完全に無視する（ObjC のソース）

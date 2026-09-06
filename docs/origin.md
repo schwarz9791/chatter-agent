@@ -117,23 +117,24 @@ hook 方式への転換で、`textFilter.ts` が**上流と要件で食い違う
 | 上流 | 移送先 | 大きさ | 改変 |
 |---|---|---|---|
 | `public/animations/idle_loop.vrma` | `apps/chatter-mascot/Assets/StreamingAssets/idle_loop.vrma` | 157,664 B | **無改変**（バイト単位で同一） |
-| `resources/icons/trayTemplate.png` | `apps/chatter-mascot/Assets/StreamingAssets/trayTemplate.png` | 671 B | **無改変**（バイト単位で同一） |
-| `resources/icons/trayTemplate@2x.png` | `apps/chatter-mascot/Assets/StreamingAssets/trayTemplate@2x.png` | 1,410 B | **無改変**（バイト単位で同一） |
 
 | | |
 |---|---|
 | 最終更新のコミット（`idle_loop.vrma`） | **`7ce44bd674c0f5fc65c41b20d5344d4e358f6d5e`**（`7ce44bd` / 2026-02-08 / kazakago / ":recycle: idle_loop.vrmaアニメーションの調整"） |
-| 最終更新のコミット（`trayTemplate*.png`） | **`a61a572`**（2026-02-06 / kazakago / ":sparkles: システムトレイアイコンを追加"）。`c641331`（2026-02-16 / "アプリアイコンを差し替え"）は `icon.*` のみで、トレイ側は触っていない |
-| コピー実施日 | `idle_loop.vrma` は 2026-08-26（[#56](https://github.com/schwarz9791/chatter-agent/issues/56)。使うのは [#59](https://github.com/schwarz9791/chatter-agent/issues/59)）、`trayTemplate*.png` は 2026-08-31（[#75](https://github.com/schwarz9791/chatter-agent/issues/75)） |
+| コピー実施日 | `idle_loop.vrma` は 2026-08-26（[#56](https://github.com/schwarz9791/chatter-agent/issues/56)。使うのは [#59](https://github.com/schwarz9791/chatter-agent/issues/59)） |
 
-**どちらも kazakago の著作物**。冒頭の「⚠」節の判定に照らすと、上流の `main` に kazakago 名義で
+**`idle_loop.vrma` は kazakago の著作物**。冒頭の「⚠」節の判定に照らすと、上流の `main` に kazakago 名義で
 入っているので**帰属が要る側**（`public/` や `resources/` にあるのは自分の作業ブランチで書いたものではない）。
-`trayTemplate*.png` はフォーク点 `46f7def` の時点で既に存在することを確認してある
-（`git cat-file -e 46f7def:resources/icons/trayTemplate.png`）。
 
 ★ **`Modified for chatter-agent.` は要らない。** 無改変なうえ、**バイナリなので
 ヘッダコメントを埋め込む場所が無い**。Apache-2.0 §4(b)（改変の告知）は改変していないので
 発生せず、§4(a)/(d)（ライセンス本文と帰属の維持）は `NOTICE` とこの表で担保する。
+
+★ **`trayTemplate.png` / `trayTemplate@2x.png`（メニューバーのアイコン。2026-08-31 に
+[#75](https://github.com/schwarz9791/chatter-agent/issues/75) でコピー）は
+[#93](https://github.com/schwarz9791/chatter-agent/issues/93) で自前の素材に差し替えた。**
+**ファイル名は据え置きで中身だけを入れ替えている**ので、パスを grep しても由来が変わったことは
+見えない。cc-mascot 由来のバイナリはこれで `idle_loop.vrma` の1本だけになった。
 
 ★ **VRoid 公式の VRMA サンプル7種は BOOTH 規約で二次配布禁止**なので同梱できない。
 cc-mascot 側も再配布不可のモーションは**プライベート submodule に隔離**したうえで、

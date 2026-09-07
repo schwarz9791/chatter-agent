@@ -3080,31 +3080,21 @@ PNG は静止画なので OS 側では吸収されない。差し替えたら
 （`Assets/Plugins/macOS~/ChatterMascotNative/CMStatusItem.m`）は 2 枚を 1 つの `NSImage` に入れ、
 **両 rep の最小 pixel 寸法**をポイントとして全 rep の size を揃える。片方だけ差し替えると
 **Retina でぼやけるか、非 Retina で 2 倍の大きさに描かれる**。
+★ **非 Retina でしか出ないので目視では気づけない。** 寸法は
+`.github/workflows/validate.yml` の `unity-macos-identity-settings` が見ている。
 
-★ **この事故は非 Retina でしか出ない。** 開発機が Retina なら**目で見ても気づけない**ので、
-寸法は `.github/workflows/validate.yml` の `unity-macos-identity-settings` が見ている。
-
-★★ **テンプレート画像はアルファだけが形として使われる**（`[image setTemplate:YES]`。RGB は無視）。
-**内側が不透明だとメニューバーに黒い塊として出る** —— #93 で最初に入れた素材が塗りつぶしの
-シルエットで、実際にそうなって描き直した（`b5ea3d9`）。輪郭線で描くなら内側は透明にすること。
+★★ **アルファだけが形として使われる**（`[image setTemplate:YES]`。RGB は無視される）。
+**内側が不透明だとメニューバーに黒い塊として出る**ので、輪郭線で描くなら内側は透明にすること。
 色は捨てられるので、白の縁取りや差し色を入れても消える。
 
-★★ **編集ツールが埋め込む XMP / ICC は落とすこと。** Affinity などは書き出し時に
-XMP（`iTXt`）と ICC プロファイル（`iCCP`）を埋める。ここに**実名・作成時刻・オーサリングツール**が
-入り、そのまま公開リポジトリと `.app` に載る —— #93 で実際に踏んだ。**目で見て絶対に
-分からない**ので、`validate.yml` が毎 PR 見ている。落とすのは書き出し設定か、標準的な道具
-（`exiftool -all=` / ImageMagick の `-strip` / `oxipng --strip all`）でよい。
+★★ **編集ツールが埋める XMP（`iTXt`）と ICC（`iCCP`）は落とすこと。** ここに**実名・作成時刻・
+オーサリングツール**が入り、そのまま公開リポジトリと `.app` に載る。**目で見て分からない**ので
+`validate.yml` が毎 PR 見ている。書き出し設定でそもそも埋めないようにするか、標準的な道具
+（`exiftool -all=` / ImageMagick の `-strip` / `oxipng --strip all`）で落とす。
 
-★ **形式は問わない。** 読み手は macOS の ImageIO（`NSImage` / `CGImageSource`）で、
-**パレット形式（`colortype=3`）も `tRNS` も普通に読む**。pngquant を通しても構わない
-（このトレイ画像は相異なる色が数十色しかなく、256 色パレットに収まる）。
+★ **画像形式は問わない。** 読み手は macOS の ImageIO（`NSImage` / `CGImageSource`）で、
+**パレット形式（`colortype=3`）も `tRNS` も普通に読む**。pngquant を通しても構わない。
 `validate.yml` が見ているのは**メタデータであって画像形式ではない**。
-
-> ★ 一度は同じ検査を EditMode テスト（`TrayIconTests`）にも置いたが、**Unity を起動するジョブが
-> 無い**（→ [#54](https://github.com/schwarz9791/chatter-agent/issues/54)）ので差し替えの瞬間には
-> 効かなかった。アルファまで見ようとすると自前の PNG デコーダが要り、その都合から
-> 「RGBA でなければならない」という**画像側には無い制約**が生えてしまう。
-> **チャンクを歩くだけで済む検査だけを、毎 PR 走る場所に置く**形に畳んだ。
 
 ## 実装の決めごと
 

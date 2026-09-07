@@ -47,8 +47,11 @@ static NSDictionary *CMParseMenuJson(const char *menuJson)
 }
 
 /*
- * ★ @1x と @2x を1つの NSImage に入れること。 片方だけだと Retina でぼやけるか、
- *   非 Retina で 2 倍の大きさに描かれる。
+ * ★★ @1x と @2x を1つの NSImage に入れること。 下の min の取り方のせいで、
+ *   片方が欠けると**残った1枚の pixel 寸法がそのまま point 寸法になる**:
+ *     @2x が無い → 16pt。 Retina では 32px 要るのに 16px しか無く、ぼやける
+ *     @1x が無い → 32pt。 2 倍の大きさに描かれる
+ *   **どちらも Retina で見える。**
  * ★ すべての rep の size をポイントに揃えること。 NSBitmapImageRep の size は既定で
  *   画素数（@2x なら 32pt）になっており、揃えないと NSImage が解像度で選べない。
  */

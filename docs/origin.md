@@ -35,7 +35,7 @@ hook 方式への転換で、`textFilter.ts` が**上流と要件で食い違う
 
 守り切れないものを「編集禁止」と書いておくと、**制約の方が先に嘘になる**。実態に合わせて降ろした。
 
-**失うもの**: `ruleBasedEmotionClassifier.ts`（501行の感情辞書）は上流が継続的に改善している。ここだけは惜しいので、上流に良い変更があれば diff を見て手で取り込む余地を残す（義務ではない）。
+**失うもの**: `defaultEmotionKeywords.ts`（235行の感情辞書）は上流が継続的に改善している。ここだけは惜しいので、上流に良い変更があれば diff を見て手で取り込む余地を残す（義務ではない）。
 
 ## フォーク点
 
@@ -76,7 +76,8 @@ hook 方式への転換で、`textFilter.ts` が**上流と要件で食い違う
 | 上流 `electron/` | 移送先 `core/src/` | 行数 | 状態 |
 |---|---|---|---|
 | `filters/textFilter.ts` | `text/textFilter.ts` | 56（テスト 341） | ✅ 済 |
-| `services/ruleBasedEmotionClassifier.ts` | `emotion/ruleBasedEmotionClassifier.ts` | 501（テスト 323） | ✅ 済 |
+| `services/ruleBasedEmotionClassifier.ts` | `emotion/ruleBasedEmotionClassifier.ts` | 292（テスト 328） | ✅ 済 |
+| `services/ruleBasedEmotionClassifier.ts`（キーワード辞書部分） | `emotion/defaultEmotionKeywords.ts` | 235 | ✅ 済 |
 
 テストはソースと同ディレクトリに並置された `*.test.ts` をそのまま持ってくる。**移植後はこのリポジトリのテストとして育てる**（上流に送る必要はない）。
 
@@ -95,16 +96,17 @@ hook 方式への転換で、`textFilter.ts` が**上流と要件で食い違う
   1回目でバッククォートが外れた結果が、2回目には見出し・リスト・表として解釈されて除去されるため。**同じテキストに二度通さないこと**（要約結果の再整形で実際に踏んだ。→ `core/src/cli/worker.ts` の `summarizeSentences`）
 - **`ruleBasedEmotionClassifier.ts`** — キーワード辞書 + 文末パターン + ヒューリスティック。LLM 不使用でオフライン・即時
 
-### 実際に加えた改変（2026-08-15 の初回コピー）
+### 実際に加えた改変
 
-型の重複を潰しただけで、ロジックは触っていない。**契約の正は `core/src/core/types.ts`** に置く。
+型の重複を潰し、キーワード辞書を分離した。ロジックは触っていない。**契約の正は `core/src/core/types.ts`** に置く。
 
 | ファイル | 改変 |
 |---|---|
 | `text/textFilter.ts` | ヘッダのみ（**未改変**。`Modified` 行なし） |
 | `text/textFilter.test.ts` | ヘッダのみ（**未改変**） |
-| `emotion/ruleBasedEmotionClassifier.ts` | `export type Emotion = ...` の定義を削除し、`core/types` から `import type` + `export type` で再輸出 |
+| `emotion/ruleBasedEmotionClassifier.ts` | `export type Emotion = ...` の定義を削除し、`core/types` から `import type` + `export type` で再輸出。キーワード辞書を `defaultEmotionKeywords.ts` へ分離し、コンストラクタで差し替えられるようにした |
 | `emotion/ruleBasedEmotionClassifier.test.ts` | ヘッダのみ（**未改変**） |
+| `emotion/defaultEmotionKeywords.ts` | 辞書データのみを分離。キーの順を `Emotion` の宣言順に揃えた |
 
 `Emotion` を `core/types` 側に寄せたのは、この union が VRM の標準 expression 名と一対一で、`speech.jsonl` の契約そのものだから。感情判定器はその契約の実装であって、定義元ではない。
 

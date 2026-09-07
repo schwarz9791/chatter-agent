@@ -828,6 +828,80 @@ show "⑳ ★ [#29] 採番のやり直しで epoch が変わり、旧世代の�
   ' "$ROOT2/state-1.json" "$ROOT2/state-2.json" "$R2/speech.state.json" "$ROOT2/queue-before.txt" "$R2/speech" "$R2/speech.jsonl"
 )
 
+show "㉑ ★ [#92] 感情キーワード辞書のユーザーカスタマイズ"
+
+# ★ ⑳ と同じ理由でもう1つ使い捨てのルートを掘る。①〜⑳ が積んだ $ROOT を汚さないため。
+#
+# ★ 既定辞書との一致は defaultEmotionKeywords.ts を直接読まず、バンドルされた CLI が
+#   書き出したファイルを外から見て確認する。
+#
+# ★ 判定はスコアリングなので文脈次第で揺れる。検査文は短く、他の感情のキーワードや
+#   文末記号（！？など）を含まないものにしてある。
+(
+  ROOT3=$(mktemp -d)
+  trap 'rm -rf "$ROOT3"' EXIT
+  export XDG_CONFIG_HOME="$ROOT3"
+  R3="$ROOT3/chatter-agent"
+  mkdir -p "$R3/spool"
+  KEYWORDS="$R3/emotion-keywords.json"
+
+  # (1) ファイルが無い状態で CLI を1回走らせると、既定辞書が書き出される
+  feed_message m-emo-created 0 true "キーワード辞書生成の確認用メッセージです"
+  node "$CLI"
+  cp "$KEYWORDS" "$ROOT3/created.json"
+
+  # (2) 既存ファイルは上書きされない
+  printf '{"marker":"上書きされてはいけない内容"}' > "$KEYWORDS"
+  cp "$KEYWORDS" "$ROOT3/before-overwrite.json"
+  feed_message m-emo-untouched 0 true "上書きされないことの確認用メッセージです"
+  node "$CLI"
+  cp "$KEYWORDS" "$ROOT3/after-overwrite.json"
+
+  # (3) 感情ごとの置き換え。angry だけ珍しい語1つに丸ごと置き換える
+  printf '%s' '{"angry":["ぷんすかぴょんぴょん"]}' > "$KEYWORDS"
+  feed_message m-emo-custom 0 true "ぷんすかぴょんぴょんしています"
+  node "$CLI"
+  feed_message m-emo-stale 0 true "むかつくことがありました"
+  node "$CLI"
+  feed_message m-emo-other 0 true "うれしい知らせがあります"
+  node "$CLI"
+
+  # (4) 壊れた JSON でも発話は止まらない
+  printf '{ invalid' > "$KEYWORDS"
+  feed_message m-emo-broken 0 true "壊れたファイルでも発話は止まりません"
+  node "$CLI"
+
+  node -e '
+    const fs = require("fs");
+    const [createdPath, beforePath, afterPath, logPath] = process.argv.slice(1);
+    const created = JSON.parse(fs.readFileSync(createdPath, "utf8"));
+    const before = fs.readFileSync(beforePath, "utf8");
+    const after = fs.readFileSync(afterPath, "utf8");
+    const rows = fs.readFileSync(logPath, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    const emotionOf = (text) => { const r = rows.find((r) => r.text === text); return r ? r.emotion : undefined; };
+
+    const EXPECTED_KEYS = ["happy", "angry", "sad", "relaxed", "surprised"];
+    const checks = [
+      ["ファイル不在から生成された既定辞書が5キー・順序どおり",
+        JSON.stringify(Object.keys(created)) === JSON.stringify(EXPECTED_KEYS)],
+      ["生成された各キーの値が空でない文字列配列",
+        EXPECTED_KEYS.every((k) =>
+          Array.isArray(created[k]) && created[k].length > 0 && created[k].every((s) => typeof s === "string" && s.length > 0))],
+      ["既存ファイルは1バイトも変わらず上書きされない", before === after],
+      ["angry を置き換えた語を含む文が angry と判定される", emotionOf("ぷんすかぴょんぴょんしています") === "angry"],
+      ["既定の angry にしか無い語を含む文は angry にならない（既定が置き換わっている）", emotionOf("むかつくことがありました") !== "angry"],
+      ["置き換えていない happy は既定のまま効く", emotionOf("うれしい知らせがあります") === "happy"],
+      ["壊れた JSON でも発話が止まらない", emotionOf("壊れたファイルでも発話は止まりません") !== undefined],
+    ];
+    let failed = 0;
+    for (const [label, ok] of checks) {
+      if (!ok) failed++;
+      console.log((ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m") + "  " + label);
+    }
+    process.exit(failed === 0 ? 0 : 1);
+  ' "$ROOT3/created.json" "$ROOT3/before-overwrite.json" "$ROOT3/after-overwrite.json" "$R3/speech.jsonl"
+)
+
 show "結果の検証"
 node -e '
   const fs = require("fs");

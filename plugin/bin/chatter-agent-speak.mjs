@@ -52,6 +52,10 @@ function getRuntimeDir(e = currentPathEnv()) {
 function getConfigFilePath(e = currentPathEnv()) {
 	return e.env.CHATTER_AGENT_CONFIG || path.join(getRuntimeDir(e), "config.json");
 }
+/** 感情キーワード辞書。CLI が初回だけ書き出し、以後は人間が編集する */
+function getEmotionKeywordsPath(e = currentPathEnv()) {
+	return e.env.CHATTER_AGENT_EMOTION_KEYWORDS || path.join(getRuntimeDir(e), "emotion-keywords.json");
+}
 /** hook が payload を落とす場所。ワーカーが処理し終えたら削除する */
 function getSpoolDir(e = currentPathEnv()) {
 	return path.join(getRuntimeDir(e), "spool");
@@ -1055,219 +1059,309 @@ function createSpeechQueue(queueDir) {
 }
 
 //#endregion
+//#region src/emotion/defaultEmotionKeywords.ts
+/**
+* 感情キーワード辞書の既定値。
+*/
+const DEFAULT_EMOTION_KEYWORDS = {
+	happy: [
+		"うれしい",
+		"嬉しい",
+		"うれ",
+		"喜",
+		"喜び",
+		"よかった",
+		"よかっ",
+		"良かっ",
+		"良い",
+		"やった",
+		"やっ",
+		"できた",
+		"すごい",
+		"すご",
+		"凄",
+		"素晴らしい",
+		"素敵",
+		"ありがと",
+		"ありが",
+		"感謝",
+		"サンクス",
+		"楽しい",
+		"楽し",
+		"愉快",
+		"面白い",
+		"面白",
+		"成功",
+		"完璧",
+		"完了",
+		"クリア",
+		"最高",
+		"ベスト",
+		"グッド",
+		"ナイス",
+		"いいね",
+		"助かっ",
+		"助かる",
+		"わーい",
+		"やっほー",
+		"やったー",
+		"いえーい",
+		"達成",
+		"ゲット",
+		"獲得",
+		"実現",
+		"解決",
+		"修正できた",
+		"直った",
+		"満足",
+		"幸せ",
+		"ハッピー",
+		"ラッキー",
+		"運が良",
+		"期待以上",
+		"想像以上"
+	],
+	angry: [
+		"むかつく",
+		"むかつ",
+		"ムカつ",
+		"腹立",
+		"怒",
+		"イライラ",
+		"いらいら",
+		"キレ",
+		"最悪",
+		"ひどい",
+		"酷",
+		"クソ",
+		"くそ",
+		"うざい",
+		"ウザ",
+		"うっとうし",
+		"許せない",
+		"許せ",
+		"我慢できない",
+		"ダメ",
+		"駄目",
+		"ダメだ",
+		"だめ",
+		"エラー",
+		"バグ",
+		"失敗",
+		"動かない",
+		"壊れ",
+		"問題",
+		"トラブル",
+		"不具合",
+		"障害",
+		"困る",
+		"困っ",
+		"困った",
+		"信じられない",
+		"呆れ",
+		"ふざけ",
+		"冗談じゃ",
+		"勘弁",
+		"マジで",
+		"本気で腹"
+	],
+	sad: [
+		"悲しい",
+		"悲し",
+		"哀",
+		"残念",
+		"ざんねん",
+		"惜しい",
+		"つらい",
+		"辛い",
+		"つら",
+		"苦しい",
+		"ごめん",
+		"すまな",
+		"すみま",
+		"申し訳",
+		"謝",
+		"無理",
+		"不可能",
+		"困った",
+		"困難",
+		"諦め",
+		"あきら",
+		"断念",
+		"失敗し",
+		"しくじ",
+		"ミス",
+		"駄目だった",
+		"間に合わ",
+		"遅れ",
+		"自信ない",
+		"不安",
+		"心配",
+		"怖",
+		"しょんぼり",
+		"がっかり",
+		"落ち込",
+		"泣",
+		"涙"
+	],
+	relaxed: [
+		"落ち着",
+		"落着",
+		"冷静",
+		"安心",
+		"あんしん",
+		"ホッと",
+		"大丈夫",
+		"だいじょうぶ",
+		"だいじょぶ",
+		"OK",
+		"ok",
+		"オッケー",
+		"おk",
+		"了解",
+		"りょうかい",
+		"承知",
+		"問題ない",
+		"問題なし",
+		"ノープロブレム",
+		"ゆっくり",
+		"のんびり",
+		"じっくり",
+		"様子見"
+	],
+	surprised: [
+		"え！",
+		"えっ",
+		"え？",
+		"えー",
+		"まさか",
+		"マジ",
+		"まじ",
+		"本当",
+		"びっくり",
+		"ビックリ",
+		"驚",
+		"ビビ",
+		"意外",
+		"予想外",
+		"想定外",
+		"なんと",
+		"何と",
+		"おお",
+		"おぉ",
+		"すごっ",
+		"やば",
+		"ヤバ",
+		"信じられない",
+		"嘘",
+		"うそ",
+		"ウソ",
+		"本当に",
+		"ほんと",
+		"本気",
+		"あり得ない",
+		"ありえな",
+		"初めて",
+		"見たことない",
+		"はぁ！？",
+		"へぇ",
+		"ほぉ",
+		"ふぉ",
+		"おったまげ",
+		"たまげ"
+	]
+};
+
+//#endregion
+//#region src/emotion/emotionKeywordsFile.ts
+/**
+* 感情キーワード辞書ファイル（`~/.config/chatter-agent/emotion-keywords.json`）の
+* 読み書き。hook 経路（毎 delta 起動）から呼ばれるので throw しない・部分採用しない。
+*/
+const MAX_KEYWORDS_PER_EMOTION = 1e3;
+function isEmotionKey(key) {
+	return Object.hasOwn(DEFAULT_EMOTION_KEYWORDS, key);
+}
+/**
+* 感情ごとに独立して検証する。1感情の不正が他の感情や全体を巻き添えにしない。
+* 常に完全な `EmotionKeywords`（既定との合成済み）を返す。
+*/
+function parseEmotionKeywords(raw, warn) {
+	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+		warn("[EmotionKeywords] トップレベルがオブジェクトではありません。既定値を使います");
+		return { ...DEFAULT_EMOTION_KEYWORDS };
+	}
+	const record = raw;
+	const result = { ...DEFAULT_EMOTION_KEYWORDS };
+	for (const key of Object.keys(record)) {
+		if (key === "neutral") {
+			warn("[EmotionKeywords] \"neutral\" は指定できません。無視します");
+			continue;
+		}
+		if (!isEmotionKey(key)) {
+			warn(`[EmotionKeywords] 未知のキー "${key}" は無視されます`);
+			continue;
+		}
+		const value = record[key];
+		if (!Array.isArray(value)) {
+			warn(`[EmotionKeywords] ${key} は配列である必要があります。既定値を使います`);
+			continue;
+		}
+		if (value.some((item) => typeof item !== "string")) {
+			warn(`[EmotionKeywords] ${key} の要素に文字列以外が含まれています。既定値を使います`);
+			continue;
+		}
+		const deduped = [];
+		const seen = /* @__PURE__ */ new Set();
+		for (const item of value) {
+			const trimmed = item.trim();
+			if (!trimmed || seen.has(trimmed)) continue;
+			seen.add(trimmed);
+			deduped.push(trimmed);
+		}
+		if (deduped.length > MAX_KEYWORDS_PER_EMOTION) {
+			warn(`[EmotionKeywords] ${key} の語数が上限（${MAX_KEYWORDS_PER_EMOTION}）を超えています。既定値を使います`);
+			continue;
+		}
+		result[key] = deduped;
+	}
+	return result;
+}
+/** ファイルが無いのは正常（初回起動前）なので警告しない */
+function readEmotionKeywords(filePath, warn = console.warn) {
+	let text;
+	try {
+		text = fs.readFileSync(filePath, "utf-8");
+	} catch (err) {
+		if (err.code === "ENOENT") return { ...DEFAULT_EMOTION_KEYWORDS };
+		warn(`[EmotionKeywords] ${filePath} を読めませんでした: ${String(err)}。既定値を使います`);
+		return { ...DEFAULT_EMOTION_KEYWORDS };
+	}
+	let parsed;
+	try {
+		parsed = JSON.parse(text);
+	} catch (err) {
+		warn(`[EmotionKeywords] ${filePath} のJSONが壊れています: ${String(err)}。既定値を使います`);
+		return { ...DEFAULT_EMOTION_KEYWORDS };
+	}
+	return parseEmotionKeywords(parsed, warn);
+}
+/** 既にあれば何もしない。失敗は握り潰し、読み取り専用の配置でも発話を止めない */
+function writeDefaultEmotionKeywordsIfAbsent(filePath) {
+	try {
+		if (fs.existsSync(filePath)) return;
+		fs.mkdirSync(path.dirname(filePath), { recursive: true });
+		writeFileAtomic(filePath, `${JSON.stringify(DEFAULT_EMOTION_KEYWORDS, null, 2)}\n`);
+	} catch {}
+}
+
+//#endregion
 //#region src/emotion/ruleBasedEmotionClassifier.ts
 var RuleBasedEmotionClassifier = class {
-	/**
-	* 感情キーワード辞書
-	*/
-	emotionKeywords = {
-		happy: [
-			"うれしい",
-			"嬉しい",
-			"うれ",
-			"喜",
-			"喜び",
-			"よかった",
-			"よかっ",
-			"良かっ",
-			"良い",
-			"やった",
-			"やっ",
-			"できた",
-			"すごい",
-			"すご",
-			"凄",
-			"素晴らしい",
-			"素敵",
-			"ありがと",
-			"ありが",
-			"感謝",
-			"サンクス",
-			"楽しい",
-			"楽し",
-			"愉快",
-			"面白い",
-			"面白",
-			"成功",
-			"完璧",
-			"完了",
-			"クリア",
-			"最高",
-			"ベスト",
-			"グッド",
-			"ナイス",
-			"いいね",
-			"助かっ",
-			"助かる",
-			"わーい",
-			"やっほー",
-			"やったー",
-			"いえーい",
-			"達成",
-			"ゲット",
-			"獲得",
-			"実現",
-			"解決",
-			"修正できた",
-			"直った",
-			"満足",
-			"幸せ",
-			"ハッピー",
-			"ラッキー",
-			"運が良",
-			"期待以上",
-			"想像以上"
-		],
-		angry: [
-			"むかつく",
-			"むかつ",
-			"ムカつ",
-			"腹立",
-			"怒",
-			"イライラ",
-			"いらいら",
-			"キレ",
-			"最悪",
-			"ひどい",
-			"酷",
-			"クソ",
-			"くそ",
-			"うざい",
-			"ウザ",
-			"うっとうし",
-			"許せない",
-			"許せ",
-			"我慢できない",
-			"ダメ",
-			"駄目",
-			"ダメだ",
-			"だめ",
-			"エラー",
-			"バグ",
-			"失敗",
-			"動かない",
-			"壊れ",
-			"問題",
-			"トラブル",
-			"不具合",
-			"障害",
-			"困る",
-			"困っ",
-			"困った",
-			"信じられない",
-			"呆れ",
-			"ふざけ",
-			"冗談じゃ",
-			"勘弁",
-			"マジで",
-			"本気で腹"
-		],
-		sad: [
-			"悲しい",
-			"悲し",
-			"哀",
-			"残念",
-			"ざんねん",
-			"惜しい",
-			"つらい",
-			"辛い",
-			"つら",
-			"苦しい",
-			"ごめん",
-			"すまな",
-			"すみま",
-			"申し訳",
-			"謝",
-			"無理",
-			"不可能",
-			"困った",
-			"困難",
-			"諦め",
-			"あきら",
-			"断念",
-			"失敗し",
-			"しくじ",
-			"ミス",
-			"駄目だった",
-			"間に合わ",
-			"遅れ",
-			"自信ない",
-			"不安",
-			"心配",
-			"怖",
-			"しょんぼり",
-			"がっかり",
-			"落ち込",
-			"泣",
-			"涙"
-		],
-		surprised: [
-			"え！",
-			"えっ",
-			"え？",
-			"えー",
-			"まさか",
-			"マジ",
-			"まじ",
-			"本当",
-			"びっくり",
-			"ビックリ",
-			"驚",
-			"ビビ",
-			"意外",
-			"予想外",
-			"想定外",
-			"なんと",
-			"何と",
-			"おお",
-			"おぉ",
-			"すごっ",
-			"やば",
-			"ヤバ",
-			"信じられない",
-			"嘘",
-			"うそ",
-			"ウソ",
-			"本当に",
-			"ほんと",
-			"本気",
-			"あり得ない",
-			"ありえな",
-			"初めて",
-			"見たことない",
-			"はぁ！？",
-			"へぇ",
-			"ほぉ",
-			"ふぉ",
-			"おったまげ",
-			"たまげ"
-		],
-		relaxed: [
-			"落ち着",
-			"落着",
-			"冷静",
-			"安心",
-			"あんしん",
-			"ホッと",
-			"大丈夫",
-			"だいじょうぶ",
-			"だいじょぶ",
-			"OK",
-			"ok",
-			"オッケー",
-			"おk",
-			"了解",
-			"りょうかい",
-			"承知",
-			"問題ない",
-			"問題なし",
-			"ノープロブレム",
-			"ゆっくり",
-			"のんびり",
-			"じっくり",
-			"様子見"
-		]
-	};
+	emotionKeywords;
+	constructor(emotionKeywords = DEFAULT_EMOTION_KEYWORDS) {
+		this.emotionKeywords = emotionKeywords;
+	}
 	/**
 	* 文末パターン（正規表現）
 	* 女性言葉・中性的・丁寧・男性的な言葉すべてに対応
@@ -3414,7 +3508,9 @@ function main() {
 		});
 		const speechQueue = createSpeechQueue(getSpeechQueueDir());
 		speechQueue.sweepTmp();
-		const classifier = new RuleBasedEmotionClassifier();
+		const emotionKeywordsPath = getEmotionKeywordsPath();
+		writeDefaultEmotionKeywordsIfAbsent(emotionKeywordsPath);
+		const classifier = new RuleBasedEmotionClassifier(readEmotionKeywords(emotionKeywordsPath));
 		const summarize = createSummaryPipeline({
 			isEnabled: () => config.get("aiSummaryEnabled"),
 			getThreshold: () => config.get("aiSummaryThreshold"),

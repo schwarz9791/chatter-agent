@@ -45,6 +45,11 @@ export function getConfigFilePath(e: PathEnv = currentPathEnv()): string {
   return e.env.CHATTER_AGENT_CONFIG || path.join(getRuntimeDir(e), "config.json");
 }
 
+/** 感情キーワード辞書。CLI が初回だけ書き出し、以後は人間が編集する */
+export function getEmotionKeywordsPath(e: PathEnv = currentPathEnv()): string {
+  return e.env.CHATTER_AGENT_EMOTION_KEYWORDS || path.join(getRuntimeDir(e), "emotion-keywords.json");
+}
+
 /** hook が payload を落とす場所。ワーカーが処理し終えたら削除する */
 export function getSpoolDir(e: PathEnv = currentPathEnv()): string {
   return path.join(getRuntimeDir(e), "spool");

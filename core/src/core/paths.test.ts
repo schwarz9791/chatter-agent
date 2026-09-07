@@ -2,6 +2,7 @@ import * as path from "path";
 import { describe, it, expect } from "vitest";
 import {
   getConfigFilePath,
+  getEmotionKeywordsPath,
   getLockDir,
   getPlayerLockDir,
   getPlayerTmpDir,
@@ -50,6 +51,7 @@ describe("ランタイムルート配下のパス", () => {
 
   it("すべてランタイムルートの直下に置く（plugin の bash が辿れる場所を1箇所に絞るため）", () => {
     expect(getConfigFilePath(e)).toBe(`${root}/config.json`);
+    expect(getEmotionKeywordsPath(e)).toBe(`${root}/emotion-keywords.json`);
     expect(getSpoolDir(e)).toBe(`${root}/spool`);
     expect(getSpeechLogPath(e)).toBe(`${root}/speech.jsonl`);
     expect(getSpeechQueueDir(e)).toBe(`${root}/speech`);
@@ -85,6 +87,13 @@ describe("ランタイムルート配下のパス", () => {
   it("CHATTER_AGENT_CONFIG は設定ファイルだけを上書きする", () => {
     const overridden = env("darwin", { CHATTER_AGENT_CONFIG: "/tmp/my.json" });
     expect(getConfigFilePath(overridden)).toBe("/tmp/my.json");
+    // spool までは動かない（設定の置き場所とランタイムの置き場所は別）
+    expect(getSpoolDir(overridden)).toBe(`${root}/spool`);
+  });
+
+  it("CHATTER_AGENT_EMOTION_KEYWORDS は感情キーワード辞書だけを上書きする", () => {
+    const overridden = env("darwin", { CHATTER_AGENT_EMOTION_KEYWORDS: "/tmp/my-keywords.json" });
+    expect(getEmotionKeywordsPath(overridden)).toBe("/tmp/my-keywords.json");
     // spool までは動かない（設定の置き場所とランタイムの置き場所は別）
     expect(getSpoolDir(overridden)).toBe(`${root}/spool`);
   });

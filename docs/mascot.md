@@ -2977,7 +2977,8 @@ Unity は「`.meta` はあるがアセットが無い」と見て**孤児とし�
 （GUID が動くと、参照している側が壊れる）」と書いている、まさにその事故。**
 
 ★ **`build.sh` はこの穴を踏まない。** Unity より先に `build-native.sh` を呼ぶため。
-踏むのは **`test.sh` と `run.sh` を、バンドルが無い状態で走らせたとき**。
+踏むのは **`test.sh` と `run.sh` を、バンドルが無い状態で走らせたとき**
+（→ [#95](https://github.com/schwarz9791/chatter-agent/issues/95)。直すのは別の PR）。
 
 ★★ **ビルドは通ってしまう。** `.app` の `Contents/PlugIns/` にはバンドルが入るし、
 EditMode テストも全部通る。**気づけるのは `git diff` だけ** —— batchmode で Unity を回したら

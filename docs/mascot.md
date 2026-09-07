@@ -2063,7 +2063,8 @@ VRM のテクスチャは `.vrm` の中にあるので、`.png` が単体で入�
 設定パネル（[#76](https://github.com/schwarz9791/chatter-agent/issues/76)）もこの土台に乗る。
 
 ★ **cc-mascot から流用できるコードは1行も無い。** あちらは Electron の `Tray` と
-`app.dock.hide()` で済んでおり、ObjC のコードが存在しない。**流用したのはアイコン画像だけ**
+`app.dock.hide()` で済んでおり、ObjC のコードが存在しない。**アイコン画像だけは流用していた**が、
+それも [#93](https://github.com/schwarz9791/chatter-agent/issues/93) で自前の素材に差し替えた
 （`trayTemplate.png` / `@2x`。→ [`origin.md`](./origin.md)）。
 
 ★ **ただし知見は1つ効いた。** cc-mascot は `app.dock.hide()` を `ready-to-show` から
@@ -2281,7 +2282,7 @@ osascript -e 'tell application "System Events" to click at {3196, 15}'
 | 確認したこと | 結果 |
 |---|---|
 | Dock に出ない | `lsappinfo` が **`type="UIElement"`**（同じアプリの旧ビルドは `type="Foreground"`） |
-| メニューバーのアイコン | 出る。テンプレート画像なので背景に応じて白/黒が入れ替わる |
+| メニューバーのアイコン | 出る。テンプレート画像として振る舞う（★ **白/黒の反転についてはこの記述を #93 で訂正した**。下の「#93 の実機確認」） |
 | **二重起動** | ★ **アイコンが並ぶ。** 3つ動かしたら3つ並んだ —— pid をツールチップに入れた狙いどおり、目で分かる |
 | メニューの中身 | ミュート（⌥M）/ キャラクターを隠す / 設定を開く… / ── / Chatter Mascot 0.1.0（**灰色**）/ 終了 |
 | 状態の反映 | ミュートに ✓ が付き、ラベルが「キャラクターを**表示する**」に変わる |
@@ -2962,6 +2963,137 @@ C# 側の `_open` が真のまま残り、`_notices` も消えないので、**�
   **別の話者が選択中であるかのように見える**
 
 `NSMenuItem` を自分で作って `[popUp.menu addItem:]` すれば重複を許容できる。
+
+### ★★ `.bundle` が無い状態で Unity を起動すると `.bundle.meta` が壊れる（#93 で踏んだ）
+
+`Assets/Plugins/macOS/ChatterMascotNative.bundle` は git に入れていない（→ `NativePluginSettings`）ので、
+**新規クローンやクリーンなワークツリーには `.meta` しか無い**。この状態で Unity を起動すると、
+Unity は「`.meta` はあるがアセットが無い」と見て**孤児として `.meta` を捨てる**。
+あとから `./scripts/build-native.sh` が `.bundle` を作ると、**新しい GUID で再インポートされる**。
+
+実測（2026-09-06 / #93）: `./scripts/run.sh …IconSettings.FixAll` を単独で先に走らせたところ、
+`ChatterMascotNative.bundle.meta` から **`PluginImporter` の `platformData` ごと設定が消え、
+`guid` が別の値に変わっていた**（残っていたのは `fileFormatVersion` と `guid` の 2 行だけ）。**`.gitignore` が「`.meta` は追跡する
+（GUID が動くと、参照している側が壊れる）」と書いている、まさにその事故。**
+
+★ **`build.sh` はこの穴を踏まない。** Unity より先に `build-native.sh` を呼ぶため。
+踏むのは **`test.sh` と `run.sh` を、バンドルが無い状態で走らせたとき**
+（→ [#95](https://github.com/schwarz9791/chatter-agent/issues/95)。直すのは別の PR）。
+
+★★ **ビルドは通ってしまう。** `.app` の `Contents/PlugIns/` にはバンドルが入るし、
+EditMode テストも全部通る。**気づけるのは `git diff` だけ** —— batchmode で Unity を回したら
+`.meta` の差分を必ず見ること。
+
+直し方は 2 手（`.bundle` が**ある**状態で行うこと）:
+
+```bash
+git checkout -- apps/chatter-mascot/Assets/Plugins/macOS/ChatterMascotNative.bundle.meta
+./scripts/run.sh ChatterMascot.EditorTools.NativePluginSettings.FixAll
+```
+
+
+### #93 の実機確認（macOS 26.6.2 / `.app`）
+
+| 確認したこと | 結果 |
+|---|---|
+| アプリアイコン | Finder に出る。他のアプリと並べて浮いていない |
+| `PlayerIcon.icns` | `Contents/Resources/` に生成された。中身は 16 / 32 / 48 / 128 / 256 / 512 / 512@2x |
+| `LSApplicationCategoryType` | `public.app-category.utilities`。**`LSUIElement = true` も残っている**（`MacPostBuild` を壊していない） |
+| **Game Mode のロケット** | **カテゴリを変えるだけで消えた。** `LSSupportsGameMode` / `GCSupportsGameMode` は**足していない** |
+| メニューバーのアイコン | 自前の素材に変わった。ミュート（`⌃⌥M`）で薄くなる（`appearsDisabled`） |
+| ★ ライト/ダークでの白黒の反転 | **観測できなかった** —— 下記 |
+
+★★ **テンプレート画像は「ライトモードにすると黒くなる」わけではない（#75 の記述を訂正）。**
+ライトに切り替えてもアイコンは白のままで、**これは chatter-mascot だけでなく
+メニューバーの他の項目も同じだった**。上の「#75 の実機確認」に「背景に応じて白/黒が
+入れ替わる」と書いたが、**反転を決めるのは外観モードではなくメニューバーの下地**
+（壁紙が透ける）で、外観モードを変えただけでは切り替わらない。
+`[image setTemplate:YES]` 自体は効いている —— **`appearsDisabled` で薄くなるのが動いている**
+ので、実装の問題ではない。**テンプレート画像の確認項目に「外観モードを切り替える」を
+入れないこと**（切り替わらないのが正常で、実装の異常と取り違える）。
+
+★ **LaunchServices のキャッシュは踏まなかった**（`lsregister -f` は打った）。ただし
+同じ bundle id（`tech.sukima.chatter-mascot`）を名乗る `.app` が**ワークツリーの数だけ登録される**
+（`Build/` と `Temp/BurstOutput/` の両方が入るので、すぐ数十件になる）。**別ワークツリーの `.app` が
+起動したままだと `open` が新しいプロセスを起こさない**（→ 上の #75 の実機確認）ので、
+確認の前に `pgrep -fl ChatterMascot.app` で見ること。実際、確認時には別ワークツリーの
+ビルドが起動していた。
+
+#### アイコン生成は**元 PNG**を読む —— `textureCompression` は効かない
+
+`Assets/ChatterMascot/Icon/AppIcon.png` の `.meta` は**既定のまま**
+（`textureCompression: 1` = 圧縮あり / `isReadable: 0` / `maxTextureSize: 2048`）だが、
+**生成された 1024 のアイコンにブロックノイズが無い**。DXT/BC を通っていれば 4x4 の
+アーティファクトが出るので、**ビルド時のアイコン生成は `Texture2D` のピクセルではなく
+ソース画像を読んでいる**。→ **アイコンのためにインポート設定を変える必要は無い。**
+
+★ **`GetIconSizes` が返すサイズと、`.icns` に入るサイズは一致しない。**
+`.icns` に枠が無いサイズ（実測では 64）は落ちる。要求される枚数は Unity のバージョンで
+変わるので**値を覚えないこと** —— `IconSettings.FixAll` が走るたびに `[Icon]` のログへ出す。
+
+#### 素材と最適化（#93）
+
+| | |
+|---|---|
+| 原本 | Apple の Icon Composer（`~/Pictures/ChatterMascot/ChatterMascot.icon`）。**リポジトリには入れない** |
+| 使ったのは | **macOS の書き出し**（1024x1024）。`-iOS-` の方は使わない —— **macOS 版は周囲にインセットが入る**（Finder で他のアイコンと大きさを揃えるための余白）。並べると一目で違う |
+| 最適化 | pngquant（`--quality=95-100 --speed 1 --strip`）を通した。**桁で縮む** |
+
+★ **pngquant は減色する。** 通したあとの `IHDR` は `depth=8 colortype=3`（パレット形式）で
+`PLTE` と `tRNS` を持つ —— **256 色のパレットに落ち、アルファも量子化されている**。
+「Icon Composer の書き出しは 16 bit/sample で `.icns` 側は 8bit だから、色深度は捨ててよい」
+までは正しいが、**pngquant がやっているのはそれだけではない**。
+
+★★ **採用は「測って確かめた」ではなく「見て許容した」。** グラデーションを等倍で切り出して
+見比べたが、**見たのは不透明な内側で、そこはアルファの量子化が効かない唯一の領域**だった。
+影響が出るとしたら**角丸のアンチエイリアスと macOS 版のインセット影の縁** —— アルファが
+連続値から量子化される場所 —— で、そこは見ていない。実機（Finder）で問題が無かったので
+採った、が正確なところ。
+
+★ **次にこのファイルを最適化するときは縁を見ること。** 不透明な内側を見比べても、
+パレット化とアルファの量子化がシルエットの縁にどう出るかは分からない。
+
+★★ **`.icon` はビルドに入れられない。** あれはディレクトリバンドルの**ソース形式**で、
+`icon.json` にレイヤー構成・`automatic-gradient` の背景・glass・shadow を持ち、
+ラスタ画像ではない。Unity の Icon が受けるのは `Texture2D` だけ。`iconutil --convert icns` も
+通らない（実測: `Invalid Iconset.`。あれが読むのは `.iconset` だけ）。コンパイルできるのは
+Xcode の `actool` で、出力は `Assets.car`。
+
+★ **Liquid Glass（macOS 26 の4外観・鏡面反射・Dock のパララックス）は入れていない。**
+効かせるには `.icon` を `actool` でコンパイルして `Contents/Resources/Assets.car` を置き、
+`Info.plist` に `CFBundleIconName` を書く（`MacPostBuild` に足せる）。**やらない理由は
+`LSUIElement`** —— Dock にも ⌘Tab にも出ないので、Liquid Glass の見せ場が効く場所が
+このアプリにほぼ無い。Unity のビルドに Xcode のツールチェーンを挟む見返りが小さい。
+**Dock に出す日が来たら再検討する。**
+
+★ **次期 macOS で iOS と macOS の geometry が共通になったら書き出し直しが要る。**
+PNG は静止画なので OS 側では吸収されない。差し替えたら
+`./scripts/run.sh ChatterMascot.EditorTools.IconSettings.FixAll` を走らせて
+`ProjectSettings.asset` の差分をコミットすること。
+
+★ **アイコンの確認は Dock ではできない**（`LSUIElement`。⌘Tab にも出ない）。
+効くのは **Finder / Spotlight / ⌘I / 通知 / 設定パネル**。
+
+### ★★ トレイ画像を差し替えるとき
+
+★★ **@1x と @2x は必ず 2 枚セットで差し替えること。** 片方だけだと
+**`@2x` が無ければ Retina でぼやけ、`@1x` が無ければディスプレイを問わず 2 倍に描かれる**
+（理由は `CMLoadTemplateImage` のコメント。→ `Assets/Plugins/macOS~/ChatterMascotNative/CMStatusItem.m`）。
+気づくのはメニューバーを見たときなので、寸法は `.github/workflows/validate.yml` の
+`unity-macos-identity-settings` が**その前に**落とす。
+
+★★ **アルファだけが形として使われる**（`[image setTemplate:YES]`。RGB は無視される）。
+**内側が不透明だとメニューバーに黒い塊として出る**ので、輪郭線で描くなら内側は透明にすること。
+色は捨てられるので、白の縁取りや差し色を入れても消える。
+
+★★ **編集ツールが埋める XMP（`iTXt`）と ICC（`iCCP`）は落とすこと。** ここに**実名・作成時刻・
+オーサリングツール**が入り、そのまま公開リポジトリと `.app` に載る。**目で見て分からない**ので
+`validate.yml` が毎 PR 見ている。書き出し設定でそもそも埋めないようにするか、標準的な道具
+（`exiftool -all=` / ImageMagick の `-strip` / `oxipng --strip all`）で落とす。
+
+★ **画像形式は問わない。** 読み手は macOS の ImageIO（`NSImage` / `CGImageSource`）で、
+**パレット形式（`colortype=3`）も `tRNS` も普通に読む**。pngquant を通しても構わない。
+`validate.yml` が見ているのは**メタデータであって画像形式ではない**。
 
 ## 実装の決めごと
 

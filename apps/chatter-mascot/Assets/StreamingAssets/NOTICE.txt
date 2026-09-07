@@ -155,11 +155,6 @@ Unity Software License に従う。
         更新されて静かにズレる。**一致は EditMode テスト（NoticeTests）が固定する。**
       ★ `StreamingAssets` はビルド後 `.app` の中のコピーが読まれる。
 
-  - trayTemplate.png / trayTemplate@2x.png — kazakago/cc-mascot の resources/icons/
-      Copyright 2026 kazakago, licensed under the Apache License, Version 2.0.
-      https://github.com/kazakago/cc-mascot
-      **改変していない。** メニューバー（ステータスバー）のアイコン（→ issue #75）。
-
 ---
 
 **`apps/chatter-mascot/` の C# は、すべて chatter-agent で新規に書いたもので、

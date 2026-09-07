@@ -2972,9 +2972,8 @@ Unity は「`.meta` はあるがアセットが無い」と見て**孤児とし�
 あとから `./scripts/build-native.sh` が `.bundle` を作ると、**新しい GUID で再インポートされる**。
 
 実測（2026-09-06 / #93）: `./scripts/run.sh …IconSettings.FixAll` を単独で先に走らせたところ、
-`ChatterMascotNative.bundle.meta` が **29 行から 2 行に落ち**、`guid` が
-`a692ce6a5257a459fb5b8910fa38355f` → `adb7c394370024e3f88665f37da0cb3a` に変わっていた
-（`PluginImporter` の `platformData` ごと消えた）。**`.gitignore` が「`.meta` は追跡する
+`ChatterMascotNative.bundle.meta` から **`PluginImporter` の `platformData` ごと設定が消え、
+`guid` が別の値に変わっていた**（残っていたのは `fileFormatVersion` と `guid` の 2 行だけ）。**`.gitignore` が「`.meta` は追跡する
 （GUID が動くと、参照している側が壊れる）」と書いている、まさにその事故。**
 
 ★ **`build.sh` はこの穴を踏まない。** Unity より先に `build-native.sh` を呼ぶため。
@@ -2997,7 +2996,7 @@ git checkout -- apps/chatter-mascot/Assets/Plugins/macOS/ChatterMascotNative.bun
 | 確認したこと | 結果 |
 |---|---|
 | アプリアイコン | Finder に出る。他のアプリと並べて浮いていない |
-| `PlayerIcon.icns` | `Contents/Resources/` に **450,802 B** で生成された。中身は 16 / 32 / 48 / 128 / 256 / 512 / 512@2x の **7 種** |
+| `PlayerIcon.icns` | `Contents/Resources/` に生成された。中身は 16 / 32 / 48 / 128 / 256 / 512 / 512@2x |
 | `LSApplicationCategoryType` | `public.app-category.utilities`。**`LSUIElement = true` も残っている**（`MacPostBuild` を壊していない） |
 | **Game Mode のロケット** | **カテゴリを変えるだけで消えた。** `LSSupportsGameMode` / `GCSupportsGameMode` は**足していない** |
 | メニューバーのアイコン | 自前の素材に変わった。ミュート（`⌃⌥M`）で薄くなる（`appearsDisabled`） |
@@ -3012,9 +3011,9 @@ git checkout -- apps/chatter-mascot/Assets/Plugins/macOS/ChatterMascotNative.bun
 ので、実装の問題ではない。**テンプレート画像の確認項目に「外観モードを切り替える」を
 入れないこと**（切り替わらないのが正常で、実装の異常と取り違える）。
 
-★ **LaunchServices のキャッシュは踏まなかった**（`lsregister -f` は打った）。ただしこの Mac には
-同じ bundle id（`tech.sukima.chatter-mascot`）を名乗る `.app` が **56 個**登録されている
-（ワークツリーごとの `Build/` と `Temp/BurstOutput/`）。**別ワークツリーの `.app` が
+★ **LaunchServices のキャッシュは踏まなかった**（`lsregister -f` は打った）。ただし
+同じ bundle id（`tech.sukima.chatter-mascot`）を名乗る `.app` が**ワークツリーの数だけ登録される**
+（`Build/` と `Temp/BurstOutput/` の両方が入るので、すぐ数十件になる）。**別ワークツリーの `.app` が
 起動したままだと `open` が新しいプロセスを起こさない**（→ 上の #75 の実機確認）ので、
 確認の前に `pgrep -fl ChatterMascot.app` で見ること。実際、確認時には別ワークツリーの
 ビルドが起動していた。
@@ -3027,9 +3026,9 @@ git checkout -- apps/chatter-mascot/Assets/Plugins/macOS/ChatterMascotNative.bun
 アーティファクトが出るので、**ビルド時のアイコン生成は `Texture2D` のピクセルではなく
 ソース画像を読んでいる**。→ **アイコンのためにインポート設定を変える必要は無い。**
 
-`PlayerSettings.GetIconSizes(NamedBuildTarget.Standalone, IconKind.Application)` が返したのは
-**`[1024, 512, 256, 128, 64, 48, 32, 16]` の 8 つ**（`[Icon]` のログに出る）。
-`.icns` に入るのは 7 種で、**64 は落ちる**（`.icns` に 64x64 の枠が無い）。
+★ **`GetIconSizes` が返すサイズと、`.icns` に入るサイズは一致しない。**
+`.icns` に枠が無いサイズ（実測では 64）は落ちる。要求される枚数は Unity のバージョンで
+変わるので**値を覚えないこと** —— `IconSettings.FixAll` が走るたびに `[Icon]` のログへ出す。
 
 #### 素材と最適化（#93）
 
@@ -3037,12 +3036,21 @@ git checkout -- apps/chatter-mascot/Assets/Plugins/macOS/ChatterMascotNative.bun
 |---|---|
 | 原本 | Apple の Icon Composer（`~/Pictures/ChatterMascot/ChatterMascot.icon`）。**リポジトリには入れない** |
 | 使ったのは | **macOS の書き出し**（1024x1024）。`-iOS-` の方は使わない —— **macOS 版は周囲にインセットが入る**（Finder で他のアイコンと大きさを揃えるための余白）。並べると一目で違う |
-| 最適化 | pngquant `--quality=95-100 --speed 1 --strip` で **2,277,213 B → 127,395 B（5.6%）** |
+| 最適化 | pngquant（`--quality=95-100 --speed 1 --strip`）を通した。**桁で縮む** |
 
-★ **縮んだ主因は減色ではなく色深度。** Icon Composer の書き出しは **16 bit/sample**（RGBA64）で、
-`.icns` 側は 8bit。**捨てている色深度は最終成果物に載らない。** 採用の判断は目視で、
-帯が出るなら背景のグラデーションに出るはずなので、**300x300 を等倍で切り出して見比べた**
-（差は出なかった）。
+★ **pngquant は減色する。** 通したあとの `IHDR` は `depth=8 colortype=3`（パレット形式）で
+`PLTE` と `tRNS` を持つ —— **256 色のパレットに落ち、アルファも量子化されている**。
+「Icon Composer の書き出しは 16 bit/sample で `.icns` 側は 8bit だから、色深度は捨ててよい」
+までは正しいが、**pngquant がやっているのはそれだけではない**。
+
+★★ **採用は「測って確かめた」ではなく「見て許容した」。** グラデーションを等倍で切り出して
+見比べたが、**見たのは不透明な内側で、そこはアルファの量子化が効かない唯一の領域**だった。
+影響が出るとしたら**角丸のアンチエイリアスと macOS 版のインセット影の縁** —— アルファが
+連続値から量子化される場所 —— で、そこは見ていない。実機（Finder）で問題が無かったので
+採った、が正確なところ。
+
+★ **次にこのファイルを最適化するときは縁を見ること。** 不透明な内側を見比べても、
+パレット化とアルファの量子化がシルエットの縁にどう出るかは分からない。
 
 ★★ **`.icon` はビルドに入れられない。** あれはディレクトリバンドルの**ソース形式**で、
 `icon.json` にレイヤー構成・`automatic-gradient` の背景・glass・shadow を持ち、

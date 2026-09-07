@@ -247,6 +247,7 @@ Assets/ChatterMascot/
     SceneFixups.cs                  シーンとプロジェクトの修繕・検査
     MacPostBuild.cs                 ★ Info.plist に LSUIElement を書く（Dock に出さない）
     NativePluginSettings.cs         PluginImporter を出荷値にする
+    IconSettings.cs                 AppIcon.png を Player Settings の Icon に登録する（#93）
     BuildScript.cs / VrmProbe.cs
   Tests/Editor/                     EditMode テスト（状態機械が主）
 ```
@@ -267,6 +268,18 @@ Editor が UniVRM の型を直接使うなら Editor の asmdef にも `VRM10` �
 ★ **`Desktop` の `MonoBehaviour` をシーンに置かないこと。** Android では
 そのアセンブリごと存在しないので、シーンに焼くと missing script になる
 （→ [`../../docs/mascot.md`](../../docs/mascot.md)）。
+
+★ **`IconSettings.FixAll` は毎回のセットアップでは要らない。** 結果
+（`m_BuildTargetIcons`）は `ProjectSettings.asset` にコミット済みなので、新規クローンでは
+何もしなくてよい——`NativePluginSettings.FixAll`（新規クローンのたびに要る）とはここが違う。
+**再実行が要るのはアイコン画像（`Assets/ChatterMascot/Icon/AppIcon.png`）を差し替えたとき
+だけ**:
+
+```bash
+./scripts/run.sh ChatterMascot.EditorTools.IconSettings.FixAll
+```
+
+差し替えの経緯と実測は [`../../docs/mascot.md`](../../docs/mascot.md) の「素材と最適化」。
 
 ### モデルとアニメーションの探索順
 

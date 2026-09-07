@@ -43,9 +43,17 @@ namespace ChatterMascot.EditorTools
             if (texture == null)
             {
                 // ★ ここで黙って空のアイコンを設定すると「ビルドしたのにアイコンが無い」に
-                //   戻ってしまい、原因（このアセットが無い）が見えなくなる。はっきり落とす
+                //   戻ってしまい、原因（このアセットが無い）が見えなくなる。はっきり落とす。
+                //
+                // ★★ ただし Exit するのは batchmode のときだけ。 FixAll は public static で
+                //   [MenuItem] の縛りも isBatchMode の判定も元々無いため、起動中の Editor に
+                //   -executeMethod したり、[MenuItem] を後から足したり、他のスクリプトから
+                //   呼んだりする経路がある。そこでアセット欠落に当たると、Exit は
+                //   **未保存のシーン・プレハブ編集ごとプロセスを道連れにする**。
+                //   batchmode（build.sh / run.sh 経由）に限れば、失うのはコマンドの終了コードで
+                //   済み、それは呼び出し側（run.sh）が受け取って CI を落とす形に直した
                 Debug.LogError($"[Icon] AppIcon.png が見つかりません: {IconPath}");
-                EditorApplication.Exit(1);
+                if (Application.isBatchMode) EditorApplication.Exit(1);
                 return;
             }
 
@@ -54,6 +62,44 @@ namespace ChatterMascot.EditorTools
             // ★ 何サイズ要求されたかは Unity のバージョンで変わるので、実測として毎回残す
             //   （docs/mascot.md）。1行に収めること —— scripts の grep は2行目以降を落とす
             Debug.Log($"[Icon] GetIconSizes(Standalone, Application) = [{string.Join(", ", sizes)}]");
+
+            if (sizes.Length == 0)
+            {
+                // ★ ここを素通りすると SetIcons に空配列を渡すことになり、SaveAssets が
+                //   「アイコン無し」を確定させてしまう。ログには「設定しました」が出るのに
+                //   実体は無い、という #93 の元の症状にそのまま戻る（batchmode の Editor に
+                //   macOS Build Support が入っていないと GetIconSizes が空を返す）。
+                //   上の null チェックと同じ理由・同じ手当てで、はっきり落とす
+                Debug.LogError("[Icon] GetIconSizes が空でした（macOS Build Support 未インストールの疑い）");
+                if (Application.isBatchMode) EditorApplication.Exit(1);
+                return;
+            }
+
+            // ★ 素材の寸法チェック。テクスチャの縦横が違う、または要求される最大サイズより
+            //   小さいと、Unity 側が引き伸ばして使うため輪郭が甘くなる。ただしここは
+            //   「アイコンが無い」ケースほど致命的ではなく（表示はされる）、意図的に
+            //   プレースホルダーの小さい素材を置く運用もあり得るので、失敗にはせず警告に留める。
+            //
+            // ★★ Texture2D.width / height はインポート設定の maxTextureSize で縮む。
+            //   素材そのものの寸法を見たいので TextureImporter から元画像のサイズを取る
+            //   （GetSourceTextureWidthAndHeight は void を返す。 out 引数で受けること）
+            if (AssetImporter.GetAtPath(IconPath) is TextureImporter importer)
+            {
+                importer.GetSourceTextureWidthAndHeight(out var sourceWidth, out var sourceHeight);
+
+                if (sourceWidth != sourceHeight)
+                {
+                    Debug.LogWarning($"[Icon] AppIcon.png が正方形ではありません: {sourceWidth}x{sourceHeight}");
+                }
+
+                var maxRequested = Mathf.Max(sizes);
+                if (sourceWidth < maxRequested || sourceHeight < maxRequested)
+                {
+                    Debug.LogWarning(
+                        $"[Icon] AppIcon.png ({sourceWidth}x{sourceHeight}) が要求される最大サイズ ({maxRequested}) を"
+                        + "下回っています。ビルド時に引き伸ばされます");
+                }
+            }
 
             // ★ 配列長は GetIconSizes の戻り値と同じ長さでなければならない（SetIcons のドキュメントに明記）。
             //   要求サイズごとに別画像を用意していないので、同じテクスチャを全枠に敷く

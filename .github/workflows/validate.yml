@@ -227,3 +227,41 @@ jobs:
             grep -n "m_DisableAudio" "$asset" || true
             exit 1
           fi
+
+  unity-macos-identity-settings:
+    name: Unity の macOS アイコン / カテゴリ設定が出荷値
+    runs-on: ubuntu-latest
+
+    # #93 で直した2値は、どちらも「二度と自動で再表明されない」種類の設定で、
+    # unity-audio-settings（上のジョブ）と同じ理由でここが最後の砦になる。
+    #   - macAppStoreCategory は ProjectSettings.asset を手で編集した値そのもの。
+    #     何かが定期的に書き直すわけではないので、Inspector で Mac App Store Category を
+    #     触る・Player Settings をリセットする・Unity のバージョン上げで再シリアライズされる、
+    #     のいずれでも黙って既定値（Game Mode 扱いのロケット）に戻りうる
+    #   - m_BuildTargetIcons を書くのは ./scripts/build.sh が呼ばない一回きりのツール
+    #     （IconSettings.FixAll）だけ。実行し忘れたままコミットすると、Info.plist は
+    #     アイコンを指すのに実体が無い .app が出荷される
+    # どちらもテストにも通常の CI にも引っかからず、実機で気づくまで気づけない
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: macAppStoreCategory が出荷値であること
+        working-directory: .
+        run: |
+          asset=apps/chatter-mascot/ProjectSettings/ProjectSettings.asset
+          if ! grep -qx "  macAppStoreCategory: public.app-category.utilities" "$asset"; then
+            echo "::error file=$asset::macAppStoreCategory が出荷値ではありません。Inspector での操作や Player Settings のリセットで戻った可能性があります（Game Mode のロケットが復活します）"
+            grep -n "macAppStoreCategory" "$asset" || true
+            exit 1
+          fi
+
+      - name: m_BuildTargetIcons が空でないこと
+        working-directory: .
+        run: |
+          asset=apps/chatter-mascot/ProjectSettings/ProjectSettings.asset
+          if grep -qx "  m_BuildTargetIcons: \[\]" "$asset"; then
+            echo "::error file=$asset::m_BuildTargetIcons が空です。./scripts/run.sh ChatterMascot.EditorTools.IconSettings.FixAll を実行し直してコミットしてください（アイコンの無い .app が出荷されます）"
+            grep -n "m_BuildTargetIcons" "$asset" || true
+            exit 1
+          fi

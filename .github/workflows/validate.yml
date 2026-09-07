@@ -305,7 +305,7 @@ jobs:
           # ★★ @1x と @2x は必ず 2 枚セット。 CMLoadTemplateImage（CMStatusItem.m）は両方を
           #   1 つの NSImage に入れ、**両 rep の最小 pixel 寸法**をポイントとして size を揃えるので、
           #   片方だけ差し替えると Retina でぼやけるか非 Retina で 2 倍の大きさに描かれる。
-          #   ★ この事故は非 Retina でしか出ない —— 開発機が Retina なら目で見ても気づけない
+          #   ★ 気づくのはメニューバーを見たときなので、その前に落とす
           EXPECTED = {"trayTemplate.png": (16, 16), "trayTemplate@2x.png": (32, 32)}
 
           paths = sorted(glob.glob(PATTERN))
@@ -314,6 +314,14 @@ jobs:
               sys.exit(1)
 
           failed = False
+
+          # ★ 0 件だけでなく「片方が消えた」も捕まえること。 EXPECTED が
+          #   「何が存在すべきか」の権威で、増えたときは下のループが落とす
+          missing = sorted(set(EXPECTED) - {os.path.basename(p) for p in paths})
+          if missing:
+              print(f"::error::トレイ画像が足りません: {', '.join(missing)}。@1x と @2x は 2 枚セットです")
+              failed = True
+
           for path in paths:
               name = os.path.basename(path)
               data = open(path, "rb").read()

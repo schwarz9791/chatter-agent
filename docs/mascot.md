@@ -3080,7 +3080,7 @@ PNG は静止画なので OS 側では吸収されない。差し替えたら
 （`Assets/Plugins/macOS~/ChatterMascotNative/CMStatusItem.m`）は 2 枚を 1 つの `NSImage` に入れ、
 **両 rep の最小 pixel 寸法**をポイントとして全 rep の size を揃える。片方だけ差し替えると
 **Retina でぼやけるか、非 Retina で 2 倍の大きさに描かれる**。
-★ **非 Retina でしか出ないので目視では気づけない。** 寸法は
+★ **気づくのはメニューバーを見たときなので、その前に落とす。** 寸法は
 `.github/workflows/validate.yml` の `unity-macos-identity-settings` が見ている。
 
 ★★ **アルファだけが形として使われる**（`[image setTemplate:YES]`。RGB は無視される）。

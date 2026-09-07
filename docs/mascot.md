@@ -3074,6 +3074,42 @@ PNG は静止画なので OS 側では吸収されない。差し替えたら
 ★ **アイコンの確認は Dock ではできない**（`LSUIElement`。⌘Tab にも出ない）。
 効くのは **Finder / Spotlight / ⌘I / 通知 / 設定パネル**。
 
+### ★★ トレイ画像を差し替えるとき
+
+トレイ画像（`trayTemplate.png` / `trayTemplate@2x.png`）は、上の「素材と最適化（#93）」で
+`AppIcon.png` に使った最適化（pngquant）をそのまま持ち込むと壊れる。**別物として扱うこと。**
+
+★★ **RGBA（colour type 6）で書き出すこと。pngquant を通さないこと。**
+`TrayIconTests`（`Assets/ChatterMascot/Tests/Editor/TrayIconTests.cs`）は、8bit・非インターレース・
+colour type 6 の PNG しか読めない自前の最小デコーダでこの2枚を検査している。**pngquant は
+減色してパレット形式（colour type 3）に変える** —— `AppIcon.png` はビルド時のアイコン生成が
+ソース PNG のピクセルをそのまま読むだけなので pngquant を通しても問題にならないが、
+トレイ画像はこのテストのデコーダが対象になるため同じ最適化は使えない。パレット形式のまま
+コミットすると `TrayTemplateCenterIsTransparent` / `TrayTemplateIsNotFilled`（と `@2x` 版）が
+「このデコーダは RGBA（colour type 6）の PNG のみ対応しています」で落ちる。
+
+★★ **編集ツールが埋め込む XMP / ICC は落とすこと。** Affinity などの編集ツールは書き出し時に
+XMP（`iTXt`）と ICC プロファイル（`iCCP`）を埋める。ここに実名・作成時刻・オーサリングツールが
+入り、そのまま公開リポジトリと `.app` に載る（この PR で実際に踏んだ）。
+
+落とすのは `./scripts/strip-png-metadata.py`:
+
+```bash
+./scripts/strip-png-metadata.py Assets/StreamingAssets/trayTemplate.png Assets/StreamingAssets/trayTemplate@2x.png
+./scripts/strip-png-metadata.py --check Assets/StreamingAssets/trayTemplate*.png   # 書き換えずに見るだけ
+```
+
+やっているのは「必須チャンク（`IHDR` / `IDAT` / `IEND`）だけを残して、それ以外を落とす」。
+`IDAT`（画素データ）は長さ・型・データ・CRC ごとバイト列のままコピーするので、**画素は無劣化**。
+**pngquant は使わないこと**（上の理由でパレット形式になる）。減色や再圧縮を伴うツールは
+そもそも目的に合わない —— ここでやりたいのは「小さくする」ではなく「メタデータだけを落とす」こと。
+
+差し替えたら `TrayIconTests` が寸法・中心画素の透明・不透明画素の比率・PNG チャンクの
+allowlist（`IHDR` / `IDAT` / `IEND`）を見る（`./scripts/test.sh`）ので、**書き出し方を間違えると
+だいたいテストが落ちる。** チャンクの allowlist は `.github/workflows/validate.yml` の
+`unity-macos-identity-settings` でも重ねて見ている——こちらは Unity を起動しないバイト検査
+なので、EditMode テストと違って PR のたびに必ず走る。
+
 ## 実装の決めごと
 
 ### `PlaybackQueue` に判断を集める

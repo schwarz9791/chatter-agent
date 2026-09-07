@@ -35,8 +35,16 @@ namespace ChatterMascot.Tests
     ///   書いた XMP（<c>iTXt</c>）と ICC プロファイル（<c>iCCP</c>）が PNG に残ったまま
     ///   公開リポジトリに入り、実名・作成時刻・オーサリングツールが漏れた。画素とは無関係に
     ///   増える種類のチャンクなので、寸法やアルファのテストでは検出できない。
-    ///   許可チャンクの allowlist（<c>IHDR</c> / <c>PLTE</c> / <c>tRNS</c> / <c>IDAT</c> / <c>IEND</c>）に
+    ///   許可チャンクの allowlist（<c>IHDR</c> / <c>IDAT</c> / <c>IEND</c>）に
     ///   無いものが1つでもあれば失敗させ、次に素材を差し替えたときの再発を防ぐ。
+    ///
+    /// ★★ <b><c>PLTE</c> / <c>tRNS</c>（パレット形式）は allowlist から外している。</b>
+    ///   このデコーダは colour type 6（RGBA）しか読めないので、<c>colortype=3</c> の
+    ///   パレット PNG を許可チャンクに含めても <c>DecodeRgbaPixels</c> がそもそも読めず、
+    ///   「テスト側の都合」に見えるだけの失敗になる。**pngquant を通すと自然にここへ落ちる**
+    ///   （減色して <c>PLTE</c>/<c>tRNS</c> を持つ形式に変わるため。実際 <c>AppIcon.png</c> は
+    ///   pngquant で colour type 3 になっている）。パレットは metadata の除去では代替できない
+    ///   ので、最初から受け付けない。
     ///
     /// ★ <c>StreamingAssets</c> の PNG は Unity がインポートしないので
     ///   <c>AssetDatabase.LoadAssetAtPath&lt;Texture2D&gt;</c> では読めない。
@@ -51,12 +59,13 @@ namespace ChatterMascot.Tests
             0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
         };
 
-        // ★ ここに無いチャンクは全部「編集ツールが埋め込んだ何か」の疑いがある。
-        //   IHDR/IEND は PNG の構造上必須、PLTE/tRNS はインデックスカラー用、IDAT が画素データ。
-        //   テキスト・時刻・ICC プロファイルなど、画素の表示に要らないものは1つも許可しない
+        // ★ ここに無いチャンクは全部「編集ツールが埋め込んだ何か」、もしくはこのデコーダが
+        //   読めないパレット形式（PLTE/tRNS）の疑いがある。IHDR/IEND は PNG の構造上必須、
+        //   IDAT が画素データ。テキスト・時刻・ICC プロファイル・パレットなど、
+        //   RGBA の画素表示に要らないものは1つも許可しない
         private static readonly HashSet<string> AllowedChunkTypes = new HashSet<string>
         {
-            "IHDR", "PLTE", "tRNS", "IDAT", "IEND",
+            "IHDR", "IDAT", "IEND",
         };
 
         // ★ 「中心が塗りつぶされている（＝シルエット）」を弾くための上限。線画・輪郭主体の
@@ -197,6 +206,7 @@ namespace ChatterMascot.Tests
             public int Height;
             public byte BitDepth;
             public byte ColorType;
+            public byte InterlaceMethod;
             public List<string> ChunkTypes;
             private byte[] _idat;
 
@@ -223,6 +233,7 @@ namespace ChatterMascot.Tests
                         image.Height = (int)ReadUInt32BigEndian(bytes, dataStart + 4);
                         image.BitDepth = bytes[dataStart + 8];
                         image.ColorType = bytes[dataStart + 9];
+                        image.InterlaceMethod = bytes[dataStart + 12];
                     }
                     else if (type == "IDAT")
                     {
@@ -241,7 +252,19 @@ namespace ChatterMascot.Tests
             public byte[] DecodeRgbaPixels()
             {
                 Assert.That(BitDepth, Is.EqualTo((byte)8), "このデコーダは 8bit 深度の PNG のみ対応しています");
-                Assert.That(ColorType, Is.EqualTo((byte)6), "このデコーダは RGBA（colour type 6）の PNG のみ対応しています");
+                Assert.That(ColorType, Is.EqualTo((byte)6),
+                    $"このデコーダは RGBA（colour type 6）の PNG のみ対応しています（実際は colour type {ColorType}）。"
+                    + "pngquant 等の減色ツールを通すとパレット形式（colour type 3）になり読めなくなります。"
+                    + "画像編集ツールから RGBA のまま書き出し直し、メタデータを落としたいときは "
+                    + "PNG の必須チャンク（IHDR/IDAT/IEND）だけを残す方法を使ってください"
+                    + "（IDAT は触らないので画素は無劣化です。詳細は docs/mascot.md の「トレイ画像を差し替えるとき」）");
+                // ★ Adam7 インターレースは非インターレース前提のデコード（下のフィルタ復元ループ）を
+                //   黙って通すことがある（走査線あたりのバイト数の想定が崩れるだけで、7パスの
+                //   合計バイト数が非インターレース1本分を上回れば例外にならない）。その場合
+                //   IndexOutOfRangeException にはならず、別物のピクセル列がそのまま返って
+                //   CenterIsTransparent / IsNotFilled がノイズを検査することになる。
+                //   IHDR の interlace method を明示的に見て、非インターレースだけを通す
+                Assert.That(InterlaceMethod, Is.EqualTo((byte)0), "このデコーダは非インターレースの PNG のみ対応しています");
 
                 byte[] raw;
                 using (var compressed = new MemoryStream(_idat, 2, _idat.Length - 2))

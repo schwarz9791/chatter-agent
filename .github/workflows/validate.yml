@@ -265,3 +265,72 @@ jobs:
             grep -n "m_BuildTargetIcons" "$asset" || true
             exit 1
           fi
+
+      # ★★ TrayIconTests.cs（EditMode テスト）は Unity を起動しないと1度も走らない
+      # （#54 のジョブが無い）。だが検査自体はバイト検査で Unity は要らないので、ここに移す。
+      #
+      # apps/chatter-mascot/.gitattributes で *.png は Git LFS 追跡。上のジョブと同じく
+      # このジョブの checkout も lfs: true を付けていない（このリポジトリの LFS 追跡分は
+      # vita.vrm が大半を占めており、毎回落とすと GitHub の LFS 帯域を無駄に消費する）ので、
+      # そのままだと trayTemplate*.png は Git LFS のポインタファイルのままになる。
+      # 検査に要る2枚だけを明示的に取得する
+      - name: トレイ PNG だけ LFS から取得
+        working-directory: .
+        run: git lfs pull --include="apps/chatter-mascot/Assets/StreamingAssets/trayTemplate*.png"
+
+      # ★ 上のステップが対象 0 件で黙って何もしないまま終わる（パスが変わった等）ことがある。
+      # ポインタファイルのままだと IHDR が無いまま allowlist の検査だけが「素通りで緑」に
+      # なりうるので、allowlist を見る前に PNG シグネチャを検査して構造的に塞ぐ。
+      # allowlist は TrayIconTests.cs（PLTE/tRNS はパレット形式なので許可しない。上のコメント参照）と揃えること
+      - name: トレイ PNG のメタデータチャンクが allowlist のみであること
+        working-directory: .
+        run: |
+          python3 <<'PY'
+          import glob
+          import struct
+          import sys
+
+          PATTERN = "apps/chatter-mascot/Assets/StreamingAssets/trayTemplate*.png"
+          SIGNATURE = bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+          ALLOWED = {b"IHDR", b"IDAT", b"IEND"}  # PLTE/tRNS は許可しない（TrayIconTests.cs 参照）
+
+          paths = sorted(glob.glob(PATTERN))
+          if not paths:
+              print(f"::error::{PATTERN} に一致する PNG が見つかりません。パスが変わっていないか確認してください")
+              sys.exit(1)
+
+          failed = False
+          for path in paths:
+              data = open(path, "rb").read()
+              if data[:8] != SIGNATURE:
+                  print(
+                      f"::error file={path}::PNG シグネチャが一致しません。Git LFS のポインタファイルの"
+                      "ままの疑いがあります（前段の git lfs pull のステップを確認してください）"
+                  )
+                  failed = True
+                  continue
+
+              offset = 8
+              unexpected = []
+              while offset + 8 <= len(data):
+                  length = struct.unpack(">I", data[offset:offset + 4])[0]
+                  chunk_type = data[offset + 4:offset + 8]
+                  if chunk_type not in ALLOWED:
+                      unexpected.append(chunk_type.decode("ascii", errors="replace"))
+                  offset += 12 + length
+                  if chunk_type == b"IEND":
+                      break
+
+              if unexpected:
+                  print(
+                      f"::error file={path}::許可していない PNG チャンクがあります: {', '.join(unexpected)}。"
+                      "編集ツールが埋め込んだメタデータ（XMP/ICC など）か、pngquant 等で減色されて"
+                      "パレット形式になった疑いがあります。pngquant は使わず、必須チャンク"
+                      "（IHDR/IDAT/IEND）だけを残す形で RGBA のまま書き出し直してください"
+                      "（IDAT は触らないので画素は無劣化です。docs/mascot.md の「トレイ画像を差し替えるとき」参照）"
+                  )
+                  failed = True
+
+          if failed:
+              sys.exit(1)
+          PY

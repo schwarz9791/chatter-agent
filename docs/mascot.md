@@ -3076,39 +3076,35 @@ PNG は静止画なので OS 側では吸収されない。差し替えたら
 
 ### ★★ トレイ画像を差し替えるとき
 
-トレイ画像（`trayTemplate.png` / `trayTemplate@2x.png`）は、上の「素材と最適化（#93）」で
-`AppIcon.png` に使った最適化（pngquant）をそのまま持ち込むと壊れる。**別物として扱うこと。**
+★★ **@1x と @2x は必ず 2 枚セットで差し替えること。** `CMLoadTemplateImage`
+（`Assets/Plugins/macOS~/ChatterMascotNative/CMStatusItem.m`）は 2 枚を 1 つの `NSImage` に入れ、
+**両 rep の最小 pixel 寸法**をポイントとして全 rep の size を揃える。片方だけ差し替えると
+**Retina でぼやけるか、非 Retina で 2 倍の大きさに描かれる**。
 
-★★ **RGBA（colour type 6）で書き出すこと。pngquant を通さないこと。**
-`TrayIconTests`（`Assets/ChatterMascot/Tests/Editor/TrayIconTests.cs`）は、8bit・非インターレース・
-colour type 6 の PNG しか読めない自前の最小デコーダでこの2枚を検査している。**pngquant は
-減色してパレット形式（colour type 3）に変える** —— `AppIcon.png` はビルド時のアイコン生成が
-ソース PNG のピクセルをそのまま読むだけなので pngquant を通しても問題にならないが、
-トレイ画像はこのテストのデコーダが対象になるため同じ最適化は使えない。パレット形式のまま
-コミットすると `TrayTemplateCenterIsTransparent` / `TrayTemplateIsNotFilled`（と `@2x` 版）が
-「このデコーダは RGBA（colour type 6）の PNG のみ対応しています」で落ちる。
+★ **この事故は非 Retina でしか出ない。** 開発機が Retina なら**目で見ても気づけない**ので、
+寸法は `.github/workflows/validate.yml` の `unity-macos-identity-settings` が見ている。
 
-★★ **編集ツールが埋め込む XMP / ICC は落とすこと。** Affinity などの編集ツールは書き出し時に
-XMP（`iTXt`）と ICC プロファイル（`iCCP`）を埋める。ここに実名・作成時刻・オーサリングツールが
-入り、そのまま公開リポジトリと `.app` に載る（この PR で実際に踏んだ）。
+★★ **テンプレート画像はアルファだけが形として使われる**（`[image setTemplate:YES]`。RGB は無視）。
+**内側が不透明だとメニューバーに黒い塊として出る** —— #93 で最初に入れた素材が塗りつぶしの
+シルエットで、実際にそうなって描き直した（`b5ea3d9`）。輪郭線で描くなら内側は透明にすること。
+色は捨てられるので、白の縁取りや差し色を入れても消える。
 
-落とすのは `./scripts/strip-png-metadata.py`:
+★★ **編集ツールが埋め込む XMP / ICC は落とすこと。** Affinity などは書き出し時に
+XMP（`iTXt`）と ICC プロファイル（`iCCP`）を埋める。ここに**実名・作成時刻・オーサリングツール**が
+入り、そのまま公開リポジトリと `.app` に載る —— #93 で実際に踏んだ。**目で見て絶対に
+分からない**ので、`validate.yml` が毎 PR 見ている。落とすのは書き出し設定か、標準的な道具
+（`exiftool -all=` / ImageMagick の `-strip` / `oxipng --strip all`）でよい。
 
-```bash
-./scripts/strip-png-metadata.py Assets/StreamingAssets/trayTemplate.png Assets/StreamingAssets/trayTemplate@2x.png
-./scripts/strip-png-metadata.py --check Assets/StreamingAssets/trayTemplate*.png   # 書き換えずに見るだけ
-```
+★ **形式は問わない。** 読み手は macOS の ImageIO（`NSImage` / `CGImageSource`）で、
+**パレット形式（`colortype=3`）も `tRNS` も普通に読む**。pngquant を通しても構わない
+（このトレイ画像は相異なる色が数十色しかなく、256 色パレットに収まる）。
+`validate.yml` が見ているのは**メタデータであって画像形式ではない**。
 
-やっているのは「必須チャンク（`IHDR` / `IDAT` / `IEND`）だけを残して、それ以外を落とす」。
-`IDAT`（画素データ）は長さ・型・データ・CRC ごとバイト列のままコピーするので、**画素は無劣化**。
-**pngquant は使わないこと**（上の理由でパレット形式になる）。減色や再圧縮を伴うツールは
-そもそも目的に合わない —— ここでやりたいのは「小さくする」ではなく「メタデータだけを落とす」こと。
-
-差し替えたら `TrayIconTests` が寸法・中心画素の透明・不透明画素の比率・PNG チャンクの
-allowlist（`IHDR` / `IDAT` / `IEND`）を見る（`./scripts/test.sh`）ので、**書き出し方を間違えると
-だいたいテストが落ちる。** チャンクの allowlist は `.github/workflows/validate.yml` の
-`unity-macos-identity-settings` でも重ねて見ている——こちらは Unity を起動しないバイト検査
-なので、EditMode テストと違って PR のたびに必ず走る。
+> ★ 一度は同じ検査を EditMode テスト（`TrayIconTests`）にも置いたが、**Unity を起動するジョブが
+> 無い**（→ [#54](https://github.com/schwarz9791/chatter-agent/issues/54)）ので差し替えの瞬間には
+> 効かなかった。アルファまで見ようとすると自前の PNG デコーダが要り、その都合から
+> 「RGBA でなければならない」という**画像側には無い制約**が生えてしまう。
+> **チャンクを歩くだけで済む検査だけを、毎 PR 走る場所に置く**形に畳んだ。
 
 ## 実装の決めごと
 

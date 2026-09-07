@@ -347,8 +347,6 @@ cd apps/chatter-mascot
 ./scripts/test.sh                          # EditMode テスト
 ./scripts/build.sh                         # 本番シーン → Build/ChatterMascot.app
 ./scripts/run.sh <Editor のメソッド>        # シーンの修繕など
-
-./scripts/strip-png-metadata.py <PNG>      # トレイ画像から XMP/ICC を落とす（→ ../../docs/mascot.md）
 ```
 
 ★ **どのスクリプトも Editor を閉じてから。** Unity はプロジェクトを排他ロックする。

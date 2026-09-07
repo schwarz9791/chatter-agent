@@ -3076,12 +3076,11 @@ PNG は静止画なので OS 側では吸収されない。差し替えたら
 
 ### ★★ トレイ画像を差し替えるとき
 
-★★ **@1x と @2x は必ず 2 枚セットで差し替えること。** `CMLoadTemplateImage`
-（`Assets/Plugins/macOS~/ChatterMascotNative/CMStatusItem.m`）は 2 枚を 1 つの `NSImage` に入れ、
-**両 rep の最小 pixel 寸法**をポイントとして全 rep の size を揃える。片方だけ差し替えると
-**Retina でぼやけるか、非 Retina で 2 倍の大きさに描かれる**。
-★ **気づくのはメニューバーを見たときなので、その前に落とす。** 寸法は
-`.github/workflows/validate.yml` の `unity-macos-identity-settings` が見ている。
+★★ **@1x と @2x は必ず 2 枚セットで差し替えること。** 片方だけだと
+**`@2x` が無ければ Retina でぼやけ、`@1x` が無ければディスプレイを問わず 2 倍に描かれる**
+（理由は `CMLoadTemplateImage` のコメント。→ `Assets/Plugins/macOS~/ChatterMascotNative/CMStatusItem.m`）。
+気づくのはメニューバーを見たときなので、寸法は `.github/workflows/validate.yml` の
+`unity-macos-identity-settings` が**その前に**落とす。
 
 ★★ **アルファだけが形として使われる**（`[image setTemplate:YES]`。RGB は無視される）。
 **内側が不透明だとメニューバーに黒い塊として出る**ので、輪郭線で描くなら内側は透明にすること。

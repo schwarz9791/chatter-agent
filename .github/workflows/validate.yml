@@ -266,25 +266,14 @@ jobs:
             exit 1
           fi
 
-      # ★★ トレイ画像の検査はここだけ（#93）。 チャンクを歩くだけなので Unity は要らず、
-      # 毎 PR 走る。EditMode テストに置くと Unity を起動するジョブが無い（→ #54）ぶん、
-      # 差し替えの瞬間には効かない。
-      #
-      # ★ メタデータは目で見て分からない —— 編集ツールが埋める XMP には実名・作成時刻・
-      # オーサリングツールが入り、そのまま公開リポジトリと .app に載る。
-      #
-      # apps/chatter-mascot/.gitattributes で *.png は Git LFS 追跡。上のジョブと同じく
-      # このジョブの checkout も lfs: true を付けていない（このリポジトリの LFS 追跡分は
-      # vita.vrm が大半を占めており、毎回落とすと GitHub の LFS 帯域を無駄に消費する）ので、
-      # そのままだと trayTemplate*.png は Git LFS のポインタファイルのままになる。
-      # 検査に要る2枚だけを明示的に取得する
+      # ★ *.png は Git LFS 追跡。 lfs: true にすると vita.vrm まで毎回落ちるので、
+      # 検査に要る2枚だけを取る（→ docs/mascot.md「トレイ画像を差し替えるとき」）
       - name: トレイ PNG だけ LFS から取得
         working-directory: .
         run: git lfs pull --include="apps/chatter-mascot/Assets/StreamingAssets/trayTemplate*.png"
 
-      # ★ 上のステップが対象 0 件で黙って何もしないまま終わる（パスが変わった等）ことがある。
-      # ポインタファイルのままだと IHDR が無いまま検査が「素通りで緑」になりうるので、
-      # 中身を見る前に PNG シグネチャを検査して構造的に塞ぐ。
+      # ★ 上の取得が黙って 0 件で終わっても「素通りで緑」にしないこと。
+      # ポインタファイルのままなら PNG シグネチャで落ちる
       - name: トレイ PNG の寸法とメタデータチャンク
         working-directory: .
         run: |
@@ -297,26 +286,20 @@ jobs:
           PATTERN = "apps/chatter-mascot/Assets/StreamingAssets/trayTemplate*.png"
           SIGNATURE = bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
 
-          # ★ 見たいのは編集ツールが埋めるメタデータ（iTXt / iCCP / tEXt / eXIf / tIME など）で
-          #   あって、画像形式ではない。PLTE / tRNS はパレット形式の必須チャンクなので許可する
-          #   —— 読み手は macOS の ImageIO で、パレットも tRNS も普通に読む（#93 で実測）
+          # ★ 弾きたいのは編集ツールが埋めるメタデータであって、画像形式ではない
           ALLOWED = {b"IHDR", b"PLTE", b"tRNS", b"IDAT", b"IEND"}
 
-          # ★★ @1x と @2x は必ず 2 枚セット。 CMLoadTemplateImage（CMStatusItem.m）は両方を
-          #   1 つの NSImage に入れ、**両 rep の最小 pixel 寸法**をポイントとして size を揃えるので、
-          #   片方だけ差し替えると Retina でぼやけるか非 Retina で 2 倍の大きさに描かれる。
-          #   ★ 気づくのはメニューバーを見たときなので、その前に落とす
+          # ★★ @1x と @2x は 2 枚セット（理由は CMLoadTemplateImage のコメント）
           EXPECTED = {"trayTemplate.png": (16, 16), "trayTemplate@2x.png": (32, 32)}
 
           paths = sorted(glob.glob(PATTERN))
           if not paths:
-              print(f"::error::{PATTERN} に一致する PNG が見つかりません。パスが変わっていないか確認してください")
+              print(f"::error::{PATTERN} に一致する PNG がありません")
               sys.exit(1)
 
           failed = False
 
-          # ★ 0 件だけでなく「片方が消えた」も捕まえること。 EXPECTED が
-          #   「何が存在すべきか」の権威で、増えたときは下のループが落とす
+          # ★ 0 件だけでなく「片方が消えた」も捕まえること（増えた側は下のループ）
           missing = sorted(set(EXPECTED) - {os.path.basename(p) for p in paths})
           if missing:
               print(f"::error::トレイ画像が足りません: {', '.join(missing)}。@1x と @2x は 2 枚セットです")
@@ -336,8 +319,7 @@ jobs:
               # ★ 期待値を書き忘れたまま素通りさせない。 @3x を足すときはここも足すこと
               if name not in EXPECTED:
                   print(
-                      f"::error file={path}::{name} の期待する寸法がこのジョブに書かれていません。"
-                      "トレイ画像を増やしたなら EXPECTED に足してください"
+                      f"::error file={path}::{name} の寸法が EXPECTED に書かれていません"
                   )
                   failed = True
                   continue
@@ -362,17 +344,14 @@ jobs:
                   want, got = EXPECTED[name], size
                   print(
                       f"::error file={path}::寸法が {want[0]}x{want[1]} ではありません（実際は {got}）。"
-                      "@1x と @2x は必ず 2 枚セットで差し替えること —— 片方だけだと Retina でぼやけるか"
-                      "非 Retina で 2 倍の大きさに描かれます（docs/mascot.md の「トレイ画像を差し替えるとき」）"
+                      "@1x と @2x は 2 枚セットです（docs/mascot.md「トレイ画像を差し替えるとき」）"
                   )
                   failed = True
 
               if unexpected:
                   print(
                       f"::error file={path}::許可していない PNG チャンクがあります: {', '.join(unexpected)}。"
-                      "編集ツールが埋め込んだメタデータ（XMP / ICC / 作成時刻など）の疑いがあります。"
-                      "書き出し設定でメタデータを埋めないようにするか、exiftool -all= などで落としてください"
-                      "（docs/mascot.md の「トレイ画像を差し替えるとき」）"
+                      "編集ツールのメタデータの疑い（docs/mascot.md「トレイ画像を差し替えるとき」）"
                   )
                   failed = True
 

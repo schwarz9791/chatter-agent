@@ -10,6 +10,7 @@ bin/chatter-agent-speak.mjs はバンドル済みの成果物で、cc-mascot 由
 
   - electron/filters/textFilter.ts @ 46f7def
   - electron/services/ruleBasedEmotionClassifier.ts @ 46f7def
+      キーワード辞書部分は core/src/emotion/defaultEmotionKeywords.ts として分離している。
 
 改変の内容と対象ファイルの一覧はリポジトリの docs/origin.md にある。
 

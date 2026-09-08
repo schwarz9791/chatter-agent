@@ -18,6 +18,39 @@ import { DEFAULT_EMOTION_KEYWORDS, type EmotionKeywords } from "./defaultEmotion
 
 export type { Emotion };
 
+// キーワード直後の否定形を弾く共通ガード。活用形を辞書に並べる代わりに、
+// 当たった位置の直後だけを見て判定する。
+const SENTENCE_BOUNDARY = /[。！？!?\n、]/;
+const NEGATION_LINK = "[はがもをにでとしてられさきりえけいうつっまなわ]{0,6}";
+const NEGATION_ENDING = "(ない|ないで|ません|ませんで|なかっ|ず|ぬ)";
+const NEGATION_PATTERN = new RegExp("^(?:" + NEGATION_LINK + "|とは言え|とはいえ|とは思え)" + NEGATION_ENDING);
+
+/** キーワード直後から文の区切りまでの短い窓を切り出す */
+function tailAfterKeyword(text: string, at: number, keywordLength: number): string {
+  const window = text.slice(at + keywordLength, at + keywordLength + 12);
+  const boundary = window.search(SENTENCE_BOUNDARY);
+  return boundary >= 0 ? window.slice(0, boundary) : window;
+}
+
+/**
+ * キーワードが1箇所でも肯定形で出現していれば真。
+ * 同じ語が複数回出るときは、すべての出現が否定形のときだけ偽になる。
+ */
+function hasAffirmativeMatch(text: string, keyword: string): boolean {
+  let index = text.indexOf(keyword);
+  while (index !== -1) {
+    if (!NEGATION_PATTERN.test(tailAfterKeyword(text, index, keyword.length))) {
+      return true;
+    }
+    index = text.indexOf(keyword, index + 1);
+  }
+  return false;
+}
+
+// 最高スコアが同点のときの優先順。scores リテラルのキー順に判定を委ねない。
+// 現在の状態や未解決の情報は、報告の喜びより優先する。
+const TIE_BREAK_ORDER: Emotion[] = ["angry", "sad", "relaxed", "surprised", "happy", "neutral"];
+
 export class RuleBasedEmotionClassifier {
   private emotionKeywords: EmotionKeywords;
 
@@ -138,7 +171,7 @@ export class RuleBasedEmotionClassifier {
     const keywordWeight = isLongText ? 3 : 2;
     for (const [emotion, keywords] of Object.entries(this.emotionKeywords)) {
       for (const keyword of keywords) {
-        if (normalizedText.includes(keyword)) {
+        if (hasAffirmativeMatch(normalizedText, keyword)) {
           scores[emotion as Emotion] += keywordWeight;
         }
       }
@@ -158,7 +191,7 @@ export class RuleBasedEmotionClassifier {
     const firstPart = normalizedText.substring(0, 50);
     for (const [emotion, keywords] of Object.entries(this.emotionKeywords)) {
       for (const keyword of keywords) {
-        if (firstPart.includes(keyword)) {
+        if (hasAffirmativeMatch(firstPart, keyword)) {
           scores[emotion as Emotion] += 2; // 文頭の感情は重視
         }
       }
@@ -186,14 +219,15 @@ export class RuleBasedEmotionClassifier {
       }
     }
 
-    // 8. 最高スコアの感情を返す（デフォルトはneutral）
+    // 8. 最高スコアの感情を返す（デフォルトはneutral、同点は TIE_BREAK_ORDER で決める）
     let maxEmotion: Emotion = "neutral";
     let maxScore = 0;
 
-    for (const [emotion, score] of Object.entries(scores)) {
+    for (const emotion of TIE_BREAK_ORDER) {
+      const score = scores[emotion];
       if (score > maxScore) {
         maxScore = score;
-        maxEmotion = emotion as Emotion;
+        maxEmotion = emotion;
       }
     }
 
@@ -262,7 +296,7 @@ export class RuleBasedEmotionClassifier {
     }
 
     // 謝罪・自責の語が同居する文では happy を持ち上げない
-    const hasApology = /(申し訳|すみま|ごめん|すまな|ミス|見落と)/.test(text);
+    const hasApology = /(申し訳|すみま|ごめん|すまな|見落と)/.test(text);
     if (hasApology) {
       scores.happy = Math.max(0, scores.happy - 4);
     } else if (/(エラー|バグ|問題|失敗)/.test(text) && /(修正|解決|できた|成功|完了)/.test(text)) {

@@ -137,9 +137,13 @@ describe("RuleBasedEmotionClassifier", () => {
       expect(classifier.classify(text)).toBe("angry");
     });
 
-    it("許せないという表明はangryと判定される", () => {
-      const text = "これはもう許せません。";
-      expect(classifier.classify(text)).toBe("angry");
+    it("否定形でしか使わない語は、その形を辞書に持つのでangryと判定される", () => {
+      expect(classifier.classify("これはもう許せません。")).toBe("angry");
+      expect(classifier.classify("許せない。")).toBe("angry");
+    });
+
+    it("肯定で使えば感情にならない（語幹だけを辞書に持たない効果）", () => {
+      expect(classifier.classify("これは許せる範囲です。")).not.toBe("angry");
     });
 
     it("複数の感嘆符を含む報告はangryと判定される", () => {
@@ -342,6 +346,72 @@ describe("RuleBasedEmotionClassifier", () => {
     it("見落としの報告はsadと判定される", () => {
       const text = "設計を見落としていました。";
       expect(classifier.classify(text)).toBe("sad");
+    });
+  });
+
+  describe("否定ガード（キーワード直後の否定形）", () => {
+    it("完了していない旨はneutralと判定される", () => {
+      expect(classifier.classify("まだ完了していません。")).toBe("neutral");
+      expect(classifier.classify("実装は完了していません。")).toBe("neutral");
+    });
+
+    it("改善されていない旨はneutralと判定される", () => {
+      expect(classifier.classify("改善されていません。")).toBe("neutral");
+    });
+
+    it("達成できなかった旨はneutralと判定される", () => {
+      expect(classifier.classify("達成できませんでした。")).toBe("neutral");
+    });
+
+    it("実現できない旨はneutralと判定される", () => {
+      expect(classifier.classify("実現できません。")).toBe("neutral");
+    });
+
+    it("「とは言えない」構文でもneutralと判定される", () => {
+      expect(classifier.classify("良いとは言えません。")).toBe("neutral");
+    });
+
+    it("落ちていない旨はneutralと判定される", () => {
+      expect(classifier.classify("一度も落ちていません。")).toBe("neutral");
+    });
+
+    it("止まっていない旨はneutralと判定される", () => {
+      expect(classifier.classify("止まっていません。")).toBe("neutral");
+    });
+
+    it("削除した語の部分一致だった文はneutralと判定される", () => {
+      expect(classifier.classify("事実はそうではありません。")).toBe("neutral");
+    });
+
+    it("極性を持たない副詞を削除したのでangryと判定されない", () => {
+      expect(classifier.classify("相変わらず順調です。")).not.toBe("angry");
+      expect(classifier.classify("依然として順調です。")).not.toBe("angry");
+    });
+
+    it("意図的な停止はangryと判定されない", () => {
+      expect(classifier.classify("サーバーを停止してから起動し直します。")).toBe("neutral");
+    });
+
+    it("句点で窓が切れるので後続の否定に引きずられない", () => {
+      const text = "完了しました。問題ありません。";
+      expect(classifier.classify(text)).toBe("happy");
+    });
+  });
+
+  describe("タイブレーク（同点時の優先順: angry > sad > relaxed > surprised > happy > neutral）", () => {
+    it("待って の重複を落としても、完了報告との同点はrelaxedが勝つ", () => {
+      const text = "サブエージェントの完了を待っています。";
+      expect(classifier.classify(text)).toBe("relaxed");
+    });
+
+    it("sad と relaxed が同点のときはsadが勝つ", () => {
+      const text = "残念ですが、順調です。";
+      expect(classifier.classify(text)).toBe("sad");
+    });
+
+    it("angry と sad が同点のときはangryが勝つ", () => {
+      const text = "腹が立ちますが残念です。";
+      expect(classifier.classify(text)).toBe("angry");
     });
   });
 });

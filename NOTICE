@@ -9,9 +9,12 @@ Portions of this product are derived from that work:
 
   - core/src/text/textFilter.ts
   - core/src/emotion/ruleBasedEmotionClassifier.ts
+  - core/src/emotion/defaultEmotionKeywords.ts
       cc-mascot の electron/ 配下（filters/textFilter.ts /
       services/ruleBasedEmotionClassifier.ts）を初回に一度だけコピーしたもの。
       以後は chatter-agent 独自に改変している。対応する *.test.ts も同じ扱い。
+      defaultEmotionKeywords.ts は ruleBasedEmotionClassifier.ts のキーワード
+      辞書部分を分離したもの。
       移植元のコミット・対応表・改変の扱いは docs/origin.md に記録している。
 
       同じディレクトリにある core/src/text/unstableTail.ts は cc-mascot 由来では

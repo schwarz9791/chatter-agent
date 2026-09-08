@@ -1096,13 +1096,11 @@ const DEFAULT_EMOTION_KEYWORDS = {
 		"嬉しい",
 		"解決しました",
 		"解決済み",
-		"解決できました",
 		"解決しています",
 		"全て解決",
 		"すべて解決"
 	],
 	angry: [
-		"むかつく",
 		"むかつ",
 		"ムカつ",
 		"腹立",
@@ -1113,7 +1111,8 @@ const DEFAULT_EMOTION_KEYWORDS = {
 		"キレ",
 		"ひどい",
 		"うっとうし",
-		"許せ",
+		"許せな",
+		"許せませ",
 		"我慢できない",
 		"呆れ",
 		"ふざけ",
@@ -1132,11 +1131,8 @@ const DEFAULT_EMOTION_KEYWORDS = {
 		"二度手間",
 		"止まって",
 		"止まったまま",
-		"停止して",
 		"強制終了",
 		"引っかかって",
-		"相変わらず",
-		"依然として",
 		"効いていません"
 	],
 	sad: [
@@ -1156,7 +1152,6 @@ const DEFAULT_EMOTION_KEYWORDS = {
 		"残念",
 		"ざんねん",
 		"惜しい",
-		"悲しい",
 		"悲し",
 		"つらい",
 		"辛い",
@@ -1171,7 +1166,6 @@ const DEFAULT_EMOTION_KEYWORDS = {
 	relaxed: [
 		"待ち",
 		"待っ",
-		"待って",
 		"待つ",
 		"待機",
 		"進行中",
@@ -1198,7 +1192,6 @@ const DEFAULT_EMOTION_KEYWORDS = {
 		"判明",
 		"発覚",
 		"気付",
-		"実は",
 		"違いました",
 		"意外",
 		"想定外",
@@ -1288,14 +1281,41 @@ function readEmotionKeywords(filePath, warn = console.warn) {
 /** 既にあれば何もしない。失敗は握り潰し、読み取り専用の配置でも発話を止めない */
 function writeDefaultEmotionKeywordsIfAbsent(filePath) {
 	try {
-		if (fs.existsSync(filePath)) return;
 		fs.mkdirSync(path.dirname(filePath), { recursive: true });
-		writeFileAtomic(filePath, `${JSON.stringify(DEFAULT_EMOTION_KEYWORDS, null, 2)}\n`);
+		fs.writeFileSync(filePath, `${JSON.stringify(DEFAULT_EMOTION_KEYWORDS, null, 2)}\n`, { flag: "wx" });
 	} catch {}
 }
 
 //#endregion
 //#region src/emotion/ruleBasedEmotionClassifier.ts
+const SENTENCE_BOUNDARY = /[。！？!?\n、]/;
+const NEGATION_PATTERN = /* @__PURE__ */ new RegExp("^(?:[はがもをにでとしてられさきりえけいうつっまなわ]{0,6}|とは言え|とはいえ|とは思え)(ない|ないで|ません|ませんで|なかっ|ず|ぬ)");
+/** キーワード直後から文の区切りまでの短い窓を切り出す */
+function tailAfterKeyword(text, at, keywordLength) {
+	const window = text.slice(at + keywordLength, at + keywordLength + 12);
+	const boundary = window.search(SENTENCE_BOUNDARY);
+	return boundary >= 0 ? window.slice(0, boundary) : window;
+}
+/**
+* キーワードが1箇所でも肯定形で出現していれば真。
+* 同じ語が複数回出るときは、すべての出現が否定形のときだけ偽になる。
+*/
+function hasAffirmativeMatch(text, keyword) {
+	let index = text.indexOf(keyword);
+	while (index !== -1) {
+		if (!NEGATION_PATTERN.test(tailAfterKeyword(text, index, keyword.length))) return true;
+		index = text.indexOf(keyword, index + 1);
+	}
+	return false;
+}
+const TIE_BREAK_ORDER = [
+	"angry",
+	"sad",
+	"relaxed",
+	"surprised",
+	"happy",
+	"neutral"
+];
 var RuleBasedEmotionClassifier = class {
 	emotionKeywords;
 	constructor(emotionKeywords = DEFAULT_EMOTION_KEYWORDS) {
@@ -1384,11 +1404,11 @@ var RuleBasedEmotionClassifier = class {
 			surprised: 0
 		};
 		const keywordWeight = isLongText ? 3 : 2;
-		for (const [emotion, keywords] of Object.entries(this.emotionKeywords)) for (const keyword of keywords) if (normalizedText.includes(keyword)) scores[emotion] += keywordWeight;
+		for (const [emotion, keywords] of Object.entries(this.emotionKeywords)) for (const keyword of keywords) if (hasAffirmativeMatch(normalizedText, keyword)) scores[emotion] += keywordWeight;
 		const patternWeight = isLongText ? 4 : 2;
 		for (const [emotion, patterns] of Object.entries(this.sentenceEndPatterns)) for (const pattern of patterns) if (pattern.test(normalizedText)) scores[emotion] += patternWeight;
 		const firstPart = normalizedText.substring(0, 50);
-		for (const [emotion, keywords] of Object.entries(this.emotionKeywords)) for (const keyword of keywords) if (firstPart.includes(keyword)) scores[emotion] += 2;
+		for (const [emotion, keywords] of Object.entries(this.emotionKeywords)) for (const keyword of keywords) if (hasAffirmativeMatch(firstPart, keyword)) scores[emotion] += 2;
 		this.applyHeuristics(normalizedText, scores);
 		if (scores.angry > 0 || scores.sad > 0) {
 			if (this.sentenceEndPatterns.happy.some((p) => p.test(normalizedText)) && (scores.angry > 0 || scores.sad > 0)) scores.happy = Math.floor(scores.happy * .5);
@@ -1398,9 +1418,12 @@ var RuleBasedEmotionClassifier = class {
 		}
 		let maxEmotion = "neutral";
 		let maxScore = 0;
-		for (const [emotion, score] of Object.entries(scores)) if (score > maxScore) {
-			maxScore = score;
-			maxEmotion = emotion;
+		for (const emotion of TIE_BREAK_ORDER) {
+			const score = scores[emotion];
+			if (score > maxScore) {
+				maxScore = score;
+				maxEmotion = emotion;
+			}
 		}
 		if (process.env.NODE_ENV === "development" && maxEmotion !== "neutral") {
 			console.log(`[EmotionClassifier] Text: "${normalizedText.substring(0, 50)}${normalizedText.length > 50 ? "..." : ""}"`);
@@ -1434,7 +1457,7 @@ var RuleBasedEmotionClassifier = class {
 		if (text.length > 100) {
 			if ((text.match(/[。.]/g) || []).length >= 3) scores.neutral += hasEmotion ? 1 : 2;
 		}
-		if (/(申し訳|すみま|ごめん|すまな|ミス|見落と)/.test(text)) scores.happy = Math.max(0, scores.happy - 4);
+		if (/(申し訳|すみま|ごめん|すまな|見落と)/.test(text)) scores.happy = Math.max(0, scores.happy - 4);
 		else if (/(エラー|バグ|問題|失敗)/.test(text) && /(修正|解決|できた|成功|完了)/.test(text)) {
 			scores.happy += 4;
 			scores.angry = Math.max(0, scores.angry - 2);

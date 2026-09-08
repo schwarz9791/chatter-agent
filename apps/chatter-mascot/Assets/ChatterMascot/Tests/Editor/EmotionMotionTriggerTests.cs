@@ -157,7 +157,11 @@ namespace ChatterMascot.Tests
                 Is.EqualTo(MotionCategory.Angry));
         }
 
-        /// <summary>同じカテゴリの連発は、そのカテゴリのクールダウンが明けるまで抑える。</summary>
+        /// <summary>
+        /// 同じカテゴリの連発は、そのカテゴリのクールダウンが明けるまで抑える。
+        /// ★ 抑制窓は <c>Update</c> ではなく <c>NotifyFired</c> の呼び出しで消費される
+        ///   （実際に再生を開始したと呼び出し側が伝えたとき）。
+        /// </summary>
         [Test]
         public void SameCategorySuppressedDuringItsOwnCooldown()
         {
@@ -166,6 +170,7 @@ namespace ChatterMascot.Tests
             Assert.That(
                 trigger.Update(1, speaking: true, emotion: Emotion.Happy, kind: SpeechKind.Assistant, now: 0.0, playingEmotion: false),
                 Is.EqualTo(MotionCategory.Happy));
+            trigger.NotifyFired(MotionCategory.Happy, 0.0);
 
             Assert.That(
                 trigger.Update(2, speaking: true, emotion: Emotion.Happy, kind: SpeechKind.Assistant, now: 5.0, playingEmotion: false),
@@ -181,6 +186,7 @@ namespace ChatterMascot.Tests
             Assert.That(
                 trigger.Update(1, speaking: true, emotion: Emotion.Happy, kind: SpeechKind.Assistant, now: 0.0, playingEmotion: false),
                 Is.EqualTo(MotionCategory.Happy));
+            trigger.NotifyFired(MotionCategory.Happy, 0.0);
 
             Assert.That(
                 trigger.Update(2, speaking: true, emotion: Emotion.Sad, kind: SpeechKind.Assistant, now: 1.0, playingEmotion: false),
@@ -196,6 +202,7 @@ namespace ChatterMascot.Tests
             Assert.That(
                 trigger.Update(1, speaking: true, emotion: Emotion.Happy, kind: SpeechKind.Assistant, now: 0.0, playingEmotion: false),
                 Is.EqualTo(MotionCategory.Happy));
+            trigger.NotifyFired(MotionCategory.Happy, 0.0);
 
             Assert.That(
                 trigger.Update(2, speaking: true, emotion: Emotion.Happy, kind: SpeechKind.Assistant, now: 10.0, playingEmotion: false),
@@ -211,19 +218,42 @@ namespace ChatterMascot.Tests
             Assert.That(
                 trigger.Update(1, speaking: true, emotion: Emotion.Happy, kind: SpeechKind.Assistant, now: 0.0, playingEmotion: false),
                 Is.EqualTo(MotionCategory.Happy));
+            trigger.NotifyFired(MotionCategory.Happy, 0.0);
 
             Assert.That(
                 trigger.Update(2, speaking: true, emotion: Emotion.Sad, kind: SpeechKind.Assistant, now: 0.1, playingEmotion: false),
                 Is.EqualTo(MotionCategory.Sad));
+            trigger.NotifyFired(MotionCategory.Sad, 0.1);
 
             // sad はまだクールダウン中だが、happy 自身のクールダウンは happy にしか響かない
             Assert.That(
                 trigger.Update(3, speaking: true, emotion: Emotion.Happy, kind: SpeechKind.Assistant, now: 10.0, playingEmotion: false),
                 Is.EqualTo(MotionCategory.Happy), "happy 自身のクールダウンだけで判定する");
+            trigger.NotifyFired(MotionCategory.Happy, 10.0);
 
             Assert.That(
                 trigger.Update(4, speaking: true, emotion: Emotion.Sad, kind: SpeechKind.Assistant, now: 10.05, playingEmotion: false),
                 Is.Null, "sad はまだ sad 自身のクールダウン中");
+        }
+
+        /// <summary>
+        /// 候補を返しても、呼び出し側が実際には再生しなかった（<c>NotifyFired</c> を呼ばなかった）
+        /// ときは、同カテゴリの抑制窓を消費しない。次の同カテゴリはクールダウンを待たずに発火できる。
+        /// </summary>
+        [Test]
+        public void DoesNotConsumeSameCategoryWindowWhenNotActuallyPlayed()
+        {
+            var trigger = new EmotionMotionTrigger(Params(cooldown: 0.0, sameCategoryCooldown: 10.0));
+
+            Assert.That(
+                trigger.Update(1, speaking: true, emotion: Emotion.Happy, kind: SpeechKind.Assistant, now: 0.0, playingEmotion: false),
+                Is.EqualTo(MotionCategory.Happy));
+            // ★ NotifyFired を呼ばない。呼び出し側にそのカテゴリのクリップが無い等、
+            //   実際には再生されなかった状況を表す
+
+            Assert.That(
+                trigger.Update(2, speaking: true, emotion: Emotion.Happy, kind: SpeechKind.Assistant, now: 1.0, playingEmotion: false),
+                Is.EqualTo(MotionCategory.Happy), "再生されなかったので窓は消費されていない");
         }
     }
 }

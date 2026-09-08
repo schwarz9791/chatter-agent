@@ -638,7 +638,13 @@ namespace ChatterMascot.Vrm
                 // ★★ #70 レビュー #2。Pick は Manifest ではなく Loaded から
                 //   （→ VrmMotionPlayer.Loaded の doc）
                 var clip = _motion.Loaded?.Pick(category.Value, () => UnityEngine.Random.value);
-                if (clip != null && _motion.Play(clip, MotionKind.Emotion, now) == MotionPlayResult.Started) return;
+                if (clip != null && _motion.Play(clip, MotionKind.Emotion, now) == MotionPlayResult.Started)
+                {
+                    // ★ 実際に再生を開始できたときだけ、同カテゴリの抑制窓を消費する
+                    //   （EmotionMotionTrigger.NotifyFired の doc）
+                    _trigger.NotifyFired(category.Value, now);
+                    return;
+                }
             }
 
             // ★ !_motion.IsPlaying を**先に**評価して短絡させること。IdleAccentTimer.ShouldFire は

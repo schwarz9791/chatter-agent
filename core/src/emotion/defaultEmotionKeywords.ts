@@ -47,14 +47,12 @@ export const DEFAULT_EMOTION_KEYWORDS: EmotionKeywords = {
     // 解決
     "解決しました",
     "解決済み",
-    "解決できました",
     "解決しています",
     "全て解決",
     "すべて解決",
   ],
   angry: [
     // 苛立ち・怒り
-    "むかつく",
     "むかつ",
     "ムカつ",
     "腹立",
@@ -65,7 +63,9 @@ export const DEFAULT_EMOTION_KEYWORDS: EmotionKeywords = {
     "キレ",
     "ひどい",
     "うっとうし",
-    "許せ",
+    // 否定形でしか使わない。語幹だけにすると「許せる」に当たり、否定ガードにも消される
+    "許せな",
+    "許せませ",
     "我慢できない",
     "呆れ",
     "ふざけ",
@@ -85,11 +85,8 @@ export const DEFAULT_EMOTION_KEYWORDS: EmotionKeywords = {
     "二度手間",
     "止まって",
     "止まったまま",
-    "停止して",
     "強制終了",
     "引っかかって",
-    "相変わらず",
-    "依然として",
     "効いていません",
   ],
   sad: [
@@ -112,7 +109,6 @@ export const DEFAULT_EMOTION_KEYWORDS: EmotionKeywords = {
     "残念",
     "ざんねん",
     "惜しい",
-    "悲しい",
     "悲し",
     "つらい",
     "辛い",
@@ -128,7 +124,6 @@ export const DEFAULT_EMOTION_KEYWORDS: EmotionKeywords = {
     // 待機・進行中
     "待ち",
     "待っ",
-    "待って",
     "待つ",
     "待機",
     "進行中",
@@ -158,7 +153,6 @@ export const DEFAULT_EMOTION_KEYWORDS: EmotionKeywords = {
     "判明",
     "発覚",
     "気付",
-    "実は",
     "違いました",
     // 意外・驚き
     "意外",

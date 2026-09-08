@@ -5,7 +5,6 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { writeFileAtomic } from "../core/atomicWrite";
 import { DEFAULT_EMOTION_KEYWORDS, type EmotionKeywords } from "./defaultEmotionKeywords";
 
 const MAX_KEYWORDS_PER_EMOTION = 1000;
@@ -94,9 +93,9 @@ export function readEmotionKeywords(filePath: string, warn: (message: string) =>
 /** 既にあれば何もしない。失敗は握り潰し、読み取り専用の配置でも発話を止めない */
 export function writeDefaultEmotionKeywordsIfAbsent(filePath: string): void {
   try {
-    if (fs.existsSync(filePath)) return;
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    writeFileAtomic(filePath, `${JSON.stringify(DEFAULT_EMOTION_KEYWORDS, null, 2)}\n`);
+    // "wx" は存在チェックと書き込みを1回のシステムコールにする。EEXIST は握り潰す。
+    fs.writeFileSync(filePath, `${JSON.stringify(DEFAULT_EMOTION_KEYWORDS, null, 2)}\n`, { flag: "wx" });
   } catch {
     // 失敗しても発話は既定値のまま続く
   }

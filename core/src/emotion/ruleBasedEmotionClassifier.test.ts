@@ -350,6 +350,18 @@ describe("RuleBasedEmotionClassifier", () => {
   });
 
   describe("否定ガード（キーワード直後の否定形）", () => {
+    it("文頭ボーナスの境界に掛かった語でも否定を見落とさない", () => {
+      // 語が文頭ボーナスの範囲の末尾で終わると、直後の否定形が範囲外に出る
+      for (const n of [42, 43, 44, 45, 46, 48, 50]) {
+        expect(classifier.classify(`${"あ".repeat(n)}完了していません。`)).toBe("neutral");
+      }
+    });
+
+    it("待たされている報告が達成として読まれない", () => {
+      const text = "--force-with-lease で push し直しており、pre-push のテスト完了を待っています。";
+      expect(classifier.classify(text)).toBe("relaxed");
+    });
+
     it("完了していない旨はneutralと判定される", () => {
       expect(classifier.classify("まだ完了していません。")).toBe("neutral");
       expect(classifier.classify("実装は完了していません。")).toBe("neutral");

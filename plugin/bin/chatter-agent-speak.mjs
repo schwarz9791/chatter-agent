@@ -1297,17 +1297,22 @@ function tailAfterKeyword(text, at, keywordLength) {
 	return boundary >= 0 ? window.slice(0, boundary) : window;
 }
 /**
-* キーワードが1箇所でも肯定形で出現していれば真。
+* キーワードが `limit` より前に1箇所でも肯定形で出現していれば真。
 * 同じ語が複数回出るときは、すべての出現が否定形のときだけ偽になる。
+*
+* ★ 走査の範囲を狭めるときは、**位置で絞って本文は切らないこと**。切った文字列を
+*   渡すと、境界に掛かった語の直後が失われて否定形を見落とす。
 */
-function hasAffirmativeMatch(text, keyword) {
+function hasAffirmativeMatch(text, keyword, limit = Number.POSITIVE_INFINITY) {
 	let index = text.indexOf(keyword);
-	while (index !== -1) {
+	while (index !== -1 && index < limit) {
 		if (!NEGATION_PATTERN.test(tailAfterKeyword(text, index, keyword.length))) return true;
 		index = text.indexOf(keyword, index + 1);
 	}
 	return false;
 }
+/** 文頭ボーナスの対象になる位置。ここまでに始まる語だけが加点される */
+const HEAD_BONUS_LIMIT = 50;
 const TIE_BREAK_ORDER = [
 	"angry",
 	"sad",
@@ -1407,8 +1412,7 @@ var RuleBasedEmotionClassifier = class {
 		for (const [emotion, keywords] of Object.entries(this.emotionKeywords)) for (const keyword of keywords) if (hasAffirmativeMatch(normalizedText, keyword)) scores[emotion] += keywordWeight;
 		const patternWeight = isLongText ? 4 : 2;
 		for (const [emotion, patterns] of Object.entries(this.sentenceEndPatterns)) for (const pattern of patterns) if (pattern.test(normalizedText)) scores[emotion] += patternWeight;
-		const firstPart = normalizedText.substring(0, 50);
-		for (const [emotion, keywords] of Object.entries(this.emotionKeywords)) for (const keyword of keywords) if (hasAffirmativeMatch(firstPart, keyword)) scores[emotion] += 2;
+		for (const [emotion, keywords] of Object.entries(this.emotionKeywords)) for (const keyword of keywords) if (hasAffirmativeMatch(normalizedText, keyword, HEAD_BONUS_LIMIT)) scores[emotion] += 2;
 		this.applyHeuristics(normalizedText, scores);
 		if (scores.angry > 0 || scores.sad > 0) {
 			if (this.sentenceEndPatterns.happy.some((p) => p.test(normalizedText)) && (scores.angry > 0 || scores.sad > 0)) scores.happy = Math.floor(scores.happy * .5);

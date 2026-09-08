@@ -33,12 +33,15 @@ function tailAfterKeyword(text: string, at: number, keywordLength: number): stri
 }
 
 /**
- * キーワードが1箇所でも肯定形で出現していれば真。
+ * キーワードが `limit` より前に1箇所でも肯定形で出現していれば真。
  * 同じ語が複数回出るときは、すべての出現が否定形のときだけ偽になる。
+ *
+ * ★ 走査の範囲を狭めるときは、**位置で絞って本文は切らないこと**。切った文字列を
+ *   渡すと、境界に掛かった語の直後が失われて否定形を見落とす。
  */
-function hasAffirmativeMatch(text: string, keyword: string): boolean {
+function hasAffirmativeMatch(text: string, keyword: string, limit = Number.POSITIVE_INFINITY): boolean {
   let index = text.indexOf(keyword);
-  while (index !== -1) {
+  while (index !== -1 && index < limit) {
     if (!NEGATION_PATTERN.test(tailAfterKeyword(text, index, keyword.length))) {
       return true;
     }
@@ -49,6 +52,9 @@ function hasAffirmativeMatch(text: string, keyword: string): boolean {
 
 // 最高スコアが同点のときの優先順。scores リテラルのキー順に判定を委ねない。
 // 現在の状態や未解決の情報は、報告の喜びより優先する。
+/** 文頭ボーナスの対象になる位置。ここまでに始まる語だけが加点される */
+const HEAD_BONUS_LIMIT = 50;
+
 const TIE_BREAK_ORDER: Emotion[] = ["angry", "sad", "relaxed", "surprised", "happy", "neutral"];
 
 export class RuleBasedEmotionClassifier {
@@ -188,10 +194,9 @@ export class RuleBasedEmotionClassifier {
     }
 
     // 4. 文頭の感情表現を強化（最初の50文字以内）
-    const firstPart = normalizedText.substring(0, 50);
     for (const [emotion, keywords] of Object.entries(this.emotionKeywords)) {
       for (const keyword of keywords) {
-        if (hasAffirmativeMatch(firstPart, keyword)) {
+        if (hasAffirmativeMatch(normalizedText, keyword, HEAD_BONUS_LIMIT)) {
           scores[emotion as Emotion] += 2; // 文頭の感情は重視
         }
       }

@@ -298,6 +298,17 @@ describe("RuleBasedEmotionClassifier", () => {
       expect(classifier.classify(text)).toBe("relaxed");
     });
 
+    it("任せた先が止まって自分でやり直す状況はangryと判定される", () => {
+      expect(classifier.classify("サブエージェントが停止したので自分で確認します。")).toBe("angry");
+      expect(classifier.classify("全件やり直します。")).toBe("angry");
+      expect(classifier.classify("レート制限に引っかかって止まっていました。")).toBe("angry");
+    });
+
+    it("手戻りは待機より優先される（待つのと待たされるのは違う）", () => {
+      expect(classifier.classify("サブエージェントの完了を待っています。")).toBe("relaxed");
+      expect(classifier.classify("止まっているので自分で確認します。")).toBe("angry");
+    });
+
     it("完了の報告はhappyと判定される", () => {
       const text = "実装が完了しました。";
       expect(classifier.classify(text)).toBe("happy");

@@ -26,6 +26,15 @@ namespace ChatterMascot.Vrm
         /// </summary>
         public readonly double CooldownSeconds;
 
+        /// <summary>
+        /// 同じカテゴリの感情モーションをもう一度許すまでの最短間隔（秒）。
+        ///
+        /// <c>CooldownSeconds</c> と役割が違う——こちらは**同じカテゴリ**に対してだけ効き、
+        /// カテゴリが切り替わる瞬間はこの間隔を待たずに通す。表情の切り替わりを
+        /// 即座に見せつつ、同じ表情の連発だけを抑えるための値。
+        /// </summary>
+        public readonly double SameCategoryCooldownSeconds;
+
         /// <summary>待機の小ネタ（<c>idle/</c>）が発火するまでの間隔の下限（秒）。</summary>
         public readonly double AccentMinSeconds;
 
@@ -35,11 +44,13 @@ namespace ChatterMascot.Vrm
         public MotionParams(
             float fadeSeconds,
             double cooldownSeconds,
+            double sameCategoryCooldownSeconds,
             double accentMinSeconds,
             double accentMaxSeconds)
         {
             FadeSeconds = fadeSeconds;
             CooldownSeconds = cooldownSeconds;
+            SameCategoryCooldownSeconds = sameCategoryCooldownSeconds;
             AccentMinSeconds = accentMinSeconds;
             AccentMaxSeconds = accentMaxSeconds;
         }
@@ -47,6 +58,7 @@ namespace ChatterMascot.Vrm
         public static MotionParams Default => new MotionParams(
             fadeSeconds: 0.5f,
             cooldownSeconds: 1.0,
+            sameCategoryCooldownSeconds: 15.0,
             accentMinSeconds: 30.0,
             accentMaxSeconds: 60.0);
     }

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using ChatterMascot.Protocol;
 
 namespace ChatterMascot.Vrm
@@ -21,6 +22,16 @@ namespace ChatterMascot.Vrm
 
         private long _lastOrder = -1;
         private double _lastEndedAt = double.NegativeInfinity;
+
+        /// <summary>
+        /// カテゴリごとに、そのカテゴリを最後に発火した時刻。
+        /// ★ 「終わった時刻」ではなく「発火した時刻」——<c>NotifyEnded</c> はカテゴリを
+        ///   受け取らないので、発火を決めた <c>Update</c> の中で記録する。
+        /// 未登録のカテゴリは <see cref="Dictionary{TKey,TValue}.TryGetValue"/> が
+        /// <c>false</c> を返すので、既定で「一度も発火していない＝必ず通す」になる。
+        /// </summary>
+        private readonly Dictionary<MotionCategory, double> _lastFiredAtByCategory =
+            new Dictionary<MotionCategory, double>();
 
         public EmotionMotionTrigger(MotionParams p)
         {
@@ -61,7 +72,18 @@ namespace ChatterMascot.Vrm
             if (now - _lastEndedAt < _params.CooldownSeconds) return null;
 
             // Neutral は MotionCategories.FromEmotion が null を返す＝発火しない
-            return MotionCategories.FromEmotion(emotion);
+            var category = MotionCategories.FromEmotion(emotion);
+            if (category == null) return null;
+
+            // 同じカテゴリの連発だけを長く抑える。切り替わりはここを通り抜ける。
+            if (_lastFiredAtByCategory.TryGetValue(category.Value, out var lastFiredAt)
+                && now - lastFiredAt < _params.SameCategoryCooldownSeconds)
+            {
+                return null;
+            }
+
+            _lastFiredAtByCategory[category.Value] = now;
+            return category;
         }
 
         /// <summary>

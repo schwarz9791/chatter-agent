@@ -11,10 +11,18 @@ namespace ChatterMascot.Tests
     [TestFixture]
     public sealed class EmotionMotionTriggerTests
     {
-        private static MotionParams Params(double cooldown = 5.0)
+        /// <summary>
+        /// ★ <c>sameCategoryCooldown</c> の既定は 0.0——同カテゴリの抑制を検証したくない
+        ///   既存テストでは、この既定のまま呼べば以前と同じ（無効）挙動になる。
+        /// </summary>
+        private static MotionParams Params(double cooldown = 5.0, double sameCategoryCooldown = 0.0)
         {
             return new MotionParams(
-                fadeSeconds: 0.5f, cooldownSeconds: cooldown, accentMinSeconds: 30.0, accentMaxSeconds: 60.0);
+                fadeSeconds: 0.5f,
+                cooldownSeconds: cooldown,
+                sameCategoryCooldownSeconds: sameCategoryCooldown,
+                accentMinSeconds: 30.0,
+                accentMaxSeconds: 60.0);
         }
 
         /// <summary>★ 毎フレーム発火し続けないための間引き。<c>order</c> が同じなら常に <c>null</c>。</summary>
@@ -147,6 +155,75 @@ namespace ChatterMascot.Tests
             Assert.That(
                 trigger.Update(8, speaking: true, emotion: Emotion.Angry, kind: SpeechKind.Assistant, now: 0.3, playingEmotion: false),
                 Is.EqualTo(MotionCategory.Angry));
+        }
+
+        /// <summary>同じカテゴリの連発は、そのカテゴリのクールダウンが明けるまで抑える。</summary>
+        [Test]
+        public void SameCategorySuppressedDuringItsOwnCooldown()
+        {
+            var trigger = new EmotionMotionTrigger(Params(cooldown: 0.0, sameCategoryCooldown: 10.0));
+
+            Assert.That(
+                trigger.Update(1, speaking: true, emotion: Emotion.Happy, kind: SpeechKind.Assistant, now: 0.0, playingEmotion: false),
+                Is.EqualTo(MotionCategory.Happy));
+
+            Assert.That(
+                trigger.Update(2, speaking: true, emotion: Emotion.Happy, kind: SpeechKind.Assistant, now: 5.0, playingEmotion: false),
+                Is.Null, "同カテゴリのクールダウン中");
+        }
+
+        /// <summary>カテゴリの切り替わりは、直前のカテゴリのクールダウン中でも即座に通す。</summary>
+        [Test]
+        public void DifferentCategoryFiresDuringSameCategoryCooldownOfAnotherCategory()
+        {
+            var trigger = new EmotionMotionTrigger(Params(cooldown: 0.0, sameCategoryCooldown: 10.0));
+
+            Assert.That(
+                trigger.Update(1, speaking: true, emotion: Emotion.Happy, kind: SpeechKind.Assistant, now: 0.0, playingEmotion: false),
+                Is.EqualTo(MotionCategory.Happy));
+
+            Assert.That(
+                trigger.Update(2, speaking: true, emotion: Emotion.Sad, kind: SpeechKind.Assistant, now: 1.0, playingEmotion: false),
+                Is.EqualTo(MotionCategory.Sad), "切り替わりはクールダウンを待たない");
+        }
+
+        /// <summary>同カテゴリのクールダウンが明ければ、そのカテゴリはまた発火できる。</summary>
+        [Test]
+        public void SameCategoryFiresAgainOnceItsCooldownElapses()
+        {
+            var trigger = new EmotionMotionTrigger(Params(cooldown: 0.0, sameCategoryCooldown: 10.0));
+
+            Assert.That(
+                trigger.Update(1, speaking: true, emotion: Emotion.Happy, kind: SpeechKind.Assistant, now: 0.0, playingEmotion: false),
+                Is.EqualTo(MotionCategory.Happy));
+
+            Assert.That(
+                trigger.Update(2, speaking: true, emotion: Emotion.Happy, kind: SpeechKind.Assistant, now: 10.0, playingEmotion: false),
+                Is.EqualTo(MotionCategory.Happy), "同カテゴリのクールダウンが明けた");
+        }
+
+        /// <summary>カテゴリごとに独立して数える。他カテゴリの直近の発火はそのカテゴリ自身の判定に影響しない。</summary>
+        [Test]
+        public void TracksEachCategoryCooldownIndependently()
+        {
+            var trigger = new EmotionMotionTrigger(Params(cooldown: 0.0, sameCategoryCooldown: 10.0));
+
+            Assert.That(
+                trigger.Update(1, speaking: true, emotion: Emotion.Happy, kind: SpeechKind.Assistant, now: 0.0, playingEmotion: false),
+                Is.EqualTo(MotionCategory.Happy));
+
+            Assert.That(
+                trigger.Update(2, speaking: true, emotion: Emotion.Sad, kind: SpeechKind.Assistant, now: 0.1, playingEmotion: false),
+                Is.EqualTo(MotionCategory.Sad));
+
+            // sad はまだクールダウン中だが、happy 自身のクールダウンは happy にしか響かない
+            Assert.That(
+                trigger.Update(3, speaking: true, emotion: Emotion.Happy, kind: SpeechKind.Assistant, now: 10.0, playingEmotion: false),
+                Is.EqualTo(MotionCategory.Happy), "happy 自身のクールダウンだけで判定する");
+
+            Assert.That(
+                trigger.Update(4, speaking: true, emotion: Emotion.Sad, kind: SpeechKind.Assistant, now: 10.05, playingEmotion: false),
+                Is.Null, "sad はまだ sad 自身のクールダウン中");
         }
     }
 }

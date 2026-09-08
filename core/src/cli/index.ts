@@ -16,6 +16,7 @@
 
 import { createConfigStore, isSpeakDisabled } from "../core/config";
 import {
+  getEmotionKeywordsPath,
   getLockDir,
   getSpeechLogPath,
   getSpeechQueueDir,
@@ -28,6 +29,7 @@ import {
 } from "../core/paths";
 import { createSpeechLog } from "../core/speechLog";
 import { createSpeechQueue } from "../core/speechQueue";
+import { readEmotionKeywords, writeDefaultEmotionKeywordsIfAbsent } from "../emotion/emotionKeywordsFile";
 import { RuleBasedEmotionClassifier } from "../emotion/ruleBasedEmotionClassifier";
 import { createSummaryPipeline } from "../summarizer/summaryPipeline";
 import { createPublisher } from "./publish";
@@ -55,7 +57,9 @@ function main(): void {
     // server から掃除すると、CLI が今まさに書いている途中の tmp を消しうる
     speechQueue.sweepTmp();
 
-    const classifier = new RuleBasedEmotionClassifier();
+    const emotionKeywordsPath = getEmotionKeywordsPath();
+    writeDefaultEmotionKeywordsIfAbsent(emotionKeywordsPath);
+    const classifier = new RuleBasedEmotionClassifier(readEmotionKeywords(emotionKeywordsPath));
 
     // 要約 CLI 自身が起動したときは isSpeakDisabled() の早期 return で既にここへ到達しない
     // （無限ループ防止の第1層）。ここに来ることそのものが、その1層目が効いていることの証拠

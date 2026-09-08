@@ -52,6 +52,10 @@ function getRuntimeDir(e = currentPathEnv()) {
 function getConfigFilePath(e = currentPathEnv()) {
 	return e.env.CHATTER_AGENT_CONFIG || path.join(getRuntimeDir(e), "config.json");
 }
+/** 感情キーワード辞書。CLI が初回だけ書き出し、以後は人間が編集する */
+function getEmotionKeywordsPath(e = currentPathEnv()) {
+	return e.env.CHATTER_AGENT_EMOTION_KEYWORDS || path.join(getRuntimeDir(e), "emotion-keywords.json");
+}
 /** hook が payload を落とす場所。ワーカーが処理し終えたら削除する */
 function getSpoolDir(e = currentPathEnv()) {
 	return path.join(getRuntimeDir(e), "spool");
@@ -1055,219 +1059,273 @@ function createSpeechQueue(queueDir) {
 }
 
 //#endregion
+//#region src/emotion/defaultEmotionKeywords.ts
+/**
+* 感情キーワード辞書の既定値。
+*/
+const DEFAULT_EMOTION_KEYWORDS = {
+	happy: [
+		"完了",
+		"できた",
+		"できました",
+		"成功",
+		"通過",
+		"合格",
+		"完成",
+		"通りました",
+		"通っています",
+		"全て通り",
+		"すべて通り",
+		"全部パス",
+		"パスし",
+		"揃いました",
+		"完璧",
+		"うまくいき",
+		"直り",
+		"直っ",
+		"改善",
+		"実現",
+		"クリア",
+		"達成",
+		"ありがと",
+		"良い",
+		"よかっ",
+		"良かっ",
+		"やった",
+		"すごい",
+		"嬉しい",
+		"解決しました",
+		"解決済み",
+		"解決しています",
+		"全て解決",
+		"すべて解決"
+	],
+	angry: [
+		"むかつ",
+		"ムカつ",
+		"腹立",
+		"腹が立",
+		"怒",
+		"イライラ",
+		"いらいら",
+		"キレ",
+		"ひどい",
+		"うっとうし",
+		"許せな",
+		"許せませ",
+		"我慢できない",
+		"呆れ",
+		"ふざけ",
+		"冗談じゃ",
+		"勘弁",
+		"うんざり",
+		"苛立",
+		"自分で確認",
+		"自分で検証",
+		"自分でやり",
+		"自分で実行",
+		"やり直します",
+		"やり直しです",
+		"全件やり直",
+		"手戻り",
+		"二度手間",
+		"止まって",
+		"止まったまま",
+		"強制終了",
+		"引っかかって",
+		"効いていません"
+	],
+	sad: [
+		"失敗",
+		"落ちて",
+		"通りません",
+		"動かない",
+		"不具合",
+		"見落と",
+		"ミス",
+		"しくじ",
+		"駄目だった",
+		"申し訳",
+		"すみま",
+		"ごめん",
+		"すまな",
+		"残念",
+		"ざんねん",
+		"惜しい",
+		"悲し",
+		"つらい",
+		"辛い",
+		"苦しい",
+		"自信ない",
+		"がっかり",
+		"落ち込",
+		"しょんぼり",
+		"泣",
+		"涙"
+	],
+	relaxed: [
+		"待ち",
+		"待っ",
+		"待つ",
+		"待機",
+		"進行中",
+		"順調",
+		"安定し",
+		"想定どおり",
+		"想定通り",
+		"落ち着",
+		"冷静",
+		"安心",
+		"大丈夫",
+		"了解",
+		"承知",
+		"問題ない",
+		"問題なし",
+		"ホッと",
+		"確認し",
+		"確かめ",
+		"調べ",
+		"検証し",
+		"測り"
+	],
+	surprised: [
+		"判明",
+		"発覚",
+		"気付",
+		"違いました",
+		"意外",
+		"想定外",
+		"予想外",
+		"まさか",
+		"えっ",
+		"驚",
+		"まじ",
+		"びっくり"
+	]
+};
+
+//#endregion
+//#region src/emotion/emotionKeywordsFile.ts
+/**
+* 感情キーワード辞書ファイル（`~/.config/chatter-agent/emotion-keywords.json`）の
+* 読み書き。hook 経路（毎 delta 起動）から呼ばれるので throw しない・部分採用しない。
+*/
+const MAX_KEYWORDS_PER_EMOTION = 1e3;
+function isEmotionKey(key) {
+	return Object.hasOwn(DEFAULT_EMOTION_KEYWORDS, key);
+}
+/**
+* 感情ごとに独立して検証する。1感情の不正が他の感情や全体を巻き添えにしない。
+* 常に完全な `EmotionKeywords`（既定との合成済み）を返す。
+*/
+function parseEmotionKeywords(raw, warn) {
+	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+		warn("[EmotionKeywords] トップレベルがオブジェクトではありません。既定値を使います");
+		return { ...DEFAULT_EMOTION_KEYWORDS };
+	}
+	const record = raw;
+	const result = { ...DEFAULT_EMOTION_KEYWORDS };
+	for (const key of Object.keys(record)) {
+		if (key === "neutral") {
+			warn("[EmotionKeywords] \"neutral\" は指定できません。無視します");
+			continue;
+		}
+		if (!isEmotionKey(key)) {
+			warn(`[EmotionKeywords] 未知のキー "${key}" は無視されます`);
+			continue;
+		}
+		const value = record[key];
+		if (!Array.isArray(value)) {
+			warn(`[EmotionKeywords] ${key} は配列である必要があります。既定値を使います`);
+			continue;
+		}
+		if (value.some((item) => typeof item !== "string")) {
+			warn(`[EmotionKeywords] ${key} の要素に文字列以外が含まれています。既定値を使います`);
+			continue;
+		}
+		const deduped = [];
+		const seen = /* @__PURE__ */ new Set();
+		for (const item of value) {
+			const trimmed = item.trim();
+			if (!trimmed || seen.has(trimmed)) continue;
+			seen.add(trimmed);
+			deduped.push(trimmed);
+		}
+		if (deduped.length > MAX_KEYWORDS_PER_EMOTION) {
+			warn(`[EmotionKeywords] ${key} の語数が上限（${MAX_KEYWORDS_PER_EMOTION}）を超えています。既定値を使います`);
+			continue;
+		}
+		result[key] = deduped;
+	}
+	return result;
+}
+/** ファイルが無いのは正常（初回起動前）なので警告しない */
+function readEmotionKeywords(filePath, warn = console.warn) {
+	let text;
+	try {
+		text = fs.readFileSync(filePath, "utf-8");
+	} catch (err) {
+		if (err.code === "ENOENT") return { ...DEFAULT_EMOTION_KEYWORDS };
+		warn(`[EmotionKeywords] ${filePath} を読めませんでした: ${String(err)}。既定値を使います`);
+		return { ...DEFAULT_EMOTION_KEYWORDS };
+	}
+	let parsed;
+	try {
+		parsed = JSON.parse(text);
+	} catch (err) {
+		warn(`[EmotionKeywords] ${filePath} のJSONが壊れています: ${String(err)}。既定値を使います`);
+		return { ...DEFAULT_EMOTION_KEYWORDS };
+	}
+	return parseEmotionKeywords(parsed, warn);
+}
+/** 既にあれば何もしない。失敗は握り潰し、読み取り専用の配置でも発話を止めない */
+function writeDefaultEmotionKeywordsIfAbsent(filePath) {
+	try {
+		fs.mkdirSync(path.dirname(filePath), { recursive: true });
+		fs.writeFileSync(filePath, `${JSON.stringify(DEFAULT_EMOTION_KEYWORDS, null, 2)}\n`, { flag: "wx" });
+	} catch {}
+}
+
+//#endregion
 //#region src/emotion/ruleBasedEmotionClassifier.ts
+const SENTENCE_BOUNDARY = /[。！？!?\n、]/;
+const NEGATION_PATTERN = /* @__PURE__ */ new RegExp("^(?:[はがもをにでとしてられさきりえけいうつっまなわ]{0,6}|とは言え|とはいえ|とは思え)(ない|ないで|ません|ませんで|なかっ|ず|ぬ)");
+/** キーワード直後から文の区切りまでの短い窓を切り出す */
+function tailAfterKeyword(text, at, keywordLength) {
+	const window = text.slice(at + keywordLength, at + keywordLength + 12);
+	const boundary = window.search(SENTENCE_BOUNDARY);
+	return boundary >= 0 ? window.slice(0, boundary) : window;
+}
+/**
+* キーワードが `limit` より前に1箇所でも肯定形で出現していれば真。
+* 同じ語が複数回出るときは、すべての出現が否定形のときだけ偽になる。
+*
+* ★ 走査の範囲を狭めるときは、**位置で絞って本文は切らないこと**。切った文字列を
+*   渡すと、境界に掛かった語の直後が失われて否定形を見落とす。
+*/
+function hasAffirmativeMatch(text, keyword, limit = Number.POSITIVE_INFINITY) {
+	let index = text.indexOf(keyword);
+	while (index !== -1 && index < limit) {
+		if (!NEGATION_PATTERN.test(tailAfterKeyword(text, index, keyword.length))) return true;
+		index = text.indexOf(keyword, index + 1);
+	}
+	return false;
+}
+/** 文頭ボーナスの対象になる位置。ここまでに始まる語だけが加点される */
+const HEAD_BONUS_LIMIT = 50;
+const TIE_BREAK_ORDER = [
+	"angry",
+	"sad",
+	"relaxed",
+	"surprised",
+	"happy",
+	"neutral"
+];
 var RuleBasedEmotionClassifier = class {
-	/**
-	* 感情キーワード辞書
-	*/
-	emotionKeywords = {
-		happy: [
-			"うれしい",
-			"嬉しい",
-			"うれ",
-			"喜",
-			"喜び",
-			"よかった",
-			"よかっ",
-			"良かっ",
-			"良い",
-			"やった",
-			"やっ",
-			"できた",
-			"すごい",
-			"すご",
-			"凄",
-			"素晴らしい",
-			"素敵",
-			"ありがと",
-			"ありが",
-			"感謝",
-			"サンクス",
-			"楽しい",
-			"楽し",
-			"愉快",
-			"面白い",
-			"面白",
-			"成功",
-			"完璧",
-			"完了",
-			"クリア",
-			"最高",
-			"ベスト",
-			"グッド",
-			"ナイス",
-			"いいね",
-			"助かっ",
-			"助かる",
-			"わーい",
-			"やっほー",
-			"やったー",
-			"いえーい",
-			"達成",
-			"ゲット",
-			"獲得",
-			"実現",
-			"解決",
-			"修正できた",
-			"直った",
-			"満足",
-			"幸せ",
-			"ハッピー",
-			"ラッキー",
-			"運が良",
-			"期待以上",
-			"想像以上"
-		],
-		angry: [
-			"むかつく",
-			"むかつ",
-			"ムカつ",
-			"腹立",
-			"怒",
-			"イライラ",
-			"いらいら",
-			"キレ",
-			"最悪",
-			"ひどい",
-			"酷",
-			"クソ",
-			"くそ",
-			"うざい",
-			"ウザ",
-			"うっとうし",
-			"許せない",
-			"許せ",
-			"我慢できない",
-			"ダメ",
-			"駄目",
-			"ダメだ",
-			"だめ",
-			"エラー",
-			"バグ",
-			"失敗",
-			"動かない",
-			"壊れ",
-			"問題",
-			"トラブル",
-			"不具合",
-			"障害",
-			"困る",
-			"困っ",
-			"困った",
-			"信じられない",
-			"呆れ",
-			"ふざけ",
-			"冗談じゃ",
-			"勘弁",
-			"マジで",
-			"本気で腹"
-		],
-		sad: [
-			"悲しい",
-			"悲し",
-			"哀",
-			"残念",
-			"ざんねん",
-			"惜しい",
-			"つらい",
-			"辛い",
-			"つら",
-			"苦しい",
-			"ごめん",
-			"すまな",
-			"すみま",
-			"申し訳",
-			"謝",
-			"無理",
-			"不可能",
-			"困った",
-			"困難",
-			"諦め",
-			"あきら",
-			"断念",
-			"失敗し",
-			"しくじ",
-			"ミス",
-			"駄目だった",
-			"間に合わ",
-			"遅れ",
-			"自信ない",
-			"不安",
-			"心配",
-			"怖",
-			"しょんぼり",
-			"がっかり",
-			"落ち込",
-			"泣",
-			"涙"
-		],
-		surprised: [
-			"え！",
-			"えっ",
-			"え？",
-			"えー",
-			"まさか",
-			"マジ",
-			"まじ",
-			"本当",
-			"びっくり",
-			"ビックリ",
-			"驚",
-			"ビビ",
-			"意外",
-			"予想外",
-			"想定外",
-			"なんと",
-			"何と",
-			"おお",
-			"おぉ",
-			"すごっ",
-			"やば",
-			"ヤバ",
-			"信じられない",
-			"嘘",
-			"うそ",
-			"ウソ",
-			"本当に",
-			"ほんと",
-			"本気",
-			"あり得ない",
-			"ありえな",
-			"初めて",
-			"見たことない",
-			"はぁ！？",
-			"へぇ",
-			"ほぉ",
-			"ふぉ",
-			"おったまげ",
-			"たまげ"
-		],
-		relaxed: [
-			"落ち着",
-			"落着",
-			"冷静",
-			"安心",
-			"あんしん",
-			"ホッと",
-			"大丈夫",
-			"だいじょうぶ",
-			"だいじょぶ",
-			"OK",
-			"ok",
-			"オッケー",
-			"おk",
-			"了解",
-			"りょうかい",
-			"承知",
-			"問題ない",
-			"問題なし",
-			"ノープロブレム",
-			"ゆっくり",
-			"のんびり",
-			"じっくり",
-			"様子見"
-		]
-	};
+	emotionKeywords;
+	constructor(emotionKeywords = DEFAULT_EMOTION_KEYWORDS) {
+		this.emotionKeywords = emotionKeywords;
+	}
 	/**
 	* 文末パターン（正規表現）
 	* 女性言葉・中性的・丁寧・男性的な言葉すべてに対応
@@ -1313,13 +1371,9 @@ var RuleBasedEmotionClassifier = class {
 			/[😢😭💔]+/u
 		],
 		surprised: [
-			/[！!？?]$/,
+			/[！!]{2,}[？?]?$/,
 			/え[っ〜～！!？?]+/,
 			/まさか[！!？?]/,
-			/の[！!？?]$/,
-			/ですか[！!？?]$/,
-			/ますか[！!？?]$/,
-			/のか[！!？?]$/,
 			/だと[！!？?]$/,
 			/マジ[！!？?]/,
 			/ほんと[！!？?]/,
@@ -1355,11 +1409,10 @@ var RuleBasedEmotionClassifier = class {
 			surprised: 0
 		};
 		const keywordWeight = isLongText ? 3 : 2;
-		for (const [emotion, keywords] of Object.entries(this.emotionKeywords)) for (const keyword of keywords) if (normalizedText.includes(keyword)) scores[emotion] += keywordWeight;
+		for (const [emotion, keywords] of Object.entries(this.emotionKeywords)) for (const keyword of keywords) if (hasAffirmativeMatch(normalizedText, keyword)) scores[emotion] += keywordWeight;
 		const patternWeight = isLongText ? 4 : 2;
 		for (const [emotion, patterns] of Object.entries(this.sentenceEndPatterns)) for (const pattern of patterns) if (pattern.test(normalizedText)) scores[emotion] += patternWeight;
-		const firstPart = normalizedText.substring(0, 50);
-		for (const [emotion, keywords] of Object.entries(this.emotionKeywords)) for (const keyword of keywords) if (firstPart.includes(keyword)) scores[emotion] += 2;
+		for (const [emotion, keywords] of Object.entries(this.emotionKeywords)) for (const keyword of keywords) if (hasAffirmativeMatch(normalizedText, keyword, HEAD_BONUS_LIMIT)) scores[emotion] += 2;
 		this.applyHeuristics(normalizedText, scores);
 		if (scores.angry > 0 || scores.sad > 0) {
 			if (this.sentenceEndPatterns.happy.some((p) => p.test(normalizedText)) && (scores.angry > 0 || scores.sad > 0)) scores.happy = Math.floor(scores.happy * .5);
@@ -1367,19 +1420,14 @@ var RuleBasedEmotionClassifier = class {
 		if (isLongText) {
 			if (scores.happy + scores.angry + scores.sad + scores.surprised + scores.relaxed >= 10) scores.neutral = Math.max(0, scores.neutral - 3);
 		}
-		if (scores.relaxed > 0 && scores.relaxed < 6) {
-			scores.neutral += scores.relaxed;
-			scores.relaxed = 0;
-		}
-		if (scores.neutral >= 4 && scores.sad > 0 && scores.sad < 4) {
-			scores.neutral += scores.sad;
-			scores.sad = 0;
-		}
 		let maxEmotion = "neutral";
 		let maxScore = 0;
-		for (const [emotion, score] of Object.entries(scores)) if (score > maxScore) {
-			maxScore = score;
-			maxEmotion = emotion;
+		for (const emotion of TIE_BREAK_ORDER) {
+			const score = scores[emotion];
+			if (score > maxScore) {
+				maxScore = score;
+				maxEmotion = emotion;
+			}
 		}
 		if (process.env.NODE_ENV === "development" && maxEmotion !== "neutral") {
 			console.log(`[EmotionClassifier] Text: "${normalizedText.substring(0, 50)}${normalizedText.length > 50 ? "..." : ""}"`);
@@ -1393,7 +1441,6 @@ var RuleBasedEmotionClassifier = class {
 	*/
 	applyHeuristics(text, scores) {
 		const hasEmotion = scores.happy + scores.angry + scores.sad + scores.surprised + scores.relaxed > 0;
-		if (/[？?]$/.test(text)) scores.surprised += 1;
 		if (text.length < 10) {
 			if (/^(OK|了解|わかった)/.test(text)) scores.relaxed += 2;
 		}
@@ -1414,7 +1461,8 @@ var RuleBasedEmotionClassifier = class {
 		if (text.length > 100) {
 			if ((text.match(/[。.]/g) || []).length >= 3) scores.neutral += hasEmotion ? 1 : 2;
 		}
-		if (/(エラー|バグ|問題|失敗)/.test(text) && /(修正|解決|できた|成功|完了)/.test(text)) {
+		if (/(申し訳|すみま|ごめん|すまな|見落と)/.test(text)) scores.happy = Math.max(0, scores.happy - 4);
+		else if (/(エラー|バグ|問題|失敗)/.test(text) && /(修正|解決|できた|成功|完了)/.test(text)) {
 			scores.happy += 4;
 			scores.angry = Math.max(0, scores.angry - 2);
 		}
@@ -3285,15 +3333,18 @@ function processMessage(item, hasNewer, deps, state) {
 		summarized: false
 	};
 	const sharedEmotion = summarized ? deps.classify(sentences.join("\n")) : null;
-	if (spoken.length > 0) deps.publish(spoken.map((text) => ({
-		source: "claude-code",
-		sessionId: content.sessionId,
-		turnId: content.turnId,
-		messageId,
-		kind: "assistant",
-		text,
-		emotion: sharedEmotion ?? deps.classify(text)
-	})));
+	if (spoken.length > 0) deps.publish(spoken.map((text) => {
+		const ownEmotion = deps.classify(text);
+		return {
+			source: "claude-code",
+			sessionId: content.sessionId,
+			turnId: content.turnId,
+			messageId,
+			kind: "assistant",
+			text,
+			emotion: ownEmotion !== "neutral" ? ownEmotion : sharedEmotion ?? "neutral"
+		};
+	}));
 	addTombstone(state, entry.messageId);
 	const persisted = tryWriteWorkerState(deps.workerStatePath, state);
 	tryRemoveEntry(entry);
@@ -3414,7 +3465,9 @@ function main() {
 		});
 		const speechQueue = createSpeechQueue(getSpeechQueueDir());
 		speechQueue.sweepTmp();
-		const classifier = new RuleBasedEmotionClassifier();
+		const emotionKeywordsPath = getEmotionKeywordsPath();
+		writeDefaultEmotionKeywordsIfAbsent(emotionKeywordsPath);
+		const classifier = new RuleBasedEmotionClassifier(readEmotionKeywords(emotionKeywordsPath));
 		const summarize = createSummaryPipeline({
 			isEnabled: () => config.get("aiSummaryEnabled"),
 			getThreshold: () => config.get("aiSummaryThreshold"),

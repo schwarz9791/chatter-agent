@@ -1,6 +1,7 @@
 /**
  * Originally from kazakago/cc-mascot (Apache-2.0, Copyright 2026 kazakago)
  *   electron/services/ruleBasedEmotionClassifier.test.ts @ 46f7def
+ * Modified for chatter-agent.
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
@@ -21,8 +22,7 @@ describe("RuleBasedEmotionClassifier", () => {
     });
 
     it("ファイルパスを含む説明はneutralと判定される", () => {
-      const text =
-        "src/components/VRMAvatar.tsxファイルを確認してください。このファイルには3Dモデルの描画ロジックが含まれています。";
+      const text = "src/components/VRMAvatar.tsxファイルの3Dモデル描画ロジックについて説明します。";
       expect(classifier.classify(text)).toBe("neutral");
     });
 
@@ -115,38 +115,46 @@ describe("RuleBasedEmotionClassifier", () => {
       expect(classifier.classify(text)).toBe("sad");
     });
 
-    it("失敗の報告はsadまたはangryと判定される", () => {
+    it("失敗の報告はsadと判定される", () => {
       const text = "ビルドに失敗しました。型エラーが残っています。";
-      const result = classifier.classify(text);
-      expect(["sad", "angry"]).toContain(result);
+      expect(classifier.classify(text)).toBe("sad");
     });
 
-    it("困難の表明はsadまたはhappyと判定される", () => {
+    it("対応できない旨の表明はsadと判定される", () => {
       const text = "この対応は困難です...制約があります...";
-      const result = classifier.classify(text);
-      expect(["sad", "happy", "neutral"]).toContain(result);
+      expect(classifier.classify(text)).toBe("sad");
     });
   });
 
-  describe("Angry（怒り）- 問題・エラーの指摘", () => {
-    it("エラーの報告はangryと判定される", () => {
-      const text = "エラーが発生しました！型定義が間違っています。";
+  describe("Angry（怒り）- 苛立ちの表明", () => {
+    it("腹が立つという表現はangryと判定される", () => {
+      const text = "同じ間違いを三回も繰り返すなんて、さすがに腹が立ちます。";
       expect(classifier.classify(text)).toBe("angry");
     });
 
-    it("バグの指摘はangryと判定される", () => {
-      const text = "これはバグです！この実装では正しく動作しません。";
+    it("うんざりという表現はangryと判定される", () => {
+      const text = "何度言っても直らず、正直うんざりしています。";
       expect(classifier.classify(text)).toBe("angry");
     });
 
-    it("問題の強い指摘はangryと判定される", () => {
-      const text = "問題があります！このコードは動かないはずです。";
-      expect(classifier.classify(text)).toBe("angry");
+    it("否定形でしか使わない語は、その形を辞書に持つのでangryと判定される", () => {
+      expect(classifier.classify("これはもう許せません。")).toBe("angry");
+      expect(classifier.classify("許せない。")).toBe("angry");
     });
 
-    it("複数の感嘆符を含むエラー報告はangryと判定される", () => {
+    it("肯定で使えば感情にならない（語幹だけを辞書に持たない効果）", () => {
+      expect(classifier.classify("これは許せる範囲です。")).not.toBe("angry");
+    });
+
+    it("複数の感嘆符を含む報告はangryと判定される", () => {
       const text = "トラブルが発生しました！！コンパイルエラーです。";
       expect(classifier.classify(text)).toBe("angry");
+    });
+
+    it("エラー・バグ・問題などの技術語だけではangryと判定されない", () => {
+      expect(classifier.classify("エラーが発生しました！型定義が間違っています。")).not.toBe("angry");
+      expect(classifier.classify("これはバグです！この実装では正しく動作しません。")).not.toBe("angry");
+      expect(classifier.classify("問題があります！このコードは動かないはずです。")).not.toBe("angry");
     });
   });
 
@@ -156,22 +164,19 @@ describe("RuleBasedEmotionClassifier", () => {
       expect(classifier.classify(text)).toBe("relaxed");
     });
 
-    it("OK の返答はrelaxedまたはneutralと判定される", () => {
-      const text = "OK〜、その方針で進めよう。";
-      const result = classifier.classify(text);
-      expect(["relaxed", "neutral"]).toContain(result);
+    it("OK の返答はrelaxedと判定される", () => {
+      const text = "その方針でOK〜。";
+      expect(classifier.classify(text)).toBe("relaxed");
     });
 
-    it("大丈夫という返答はrelaxedまたはneutralと判定される", () => {
+    it("大丈夫という返答はrelaxedと判定される", () => {
       const text = "大丈夫だよ、問題ない。";
-      const result = classifier.classify(text);
-      expect(["relaxed", "neutral"]).toContain(result);
+      expect(classifier.classify(text)).toBe("relaxed");
     });
 
-    it("安心の表明はrelaxedまたはneutralと判定される", () => {
+    it("安心の表明はrelaxedと判定される", () => {
       const text = "その実装で安心した〜";
-      const result = classifier.classify(text);
-      expect(["relaxed", "neutral"]).toContain(result);
+      expect(classifier.classify(text)).toBe("relaxed");
     });
   });
 
@@ -192,7 +197,7 @@ describe("RuleBasedEmotionClassifier", () => {
     });
 
     it("マジという表現はsurprisedと判定される", () => {
-      const text = "マジ！？そのAPIがそんな動作をするの！？";
+      const text = "まじですか、そんな仕様があったとは知りませんでした。";
       expect(classifier.classify(text)).toBe("surprised");
     });
   });
@@ -212,9 +217,7 @@ describe("RuleBasedEmotionClassifier", () => {
 
     it("混在したキーワードは優先度の高い感情が選ばれる", () => {
       const text = "エラーが発生しましたが、解決できました！";
-      // happy の方が強く出ることを期待
-      const result = classifier.classify(text);
-      expect(["happy", "angry"]).toContain(result);
+      expect(classifier.classify(text)).toBe("happy");
     });
   });
 
@@ -236,14 +239,12 @@ describe("RuleBasedEmotionClassifier", () => {
 
     it("型エラーの指摘", () => {
       const text = "型エラーが発生しています。Emotion型の定義を確認してください。";
-      const result = classifier.classify(text);
-      expect(["angry", "neutral"]).toContain(result);
+      expect(classifier.classify(text)).not.toBe("angry");
     });
 
     it("実装方針の確認", () => {
       const text = "了解〜、その方針で実装を進めるわ。";
-      const result = classifier.classify(text);
-      expect(["relaxed", "neutral"]).toContain(result);
+      expect(classifier.classify(text)).toBe("relaxed");
     });
 
     it("長文のコード説明", () => {
@@ -283,46 +284,146 @@ describe("RuleBasedEmotionClassifier", () => {
   });
 
   describe("エッジケース - スコア調整", () => {
-    it("neutral >= 4 && sad > 0 && sad < 4 の場合neutralが優先される", () => {
-      // "了解" = neutral +2
-      // "します" = 中性的 +1
-      // "申し訳" = sad +3
-      // "ありません" = neutral +1
-      // "次に" = neutral +2
-      // "進めます" = neutral +2
-      // neutral: 2+1+1+2+2 = 8, sad: 3
-      // 条件: neutral >= 4 && sad > 0 && sad < 4
-      // 結果: sadスコアがneutralに吸収される
-      const text = "了解しました。申し訳ありませんが、次に進めます。";
-      const result = classifier.classify(text);
-
-      // sadが含まれているけど、neutralが圧倒的に高いのでneutralが優先される
-      expect(result).toBe("neutral");
-    });
-
-    it("neutralとsadが混在する長文でneutralが優先される", () => {
-      // 複数のneutralキーワードと少数のsadキーワード
+    it("技術的な説明の中の軽い言及ではsadが優先されない", () => {
       const text =
-        "了解しました。まずこちらを確認してください。申し訳ありませんが、次に進めます。その後、実装を続けます。";
-      const result = classifier.classify(text);
-
-      // neutralが優先される
-      expect(result).toBe("neutral");
+        "このクラスの型とインターフェースを説明します。`sample.ts`のコード例を先に示したあと、最後の行だけ見落としがありました。";
+      expect(classifier.classify(text)).toBe("neutral");
     });
 
-    it("relaxedが弱い場合neutralに吸収される", () => {
-      // "了解〜" = relaxed +1
-      // "進めるわ" = neutral +1
-      // "ます" = 中性的 +1
-      // relaxed: 1 (< 6), neutral: 1+1 = 2
-      // 条件: relaxed > 0 && relaxed < 6
-      // 結果: relaxedスコアがneutralに吸収される
+    it("relaxedの弱いシグナルもneutralに吸収されず判定に反映される", () => {
       const text = "了解〜、その方針で進めるわ。";
-      const result = classifier.classify(text);
+      expect(classifier.classify(text)).toBe("relaxed");
+    });
+  });
 
-      // relaxedが含まれているけど、弱いのでneutralかrelaxedになる
-      // 実際にはneutral + relaxed = 2+1 = 3なので、優先度による
-      expect(["neutral", "relaxed"]).toContain(result);
+  describe("作業状況に応じた表情判定", () => {
+    it("完了を待っている状況はrelaxedと判定される", () => {
+      const text = "サブエージェントの完了を待っています。";
+      expect(classifier.classify(text)).toBe("relaxed");
+    });
+
+    it("任せた先が止まって自分でやり直す状況はangryと判定される", () => {
+      expect(classifier.classify("サブエージェントが停止したので自分で確認します。")).toBe("angry");
+      expect(classifier.classify("全件やり直します。")).toBe("angry");
+      expect(classifier.classify("レート制限に引っかかって止まっていました。")).toBe("angry");
+    });
+
+    it("手戻りは待機より優先される（待つのと待たされるのは違う）", () => {
+      expect(classifier.classify("サブエージェントの完了を待っています。")).toBe("relaxed");
+      expect(classifier.classify("止まっているので自分で確認します。")).toBe("angry");
+    });
+
+    it("完了の報告はhappyと判定される", () => {
+      const text = "実装が完了しました。";
+      expect(classifier.classify(text)).toBe("happy");
+    });
+
+    it("ブラウザという語だけではangryと判定されない", () => {
+      const text = "ブラウザで確認します。";
+      expect(classifier.classify(text)).not.toBe("angry");
+    });
+
+    it("方針を尋ねる疑問文はsurprisedと判定されない", () => {
+      const text = "着手順はどうしますか？";
+      expect(classifier.classify(text)).not.toBe("surprised");
+    });
+
+    it("未解決件数の報告だけではhappyと判定されない", () => {
+      const text = "2件の未解決コメントがあります。";
+      expect(classifier.classify(text)).not.toBe("happy");
+    });
+
+    it("不安定という語を含んでいてもsadと判定されない", () => {
+      const text = "テストが不安定でしたが直りました。";
+      expect(classifier.classify(text)).not.toBe("sad");
+    });
+
+    it("謝罪と同居する完了報告はhappyと判定されない", () => {
+      const text = "申し訳ありません、対応は完了しています。";
+      expect(classifier.classify(text)).not.toBe("happy");
+    });
+
+    it("見落としの報告はsadと判定される", () => {
+      const text = "設計を見落としていました。";
+      expect(classifier.classify(text)).toBe("sad");
+    });
+  });
+
+  describe("否定ガード（キーワード直後の否定形）", () => {
+    it("文頭ボーナスの境界に掛かった語でも否定を見落とさない", () => {
+      // 語が文頭ボーナスの範囲の末尾で終わると、直後の否定形が範囲外に出る
+      for (const n of [42, 43, 44, 45, 46, 48, 50]) {
+        expect(classifier.classify(`${"あ".repeat(n)}完了していません。`)).toBe("neutral");
+      }
+    });
+
+    it("待たされている報告が達成として読まれない", () => {
+      const text = "--force-with-lease で push し直しており、pre-push のテスト完了を待っています。";
+      expect(classifier.classify(text)).toBe("relaxed");
+    });
+
+    it("完了していない旨はneutralと判定される", () => {
+      expect(classifier.classify("まだ完了していません。")).toBe("neutral");
+      expect(classifier.classify("実装は完了していません。")).toBe("neutral");
+    });
+
+    it("改善されていない旨はneutralと判定される", () => {
+      expect(classifier.classify("改善されていません。")).toBe("neutral");
+    });
+
+    it("達成できなかった旨はneutralと判定される", () => {
+      expect(classifier.classify("達成できませんでした。")).toBe("neutral");
+    });
+
+    it("実現できない旨はneutralと判定される", () => {
+      expect(classifier.classify("実現できません。")).toBe("neutral");
+    });
+
+    it("「とは言えない」構文でもneutralと判定される", () => {
+      expect(classifier.classify("良いとは言えません。")).toBe("neutral");
+    });
+
+    it("落ちていない旨はneutralと判定される", () => {
+      expect(classifier.classify("一度も落ちていません。")).toBe("neutral");
+    });
+
+    it("止まっていない旨はneutralと判定される", () => {
+      expect(classifier.classify("止まっていません。")).toBe("neutral");
+    });
+
+    it("削除した語の部分一致だった文はneutralと判定される", () => {
+      expect(classifier.classify("事実はそうではありません。")).toBe("neutral");
+    });
+
+    it("極性を持たない副詞を削除したのでangryと判定されない", () => {
+      expect(classifier.classify("相変わらず順調です。")).not.toBe("angry");
+      expect(classifier.classify("依然として順調です。")).not.toBe("angry");
+    });
+
+    it("意図的な停止はangryと判定されない", () => {
+      expect(classifier.classify("サーバーを停止してから起動し直します。")).toBe("neutral");
+    });
+
+    it("句点で窓が切れるので後続の否定に引きずられない", () => {
+      const text = "完了しました。問題ありません。";
+      expect(classifier.classify(text)).toBe("happy");
+    });
+  });
+
+  describe("タイブレーク（同点時の優先順: angry > sad > relaxed > surprised > happy > neutral）", () => {
+    it("待って の重複を落としても、完了報告との同点はrelaxedが勝つ", () => {
+      const text = "サブエージェントの完了を待っています。";
+      expect(classifier.classify(text)).toBe("relaxed");
+    });
+
+    it("sad と relaxed が同点のときはsadが勝つ", () => {
+      const text = "残念ですが、順調です。";
+      expect(classifier.classify(text)).toBe("sad");
+    });
+
+    it("angry と sad が同点のときはangryが勝つ", () => {
+      const text = "腹が立ちますが残念です。";
+      expect(classifier.classify(text)).toBe("angry");
     });
   });
 });

@@ -1139,21 +1139,39 @@ describe("state の永続化が失敗したときの安全側の挙動（A4）",
 });
 
 /**
- * E1（issue #38 レビュー）: 要約が効いたときは、原文（要約前の全文）由来の感情を全文で共有する。
- * 要約が効かなかったときは、従来どおり文ごとに判定する。
+ * 要約後の文が自分自身で emotion を判定できるならそれを使う。文単体では neutral にしか
+ * ならなかったときだけ、原文全体の判定を借りる。要約が効かなかったときは従来どおり
+ * 文ごとに判定する。
  */
-describe("感情判定（E1）", () => {
-  it("★ 要約が効いたとき、publish される全文が同じ emotion になる（原文全体で判定する）", () => {
+describe("感情判定", () => {
+  it("★ 要約が効いても、文自体で判定できる emotion は原文由来の判定に塗り潰されない", () => {
+    appendDelta("m1", 0, "驚きの出来事がありました。", true);
+    drain({
+      summarize: () => "順調です。バグが直りました！",
+      // 原文は surprised に判定されるが、要約後の各文はそれ自体で別の emotion になる
+      classify: (text) => {
+        if (text.includes("順調")) return "relaxed";
+        if (text.includes("バグ")) return "happy";
+        return "surprised"; // 原文（sentences.join）向け
+      },
+    });
+
+    const rows = records();
+    expect(rows.map((r) => r.text)).toEqual(["順調です。", "バグが直りました！"]);
+    expect(rows.map((r) => r.emotion)).toEqual(["relaxed", "happy"]);
+  });
+
+  it("★ 要約が効いたとき、文自体では neutral にしかならない文は原文由来の emotion を受け取る", () => {
     appendDelta("m1", 0, "元のメッセージです。", true);
     drain({
       summarize: () => "要約その1！要約その2？要約その3。",
-      // 要約後の文には「元の」が含まれない。文ごとに判定していたら neutral になるはずの値
+      // 要約後の文には「元の」が含まれない。文ごとに判定すると全部 neutral になる
       classify: (text) => (text.includes("元の") ? "happy" : "neutral"),
     });
 
     const rows = records();
     expect(rows.map((r) => r.text)).toEqual(["要約その1！", "要約その2？", "要約その3。"]);
-    // 原文（sentences.join）で判定した1つの emotion が全文で共有されている
+    // 自力では neutral にしかならないので、原文（sentences.join）由来の happy を借りる
     expect(rows.map((r) => r.emotion)).toEqual(["happy", "happy", "happy"]);
   });
 

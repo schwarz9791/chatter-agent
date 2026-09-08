@@ -13,7 +13,12 @@ namespace ChatterMascot.Tests
     {
         private static MotionParams Params(double min, double max)
         {
-            return new MotionParams(fadeSeconds: 0.5f, cooldownSeconds: 5.0, accentMinSeconds: min, accentMaxSeconds: max);
+            return new MotionParams(
+                fadeSeconds: 0.5f,
+                cooldownSeconds: 5.0,
+                sameCategoryCooldownSeconds: 15.0,
+                accentMinSeconds: min,
+                accentMaxSeconds: max);
         }
 
         [Test]

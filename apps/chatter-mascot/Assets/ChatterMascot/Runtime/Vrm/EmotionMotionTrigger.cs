@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using ChatterMascot.Protocol;
 
 namespace ChatterMascot.Vrm
@@ -21,6 +22,21 @@ namespace ChatterMascot.Vrm
 
         private long _lastOrder = -1;
         private double _lastEndedAt = double.NegativeInfinity;
+
+        /// <summary>
+        /// カテゴリごとに、そのカテゴリを最後に発火した時刻。
+        /// ★ 「終わった時刻」ではなく「発火した時刻」——<c>NotifyEnded</c> はカテゴリを
+        ///   受け取らないので、<see cref="NotifyFired"/> で記録する。
+        /// ★★ <c>Update</c> 自身はここへ書き込まない。<c>Update</c> が返す候補は
+        ///   判定でしかなく、実際に再生されるとは限らない（呼び出し側にそのカテゴリの
+        ///   クリップが1本も無い等）。記録は、呼び出し側が実際に再生を開始したときに
+        ///   <see cref="NotifyFired"/> を呼んで初めて行われる——でなければ再生されなかった
+        ///   ぶんまで抑制窓を消費してしまう。
+        /// 未登録のカテゴリは <see cref="Dictionary{TKey,TValue}.TryGetValue"/> が
+        /// <c>false</c> を返すので、既定で「一度も発火していない＝必ず通す」になる。
+        /// </summary>
+        private readonly Dictionary<MotionCategory, double> _lastFiredAtByCategory =
+            new Dictionary<MotionCategory, double>();
 
         public EmotionMotionTrigger(MotionParams p)
         {
@@ -61,7 +77,17 @@ namespace ChatterMascot.Vrm
             if (now - _lastEndedAt < _params.CooldownSeconds) return null;
 
             // Neutral は MotionCategories.FromEmotion が null を返す＝発火しない
-            return MotionCategories.FromEmotion(emotion);
+            var category = MotionCategories.FromEmotion(emotion);
+            if (category == null) return null;
+
+            // 同じカテゴリの連発だけを長く抑える。切り替わりはここを通り抜ける。
+            if (_lastFiredAtByCategory.TryGetValue(category.Value, out var lastFiredAt)
+                && now - lastFiredAt < _params.SameCategoryCooldownSeconds)
+            {
+                return null;
+            }
+
+            return category;
         }
 
         /// <summary>
@@ -72,6 +98,17 @@ namespace ChatterMascot.Vrm
         public void NotifyEnded(double now)
         {
             _lastEndedAt = now;
+        }
+
+        /// <summary>
+        /// <see cref="Update"/> が返した候補の再生を、呼び出し側が実際に開始した。
+        /// 同じカテゴリの抑制窓の起点をここに置く。
+        /// ★ 候補が返っても、その先でクリップが無い・再生に失敗したなど再生に至らないことがある。
+        ///   そのときはこれを呼ばないこと——呼ばれない限り窓は消費されない。
+        /// </summary>
+        public void NotifyFired(MotionCategory category, double now)
+        {
+            _lastFiredAtByCategory[category] = now;
         }
     }
 }

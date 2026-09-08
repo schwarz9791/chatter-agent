@@ -99,7 +99,7 @@ cc-mascot 由来のファイルも**このリポジトリのコードとして�
 
 Apache-2.0 §4(b) は、**改変したファイルにその旨の目立つ告知を付ける**ことを要求している。由来のあるファイルを触ったら、ヘッダに `Modified for chatter-agent.` があるか確認すること。
 
-**対象は `text/textFilter.ts` と `emotion/ruleBasedEmotionClassifier.ts`（+ 両者のテスト）の4ファイルだけ。** 同じディレクトリに並んでいる `text/unstableTail.ts` と `prompt/` 配下は cc-mascot 由来ではないので、ヘッダを足さないこと。区別の根拠は [`origin.md`](./origin.md)。
+**対象は `text/textFilter.ts`、`emotion/ruleBasedEmotionClassifier.ts`（+ 前二者のテスト）、`emotion/defaultEmotionKeywords.ts` の5ファイルだけ。** 同じディレクトリに並んでいる `text/unstableTail.ts` と `prompt/` 配下は cc-mascot 由来ではないので、ヘッダを足さないこと。区別の根拠は [`origin.md`](./origin.md)。
 
 ### 2. `tsconfig.json` の `moduleResolution: "bundler"` を変えない
 
@@ -289,7 +289,7 @@ lint と format は **oxlint / oxfmt**（Oxc）。eslint / prettier は使わな
 
 ### 移植コードのフォーマットについて
 
-cc-mascot から移植したコードを oxfmt で整形すると、上流との差分が読みにくくなる。特に `emotion/ruleBasedEmotionClassifier.ts` は、上流の辞書改善を手で取り込む余地を残してある（→ [`origin.md`](./origin.md)）。
+cc-mascot から移植したコードを oxfmt で整形すると、上流との差分が読みにくくなる。特に `emotion/ruleBasedEmotionClassifier.ts` と、辞書を切り出した `emotion/defaultEmotionKeywords.ts` は、上流の辞書改善を手で取り込む余地を残してある（→ [`origin.md`](./origin.md)）。
 
 整形から外したい場合は `.oxfmtrc.json` の `ignorePatterns` に足す。**oxfmt は指定が無ければ `.gitignore` と `.prettierignore` も読む**が、このリポジトリに `.prettierignore` は置いていない。
 
@@ -302,6 +302,7 @@ cc-mascot から移植したコードを oxfmt で整形すると、上流との
 | | パス | 書く人 |
 |---|---|---|
 | 設定 | `{root}/config.json` | 人間 |
+| 感情キーワード辞書 | `{root}/emotion-keywords.json` | ★ CLI（無いときだけ既定を書き出す）→ 以後は人間 |
 | spool | `{root}/spool/` | hook が書き、CLI が消す |
 | 発話の記録 | `{root}/speech.jsonl`（退避は `speech.1.jsonl` の1世代だけ） | CLI |
 | 配信キュー | `{root}/speech/<seq>.json` | CLI が書く。上限超過は CLI が切り、ack と起動時の掃除は server が行う |
@@ -314,6 +315,10 @@ cc-mascot から移植したコードを oxfmt で整形すると、上流との
 | サーバーのロック | `{root}/server.lock/`（ディレクトリ） | **server**（bind の前に取る。2台目は起動に失敗する） |
 | player のロック | `{root}/player.lock/`（ディレクトリ） | **player**（接続の前に取る。2台目は起動に失敗する） |
 | player の一時 WAV | `{root}/player-tmp/<エポック>-<seq>.wav` | **player**（起動時にディレクトリごと作り直す。`seq` は採番の世代を跨いで一意でないので、ファイル名に世代を混ぜる） |
+
+★ **`emotion-keywords.json` は「書く人」が2者になる唯一のファイル。** 最初だけ CLI が既定を書き出し、
+以後は人間が編集する。CLI は**ファイルが無いときだけ**書く——既にあれば絶対に上書きしない。
+server / player はこのファイルを読みも書きもしない（読むのも CLI だけ）。
 
 ★★ **`summarizer-sessions.json` を `speak.state.json` に相乗りさせないこと。**
 あちらは CLI が「ドレインの先頭で読み、途中と末尾で全体を書き戻す」形で使っている。
@@ -355,6 +360,58 @@ cc-mascot から移植したコードを oxfmt で整形すると、上流との
 | `speechQueueMaxEntries` | `500` | `CHATTER_AGENT_SPEECH_QUEUE_MAX_ENTRIES` |
 | `spoolMaxAgeHours` | `6` | `CHATTER_AGENT_SPOOL_MAX_AGE_HOURS` |
 | `allowedOrigins` | `[]` | `CHATTER_AGENT_ALLOWED_ORIGINS`（カンマ区切り） |
+
+### 感情判定は「文が感情的か」ではなく「作業で何が起きているか」で決める
+
+`emotion` は VRM の expression に一対一で載る。判定器が答えるべきなのは
+**「いま作業で何が起きていて、相棒ならどんな顔をするか」**であって、発話の字義どおりの
+情動ではない。計画と実装が仕事である以上、発話は平坦になるのが当たり前で、そこに
+少し芝居を乗せる。
+
+| 作業の状況 | 表情 |
+|---|---|
+| テストが通った / 実装が完了した | `happy` |
+| 完了を待っている / これから取り組む | `relaxed` |
+| テストが落ちた / 見落とした / 申し訳ない | `sad` |
+| 想定と違うと分かった / 原因が判明した | `surprised` |
+| 任せた先が止まって自分でやり直す / 本当に苛立っている | `angry` |
+
+★ **技術報告語を怒りに割り当てないこと。** `問題` `失敗` `バグ` `エラー` は Claude Code に
+とって業務上の中立語彙で、これらで怒らせると平坦な報告のたびに表情が動く。失敗時の
+実際のトーンは自責なので、受け皿は `angry` ではなく `sad`。`angry` が引き受けるのは
+**手戻り**——任せた先が止まって自分でやり直す場面。**待つのと待たされるのは違う**ので、
+同じ文に待機の語があっても手戻りを優先する。
+
+★ **キーワードは `includes` の部分一致なので、短い語と英字は他の語に埋もれる。**
+語を足すときは、実際に何にマッチするかを必ず確かめること（`ウザ` が `ブラウザ` に、
+`ok` が `hook` や `Storybook` に、`不安` が `不安定` に埋もれていた）。
+★ **複合名詞の一部に当たる穴は残っている。** `ミス` は `ミスマッチ`、`成功` は `成功率`、
+`完成` は `完成度` に当たる。一律に「直後が漢字なら弾く」規則は使えない——`完了通知`
+`完了条件` のような正しい発火まで消えるため。語ごとに活用形を並べて塞ぐのも同じ理由で
+採らない。
+
+★ **キーワード直後の否定形は共通のガード（`hasAffirmativeMatch`）で弾く。** 活用形を
+辞書に並べて塞ぐ代わりに、当たった位置の直後の短い窓だけを見て否定形かどうかを
+判定する。同じ語が複数回出るときは、すべての出現が否定形のときだけ加点しない。
+語ごとの例外は持たせないこと。**否定形そのものが定型句の語は、辞書側にその形で
+持たせて解く**（`許せ` ではなく `許せな` / `許せませ`）——語幹だけを持つと、肯定用法に
+誤って当たるうえ、ガードにも消える。
+
+★ **同点になったときの優先順は `TIE_BREAK_ORDER` で固定してある。** `scores` オブジェクト
+リテラルのキー順に判定を委ねないこと。優先順は、現在の状態や未解決の情報を
+報告の喜びより優先する向きに決めている。
+
+★ **`relaxed` を neutral に吸収する抑制を戻さないこと。** 1語では点が足りず、`relaxed` が
+構造的に出なくなる。
+
+★ **疑問符で `surprised` に加点しないこと。** 方針を尋ねる文が大量に出るので、質問の
+たびに驚いた顔になる。
+
+**感情キーワード辞書（`{root}/emotion-keywords.json`）は `config.json` に含めない。** 理由は3つ:
+
+- 数百語の配列がユーザーの設定ファイルの大半を占めることになる
+- `SPECS` は1キー1パーサの表なので、配列の中身の検証だけが非対称になる
+- 読み手が CLI だけなので、`SPECS` に載せると server / player が起動のたびに未知キー警告を吐く（下の「server（音声合成）だけが読むキー」と同じ理由）
 
 server（音声合成）だけが読むキー。**別ファイルに分けないこと。** `SPECS` は全バイナリで共有していて、
 載っていないキーは未知キーとして警告されるので、分けると `chatter-agent-speak` が
@@ -550,6 +607,7 @@ player だけが読むキー。**これも別ファイルに分けない**（理
 config に載せない環境変数:
 
 - `CHATTER_AGENT_CONFIG` — `config.json` の場所そのもの
+- `CHATTER_AGENT_EMOTION_KEYWORDS` — `emotion-keywords.json` の場所そのもの
 - `CHATTER_AGENT_DISABLE` — hook と CLI を無効化（無限ループ防止の第1層）
 - `CHATTER_AGENT_CLI` — 開発時にバンドルを差し替える
 - `CHATTER_AGENT_HOOK_DEBUG` — hook が受けた payload を `{root}/hook-debug.log` に落とす（hook 側だけ。→ [`plugin.md`](./plugin.md)）

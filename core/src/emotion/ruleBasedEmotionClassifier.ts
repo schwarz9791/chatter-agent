@@ -14,235 +14,55 @@
 // 改変: Emotion をここで定義せず、契約側（core/types）から取り込む。
 // VRM の expression 名と一対一である以上、正は speech.jsonl の契約側にある。
 import type { Emotion } from "../core/types";
+import { DEFAULT_EMOTION_KEYWORDS, type EmotionKeywords } from "./defaultEmotionKeywords";
 
 export type { Emotion };
 
+// キーワード直後の否定形を弾く共通ガード。活用形を辞書に並べる代わりに、
+// 当たった位置の直後だけを見て判定する。
+const SENTENCE_BOUNDARY = /[。！？!?\n、]/;
+const NEGATION_LINK = "[はがもをにでとしてられさきりえけいうつっまなわ]{0,6}";
+const NEGATION_ENDING = "(ない|ないで|ません|ませんで|なかっ|ず|ぬ)";
+const NEGATION_PATTERN = new RegExp("^(?:" + NEGATION_LINK + "|とは言え|とはいえ|とは思え)" + NEGATION_ENDING);
+
+/** キーワード直後から文の区切りまでの短い窓を切り出す */
+function tailAfterKeyword(text: string, at: number, keywordLength: number): string {
+  const window = text.slice(at + keywordLength, at + keywordLength + 12);
+  const boundary = window.search(SENTENCE_BOUNDARY);
+  return boundary >= 0 ? window.slice(0, boundary) : window;
+}
+
+/**
+ * キーワードが `limit` より前に1箇所でも肯定形で出現していれば真。
+ * 同じ語が複数回出るときは、すべての出現が否定形のときだけ偽になる。
+ *
+ * ★ 走査の範囲を狭めるときは、**位置で絞って本文は切らないこと**。切った文字列を
+ *   渡すと、境界に掛かった語の直後が失われて否定形を見落とす。
+ */
+function hasAffirmativeMatch(text: string, keyword: string, limit = Number.POSITIVE_INFINITY): boolean {
+  let index = text.indexOf(keyword);
+  while (index !== -1 && index < limit) {
+    if (!NEGATION_PATTERN.test(tailAfterKeyword(text, index, keyword.length))) {
+      return true;
+    }
+    index = text.indexOf(keyword, index + 1);
+  }
+  return false;
+}
+
+// 最高スコアが同点のときの優先順。scores リテラルのキー順に判定を委ねない。
+// 現在の状態や未解決の情報は、報告の喜びより優先する。
+/** 文頭ボーナスの対象になる位置。ここまでに始まる語だけが加点される */
+const HEAD_BONUS_LIMIT = 50;
+
+const TIE_BREAK_ORDER: Emotion[] = ["angry", "sad", "relaxed", "surprised", "happy", "neutral"];
+
 export class RuleBasedEmotionClassifier {
-  /**
-   * 感情キーワード辞書
-   */
-  private emotionKeywords: Record<Exclude<Emotion, "neutral">, string[]> = {
-    happy: [
-      // 喜び・嬉しさ（基本）
-      "うれしい",
-      "嬉しい",
-      "うれ",
-      "喜",
-      "喜び",
-      "よかった",
-      "よかっ",
-      "良かっ",
-      "良い",
-      "やった",
-      "やっ",
-      "できた",
-      "すごい",
-      "すご",
-      "凄",
-      "素晴らしい",
-      "素敵",
-      "ありがと",
-      "ありが",
-      "感謝",
-      "サンクス",
-      "楽しい",
-      "楽し",
-      "愉快",
-      "面白い",
-      "面白",
-      "成功",
-      "完璧",
-      "完了",
-      "クリア",
-      "最高",
-      "ベスト",
-      "グッド",
-      "ナイス",
-      "いいね",
-      "助かっ",
-      "助かる",
-      "わーい",
-      "やっほー",
-      "やったー",
-      "いえーい",
-      // 達成感
-      "達成",
-      "ゲット",
-      "獲得",
-      "実現",
-      "解決",
-      "修正できた",
-      "直った",
-      // ポジティブ表現
-      "満足",
-      "幸せ",
-      "ハッピー",
-      "ラッキー",
-      "運が良",
-      "期待以上",
-      "想像以上",
-    ],
-    angry: [
-      // 怒り・イライラ（基本）
-      "むかつく",
-      "むかつ",
-      "ムカつ",
-      "腹立",
-      "怒",
-      "イライラ",
-      "いらいら",
-      "キレ",
-      "最悪",
-      "ひどい",
-      "酷",
-      "クソ",
-      "くそ",
-      "うざい",
-      "ウザ",
-      "うっとうし",
-      "許せない",
-      "許せ",
-      "我慢できない",
-      "ダメ",
-      "駄目",
-      "ダメだ",
-      "だめ",
-      // 技術的な問題
-      "エラー",
-      "バグ",
-      "失敗",
-      "動かない",
-      "壊れ",
-      "問題",
-      "トラブル",
-      "不具合",
-      "障害",
-      "困る",
-      "困っ",
-      "困った",
-      // 否定的表現
-      "信じられない",
-      "呆れ",
-      "ふざけ",
-      "冗談じゃ",
-      "勘弁",
-      "マジで",
-      "本気で腹",
-    ],
-    sad: [
-      // 悲しみ・残念（基本）
-      "悲しい",
-      "悲し",
-      "哀",
-      "残念",
-      "ざんねん",
-      "惜しい",
-      "つらい",
-      "辛い",
-      "つら",
-      "苦しい",
-      "ごめん",
-      "すまな",
-      "すみま",
-      "申し訳",
-      "謝",
-      "無理",
-      "不可能",
-      "困った",
-      "困難",
-      "諦め",
-      "あきら",
-      "断念",
-      // ネガティブな結果
-      "失敗し",
-      "しくじ",
-      "ミス",
-      "駄目だった",
-      "間に合わ",
-      "遅れ",
-      // 弱気な表現
-      "自信ない",
-      "不安",
-      "心配",
-      "怖",
-      "しょんぼり",
-      "がっかり",
-      "落ち込",
-      "泣",
-      "涙",
-    ],
-    surprised: [
-      // 驚き・意外（基本）
-      "え！",
-      "えっ",
-      "え？",
-      "えー",
-      "まさか",
-      "マジ",
-      "まじ",
-      "本当",
-      "びっくり",
-      "ビックリ",
-      "驚",
-      "ビビ",
-      "意外",
-      "予想外",
-      "想定外",
-      "なんと",
-      "何と",
-      "おお",
-      "おぉ",
-      "すごっ",
-      "やば",
-      "ヤバ",
-      // 驚きの表現
-      "信じられない",
-      "嘘",
-      "うそ",
-      "ウソ",
-      "本当に",
-      "ほんと",
-      "本気",
-      "あり得ない",
-      "ありえな",
-      "初めて",
-      "見たことない",
-      // 口語的な驚き
-      "はぁ！？",
-      "へぇ",
-      "ほぉ",
-      "ふぉ",
-      "おったまげ",
-      "たまげ",
-    ],
-    relaxed: [
-      // 落ち着き・安心（明確な表現のみ）
-      "落ち着",
-      "落着",
-      "冷静",
-      "安心",
-      "あんしん",
-      "ホッと",
-      "大丈夫",
-      "だいじょうぶ",
-      "だいじょぶ",
-      "OK",
-      "ok",
-      "オッケー",
-      "おk",
-      "了解",
-      "りょうかい",
-      "承知",
-      "問題ない",
-      "問題なし",
-      "ノープロブレム",
-      // 穏やかな表現
-      "ゆっくり",
-      "のんびり",
-      "じっくり",
-      "様子見",
-    ],
-  };
+  private emotionKeywords: EmotionKeywords;
+
+  constructor(emotionKeywords: EmotionKeywords = DEFAULT_EMOTION_KEYWORDS) {
+    this.emotionKeywords = emotionKeywords;
+  }
 
   /**
    * 文末パターン（正規表現）
@@ -301,16 +121,11 @@ export class RuleBasedEmotionClassifier {
       /[😢😭💔]+/u, // 悲しみの絵文字
     ],
     surprised: [
-      /[！!？?]$/, // 疑問符・感嘆符
+      /[！!]{2,}[？?]?$/, // 感嘆符（連続）
       // 女性言葉
       /え[っ〜～！!？?]+/, // えっ！、え〜？など
       /まさか[！!？?]/, // まさか！
-      /の[！!？?]$/, // なの！？
-      // 中性的・丁寧
-      /ですか[！!？?]$/, // そうですか！？
-      /ますか[！!？?]$/, // 本当ですか！？
       // 男性的
-      /のか[！!？?]$/, // そうなのか！？
       /だと[！!？?]$/, // マジだと！？
       // 共通
       /マジ[！!？?]/, // マジ！？
@@ -362,7 +177,7 @@ export class RuleBasedEmotionClassifier {
     const keywordWeight = isLongText ? 3 : 2;
     for (const [emotion, keywords] of Object.entries(this.emotionKeywords)) {
       for (const keyword of keywords) {
-        if (normalizedText.includes(keyword)) {
+        if (hasAffirmativeMatch(normalizedText, keyword)) {
           scores[emotion as Emotion] += keywordWeight;
         }
       }
@@ -379,10 +194,9 @@ export class RuleBasedEmotionClassifier {
     }
 
     // 4. 文頭の感情表現を強化（最初の50文字以内）
-    const firstPart = normalizedText.substring(0, 50);
     for (const [emotion, keywords] of Object.entries(this.emotionKeywords)) {
       for (const keyword of keywords) {
-        if (firstPart.includes(keyword)) {
+        if (hasAffirmativeMatch(normalizedText, keyword, HEAD_BONUS_LIMIT)) {
           scores[emotion as Emotion] += 2; // 文頭の感情は重視
         }
       }
@@ -410,26 +224,15 @@ export class RuleBasedEmotionClassifier {
       }
     }
 
-    // 8. 感情の弱いrelaxed/sadをneutralに統合（技術説明の誤分類を防ぐ）
-    // relaxedが弱い場合（スコア6未満）、neutralを優先
-    if (scores.relaxed > 0 && scores.relaxed < 6) {
-      scores.neutral += scores.relaxed;
-      scores.relaxed = 0;
-    }
-    // neutralスコアが高く、sadが弱い場合、neutralを優先
-    if (scores.neutral >= 4 && scores.sad > 0 && scores.sad < 4) {
-      scores.neutral += scores.sad;
-      scores.sad = 0;
-    }
-
-    // 9. 最高スコアの感情を返す（デフォルトはneutral）
+    // 8. 最高スコアの感情を返す（デフォルトはneutral、同点は TIE_BREAK_ORDER で決める）
     let maxEmotion: Emotion = "neutral";
     let maxScore = 0;
 
-    for (const [emotion, score] of Object.entries(scores)) {
+    for (const emotion of TIE_BREAK_ORDER) {
+      const score = scores[emotion];
       if (score > maxScore) {
         maxScore = score;
-        maxEmotion = emotion as Emotion;
+        maxEmotion = emotion;
       }
     }
 
@@ -452,11 +255,6 @@ export class RuleBasedEmotionClassifier {
     // 感情スコアの合計を計算
     const emotionScoreSum = scores.happy + scores.angry + scores.sad + scores.surprised + scores.relaxed;
     const hasEmotion = emotionScoreSum > 0;
-
-    // 疑問符で終わる → surprised傾向
-    if (/[？?]$/.test(text)) {
-      scores.surprised += 1;
-    }
 
     // 短い返事（明確なrelaxed表現のみ）
     if (text.length < 10) {
@@ -502,10 +300,14 @@ export class RuleBasedEmotionClassifier {
       }
     }
 
-    // ネガティブワード + 肯定 → happy（問題解決）
-    if (/(エラー|バグ|問題|失敗)/.test(text) && /(修正|解決|できた|成功|完了)/.test(text)) {
-      scores.happy += 4; // 強化
-      scores.angry = Math.max(0, scores.angry - 2); // ネガティブスコアを減らす
+    // 謝罪・自責の語が同居する文では happy を持ち上げない
+    const hasApology = /(申し訳|すみま|ごめん|すまな|見落と)/.test(text);
+    if (hasApology) {
+      scores.happy = Math.max(0, scores.happy - 4);
+    } else if (/(エラー|バグ|問題|失敗)/.test(text) && /(修正|解決|できた|成功|完了)/.test(text)) {
+      // ネガティブワード + 肯定 → happy（問題解決）
+      scores.happy += 4;
+      scores.angry = Math.max(0, scores.angry - 2);
     }
   }
 }

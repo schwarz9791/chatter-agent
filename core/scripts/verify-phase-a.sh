@@ -861,9 +861,13 @@ show "㉑ ★ [#92] 感情キーワード辞書のユーザーカスタマイズ
   printf '%s' '{"angry":["ぷんすかぴょんぴょん"]}' > "$KEYWORDS"
   feed_message m-emo-custom 0 true "ぷんすかぴょんぴょんしています"
   node "$CLI"
-  feed_message m-emo-stale 0 true "むかつくことがありました"
+  ANGRY_WORD=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).angry[0])' "$ROOT3/created.json")
+  feed_message m-emo-stale 0 true "${ANGRY_WORD}ことがありました"
   node "$CLI"
-  feed_message m-emo-other 0 true "うれしい知らせがあります"
+  # ★ 既定辞書の語を直に書かないこと。辞書の中身を入れ替えるたびにこの検査が落ちる。
+  #   書き出された既定から happy の語を1つ borrow して文を組む。
+  HAPPY_WORD=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).happy[0])' "$ROOT3/created.json")
+  feed_message m-emo-other 0 true "${HAPPY_WORD}です"
   node "$CLI"
 
   # (4) 壊れた JSON でも発話は止まらない
@@ -873,7 +877,7 @@ show "㉑ ★ [#92] 感情キーワード辞書のユーザーカスタマイズ
 
   node -e '
     const fs = require("fs");
-    const [createdPath, beforePath, afterPath, logPath] = process.argv.slice(1);
+    const [createdPath, beforePath, afterPath, logPath, happyProbe, angryProbe] = process.argv.slice(1);
     const created = JSON.parse(fs.readFileSync(createdPath, "utf8"));
     const before = fs.readFileSync(beforePath, "utf8");
     const after = fs.readFileSync(afterPath, "utf8");
@@ -889,8 +893,8 @@ show "㉑ ★ [#92] 感情キーワード辞書のユーザーカスタマイズ
           Array.isArray(created[k]) && created[k].length > 0 && created[k].every((s) => typeof s === "string" && s.length > 0))],
       ["既存ファイルは1バイトも変わらず上書きされない", before === after],
       ["angry を置き換えた語を含む文が angry と判定される", emotionOf("ぷんすかぴょんぴょんしています") === "angry"],
-      ["既定の angry にしか無い語を含む文は angry にならない（既定が置き換わっている）", emotionOf("むかつくことがありました") !== "angry"],
-      ["置き換えていない happy は既定のまま効く", emotionOf("うれしい知らせがあります") === "happy"],
+      ["既定の angry にしか無い語を含む文は angry にならない（既定が置き換わっている）", emotionOf(angryProbe) !== "angry"],
+      ["置き換えていない happy は既定のまま効く", emotionOf(happyProbe) === "happy"],
       ["壊れた JSON でも発話が止まらない", emotionOf("壊れたファイルでも発話は止まりません") !== undefined],
     ];
     let failed = 0;
@@ -899,7 +903,7 @@ show "㉑ ★ [#92] 感情キーワード辞書のユーザーカスタマイズ
       console.log((ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m") + "  " + label);
     }
     process.exit(failed === 0 ? 0 : 1);
-  ' "$ROOT3/created.json" "$ROOT3/before-overwrite.json" "$ROOT3/after-overwrite.json" "$R3/speech.jsonl"
+  ' "$ROOT3/created.json" "$ROOT3/before-overwrite.json" "$ROOT3/after-overwrite.json" "$R3/speech.jsonl" "${HAPPY_WORD}です" "${ANGRY_WORD}ことがありました"
 )
 
 show "結果の検証"

@@ -35,7 +35,7 @@ hook 方式への転換で、`textFilter.ts` が**上流と要件で食い違う
 
 守り切れないものを「編集禁止」と書いておくと、**制約の方が先に嘘になる**。実態に合わせて降ろした。
 
-**失うもの**: `defaultEmotionKeywords.ts`（235行の感情辞書）は上流が継続的に改善している。ここだけは惜しいので、上流に良い変更があれば diff を見て手で取り込む余地を残す（義務ではない）。
+**失うもの**: 感情辞書（`defaultEmotionKeywords.ts`）は上流が継続的に改善している。ただしこちらの辞書は Claude Code の発話に合わせて語彙を入れ替えてあり、**上流の辞書とは狙う対象がもう違う**。取り込む余地は実質的に無い。
 
 ## フォーク点
 
@@ -76,8 +76,8 @@ hook 方式への転換で、`textFilter.ts` が**上流と要件で食い違う
 | 上流 `electron/` | 移送先 `core/src/` | 行数 | 状態 |
 |---|---|---|---|
 | `filters/textFilter.ts` | `text/textFilter.ts` | 56（テスト 341） | ✅ 済 |
-| `services/ruleBasedEmotionClassifier.ts` | `emotion/ruleBasedEmotionClassifier.ts` | 292（テスト 328） | ✅ 済 |
-| `services/ruleBasedEmotionClassifier.ts`（キーワード辞書部分） | `emotion/defaultEmotionKeywords.ts` | 235 | ✅ 済 |
+| `services/ruleBasedEmotionClassifier.ts` | `emotion/ruleBasedEmotionClassifier.ts` | 274（テスト 336） | ✅ 済 |
+| `services/ruleBasedEmotionClassifier.ts`（キーワード辞書部分） | `emotion/defaultEmotionKeywords.ts` | 155 | ✅ 済 |
 
 テストはソースと同ディレクトリに並置された `*.test.ts` をそのまま持ってくる。**移植後はこのリポジトリのテストとして育てる**（上流に送る必要はない）。
 
@@ -98,15 +98,15 @@ hook 方式への転換で、`textFilter.ts` が**上流と要件で食い違う
 
 ### 実際に加えた改変
 
-型の重複を潰し、キーワード辞書を分離した。ロジックは触っていない。**契約の正は `core/src/core/types.ts`** に置く。
+型の重複を潰したうえで、**辞書と判定ロジックを Claude Code の発話に合わせて作り直した**。**契約の正は `core/src/core/types.ts`** に置く。
 
 | ファイル | 改変 |
 |---|---|
 | `text/textFilter.ts` | ヘッダのみ（**未改変**。`Modified` 行なし） |
 | `text/textFilter.test.ts` | ヘッダのみ（**未改変**） |
-| `emotion/ruleBasedEmotionClassifier.ts` | `export type Emotion = ...` の定義を削除し、`core/types` から `import type` + `export type` で再輸出。キーワード辞書を `defaultEmotionKeywords.ts` へ分離し、コンストラクタで差し替えられるようにした |
-| `emotion/ruleBasedEmotionClassifier.test.ts` | ヘッダのみ（**未改変**） |
-| `emotion/defaultEmotionKeywords.ts` | 辞書データのみを分離。キーの順を `Emotion` の宣言順に揃えた |
+| `emotion/ruleBasedEmotionClassifier.ts` | `export type Emotion = ...` の定義を削除し、`core/types` から `import type` + `export type` で再輸出。キーワード辞書を `defaultEmotionKeywords.ts` へ分離し、コンストラクタで差し替えられるようにした。`relaxed` を neutral に吸収する抑制の撤廃、疑問符での `surprised` 加点の撤廃、謝罪語が同居する文で `happy` を持ち上げない扱いを加えた |
+| `emotion/ruleBasedEmotionClassifier.test.ts` | 期待値を新しい設計に合わせて書き換え、作業状況と表情の対応を固定するテストを追加 |
+| `emotion/defaultEmotionKeywords.ts` | 辞書データを分離。キーの順を `Emotion` の宣言順に揃えたうえで、**語彙を全面的に入れ替えた** |
 
 `Emotion` を `core/types` 側に寄せたのは、この union が VRM の標準 expression 名と一対一で、`speech.jsonl` の契約そのものだから。感情判定器はその契約の実装であって、定義元ではない。
 
@@ -198,7 +198,7 @@ cc-mascot は jsonl ログ監視方式なので以下も持っているが、cha
 
 ## 上流の変更を見たくなったとき
 
-追従の義務は無いが、感情辞書の改善などを取り込みたくなることはある。
+追従の義務は無く、実際に追従する予定も無い。**感情辞書は語彙ごと入れ替えてあるので、上流の辞書改善を当てる先はもう存在しない。** 見るとすれば `textFilter.ts` 側になる。
 
 ```bash
 UPSTREAM=/Users/schwarz/dev/cc-mascot

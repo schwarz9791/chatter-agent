@@ -759,12 +759,8 @@ function processMessage(
     ? summarizeSentences(sentences, deps, state, messageId)
     : { spoken: sentences, summarized: false };
 
-  // ★ E1（issue #38 レビュー）: 要約が効いたときだけ、原文（要約前の全文）由来の感情を
-  //   全文で共有する。RuleBasedEmotionClassifier の文末パターン
-  //   （emotion/ruleBasedEmotionClassifier.ts の sentenceEndPatterns）はほぼ全部が
-  //   ！/？/…/♪/絵文字で、要約プロンプトの指示に従ってモデルが記号を落とすと、要約後の
-  //   文はほぼ確実に neutral に潰れる。要約が効かなかった（summarized: false）ときは
-  //   従来どおり文ごとに判定する（文ごとに表情が変わるのが正しい）
+  // 要約で記号が落ちると文単位の判定は neutral に潰れやすい。原文全体の判定を
+  // 保険として持っておき、文単体で判定できなかったときだけ借りる。
   const sharedEmotion = summarized ? deps.classify(sentences.join("\n")) : null;
 
   // ★ メッセージ1つ分をまとめて1回だけ publish すること。分けて呼ぶと `ts` が割れる
@@ -773,15 +769,20 @@ function processMessage(
   //   重複排除のキーは `(epoch, seq)` で、`ts` はそこには使わない
   if (spoken.length > 0) {
     deps.publish(
-      spoken.map((text): SpeechEntry => ({
-        source: "claude-code",
-        sessionId: content.sessionId,
-        turnId: content.turnId,
-        messageId,
-        kind: "assistant",
-        text,
-        emotion: sharedEmotion ?? deps.classify(text),
-      })),
+      spoken.map((text): SpeechEntry => {
+        // 文単体で判定できたならそれを使う。neutral にしか落ちなかったときだけ、
+        // 原文由来の感情（sharedEmotion）で補う。
+        const ownEmotion = deps.classify(text);
+        return {
+          source: "claude-code",
+          sessionId: content.sessionId,
+          turnId: content.turnId,
+          messageId,
+          kind: "assistant",
+          text,
+          emotion: ownEmotion !== "neutral" ? ownEmotion : (sharedEmotion ?? "neutral"),
+        };
+      }),
     );
   }
 

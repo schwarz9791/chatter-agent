@@ -82,16 +82,11 @@ export class RuleBasedEmotionClassifier {
       /[😢😭💔]+/u, // 悲しみの絵文字
     ],
     surprised: [
-      /[！!？?]$/, // 疑問符・感嘆符
+      /[！!]{2,}[？?]?$/, // 感嘆符（連続）
       // 女性言葉
       /え[っ〜～！!？?]+/, // えっ！、え〜？など
       /まさか[！!？?]/, // まさか！
-      /の[！!？?]$/, // なの！？
-      // 中性的・丁寧
-      /ですか[！!？?]$/, // そうですか！？
-      /ますか[！!？?]$/, // 本当ですか！？
       // 男性的
-      /のか[！!？?]$/, // そうなのか！？
       /だと[！!？?]$/, // マジだと！？
       // 共通
       /マジ[！!？?]/, // マジ！？
@@ -191,19 +186,7 @@ export class RuleBasedEmotionClassifier {
       }
     }
 
-    // 8. 感情の弱いrelaxed/sadをneutralに統合（技術説明の誤分類を防ぐ）
-    // relaxedが弱い場合（スコア6未満）、neutralを優先
-    if (scores.relaxed > 0 && scores.relaxed < 6) {
-      scores.neutral += scores.relaxed;
-      scores.relaxed = 0;
-    }
-    // neutralスコアが高く、sadが弱い場合、neutralを優先
-    if (scores.neutral >= 4 && scores.sad > 0 && scores.sad < 4) {
-      scores.neutral += scores.sad;
-      scores.sad = 0;
-    }
-
-    // 9. 最高スコアの感情を返す（デフォルトはneutral）
+    // 8. 最高スコアの感情を返す（デフォルトはneutral）
     let maxEmotion: Emotion = "neutral";
     let maxScore = 0;
 
@@ -233,11 +216,6 @@ export class RuleBasedEmotionClassifier {
     // 感情スコアの合計を計算
     const emotionScoreSum = scores.happy + scores.angry + scores.sad + scores.surprised + scores.relaxed;
     const hasEmotion = emotionScoreSum > 0;
-
-    // 疑問符で終わる → surprised傾向
-    if (/[？?]$/.test(text)) {
-      scores.surprised += 1;
-    }
 
     // 短い返事（明確なrelaxed表現のみ）
     if (text.length < 10) {
@@ -283,10 +261,14 @@ export class RuleBasedEmotionClassifier {
       }
     }
 
-    // ネガティブワード + 肯定 → happy（問題解決）
-    if (/(エラー|バグ|問題|失敗)/.test(text) && /(修正|解決|できた|成功|完了)/.test(text)) {
-      scores.happy += 4; // 強化
-      scores.angry = Math.max(0, scores.angry - 2); // ネガティブスコアを減らす
+    // 謝罪・自責の語が同居する文では happy を持ち上げない
+    const hasApology = /(申し訳|すみま|ごめん|すまな|ミス|見落と)/.test(text);
+    if (hasApology) {
+      scores.happy = Math.max(0, scores.happy - 4);
+    } else if (/(エラー|バグ|問題|失敗)/.test(text) && /(修正|解決|できた|成功|完了)/.test(text)) {
+      // ネガティブワード + 肯定 → happy（問題解決）
+      scores.happy += 4;
+      scores.angry = Math.max(0, scores.angry - 2);
     }
   }
 }

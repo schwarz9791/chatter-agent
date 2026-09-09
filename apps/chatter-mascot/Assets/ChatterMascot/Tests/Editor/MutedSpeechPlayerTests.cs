@@ -193,7 +193,7 @@ namespace ChatterMascot.Tests
         /// <summary>
         /// ★★ <b>待っている本数を <c>ActiveCount</c> に数えること。</b> 数えないと
         /// <c>AudioIdleGate</c> が「鳴っていない」と判定して出力デバイスを手放す
-        /// （macOS は <c>CanSuspendOutput == false</c> で無害だが、Android では効く → #25）。
+        /// （macOS は <c>CanSuspendOutput == false</c> で無害だが、Android では効く → #97）。
         /// </summary>
         [UnityTest]
         public IEnumerator CountsTheSilentWaitAsActive()

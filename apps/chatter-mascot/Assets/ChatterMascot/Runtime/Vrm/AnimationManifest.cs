@@ -77,7 +77,7 @@ namespace ChatterMascot.Vrm
         ///   選ばれるファイルが変わる）。
         /// ★ <paramref name="bundled"/> は最後のルート（同梱）の<b>後ろ</b>に同じ規則
         ///   （先勝ち・<c>FileName</c> で同名判定）でマージする。<b>今回は誰も渡さない</b>
-        ///   （#25 で Android 向けの同梱マニフェスト JSON が入るまで空）——それでも
+        ///   （#97 で Android 向けの同梱マニフェスト JSON が入るまで空）——それでも
         ///   引数だけは先に空けておく設計。
         /// </summary>
         public static AnimationManifest Build(AssetEnv env, IReadOnlyList<MotionClip> bundled = null)

@@ -176,7 +176,7 @@ namespace ChatterMascot.Tests
         /// <summary>
         /// ★★ <b>音量の上限は 1.0。</b> 1.0 超えが効くのは macOS（<c>afplay -v</c>）だけで、
         ///   Android の <c>AudioSource.volume</c> は Unity 側で 0〜1 にクランプされる。
-        ///   <c>settings.json</c> は XR（#25）と共有するので、
+        ///   <c>settings.json</c> は XR（#98）と共有するので、
         ///   <b>プラットフォームで意味の変わる範囲を持たせない</b>。
         /// </summary>
         [Test]

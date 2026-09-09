@@ -25,7 +25,7 @@ Android XR グラス（XREAL Aura）の両方をここからビルドする。
 ### 必要な Unity モジュール
 
 - **Mac Build Support (IL2CPP)** — macOS Standalone のビルドに要る
-- **Android Build Support**（OpenJDK / SDK & NDK 込み）— #25 で要る
+- **Android Build Support**（OpenJDK / SDK & NDK 込み）— #97 で要る
 
 ### Xcode コマンドラインツール（macOS のみ）
 
@@ -459,7 +459,7 @@ osascript -e 'tell application "System Events" to tell process "Chatter Mascot" 
 `Application.targetFrameRate` の上限を設定パネルの「モーション」→「フレームレート」から
 変えられる。**その2値以外は既定へフォールバックする**（クランプではない）。デスクトップ
 だけの項目——Android / XR には設定パネルが無いので、この JSON の既定がそのまま使われる
-（→ [#25](https://github.com/schwarz9791/chatter-agent/issues/25)）。60 fps の CPU コストは
+（→ [#98](https://github.com/schwarz9791/chatter-agent/issues/98)）。60 fps の CPU コストは
 [`../../docs/mascot.md`](../../docs/mascot.md) の「#88 時点の実測」に実測がある。
 
 ★★ **「大きさ」もここに無い。** ウィンドウの大きさは `window.json` が持っていて、

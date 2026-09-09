@@ -262,7 +262,7 @@ namespace ChatterMascot.Desktop
             ///
             /// ★ <b><c>Assets/</c> に <c>InputSettings</c> アセットを置かないこと。</b>
             ///   あれは <c>EditorBuildSettings</c> 経由でプロジェクト全体に効くので、
-            ///   <b>Android（#25）まで巻き込む</b>。常駐マスコットの都合なので
+            ///   <b>Android（#97）まで巻き込む</b>。常駐マスコットの都合なので
             ///   <c>ChatterMascot.Desktop</c> に閉じる。
             ///
             /// ★ <c>CursorGazeSource</c> / <c>DragStateGuard</c> の「新しい入力系のマウス状態は

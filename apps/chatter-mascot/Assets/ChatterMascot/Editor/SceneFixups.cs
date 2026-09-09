@@ -39,7 +39,7 @@ namespace ChatterMascot.EditorTools
         /// <summary>アウトラインの Renderer Feature。★ 型名で見る（型そのものは参照しない）。</summary>
         private const string OutlineFeatureType = "MToonOutlineRenderFeature";
 
-        /// <summary>★ <b>Mobile も見ること。</b> #25 で同じ罠を再度踏まないため。</summary>
+        /// <summary>★ <b>Mobile も見ること。</b> #97 で同じ罠を再度踏まないため。</summary>
         private static readonly string[] RendererAssets =
         {
             "Assets/Settings/PC_Renderer.asset",

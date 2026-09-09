@@ -36,7 +36,7 @@ namespace ChatterMascot
         ///   <c>vSyncCount: 0</c> のままの方が確実に効く（透過ウィンドウで VSync が効くかも不明）。
         ///
         /// ★ <b>この 30 はデスクトップ限定の値。</b> Android XR ではヘッドセットの
-        ///   リフレッシュレートに合わせる必要がある（→ #25）。VRM のリップシンクと
+        ///   リフレッシュレートに合わせる必要がある（→ #99）。VRM のリップシンクと
         ///   spring bone が入ったら見直す（→ #17）。
         ///
         /// ★ <b>デスクトップでは設定パネルの <c>display.frameRate</c>（#88）がこの値を上書きする</b>
@@ -44,7 +44,7 @@ namespace ChatterMascot
         ///   から効く。<b>Android / XR には設定パネルが無い</b>ので、この <c>[SerializeField]</c> の
         ///   既定（＝ <c>settings.json</c> を読めなかったときの既定でもある。→
         ///   <c>Settings.SettingsMapping.DefaultFrameRate</c>）がそのまま使われる。
-        ///   ヘッドセットのリフレッシュレートに合わせる話（#25）が入るまではここが権威。
+        ///   ヘッドセットのリフレッシュレートに合わせる話（#99）が入るまではここが権威。
         /// </summary>
         [Header("表示")]
         [Tooltip("フレームレートの上限。常駐アプリなので電力に直接効く。0 以下なら制限しない。" +
@@ -77,7 +77,7 @@ namespace ChatterMascot
         ///   返るので、補正しないと<b>口が音より先に動く</b>。Unity 内蔵オーディオの実装
         ///   （<c>AudioClipPlayer</c>）では 0 が正しい —— 原理的には発話ごとに持つべきだが、
         ///   <c>MascotRunner</c> は <see cref="ISpeechPlayer"/> 型しか持たない。
-        ///   Android を入れるとき（#25）に <c>ILipSyncSource</c> へ移す。
+        ///   Android を入れるとき（#97）に <c>ILipSyncSource</c> へ移す。
         ///
         /// ★ <b>負の側へ倒さないこと。</b> 口が音より先に動くより、遅れるほうが自然に見える。
         ///

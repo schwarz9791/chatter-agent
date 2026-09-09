@@ -301,7 +301,7 @@ TTS + 再生は生成よりずっと遅い。Claude Code は 2 秒で 20 文吐�
 
 ★★ **書き込み（`PATCH` / `POST`）は同じマシンからだけ。** それ以外は **404**。
 読み（`GET`）は今までと同じ姿勢（無認証・LAN から届く。→ 下の「セキュリティ」）のままにしてある ——
-XR クライアント（[#25](https://github.com/schwarz9791/chatter-agent/issues/25)）が
+XR クライアント（[#98](https://github.com/schwarz9791/chatter-agent/issues/98)）が
 LAN 越しに話者一覧を引けなくなるため。
 
 ```
@@ -328,7 +328,7 @@ POST  /v1/summary/preview  200 {"summary":"…","outcome":"ok","elapsedMs":11845
 ### 書き込み口の絞りは3重
 
 サーバーは既定 `host: 0.0.0.0` で無認証（→ 下の「セキュリティ」/ [#3](https://github.com/schwarz9791/chatter-agent/issues/3)）。
-**bind は変えない**（Android から繋ぐ #25 が死ぬ）。代わりに**書き込み口だけ**を絞る。
+**bind は変えない**（Android から繋ぐ #98 が死ぬ）。代わりに**書き込み口だけ**を絞る。
 
 | # | 絞り | 返す | 理由 |
 |---|---|---|---|
@@ -412,7 +412,7 @@ LAN からなら `GET, HEAD, OPTIONS` を返す。
 
 **LAN 上の他端末に対する認証は無い。** 既定の `0.0.0.0` バインドは、同一 LAN の誰でもエージェントの発言を読める状態を意味する。**会話のテキストに加えて、合成した音声も同じ口から取れる。** 信頼できないネットワークでは `host` を `127.0.0.1` にすること。認証の追加は [#3](https://github.com/schwarz9791/chatter-agent/issues/3)。
 
-★ **制御 API（[#76](https://github.com/schwarz9791/chatter-agent/issues/76)）でもこの姿勢は変えていない。** bind を絞ると LAN の Android から繋ぐ [#25](https://github.com/schwarz9791/chatter-agent/issues/25) が死ぬので、**新しく開いた書き込み口（`PATCH` / `POST`）だけをループバックに絞った**（→ 上の「制御 API」）。`GET /v1/config` は LAN から読める —— つまり **`playerCommand` などのローカルなパスが LAN に見える**。会話全文が既に読める状態と比べれば増分は小さいが、増えていないわけではない。ここを塞ぐのは認証（#3）の仕事。
+★ **制御 API（[#76](https://github.com/schwarz9791/chatter-agent/issues/76)）でもこの姿勢は変えていない。** bind を絞ると LAN の Android から繋ぐ [#98](https://github.com/schwarz9791/chatter-agent/issues/98) が死ぬので、**新しく開いた書き込み口（`PATCH` / `POST`）だけをループバックに絞った**（→ 上の「制御 API」）。`GET /v1/config` は LAN から読める —— つまり **`playerCommand` などのローカルなパスが LAN に見える**。会話全文が既に読める状態と比べれば増分は小さいが、増えていないわけではない。ここを塞ぐのは認証（#3）の仕事。
 
 ## 記録 — `{root}/speech.jsonl`
 

@@ -46,7 +46,7 @@ namespace ChatterMascot.EditorTools
             }
 
             // ★ 「すべてのプラットフォーム」を切ってから macOS だけ立てること。
-            //   立てるだけだと Any が残り、Android ビルドに混ざる（→ #25）
+            //   立てるだけだと Any が残り、Android ビルドに混ざる（→ #97）
             importer.SetCompatibleWithAnyPlatform(false);
             importer.SetCompatibleWithPlatform(BuildTarget.StandaloneOSX, true);
 

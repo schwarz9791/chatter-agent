@@ -41,7 +41,7 @@ namespace ChatterMascot.Vrm
         /// <c>chatter-agent-server</c> と共有できるファイルシステムがあるか。
         ///
         /// ★ <b>許可リストで書くこと。</b> 「Android を除く」と否定で書くと、
-        ///   #25 が持ち込む新しい XR プラットフォームが<b>黙って共有 FS を持つ扱い</b>になる。
+        ///   #97 が持ち込む新しい XR プラットフォームが<b>黙って共有 FS を持つ扱い</b>になる。
         /// </summary>
         private static bool HasSharedFileSystem()
         {

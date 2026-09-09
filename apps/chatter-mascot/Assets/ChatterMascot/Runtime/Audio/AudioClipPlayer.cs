@@ -157,7 +157,7 @@ namespace ChatterMascot.Audio
                 // ★ ここは AudioClip 用とエンベロープ用で**サンプルを二度デコードしている**。
                 //   消すには Decode から float[] を貰う形にする必要があるが、1発話あたり
                 //   数百 KB を一度余分になめるだけ（約 1ms）なので今はやらない。
-                //   この実装が主役になるのは Android（#25）なので、そのときに測って判断する
+                //   この実装が主役になるのは Android（#97）なので、そのときに測って判断する
                 Envelope = LipSyncEnvelope.BuildOrWarn(
                     wav, header, LipSyncEnvelope.DefaultFrameMs, ref _warnedEnvelope, Warn),
                 EnvelopeFrameMs = LipSyncEnvelope.DefaultFrameMs,

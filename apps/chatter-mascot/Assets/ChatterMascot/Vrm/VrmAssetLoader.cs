@@ -30,7 +30,7 @@ namespace ChatterMascot.Vrm
     /// ★ <b><c>File.ReadAllBytes</c> ではなく <c>UnityWebRequest</c> を使う。</b>
     ///   Android の <c>streamingAssetsPath</c> は APK 内の <c>jar:file://…</c> で、
     ///   パスからは読めない。<c>UnityWebRequest</c> なら <c>file://</c> も jar URL も
-    ///   同じコードで読め、#25 で「macOS では出るのに XR で出ない」を踏まずに済む。
+    ///   同じコードで読め、#97 で「macOS では出るのに XR で出ない」を踏まずに済む。
     ///
     /// ★ <b>存在確認を先にしないこと。</b> 同じ理由で <c>File.Exists</c> は
     ///   Android の同梱アセットに対して<b>必ず false</b> を返す（→ <see cref="AssetPath"/>）。

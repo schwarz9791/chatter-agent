@@ -36,7 +36,7 @@
 確実に効く（透過ウィンドウで VSync が効くかも確かめていない）。
 
 ★ **既定の 30fps はデスクトップ限定。** Android XR ではヘッドセットのリフレッシュレートに
-合わせる必要がある（→ #25）。`MascotRunner` の Inspector で変えられる。
+合わせる必要がある（→ #99）。`MascotRunner` の Inspector で変えられる。
 
 ★ **「リップシンクが入ったら 30fps で足りるか見直す」という宿題は #58 で閉じた。
 結論は 30fps 据え置き。** → 下の「30fps で口が足りるかの決着（#58）」
@@ -49,7 +49,7 @@
 書かないのは、VRM 読み込み中の一時的な引き上げ（`FrameRateBudget.Boost`）を上書きで
 消さないため。選択肢に無い値（`settings.json` を手で壊した場合など）は**クランプではなく
 既定へフォールバック**（警告ログつき）。Android/XR には設定パネルが無いので、この JSON の
-既定がそのまま使われる（→ #25）。
+既定がそのまま使われる（→ #98）。
 
 ### #59 時点の実測: フレームレート上限ありでの常駐 CPU
 
@@ -122,7 +122,7 @@ Unity 側は `ws://127.0.0.1:9`（listen していないポート）を焼いた
 
 | 手段 | なぜ使えないか |
 |---|---|
-| `AudioSettings.Mobile.StopAudioOutput()` | **iOS / Android 専用。** macOS でもコンパイルは通り例外も出ないが、実行すると Unity が `"implemented for iOS and Android only"` とログに出して**何もしない**（実測: 呼んだ後も 40秒間 `proc=1` のまま）。★ **Android では効くので #25 では使える** |
+| `AudioSettings.Mobile.StopAudioOutput()` | **iOS / Android 専用。** macOS でもコンパイルは通り例外も出ないが、実行すると Unity が `"implemented for iOS and Android only"` とログに出して**何もしない**（実測: 呼んだ後も 40秒間 `proc=1` のまま）。★ **Android では効くので #97 では使える** |
 | `Enable Output Suspension` | **Editor 専用**（公式マニュアル明記）。スタンドアロンには効かない |
 | `Disable Unity Audio` | 静的なプロジェクト設定。ランタイムに切り替えられない |
 | `AudioSettings.Reset()` | 「再初期化」であって解放ではない |
@@ -923,7 +923,7 @@ Android ではそのアセンブリが存在しないので解決先が無く、
 
 ★ **他人のコンポーネントは移せない。** `Mascot.unity` には `UniWindowController` プレハブが
 置いてあるので、**Android ビルドでは missing script が1件出たままになる**。
-剥がすならビルド時処理で、それは [#25](https://github.com/schwarz9791/chatter-agent/issues/25)。
+剥がすならビルド時処理で、それは [#97](https://github.com/schwarz9791/chatter-agent/issues/97)。
 
 ### ★ `scripts/run.sh` の grep を通らないログは存在しないのと同じ
 
@@ -1063,7 +1063,7 @@ Post Processing も無効のまま——**カメラの post-processing を有効
 （スーパーサンプリング）→ `UniversalAdditionalCameraData` 経由の FXAA（最後の手段。
 ポストプロセス扱いになるぶん透過との相性リスクが上がる）。
 
-`Mobile_RPAsset`（Android / XR）は触っていない（→ #25）。
+`Mobile_RPAsset`（Android / XR）は触っていない（→ #97）。
 
 ★ **効果が実機で目立ったのは、常用ディスプレイが 4K パネルの等倍（1x）運用のため。**
 `3840x2130 pt = px` で1ピクセル=1ポイントなので、Retina（2x）でスケーリングされる場合より
@@ -1833,7 +1833,7 @@ ack のように「送れたことを前提に手元から消す」値でこれ�
 明記している。イベント自体は呼ばれるが `false` が効かないので、
 **この経路の確認はビルドした `.app` でしか取れない**。Editor で ack が落ちても実装の失敗ではない。
 
-★ **iOS / iPadOS では戻り値が効かない**（ドキュメント明記）。**Android での挙動は未確認**（→ #25）。
+★ **iOS / iPadOS では戻り値が効かない**（ドキュメント明記）。**Android での挙動は未確認**（→ #97）。
 
 ★ `CloseAsync` の中で最後の ack を待つときは、**`_cancellation.Token` を渡さないこと**。
 直後の `Cancel()` が、たった今投げた送信を自分で中断する。
@@ -2107,7 +2107,7 @@ guid: a692ce6a5257a459fb5b8910fa38355f
 
 `PluginImporter` のブロックが無い＝**プラットフォームの絞り込みが記録されていない**。
 このままだと Unity が既定（すべてのプラットフォーム）でインポートし直すことがあり、
-**macOS のバンドルが Android ビルドに混ざる**（→ [#25](https://github.com/schwarz9791/chatter-agent/issues/25)）。
+**macOS のバンドルが Android ビルドに混ざる**（→ [#97](https://github.com/schwarz9791/chatter-agent/issues/97)）。
 
 ★ **Inspector で直さないこと。** `.bundle` は git に入っていない（バイナリはレビューできず、
 `plugin/bin/*.mjs` のように CI でソースとの一致を検証できない）ので、
@@ -2201,7 +2201,7 @@ C# だけの変更で済むのが、この作りを選んだ理由そのもの�
 ★ **`ActiveCount` に「無音で待っている本数」を足すこと。** 足さないとミュート中は
 本物の `ActiveCount` が常に 0 になり、`AudioIdleGate` が「鳴っていない」と判定して
 出力デバイスを手放す。macOS は `CanSuspendOutput == false` なので無害だが、
-**Android では実際に手放してしまう**（→ #25）。
+**Android では実際に手放してしまう**（→ #97）。
 
 ★ **`Prepare` は本物に委譲すること。** WAV の検証もエンベロープ生成も走るので、
 ミュートの有無で**ログの見え方が変わらない**。無音の原因を切り分けるとき、
@@ -2462,7 +2462,7 @@ InputSystem.settings.backgroundBehavior = InputSettings.BackgroundBehavior.Ignor
 ```
 
 ★ **`Assets/` に `InputSettings` アセットを置くより実行時に立てる方がよい。** アセットは
-`EditorBuildSettings` の `com.unity.input.settings` に登録が要り、**Android（#25）にも効いてしまう**。
+`EditorBuildSettings` の `com.unity.input.settings` に登録が要り、**Android（#97）にも効いてしまう**。
 常駐マスコットの都合なので `Desktop` asmdef に閉じる。
 
 **② それでも `OnPointerClick` は呼ばれない。座標が古いから。**
@@ -2873,7 +2873,7 @@ API not found (/v1). Update chatter-agent-server.
   観測した事実だけを出して、対処だけ添える
 - ★★ **このクライアントにとって 404 は「口が無い」だけ**だが、サーバー側にはもう1つ
   404 を返す枝がある（**ループバック以外からの書き込み**を「口の存在ごと見せない」で断る絞り）。
-  同じマシンで動く前提なので今は当たらないが、**#25 で別ホストに繋ぐようになると
+  同じマシンで動く前提なので今は当たらないが、**#98 で別ホストに繋ぐようになると
   書き込みだけ 404 になる** —— そのときはメソッドで出し分けること
 - ★ `Player.log` にも1行残す。パネルの note は**開いている間しか見えない**うえ、
   3項目がまとめて無効になる原因は後から突き合わせたくなる種類の情報
@@ -2885,7 +2885,7 @@ API not found (/v1). Update chatter-agent-server.
 （`audioSource.volume = 1.5` は黙って 1.0 になり、`AudioClipPlayer.CopySettings` はその 1.0 を
 各 voice に写す）。つまり**スライダーの右半分が XR では no-op** になる。
 
-`settings.json` は **XR（#25）と共有する前提**なので、doc を「macOS だけ 2.0 まで効く」と
+`settings.json` は **XR（#98）と共有する前提**なので、doc を「macOS だけ 2.0 まで効く」と
 書き直す逃げ道は採らなかった。**同じファイルの同じキーが、開いた環境によって意味を変える**のは
 設定として成立しない。上限を 1.0 に下げてある（`SettingsMapping.VolumeMax`）。
 
@@ -3207,7 +3207,7 @@ Unity 内蔵オーディオが有効なままだと Unity 側がデバイスを�
 **うち 95サンプルは afplay が鳴っている最中**だった（＝「鳴っていないから掴んでいない」ではない）。
 
 ★ **`AudioIdleGate` は macOS では働かない。** afplay 方式には手放すものが残っていないので
-`SuspendOutput` は no-op。**Android / iOS でだけ効く**（→ [#25](https://github.com/schwarz9791/chatter-agent/issues/25)）。
+`SuspendOutput` は no-op。**Android / iOS でだけ効く**（→ [#97](https://github.com/schwarz9791/chatter-agent/issues/97)）。
 それでも判定を切り出してあるのは、猶予の設計とテストをプラットフォーム間で共有するため。
 
 **「喋っていない期間」は `AudioIdleGate` を作るまでコードのどこにも存在しなかった。**
@@ -3345,7 +3345,7 @@ offset ぶんの先行区間で `envelope[0]` を返す＝音より先に口が�
 
 ★ `AudioClipPlayer` 側は `AudioClip` 用とエンベロープ用で**サンプルを二度デコードする**。
 消すには `Decode` から `float[]` を貰う形にする必要があるが、数百 KB を一度余分になめるだけ
-（約 1ms）なので今はやっていない。この実装が主役になるのは Android（#25）。
+（約 1ms）なので今はやっていない。この実装が主役になるのは Android（#97）。
 
 #### ★ ゲインと減衰は `FacePolicy` ではなく `MouthTracker` に置く
 
@@ -3748,7 +3748,7 @@ B = #70 **27.3%**（26.7 26.8 27.8 28.3 27.3 27.3。途中で小ネタが1本再
 `[Mascot] モーション開始: Emotion WIN00.vrma（happy、4.0s）` / `モーション終了`。
 
 **残した宿題**: `idle/` の 8.8〜18.2 秒が小ネタとして長いかは耳と目で判断する
-（Issue #70 に持ち越し）。Android の同梱マニフェスト JSON は #25（`AnimationManifest.Build` の
+（Issue #70 に持ち越し）。Android の同梱マニフェスト JSON は #97（`AnimationManifest.Build` の
 `bundled` 引数が口）。`__cool` / `__cute` は分類だけで設定なし。
 
 ### ★ Unity CLI
@@ -3821,4 +3821,4 @@ curl -fsSL https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh | UNITY_
 
 ★ **UniWindowController の macOS ネイティブプラグインが Android ビルドに混ざらないよう
 Plugin Inspector で macOS に限定すること。** XR パッケージは Android にだけ効かせる
-（→ [#25](https://github.com/schwarz9791/chatter-agent/issues/25)）。
+（→ [#99](https://github.com/schwarz9791/chatter-agent/issues/99)）。

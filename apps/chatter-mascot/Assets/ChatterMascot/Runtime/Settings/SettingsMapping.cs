@@ -24,7 +24,7 @@ namespace ChatterMascot.Settings
         /// ★★ <b>1.0 より上へ戻さないこと。</b> 1.0 超えが効くのは macOS
         ///   （<c>afplay -v</c>）だけで、Android の <see cref="UnityEngine.AudioSource.volume"/> は
         ///   <b>Unity 側で 0〜1 にクランプされる</b>（<c>AudioClipPlayer.CopySettings</c> は
-        ///   そのクランプ後の値を写す）。<c>settings.json</c> は XR（#25）と共有する前提なので、
+        ///   そのクランプ後の値を写す）。<c>settings.json</c> は XR（#98）と共有する前提なので、
         ///   <b>プラットフォームによって意味の変わる範囲を持たせない</b> ——
         ///   大きくしたいなら <c>AudioMixer</c> が要るが、それは<b>両方で効く形にしてから</b>入れる。
         ///

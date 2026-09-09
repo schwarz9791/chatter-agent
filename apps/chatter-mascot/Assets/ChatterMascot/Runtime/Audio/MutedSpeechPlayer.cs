@@ -65,7 +65,7 @@ namespace ChatterMascot.Audio
         /// ★ <b>待っている本数を足すこと。</b> 足さないと、ミュート中は本物の
         /// <c>ActiveCount</c> が常に 0 になり、<c>AudioIdleGate</c> が「鳴っていない」と判定して
         /// 出力デバイスを手放す。macOS は <c>CanSuspendOutput == false</c> なので無害だが、
-        /// <b>Android では実際に手放してしまう</b>（→ #25）。
+        /// <b>Android では実際に手放してしまう</b>（→ #97）。
         /// </summary>
         public int ActiveCount
         {

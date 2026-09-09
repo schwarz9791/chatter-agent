@@ -55,7 +55,7 @@ namespace ChatterMascot.Settings
                     ["vrm"] = settings.VrmFileName ?? "",
                 },
                 // ★ いまはデスクトップの設定パネルからしか書かない項目（→ MascotSettings.FrameRate
-                //   の doc）。settings.json 自体は XR（#25）と共有する前提なので、キーの置き場所は
+                //   の doc）。settings.json 自体は XR（#98）と共有する前提なので、キーの置き場所は
                 //   ここでよい —— ヘッドセットのリフレッシュレートに合わせる話が入るまでは既定のまま
                 ["display"] = new JObject
                 {

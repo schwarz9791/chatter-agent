@@ -48,7 +48,7 @@ namespace ChatterMascot.Net
     ///
     /// ★★ <b>書き込み（<c>PATCH</c> / <c>POST</c>）はサーバー側でループバック限定になっている。</b>
     ///   このクライアントが同じマシンで動く前提（→ <c>docs/protocol.md</c> の「制御 API」）。
-    ///   XR（#25）から設定を書く道はまだ無い。
+    ///   XR（#98）から設定を書く道はまだ無い。
     ///
     /// ★ <b><c>Origin</c> を付けないこと。</b> 付いた書き込みはサーバーが 403 で弾く
     ///   （WebView からの CSRF を塞ぐ仕掛け）。<c>UnityWebRequest</c> は既定で送らないので、
@@ -255,7 +255,7 @@ namespace ChatterMascot.Net
         ///   もう1つ 404 を返す枝がある（<b>ループバック以外からの書き込み</b>を
         ///   「口の存在ごと見せない」で断る絞り。→ <c>docs/protocol.md</c>）が、
         ///   このクライアントは同じマシンで動く前提なので当たらない。
-        ///   ★ <b>#25 で別ホストのサーバーに繋ぐようになったら、そこが崩れる</b> ——
+        ///   ★ <b>#98 で別ホストのサーバーに繋ぐようになったら、そこが崩れる</b> ——
         ///   書き込みだけ 404 になるので、そのときはメソッドで出し分けること。
         /// </summary>
         public static string DescribeFailure(long status, string body)

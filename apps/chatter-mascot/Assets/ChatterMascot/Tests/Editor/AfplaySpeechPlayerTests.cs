@@ -53,6 +53,25 @@ namespace ChatterMascot.Tests
             Assert.That(AfplaySpeechPlayer.TimeoutSecondsFor(-1), Is.EqualTo(120f).Within(0.01f));
         }
 
+        // ---- Process.Start の所要時間（純粋、#103） ----
+
+        [Test]
+        public void SpawnWarningIsNullBelowTheThreshold()
+        {
+            Assert.That(AfplaySpeechPlayer.SpawnWarning(AfplaySpeechPlayer.SpawnWarnMs - 1, 1233), Is.Null);
+        }
+
+        /// <summary>フレーム番号が載っていること——StallProbe の行と突き合わせる手がかり。</summary>
+        [Test]
+        public void SpawnWarningIncludesTheFrameAtTheThreshold()
+        {
+            var warning = AfplaySpeechPlayer.SpawnWarning(AfplaySpeechPlayer.SpawnWarnMs, 1233);
+
+            Assert.That(warning, Is.Not.Null);
+            StringAssert.Contains("frame=1233", warning);
+            StringAssert.Contains(AfplaySpeechPlayer.SpawnWarnMs + "ms", warning);
+        }
+
         // ---- Prepare / Discard ----
 
         [Test]

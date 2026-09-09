@@ -53,11 +53,13 @@ namespace ChatterMascot.Vrm
         /// <summary>読み込み済みの1本。<see cref="VrmMotionPlayer"/> の外へは出さない。</summary>
         private sealed class LoadedClip
         {
+            public readonly MotionClip Clip;
             public readonly Vrm10AnimationInstance Instance;
             public readonly Animation Animation;
 
-            public LoadedClip(Vrm10AnimationInstance instance, Animation animation)
+            public LoadedClip(MotionClip clip, Vrm10AnimationInstance instance, Animation animation)
             {
+                Clip = clip;
                 Instance = instance;
                 Animation = animation;
             }
@@ -84,11 +86,29 @@ namespace ChatterMascot.Vrm
 
         private bool _disposed;
         private PlayState _state = PlayState.Idle;
+
+        /// <summary>
+        /// <see cref="StateName"/> が返す値。<see cref="SetState"/> でしか書き換えない。
+        ///
+        /// ★ <b>常駐アプリの GC 予算のため。</b> <see cref="StateName"/> を毎回文字列補間で
+        ///   組むと、<see cref="VrmCharacter"/> がモーション再生中は毎フレーム（<c>Tick</c> の
+        ///   前後で2回、<c>StallProbe</c> 用に1回）呼ぶので確保が積み上がる
+        ///   （<c>SetWeightsNonAlloc</c> にこだわっているのと同じ理由）。遷移した瞬間だけ組み直す。
+        /// </summary>
+        private string _stateName = "Idle";
+
         private MotionKind _kind;
         private LoadedClip _current;
         private CrossFadeAnimation _fade;
         private bool _ended;
         private double _startedAt;
+
+        /// <summary>
+        /// いまの <see cref="_fade"/> について NaN の警告を出したか（#103）。<see cref="Play"/> と
+        /// FadeOut 開始（新しい <see cref="CrossFadeAnimation"/> を作る2箇所）で <c>false</c> に戻す
+        /// ——1フェードにつき1回だけ出す。
+        /// </summary>
+        private bool _fadeNaNWarned;
 
         public VrmMotionPlayer(VrmIdleAnimation idle, MotionParams p)
         {
@@ -128,6 +148,28 @@ namespace ChatterMascot.Vrm
 
         /// <summary>いま再生しているのが感情モーションか（<see cref="EmotionMotionTrigger"/> に渡す）。</summary>
         public bool IsPlayingEmotion => IsPlaying && _kind == MotionKind.Emotion;
+
+        /// <summary>
+        /// いまの状態の読み取り専用の文字列表現（<see cref="StallProbe"/> 用、#103）。
+        /// <c>Idle</c> か、<c>&lt;状態&gt;(&lt;ファイル名&gt;)</c>（例: <c>FadeOut(happy_01.vrma)</c>）。
+        ///
+        /// ★ <c>Time.*</c> はここでは読まない（クラスの doc を参照）。フレーム番号は
+        ///   呼び出し側（<see cref="VrmCharacter"/>）が持つ。
+        /// ★ 毎回組まない。<see cref="_stateName"/> の doc を参照。
+        /// </summary>
+        public string StateName => _stateName;
+
+        /// <summary>
+        /// <see cref="_state"/> と <see cref="_stateName"/> を同時に書き換える、唯一の書き口。
+        /// <c>_state</c> を直接代入しないこと——<see cref="_stateName"/> が古いまま取り残される。
+        /// </summary>
+        private void SetState(PlayState state)
+        {
+            _state = state;
+            _stateName = state == PlayState.Idle || _current == null
+                ? "Idle"
+                : $"{state}({_current.Clip.FileName})";
+        }
 
         /// <summary>
         /// 直前の <see cref="Tick"/> で待機へ戻り切ったら1回だけ <c>true</c>。呼ぶと消費する。
@@ -309,7 +351,7 @@ namespace ChatterMascot.Vrm
                                   "emotion とリップシンクが上書きされます");
             }
 
-            _loaded[clip] = new LoadedClip(vrma, animation);
+            _loaded[clip] = new LoadedClip(clip, vrma, animation);
             return true;
         }
 
@@ -373,10 +415,11 @@ namespace ChatterMascot.Vrm
             var from = _idle.Current != null ? _idle.Current.ControlRig : _idle.Idle.ControlRig;
             _fade = new CrossFadeAnimation(from, loaded.Instance.ControlRig, now, _params.FadeSeconds);
             _idle.Present(_fade);
+            _fadeNaNWarned = false;
 
             _current = loaded;
             _kind = kind;
-            _state = PlayState.FadeIn;
+            SetState(PlayState.FadeIn);
             // ★ 1本1行。実機で「出た／出ない」を Player.log から判定する唯一の手がかり
             //   （docs/mascot.md「顔が動かないのが正常と壊れて動かないはログでしか区別できない」と同じ理由）
             // ★★ #70 レビュー #8。上で取った state をそのまま使うこと。loaded.State を
@@ -399,11 +442,12 @@ namespace ChatterMascot.Vrm
 
                 case PlayState.FadeIn:
                     _fade.Tick(now);
+                    WarnIfFadeIsNaN();
                     if (_fade.IsDone)
                     {
                         _idle.Present(_current.Instance);
                         _fade = null;
-                        _state = PlayState.Playing;
+                        SetState(PlayState.Playing);
                     }
                     return;
 
@@ -415,12 +459,25 @@ namespace ChatterMascot.Vrm
                         _current.Animation.Stop();
                         _current = null;
                         _fade = null;
-                        _state = PlayState.Idle;
+                        SetState(PlayState.Idle);
                         return;
                     }
 
                     // ★ length まで待つと最終フレームを FadeSeconds ぶん保持してから戻る
                     var state = _current.State;
+
+                    // ★ VRMA の末尾に重複キーがあると、インポータが作る接線が NaN になり、
+                    //   クリップ長を越えた評価だけがそれで外挿されて hips が NaN になる。
+                    //   提示中のクリップを終端より先まで再生させないことで、ファイル側の
+                    //   重複キーを無害にする（#103）。短いクリップで length - FadeSeconds が
+                    //   負になり、下のフェードアウト開始判定より先に終端を越える経路も塞ぐ
+                    if (state != null && ClipEnd.Overshoots(state.time, state.length))
+                    {
+                        state.time = ClipEnd.Limit(state.length);
+                        // ★ 実行順 0 のここで差し直せば、11000 の Retarget は差し直した姿勢を読む
+                        _current.Animation.Sample();
+                    }
+
                     if (state == null || state.time >= state.length - _params.FadeSeconds)
                     {
                         if (state != null)
@@ -430,12 +487,26 @@ namespace ChatterMascot.Vrm
                         _fade = new CrossFadeAnimation(
                             _current.Instance.ControlRig, _idle.Idle.ControlRig, now, _params.FadeSeconds);
                         _idle.Present(_fade);
-                        _state = PlayState.FadeOut;
+                        _fadeNaNWarned = false;
+                        SetState(PlayState.FadeOut);
                     }
                     return;
 
                 case PlayState.FadeOut:
+                    // ★ VRMA の末尾に重複キーがあると、インポータが作る接線が NaN になり、
+                    //   クリップ長を越えた評価だけがそれで外挿されて hips が NaN になる。
+                    //   提示中のクリップを終端より先まで再生させないことで、ファイル側の
+                    //   重複キーを無害にする（#103）
+                    var fadeOutState = _current.State;
+                    if (fadeOutState != null && ClipEnd.Overshoots(fadeOutState.time, fadeOutState.length))
+                    {
+                        fadeOutState.time = ClipEnd.Limit(fadeOutState.length);
+                        // ★ 実行順 0 のここで差し直せば、11000 の Retarget は差し直した姿勢を読む
+                        _current.Animation.Sample();
+                    }
+
                     _fade.Tick(now);
+                    WarnIfFadeIsNaN();
                     if (_fade.IsDone)
                     {
                         _idle.PresentIdle();
@@ -443,11 +514,36 @@ namespace ChatterMascot.Vrm
                         Debug.Log($"[Mascot] モーション終了: {_kind} → 待機");
                         _current = null;
                         _fade = null;
-                        _state = PlayState.Idle;
+                        SetState(PlayState.Idle);
                         _ended = true;
                     }
                     return;
             }
+        }
+
+        /// <summary>
+        /// フェードの出力（Hips）に NaN が混ざっていないかを見て、混ざっていれば1回だけ警告する
+        /// （<see cref="_fadeNaNWarned"/> の doc、#103）。
+        ///
+        /// ★ VRMA 側の legacy Animation はこの <see cref="Tick"/> より前（<c>LateUpdate</c> 内で
+        ///   <c>Vrm10Runtime</c> の Retarget（実行順 11000）より前）に更新されている——ここで読む
+        ///   <see cref="LoadedClip.State"/> は Retarget が読む値と同じフレームのもの。
+        /// ★ <see cref="ClipEnd"/> のガードが効いていれば出ないはずのログ——出た場合は、
+        ///   ガードが対処していない別の発生源を疑う。
+        /// </summary>
+        private void WarnIfFadeIsNaN()
+        {
+            if (_fadeNaNWarned || _fade == null) return;
+            if (!_fade.TryDescribeNaN(out var nan)) return;
+
+            _fadeNaNWarned = true;
+            var animState = _current != null ? _current.State : null;
+            var time = animState != null ? animState.time : -1f;
+            var length = animState != null ? animState.length : -1f;
+            var clipFileName = _current != null ? _current.Clip.FileName : "?";
+            Debug.LogWarning(
+                $"[Mascot] モーション: フェードの出力が NaN です {_state} clip={clipFileName} " +
+                $"state.time={time:F3} length={length:F3} {nan}（VRMA の末尾の重複キーを疑う）");
         }
 
         /// <summary>
@@ -464,7 +560,7 @@ namespace ChatterMascot.Vrm
             }
             _current = null;
             _fade = null;
-            _state = PlayState.Idle;
+            SetState(PlayState.Idle);
             _idle.PresentIdle();
         }
 

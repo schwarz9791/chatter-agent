@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using UniGLTF.Utils;
 using UnityEngine;
 using UniVRM10;
@@ -171,6 +172,82 @@ namespace ChatterMascot.Vrm
             var hips = tpose.GetWorldTransform(HumanBodyBones.Hips);
             if (!hips.HasValue) return Vector3.zero;
             return CrossFade.NormalizeHipsDelta(pose.GetRawHipsPosition(), hips.Value.Translation);
+        }
+
+        /// <summary>
+        /// フェードの出力に NaN が混ざっていないかを診断する（#103）。<b>最初に見つかった1箇所だけ</b>
+        /// を <paramref name="description"/> に入れて <c>true</c> を返す。無ければ <c>false</c>。
+        ///
+        /// ★ 調べる順は「混ぜる前の入力（<c>from</c> / <c>to</c>）」→「混ぜた結果（<c>blend</c>）」。
+        ///   入力側で既に NaN なら、ブレンドの数式（<see cref="CrossFade"/>）を疑う理由が無い。
+        /// </summary>
+        public bool TryDescribeNaN(out string description)
+        {
+            var body = FindNaNBody();
+            if (body == null)
+            {
+                description = null;
+                return false;
+            }
+
+            description = body + " t=" + _t.ToString("F3", CultureInfo.InvariantCulture);
+            return true;
+        }
+
+        private string FindNaNBody()
+        {
+            var fromTPoseHips = _fromTPose.GetWorldTransform(HumanBodyBones.Hips)?.Translation;
+            if (fromTPoseHips.HasValue && HasNaN(fromTPoseHips.Value)) return Describe("from.tposeHips", fromTPoseHips.Value);
+
+            var fromRawHips = _fromPose.GetRawHipsPosition();
+            if (HasNaN(fromRawHips)) return Describe("from.rawHips", fromRawHips);
+
+            var toTPoseHips = _toTPose.GetWorldTransform(HumanBodyBones.Hips)?.Translation;
+            if (toTPoseHips.HasValue && HasNaN(toTPoseHips.Value)) return Describe("to.tposeHips", toTPoseHips.Value);
+
+            var toRawHips = _toPose.GetRawHipsPosition();
+            if (HasNaN(toRawHips)) return Describe("to.rawHips", toRawHips);
+
+            var blendHips = GetRawHipsPosition();
+            if (HasNaN(blendHips)) return Describe("blend", blendHips);
+
+            // ★ Retarget が Hips に渡す parentBone は常に LastBone
+            //   （ITPoseProviderExtensions.EnumerateBoneParentPairs の Hips 分岐と同じ）
+            var fromHipsRot = _fromPose.GetNormalizedLocalRotation(HumanBodyBones.Hips, HumanBodyBones.LastBone);
+            if (HasNaN(fromHipsRot)) return Describe("from.hipsRot", fromHipsRot);
+
+            var toHipsRot = _toPose.GetNormalizedLocalRotation(HumanBodyBones.Hips, HumanBodyBones.LastBone);
+            if (HasNaN(toHipsRot)) return Describe("to.hipsRot", toHipsRot);
+
+            var blendHipsRot = GetNormalizedLocalRotation(HumanBodyBones.Hips, HumanBodyBones.LastBone);
+            if (HasNaN(blendHipsRot)) return Describe("blend.hipsRot", blendHipsRot);
+
+            return null;
+        }
+
+        private static bool HasNaN(Vector3 v)
+        {
+            return float.IsNaN(v.x) || float.IsNaN(v.y) || float.IsNaN(v.z);
+        }
+
+        private static bool HasNaN(Quaternion q)
+        {
+            return float.IsNaN(q.x) || float.IsNaN(q.y) || float.IsNaN(q.z) || float.IsNaN(q.w);
+        }
+
+        private static string Describe(string label, Vector3 v)
+        {
+            return label + "=(" + v.x.ToString("F3", CultureInfo.InvariantCulture) + "," +
+                   v.y.ToString("F3", CultureInfo.InvariantCulture) + "," +
+                   v.z.ToString("F3", CultureInfo.InvariantCulture) + ")";
+        }
+
+        private static string Describe(string label, Quaternion q)
+        {
+            return label + "=(" + q.x.ToString("F3", CultureInfo.InvariantCulture) + "," +
+                   q.y.ToString("F3", CultureInfo.InvariantCulture) + "," +
+                   q.z.ToString("F3", CultureInfo.InvariantCulture) + "," +
+                   q.w.ToString("F3", CultureInfo.InvariantCulture) + ")";
         }
     }
 }

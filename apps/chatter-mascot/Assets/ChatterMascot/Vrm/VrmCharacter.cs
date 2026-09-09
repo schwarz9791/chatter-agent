@@ -222,6 +222,9 @@ namespace ChatterMascot.Vrm
         ///   または <see cref="OnDisable"/> 済み）は <see cref="MotionPlayResult.NotLoaded"/>。
         ///   <paramref name="clip"/><c> == null</c> も同じ値に落ちる（<c>VrmMotionPlayer.Play</c> の
         ///   拒否条件どおり）。
+        /// ★ <see cref="LateUpdate"/> の外から呼ばれるので <c>StallProbe</c> に "Play:" タグは
+        ///   付けない（#103）——次の <see cref="LateUpdate"/> のフレームまたぎ比較
+        ///   （<see cref="_probeLastStateName"/>）が "Idle→FadeIn(…)" として拾う。
         /// </summary>
         public MotionPlayResult PreviewMotion(MotionClip clip)
         {
@@ -400,6 +403,24 @@ namespace ChatterMascot.Vrm
         /// </summary>
         private readonly MouthTracker _mouth = new MouthTracker();
 
+        /// <summary>
+        /// メインスレッドのストールと hips / head の飛びを検知する（#103）。<see cref="_faceLatch"/> と
+        /// 同じ理由でフィールド初期化子——テストが当たる場所は <c>Runtime/Vrm/</c> の純粋クラスに
+        /// 置き、<c>MonoBehaviour</c> にはフィールドとして持つだけにする。
+        /// </summary>
+        private readonly StallProbe _stallProbe = new StallProbe();
+
+        /// <summary>
+        /// 前回 <see cref="LateUpdate"/> で見た <see cref="VrmMotionPlayer.StateName"/>（#103）。
+        /// 未読み込みなら <c>null</c>。
+        ///
+        /// ★ <b>遷移の検出は「呼び出し元」に依存させないこと。</b> <c>Tick</c> の前後を比べる形だと、
+        ///   <see cref="LateUpdate"/> の外（<see cref="PreviewMotion"/>、設定パネル経由）から
+        ///   <see cref="VrmMotionPlayer.Play"/> が呼ばれたケースを取り落とす——フレームをまたいで
+        ///   ここと今の <c>StateName</c> を比べれば、呼び出し元を問わず遷移が拾える。
+        /// </summary>
+        private string _probeLastStateName;
+
         private double _faceLoggedAt = double.NegativeInfinity;
 
         /// <summary>
@@ -559,6 +580,20 @@ namespace ChatterMascot.Vrm
             //   時計が巻き戻るとアイドルが凍る（AudioIdleGate と同じ理由）
             var now = Time.realtimeSinceStartupAsDouble;
 
+            // ★★ #103。実行順 0 のここでは、実ボーンはまだ前フレームの最終姿勢
+            //   （11000〜11010 の書き戻し後）のまま——SpringBone はこの下の処理では動かない。
+            //   deltaTime も同じフレーム内では変わらない。先頭で取るのは、下の処理
+            //   （Play による Present の差し替えなど）との順序に寄りかからないため
+            var stallFrame = Time.frameCount;
+            var stallDeltaTime = Time.deltaTime;
+            var stallUnscaledDeltaTime = Time.unscaledDeltaTime;
+            Vector3? stallHips = _instance != null && _instance.TryGetBoneTransform(HumanBodyBones.Hips, out var stallHipsTransform)
+                ? stallHipsTransform.position
+                : (Vector3?)null;
+            Vector3? stallHead = _instance != null && _instance.TryGetBoneTransform(HumanBodyBones.Head, out var stallHeadTransform)
+                ? stallHeadTransform.position
+                : (Vector3?)null;
+
             // ★ kind / emotion を先に既定値で確定させること。runner == null のときは
             //   && の短絡で TryGetSpeaking 自体が呼ばれず out に何も入らないので、
             //   `out var` で受けると CS0165（未割り当てローカル変数の使用）になる。
@@ -592,8 +627,35 @@ namespace ChatterMascot.Vrm
             //   FadeOut は Tick が毎フレーム進めないと終わらない。早期 return より後に置くと、
             //   `_idle.IsPlaying` が true の間（＝ VRMA 経路が有効な通常状態）は毎フレーム
             //   このメソッド自体に到達できず、感情モーションが一生 Playing のまま固まる
-            UpdateMotion(now, order);
-            UpdateMotionProbe(now);
+            var playEvent = CombineMotionEvents(UpdateMotion(now, order), UpdateMotionProbe(now));
+
+            // ★ #103。フレームまたぎで StateName を比べる（_probeLastStateName の doc）。
+            //   UpdateMotion / UpdateMotionProbe の**後**に取ること——SpringBone が積分するのは
+            //   このフレームの Present 後の姿勢なので、motion= に出す状態も Tick 後のものにする。
+            //   初回（_probeLastStateName がまだ null）は遷移扱いにしない
+            var stateNow = _motion != null ? _motion.StateName : "NotLoaded";
+            var transitionEvent = _probeLastStateName != null && !ReferenceEquals(stateNow, _probeLastStateName)
+                ? _probeLastStateName + "→" + stateNow
+                : null;
+            _probeLastStateName = stateNow;
+
+            var motionEvent = CombineMotionEvents(transitionEvent, playEvent);
+
+            // ★ 閾値未満なら Observe は空を返す（StallProbe の doc）
+            var stallSample = new StallSample
+            {
+                Frame = stallFrame,
+                Now = now,
+                DeltaTime = stallDeltaTime,
+                UnscaledDeltaTime = stallUnscaledDeltaTime,
+                HipsWorld = stallHips,
+                HeadWorld = stallHead,
+                MotionState = stateNow,
+                MotionEvent = motionEvent,
+                Speaking = Speaking,
+                Kind = Kind,
+            };
+            foreach (var line in _stallProbe.Observe(stallSample)) Debug.Log(line);
 
             // ★ UpdateGaze の中に置かないこと。UpdateGaze は先頭で gazeTarget == null ||
             //   _camera == null を早期 return するので、そこに置くとカメラが無いときに
@@ -617,11 +679,18 @@ namespace ChatterMascot.Vrm
         /// 呼ぶ位置は <see cref="LateUpdate"/> の doc を参照。
         /// </summary>
         /// <param name="order">いま鳴っている文の <c>SpeakingSet.Entry.Order</c>。鳴っていなければ -1。</param>
-        private void UpdateMotion(double now, long order)
+        /// <returns>
+        /// <see cref="VrmMotionPlayer.Play"/> をこのフレームで開始できたときだけ
+        /// <c>"Play:&lt;kind&gt;:&lt;file&gt;"</c>。無ければ <c>null</c>（<see cref="StallProbe"/> 用、#103）。
+        /// 状態遷移そのものの検出は <see cref="LateUpdate"/> 側（<see cref="_probeLastStateName"/>）が
+        /// フレームまたぎで行う——ここでは「なぜ Play したか」の由来だけを返す。
+        /// </returns>
+        private string UpdateMotion(double now, long order)
         {
-            if (_motion == null) return;
+            if (_motion == null) return null;
 
             _motion.Tick(now);
+
             if (_motion.ConsumeEnded(out var endedKind))
             {
                 // ★★ #70 レビュー #3。IdleAccentTimer.Reset は種別を問わず両方で呼んでよい
@@ -643,7 +712,7 @@ namespace ChatterMascot.Vrm
                     // ★ 実際に再生を開始できたときだけ、同カテゴリの抑制窓を消費する
                     //   （EmotionMotionTrigger.NotifyFired の doc）
                     _trigger.NotifyFired(category.Value, now);
-                    return;
+                    return "Play:" + MotionKind.Emotion + ":" + clip.FileName;
                 }
             }
 
@@ -654,8 +723,21 @@ namespace ChatterMascot.Vrm
             if (!_motion.IsPlaying && _accent.ShouldFire(now, Speaking))
             {
                 var clip = _motion.Loaded?.Pick(MotionCategory.Idle, () => UnityEngine.Random.value);
-                if (clip != null) _motion.Play(clip, MotionKind.Accent, now);
+                if (clip != null && _motion.Play(clip, MotionKind.Accent, now) == MotionPlayResult.Started)
+                {
+                    return "Play:" + MotionKind.Accent + ":" + clip.FileName;
+                }
             }
+
+            return null;
+        }
+
+        /// <summary>2つのモーションイベント文字列を連結する。片方が <c>null</c> ならもう片方をそのまま返す。</summary>
+        private static string CombineMotionEvents(string a, string b)
+        {
+            if (a == null) return b;
+            if (b == null) return a;
+            return a + "; " + b;
         }
 
         /// <summary>
@@ -666,17 +748,21 @@ namespace ChatterMascot.Vrm
         ///   <c>return</c> するので、その場合ここが呼ばれずに待ちの起点がずれる——独立した
         ///   呼び出しにして、毎フレーム確実に評価されるようにする。
         /// </summary>
-        private void UpdateMotionProbe(double now)
+        /// <returns>
+        /// <see cref="VrmMotionPlayer.Play"/> をこのフレームで開始できたときだけ
+        /// <c>"Play:Emotion:&lt;file&gt;"</c>。無ければ <c>null</c>（<see cref="StallProbe"/> 用、#103）。
+        /// </returns>
+        private string UpdateMotionProbe(double now)
         {
-            if (string.IsNullOrEmpty(_motionProbeArgument) || _motionProbeFired) return;
+            if (string.IsNullOrEmpty(_motionProbeArgument) || _motionProbeFired) return null;
             // ★★ #70 レビュー #2。Manifest ではなく Loaded で「揃った」を判定すること
             //   （→ VrmMotionPlayer.Loaded の doc）。Manifest は走査直後から非 null なので、
             //   それで判定するとプリロード中に Pick してしまい、まだ _loaded に無いクリップを
             //   選んで Play が黙って失敗する
-            if (_motion == null || _motion.Loaded == null || _idle == null || !_idle.IsLoaded) return;
+            if (_motion == null || _motion.Loaded == null || _idle == null || !_idle.IsLoaded) return null;
 
             if (double.IsNaN(_motionProbeReadyAt)) _motionProbeReadyAt = now;
-            if (now - _motionProbeReadyAt < MotionProbeDelaySeconds) return;
+            if (now - _motionProbeReadyAt < MotionProbeDelaySeconds) return null;
 
             _motionProbeFired = true;
 
@@ -685,18 +771,19 @@ namespace ChatterMascot.Vrm
             {
                 Debug.LogWarning($"[Mascot] motionProbe: '{_motionProbeArgument}' は既知のカテゴリではありません" +
                                   "（idle / happy / angry / sad / relaxed / surprised）");
-                return;
+                return null;
             }
 
             var clip = _motion.Loaded.Pick(category.Value, () => UnityEngine.Random.value);
             if (clip == null)
             {
                 Debug.Log($"[Mascot] motionProbe: カテゴリ '{_motionProbeArgument}' にクリップがありません");
-                return;
+                return null;
             }
 
             var result = _motion.Play(clip, MotionKind.Emotion, now);
             Debug.Log($"[Mascot] motionProbe: {clip.FileName} を{(result == MotionPlayResult.Started ? "再生します" : "再生できませんでした")}");
+            return result == MotionPlayResult.Started ? "Play:" + MotionKind.Emotion + ":" + clip.FileName : null;
         }
 
         /// <summary>

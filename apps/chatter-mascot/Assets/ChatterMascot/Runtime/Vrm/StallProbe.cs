@@ -52,7 +52,8 @@ namespace ChatterMascot.Vrm
     ///   これを補う。
     ///
     /// ★ 位置の NaN は Unity が警告しない（回転の NaN と違う）。hips / head のどちらかが
-    ///   NaN のフレームは <c>nanPose:</c> を窓や閾値に関係なく毎フレーム出す。
+    ///   非有限（NaN または ±Infinity。<see cref="Finite"/>）のフレームは <c>nanPose:</c> を
+    ///   窓や閾値に関係なく毎フレーム出す。
     /// </summary>
     public sealed class StallProbe
     {
@@ -112,10 +113,10 @@ namespace ChatterMascot.Vrm
                 lines.Add(FormatHipsJump(sample, hipsMoved.Value));
             }
 
-            // ★ 窓や閾値に関係なく無条件（NaN が続く間は毎フレーム出る）。位置の NaN は
+            // ★ 窓や閾値に関係なく無条件（非有限が続く間は毎フレーム出る）。位置の NaN は
             //   Unity が警告しないので、ここで拾わないと気づけない
-            var hipsIsNaN = sample.HipsWorld.HasValue && HasNaN(sample.HipsWorld.Value);
-            var headIsNaN = sample.HeadWorld.HasValue && HasNaN(sample.HeadWorld.Value);
+            var hipsIsNaN = sample.HipsWorld.HasValue && !Finite.IsFinite(sample.HipsWorld.Value);
+            var headIsNaN = sample.HeadWorld.HasValue && !Finite.IsFinite(sample.HeadWorld.Value);
             if (hipsIsNaN || headIsNaN)
             {
                 if (lines == null) lines = new List<string>();
@@ -139,9 +140,22 @@ namespace ChatterMascot.Vrm
             return lines != null ? (IReadOnlyList<string>)lines : NoLines;
         }
 
+        /// <summary>
+        /// 前フレームと今フレームの実ボーン位置から移動量（メートル）を測る。
+        ///
+        /// ★ <b>非有限（NaN / Infinity）から有限へ戻った瞬間も飛びとして扱う。</b>
+        ///   <c>Vector3.Distance</c> は片方が非有限だと NaN を返し、<c>NaN &gt;= HipsJumpMeters</c>
+        ///   は常に <c>false</c> なので、素の距離判定では SpringBone が異常な刻みを受ける
+        ///   当のフレーム（復帰フレーム）が <c>hipsJump:</c> から漏れる。<c>PositiveInfinity</c>
+        ///   を返せば既存の閾値判定（<c>&gt;= HipsJumpMeters</c>）がそのまま拾う。
+        /// </summary>
         private static float? Moved(Vector3? prev, Vector3? current)
         {
-            return prev.HasValue && current.HasValue ? Vector3.Distance(prev.Value, current.Value) : (float?)null;
+            if (!prev.HasValue || !current.HasValue) return null;
+
+            if (!Finite.IsFinite(prev.Value) && Finite.IsFinite(current.Value)) return float.PositiveInfinity;
+
+            return Vector3.Distance(prev.Value, current.Value);
         }
 
         private string FormatStall(in StallSample sample, double gap, float? hipsMoved, float? headMoved)
@@ -161,7 +175,7 @@ namespace ChatterMascot.Vrm
         private string FormatHipsJump(in StallSample sample, float hipsMoved)
         {
             return "[Mascot] hipsJump: frame=" + sample.Frame.ToString(CultureInfo.InvariantCulture) +
-                   " moved=" + hipsMoved.ToString("F3", CultureInfo.InvariantCulture) + "m" +
+                   " moved=" + FormatMoved(hipsMoved) +
                    " dt=" + sample.DeltaTime.ToString("F3", CultureInfo.InvariantCulture) +
                    " motion=" + sample.MotionState;
         }
@@ -188,16 +202,15 @@ namespace ChatterMascot.Vrm
                    " lastMotionEvent=" + FormatLastMotionEvent(sample.Frame);
         }
 
-        private static bool HasNaN(Vector3 v)
-        {
-            return float.IsNaN(v.x) || float.IsNaN(v.y) || float.IsNaN(v.z);
-        }
-
+        /// <summary>
+        /// ★ <c>PositiveInfinity</c>（<see cref="Moved"/> の doc）は「非有限から有限へ戻った」を
+        ///   表すので、数値ではなく <c>n/a→finite</c> として読めるようにする。
+        /// </summary>
         private static string FormatMoved(float? moved)
         {
-            return moved.HasValue
-                ? moved.Value.ToString("F3", CultureInfo.InvariantCulture) + "m"
-                : "n/a";
+            if (!moved.HasValue) return "n/a";
+            if (float.IsPositiveInfinity(moved.Value)) return "n/a→finite";
+            return moved.Value.ToString("F3", CultureInfo.InvariantCulture) + "m";
         }
 
         private string FormatLastMotionEvent(int frame)

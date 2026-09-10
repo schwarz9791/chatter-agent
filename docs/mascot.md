@@ -3115,30 +3115,43 @@ PNG は静止画なので OS 側では吸収されない。差し替えたら
   モデルが1フレーム消え、SpringBone が異常な刻みを受けて髪が「上から降りてくる」ように見える
 
 **対策**（`Runtime/Vrm/ClipEnd.cs`）: 提示中のクリップを、終端の手前（既定 1ms）より先まで
-進ませない。`VrmMotionPlayer.Tick` の `Playing` / `FadeOut` 両分岐で、`state.time` がその
-手前を越えていたら巻き戻して `Animation.Sample()` で差し直す——ファイル側の重複キーは直さず、
-**評価が届かない範囲に押し込める**ことで無害化する。
+進ませない。`VrmMotionPlayer.Tick` の `Playing` / `FadeIn` / `FadeOut` の3分岐すべてで
+（`ClampToClipEnd` に1箇所へ寄せてある）、`state.time` がその手前を越えていたら巻き戻して
+`Animation.Sample()` で差し直す——ファイル側の重複キーは直さず、**評価が届かない範囲に
+押し込める**ことで無害化する。`FadeIn` にも当てるのは、あちらの終了が壁時計だけで決まり
+`state.time` を見ないため——`FadeSeconds` より短いクリップだと、ここが無いと `to` 側が
+フェードの残り時間ずっと終端を越えて評価される。
 
-`Player.log` の5行の読み方:
+★ **重複キーの検査は読み込み時に1回だけ**（`VrmaLoader.ParseAsync`）。`animations[].samplers[].input`
+（時刻キー）に単調増加でない箇所があれば、ファイル名と件数を起動ログへ1回だけ警告する
+（`Runtime/Vrm/VrmaKeyframes.cs`）。フェード中の毎フレーム診断（後述の `Player.log` の行とは別物）
+に置くと、常駐アプリの寿命中ずっとコストが乗り続けるうえ、`FadeIn` 側は `to` クリップが
+`time≈0` なので原理的に末尾の重複キーを捕まえられない——読み込み時なら1回で済み、
+フェードの位相に依存しない。
+
+`Player.log` の5行の読み方（`stall:` / `hipsJump:` / `nanPose:` / `motionEdge:` の4つは
+**既定 OFF。`-stallProbe` の opt-in**——付けるのは `Player.log` の分布を取って調べるときだけ。
+[#105](https://github.com/schwarz9791/chatter-agent/issues/105) に着手するときに ON にする。
+`afplay` の行だけは opt-in ではなく常時出る）:
 
 - `stall: frame=… dt=… gap=… hips=… head=…` —— `dt` か `gap` のどちらかが閾値を超えたフレーム。
   `hips=` / `head=` が小さければ姿勢（実ボーン）は連続で、飛んでいるのは SpringBone の刻みだけ
 - `hipsJump: frame=… moved=…` —— 実ボーンの hips 自体が飛んだフレーム。出ていれば
-  SpringBone ではなく姿勢そのもの（クロスフェード or Retarget）を疑う
-- `nanPose: frame=… hips=<nan|ok> head=<nan|ok>…` —— hips / head のワールド位置に
-  `NaN` が混ざったフレーム。窓や閾値に関係なく、NaN が続く間は毎フレーム出る。
-  実機で髪が飛んだ瞬間はこれが出ていた
+  SpringBone ではなく姿勢そのもの（クロスフェード or Retarget）を疑う。**非有限（NaN /
+  ±Infinity）から有限へ戻った瞬間もここに出る**（`moved=n/a→finite`）——`Vector3.Distance` は
+  非有限を含むと NaN を返すので、素の距離判定では SpringBone が異常な刻みを受ける当のフレーム
+  （復帰フレーム）を取り落とす
+- `nanPose: frame=… hips=<nan|ok> head=<nan|ok>…` —— hips / head のワールド位置が
+  非有限（`NaN` または `±Infinity`。両方とも `nan` と表示する）なフレーム。窓や閾値に関係なく、
+  非有限が続く間は毎フレーム出る。実機で髪が飛んだ瞬間はこれが出ていた
 - `motionEdge: frame=… age=… hips=… head=… event=…` —— モーションの遷移が起きたフレームと、
   その直後数フレームを閾値に関係なく無条件に出す。`stall:` / `hipsJump:` のどちらも出ない
   ほど小さい飛びでも、切り替え直後の hips / head の動きをここで直接見られる
 - `afplay の起動に …ms かかりました（frame=…）` —— `Process.Start` の所要時間。`stall:` と
   `frame` が近ければ、ストール源をここまで絞り込める
 
-5行とも `frame=` で突き合わせて読むこと（配線は増やしていない——afplay 側とモーション側は
+いずれも `frame=` で突き合わせて読むこと（配線は増やしていない——afplay 側とモーション側は
 互いを参照しない）。
-
-★ **手元の `.vrma` に末尾重複キーがあるかは、glTF の `animations[].samplers[].input`
-（時刻の配列）の末尾2つが等しいかで検査できる。**
 
 ### ★ SpringBone は `Time.deltaTime` を素通しで積分する
 

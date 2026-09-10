@@ -62,7 +62,8 @@ namespace ChatterMascot.Tests
 
         /// <summary>
         /// ★ <c>gap</c> 単独でも立つ（<c>dt</c> はクランプ済みで正常値のまま）。
-        ///   <c>deltaTime</c> は 0.333 で頭打ちなので、真のストール長は <c>gap</c> でしか見えない。
+        ///   <c>deltaTime</c> は <c>Maximum Allowed Timestep</c> で頭打ちになるので（→ docs/mascot.md）、
+        ///   真のストール長は <c>gap</c> でしか見えない。
         /// </summary>
         [Test]
         public void GapAloneTriggersStall()
@@ -250,6 +251,36 @@ namespace ChatterMascot.Tests
             StringAssert.Contains("hips=nan", lines[0]);
             // head は渡していない（null）ので nan ではない
             StringAssert.Contains("head=ok", lines[0]);
+        }
+
+        /// <summary>
+        /// ★ NaN の次のフレームで有限へ戻ったら <c>hipsJump:</c> が出る（距離ではなく復帰そのものを
+        ///   飛びとして扱う——<c>Vector3.Distance</c> は非有限を含むと NaN を返し、素の距離判定では
+        ///   このフレームを取り落とす）。
+        /// </summary>
+        [Test]
+        public void HipsJumpFiresWhenHipsRecoversFromNaN()
+        {
+            var probe = new StallProbe();
+            probe.Observe(Sample(1, 0.0, 0.033f, 0.033f, new Vector3(float.NaN, 0f, 0f)));
+
+            var lines = probe.Observe(Sample(2, 0.033, 0.033f, 0.033f, Vector3.zero));
+
+            Assert.That(lines.Count, Is.EqualTo(1));
+            StringAssert.Contains("[Mascot] hipsJump:", lines[0]);
+            StringAssert.Contains("moved=n/a→finite", lines[0]);
+        }
+
+        /// <summary>★ ±Infinity も非有限として nanPose: が出る（float.IsNaN だけでは通ってしまう）。</summary>
+        [Test]
+        public void NanPoseFiresWhenHipsIsInfinite()
+        {
+            var probe = new StallProbe();
+            var lines = probe.Observe(Sample(1, 0.0, 0.033f, 0.033f, new Vector3(float.PositiveInfinity, 0f, 0f)));
+
+            Assert.That(lines.Count, Is.EqualTo(1));
+            StringAssert.Contains("[Mascot] nanPose:", lines[0]);
+            StringAssert.Contains("hips=nan", lines[0]);
         }
 
         /// <summary>通常の位置では、他の行（ここでは stall:）が立っても nanPose: は出ない。</summary>

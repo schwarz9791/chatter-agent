@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Threading.Tasks;
 using ChatterMascot.Settings;
@@ -57,6 +58,12 @@ namespace ChatterMascot.Audio
 
         /// <summary>同時に鳴っている本数がこれを超えたら警告する（診断のみ）</summary>
         private const int ProcessWarnThreshold = 8;
+
+        /// <summary>
+        /// <c>Process.Start</c> がこれ以上かかったら1行だけ警告する（ストール源の切り分け用、#103）。
+        /// ★ <c>StallProbe</c>（<c>ChatterMascot.Vrm</c>）の行と <c>frame=</c> で突き合わせて読む。
+        /// </summary>
+        public const long SpawnWarnMs = 50;
 
         private readonly string _command;
         private readonly Func<float> _volume;
@@ -157,6 +164,17 @@ namespace ChatterMascot.Audio
         }
 
         /// <summary>
+        /// <see cref="SpawnWarnMs"/> の判定と文言。<b>純粋関数</b>（テストで固定する）。
+        /// 閾値未満なら <c>null</c>。
+        /// </summary>
+        public static string SpawnWarning(long elapsedMs, int frame)
+        {
+            if (elapsedMs < SpawnWarnMs) return null;
+            return "afplay の起動に " + elapsedMs.ToString(CultureInfo.InvariantCulture) + "ms かかりました（frame=" +
+                   frame.ToString(CultureInfo.InvariantCulture) + "）";
+        }
+
+        /// <summary>
         /// WAV を一時ファイルに書く。
         ///
         /// ★ <b>ファイル名は呼び出し側の <paramref name="name"/> をそのまま使う</b>
@@ -208,6 +226,9 @@ namespace ChatterMascot.Audio
             ResumeOutput();
 
             Process process;
+            // ★ Process.Start だけを測る。既存の「起動ラグの較正ログ」（起動〜終了の合計）とは
+            //   別物なので混ぜない——こちらはストール源の切り分け用（#103）
+            var spawnStopwatch = Stopwatch.StartNew();
             try
             {
                 var info = new ProcessStartInfo
@@ -225,8 +246,19 @@ namespace ChatterMascot.Audio
             {
                 return "再生プロセスを起動できませんでした: " + e.Message;
             }
+            finally
+            {
+                spawnStopwatch.Stop();
+            }
 
             if (process == null) return "再生プロセスを起動できませんでした";
+
+            var spawnWarning = SpawnWarning(spawnStopwatch.ElapsedMilliseconds, Time.frameCount);
+            if (spawnWarning != null)
+            {
+                var warn = Warn;
+                if (warn != null) warn(spawnWarning);
+            }
 
             _running.Add(process);
             if (_running.Count > ProcessWarnThreshold && !_warnedProcessCount)

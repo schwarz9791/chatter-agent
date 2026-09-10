@@ -3095,6 +3095,89 @@ PNG は静止画なので OS 側では吸収されない。差し替えたら
 **パレット形式（`colortype=3`）も `tRNS` も普通に読む**。pngquant を通しても構わない。
 `validate.yml` が見ているのは**メタデータであって画像形式ではない**。
 
+### ★ VRMA の末尾の重複キーは、クリップ長を越えた評価で hips を NaN にする
+
+**実機で観測された髪の飛びはストールではなく、これだった。** ストール（`Time.deltaTime` の
+素通し。次の項）は同じ期間に何度も出ていたが、そのときは髪が飛んでいない。
+
+**根本原因**（実機ログと UniVRM のソースから特定）:
+
+- 一部の VRMA（VRoid Studio 書き出し）は**末尾のキーの時刻が重複している**
+  （最後の2〜3キーが同じ時刻で並ぶ）
+- UniVRM の `AnimationImporterUtil.CalculateTangent` は隣接キーの時刻差で割って接線を作るので、
+  重複キーの直前のキーの outTangent が `0/0 = NaN` になる（`AnimationCurve.AddKey` は
+  同時刻のキーを足さないが、NaN の接線はそのまま残る）
+- 範囲内（0 〜 クリップ長）の評価ではこの接線は使われない。**クリップ長を越えた時刻で
+  評価したときだけ**、その NaN の接線で外挿されて hips の位置が NaN になる
+- フェードアウトは `state.time >= length - FadeSeconds` になった最初のフレームで始まるため、
+  実際の終了は最大1フレームぶん後ろにずれる。位相によっては `WrapMode.ClampForever` の
+  legacy Animation がクリップ長を数 ms 超えて評価される——そのフレームだけ hips が NaN になり、
+  モデルが1フレーム消え、SpringBone が異常な刻みを受けて髪が「上から降りてくる」ように見える
+
+**対策**（`Runtime/Vrm/ClipEnd.cs`）: 提示中のクリップを、終端の手前（既定 1ms）より先まで
+進ませない。`VrmMotionPlayer.Tick` の `Playing` / `FadeIn` / `FadeOut` の3分岐すべてで
+（`ClampToClipEnd` に1箇所へ寄せてある）、`state.time` がその手前を越えていたら巻き戻して
+`Animation.Sample()` で差し直す——ファイル側の重複キーは直さず、**評価が届かない範囲に
+押し込める**ことで無害化する。`FadeIn` にも当てるのは、あちらの終了が壁時計だけで決まり
+`state.time` を見ないため——`FadeSeconds` より短いクリップだと、ここが無いと `to` 側が
+フェードの残り時間ずっと終端を越えて評価される。
+
+★ **重複キーの検査は読み込み時に1回だけ**（`VrmaLoader.ParseAsync`）。`animations[].samplers[].input`
+（時刻キー）に単調増加でない箇所があれば、ファイル名と件数を起動ログへ1回だけ警告する
+（`Runtime/Vrm/VrmaKeyframes.cs`）。フェード中の毎フレーム診断（後述の `Player.log` の行とは別物）
+に置くと、常駐アプリの寿命中ずっとコストが乗り続けるうえ、`FadeIn` 側は `to` クリップが
+`time≈0` なので原理的に末尾の重複キーを捕まえられない——読み込み時なら1回で済み、
+フェードの位相に依存しない。
+
+`Player.log` の5行の読み方（`stall:` / `hipsJump:` / `nanPose:` / `motionEdge:` の4つは
+**既定 OFF。`-stallProbe` の opt-in**——付けるのは `Player.log` の分布を取って調べるときだけ。
+[#105](https://github.com/schwarz9791/chatter-agent/issues/105) に着手するときに ON にする。
+`afplay` の行だけは opt-in ではなく常時出る）:
+
+- `stall: frame=… dt=… gap=… hips=… head=…` —— `dt` か `gap` のどちらかが閾値を超えたフレーム。
+  `hips=` / `head=` が小さければ姿勢（実ボーン）は連続で、飛んでいるのは SpringBone の刻みだけ
+- `hipsJump: frame=… moved=…` —— 実ボーンの hips 自体が飛んだフレーム。出ていれば
+  SpringBone ではなく姿勢そのもの（クロスフェード or Retarget）を疑う。**非有限（NaN /
+  ±Infinity）から有限へ戻った瞬間もここに出る**（`moved=n/a→finite`）——`Vector3.Distance` は
+  非有限を含むと NaN を返すので、素の距離判定では SpringBone が異常な刻みを受ける当のフレーム
+  （復帰フレーム）を取り落とす
+- `nanPose: frame=… hips=<nan|ok> head=<nan|ok>…` —— hips / head のワールド位置が
+  非有限（`NaN` または `±Infinity`。両方とも `nan` と表示する）なフレーム。窓や閾値に関係なく、
+  非有限が続く間は毎フレーム出る。実機で髪が飛んだ瞬間はこれが出ていた
+- `motionEdge: frame=… age=… hips=… head=… event=…` —— モーションの遷移が起きたフレームと、
+  その直後数フレームを閾値に関係なく無条件に出す。`stall:` / `hipsJump:` のどちらも出ない
+  ほど小さい飛びでも、切り替え直後の hips / head の動きをここで直接見られる
+- `afplay の起動に …ms かかりました（frame=…）` —— `Process.Start` の所要時間。`stall:` と
+  `frame` が近ければ、ストール源をここまで絞り込める
+
+いずれも `frame=` で突き合わせて読むこと（配線は増やしていない——afplay 側とモーション側は
+互いを参照しない）。
+
+### ★ SpringBone は `Time.deltaTime` を素通しで積分する
+
+`FastSpringBoneService.LateUpdate`（UniVRM、実行順 11010）は `Time.deltaTime` を**クランプ無しで**
+Verlet 積分に渡す。メインスレッドが詰まった直後のフレームは `deltaTime` が
+`Maximum Allowed Timestep`（`TimeManager.asset`）に張り付き、理屈のうえでは髪や揺れものの
+刻みが飛んで見えうる——**ただし実機で確認された髪の飛びの原因はこれではなかった**（→ 前項）。
+
+**この機構は一度、別の形ですでに踏んでいる。** `VrmStage.LateUpdate` はロード直後の1フレームだけ
+（`_framePending`）`_instance?.Runtime?.SpringBone?.RestoreInitialTransform()` を呼んでいる——
+これは「読み込み中に積もった巨大な `deltaTime` で髪が吹き飛ぶのを戻す」ための手当てで、
+今回と同じ現象への対処がすでに1箇所ある（→ `VrmStage.cs` の `Adopt` / `LateUpdate` のコメント）。
+**ただしその手当てはロード時の1回しか効かない。** 稼働中に起きるストールには誰も手当てしていない。
+
+★ **症状は詰まった当のフレームではなく、次のフレームに出る。** `deltaTime` が膨らむのは
+詰まりが終わって次の `Update` が回ったときなので、`Player.log` を読むときは1フレーム
+ずらして相関を取ること（`VrmCharacter.LateUpdate` に足したプローブは `frame=` を全行に載せている）。
+
+★ **`dt` は頭打ちになるので、詰まりの本当の長さは `gap`（`LateUpdate` 間の
+`Time.realtimeSinceStartupAsDouble` の差）で見ること。** `deltaTime` は
+`Maximum Allowed Timestep` で 0.333s に丸められるが、`gap` はクランプされない生の実時間差。
+
+★ **恒久対策（`Time.maximumDeltaTime` を下げる等）はまだ入れていない。** `stall:` 行は実機で
+0.2〜1秒のものが何度も出ているが、それ自体が髪を飛ばした証拠はまだ無い（→ 前項）。対策を
+入れるかは `Player.log` の分布を見てから別途判断する（#103）。
+
 ## 実装の決めごと
 
 ### `PlaybackQueue` に判断を集める

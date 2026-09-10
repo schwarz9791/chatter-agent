@@ -7,7 +7,8 @@
         "UniGLTF",
         "UniGLTF.Utils",
         "UniHumanoid",
-        "Unity.Timeline"
+        "Unity.Timeline",
+        "Unity.Collections"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

@@ -119,6 +119,10 @@ namespace ChatterMascot.Vrm
         [Tooltip("今の emotion / kind と実効 weight を1秒ごとにログへ出す。★ ビルド済みアプリでは起動引数 -faceLog 1 でも立てられる")]
         [SerializeField] private bool faceDebugLog;
 
+        [Header("診断")]
+        [Tooltip("メインスレッドのストールと hips / head の飛びを1行ログで出す（#103）。★ ビルド済みアプリでは起動引数 -stallProbe でも立てられる。既定 OFF——分布を取って調べるとき（#105）だけ付ける")]
+        [SerializeField] private bool stallProbeLog;
+
         /// <summary>
         /// 待機モーションを回すか（設定パネル / #76）。
         ///
@@ -400,6 +404,26 @@ namespace ChatterMascot.Vrm
         /// </summary>
         private readonly MouthTracker _mouth = new MouthTracker();
 
+        /// <summary>
+        /// メインスレッドのストールと hips / head の飛びを検知する（#103）。<see cref="_faceLatch"/> と
+        /// 同じ理由でフィールド初期化子——テストが当たる場所は <c>Runtime/Vrm/</c> の純粋クラスに
+        /// 置き、<c>MonoBehaviour</c> にはフィールドとして持つだけにする。
+        /// </summary>
+        private readonly StallProbe _stallProbe = new StallProbe();
+
+        /// <summary>
+        /// 前回 <see cref="LateUpdate"/> で見た <see cref="VrmMotionPlayer.StateName"/>（#103）。
+        /// <b>初回の <see cref="LateUpdate"/> の前だけ <c>null</c>。</b> <see cref="_motion"/>
+        /// <c> == null</c>（未読み込み）のときは <c>"NotLoaded"</c> が入る。
+        ///
+        /// ★ <b>遷移の検出は「呼び出し元」に依存させないこと。</b> <c>Tick</c> の前後を比べる形だと、
+        ///   <see cref="LateUpdate"/> の外（<see cref="PreviewMotion"/>、設定パネル経由）から
+        ///   <see cref="VrmMotionPlayer.Play"/> が呼ばれたケースを取り落とす——フレームをまたいで
+        ///   ここと今の <c>StateName</c> を比べれば、呼び出し元を問わず遷移が拾える。
+        /// ★ <see cref="stallProbeLog"/> が OFF の間は更新しない。
+        /// </summary>
+        private string _probeLastStateName;
+
         private double _faceLoggedAt = double.NegativeInfinity;
 
         /// <summary>
@@ -481,6 +505,14 @@ namespace ChatterMascot.Vrm
                 Debug.Log($"[Mascot] face ログの間隔をコマンドラインで上書きします: {faceLogMsValue}ms");
             }
 
+            // ★ #103 レビューで opt-in にした。既定 OFF——faceLog と同じ形（Flag。単独で渡せば有効化）
+            var stallProbe = CommandLine.Flag("-stallProbe", stallProbeLog);
+            if (stallProbe != stallProbeLog)
+            {
+                stallProbeLog = stallProbe;
+                Debug.Log($"[Mascot] stallProbeLog をコマンドラインで上書きします: {stallProbeLog}");
+            }
+
             // ★ #70。目視確認用。-motionProbe happy のように渡すと、モーションの読み込みが
             //   揃った3秒後に1回だけそのカテゴリを再生する（UpdateMotionProbe）
             _motionProbeArgument = CommandLine.Argument("-motionProbe");
@@ -559,6 +591,30 @@ namespace ChatterMascot.Vrm
             //   時計が巻き戻るとアイドルが凍る（AudioIdleGate と同じ理由）
             var now = Time.realtimeSinceStartupAsDouble;
 
+            // ★★ #103。実行順 0 のここでは、実ボーンはまだ前フレームの最終姿勢
+            //   （11000〜11010 の書き戻し後）のまま——SpringBone はこの下の処理では動かない。
+            //   deltaTime も同じフレーム内では変わらない。先頭で取るのは、下の処理
+            //   （Play による Present の差し替えなど）との順序に寄りかからないため
+            // ★ 既定 OFF（-stallProbe の opt-in、stallProbeLog の doc を参照）。骨の position 読みは
+            //   OFF の間は丸ごと飛ばす
+            var stallFrame = 0;
+            var stallDeltaTime = 0f;
+            var stallUnscaledDeltaTime = 0f;
+            Vector3? stallHips = null;
+            Vector3? stallHead = null;
+            if (stallProbeLog)
+            {
+                stallFrame = Time.frameCount;
+                stallDeltaTime = Time.deltaTime;
+                stallUnscaledDeltaTime = Time.unscaledDeltaTime;
+                stallHips = _instance != null && _instance.TryGetBoneTransform(HumanBodyBones.Hips, out var stallHipsTransform)
+                    ? stallHipsTransform.position
+                    : (Vector3?)null;
+                stallHead = _instance != null && _instance.TryGetBoneTransform(HumanBodyBones.Head, out var stallHeadTransform)
+                    ? stallHeadTransform.position
+                    : (Vector3?)null;
+            }
+
             // ★ kind / emotion を先に既定値で確定させること。runner == null のときは
             //   && の短絡で TryGetSpeaking 自体が呼ばれず out に何も入らないので、
             //   `out var` で受けると CS0165（未割り当てローカル変数の使用）になる。
@@ -595,6 +651,35 @@ namespace ChatterMascot.Vrm
             UpdateMotion(now, order);
             UpdateMotionProbe(now);
 
+            if (stallProbeLog)
+            {
+                // ★ #103。フレームまたぎで StateName を比べる（_probeLastStateName の doc）。
+                //   UpdateMotion / UpdateMotionProbe の**後**に取ること——SpringBone が積分するのは
+                //   このフレームの Present 後の姿勢なので、motion= に出す状態も Tick 後のものにする。
+                //   初回（_probeLastStateName がまだ null）は遷移扱いにしない
+                var stateNow = _motion != null ? _motion.StateName : "NotLoaded";
+                var transitionEvent = _probeLastStateName != null && !ReferenceEquals(stateNow, _probeLastStateName)
+                    ? _probeLastStateName + "→" + stateNow
+                    : null;
+                _probeLastStateName = stateNow;
+
+                // ★ 閾値未満なら Observe は空を返す（StallProbe の doc）
+                var stallSample = new StallSample
+                {
+                    Frame = stallFrame,
+                    Now = now,
+                    DeltaTime = stallDeltaTime,
+                    UnscaledDeltaTime = stallUnscaledDeltaTime,
+                    HipsWorld = stallHips,
+                    HeadWorld = stallHead,
+                    MotionState = stateNow,
+                    MotionEvent = transitionEvent,
+                    Speaking = Speaking,
+                    Kind = Kind,
+                };
+                foreach (var line in _stallProbe.Observe(stallSample)) Debug.Log(line);
+            }
+
             // ★ UpdateGaze の中に置かないこと。UpdateGaze は先頭で gazeTarget == null ||
             //   _camera == null を早期 return するので、そこに置くとカメラが無いときに
             //   キャッシュが更新されない。「同じ点を使う」（TryGetCachedGazeOrigin の doc）を
@@ -622,6 +707,7 @@ namespace ChatterMascot.Vrm
             if (_motion == null) return;
 
             _motion.Tick(now);
+
             if (_motion.ConsumeEnded(out var endedKind))
             {
                 // ★★ #70 レビュー #3。IdleAccentTimer.Reset は種別を問わず両方で呼んでよい

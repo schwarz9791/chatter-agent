@@ -40,6 +40,8 @@ ExportedObj/
 # クラッシュレポート
 sysinfo.txt
 crashlytics-build.properties
+mono_crash.*.json
+mono_crash.*.blob
 
 # ビルド成果物
 *.apk

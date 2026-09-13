@@ -1,6 +1,9 @@
 # ローカル専用の作業メモ（設計書はここに置いたまま。CLAUDE.md から参照している）
 _workspace/
 
+# 環境変数
+.env
+
 # Logs
 logs
 *.log

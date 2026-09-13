@@ -17,7 +17,7 @@ namespace ChatterMascot.EditorTools
     ///   <c>-batchmode</c> はダイアログを出さないので、この失敗の仕方をしない。
     ///
     /// <code>
-    /// /Applications/Unity/Hub/Editor/6000.5.8f1/Unity.app/Contents/MacOS/Unity \
+    /// /Applications/Unity/Hub/Editor/6000.3.14f1-arm64/Unity.app/Contents/MacOS/Unity \
     ///   -batchmode -quit -nographics \
     ///   -projectPath apps/chatter-mascot \
     ///   -executeMethod ChatterMascot.EditorTools.BuildScript.BuildMacOS \

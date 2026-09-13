@@ -13,7 +13,7 @@ Android XR グラス（XREAL Aura）の両方をここからビルドする。
 
 | | |
 |---|---|
-| Unity | **6**（開発は 6000.5.8f1） |
+| Unity | **6**（開発は 6000.3.14f1） |
 | レンダーパイプライン | **URP** |
 | VRM | [UniVRM](https://github.com/vrm-c/UniVRM) |
 | ウィンドウ制御（macOS） | [UniWindowController](https://github.com/kirurobo/UniWindowController) `com.kirurobo.uniwinc`（MIT） |

@@ -7,7 +7,7 @@
 #   呼び出し側からは「ハングした」としか見えない。
 set -euo pipefail
 
-UNITY_VERSION="${UNITY_VERSION:-6000.5.8f1}"
+UNITY_VERSION="${UNITY_VERSION:-6000.3.14f1-arm64}"
 UNITY_BIN="/Applications/Unity/Hub/Editor/${UNITY_VERSION}/Unity.app/Contents/MacOS/Unity"
 PROJECT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 

@@ -1024,6 +1024,7 @@ prefab にもシーンにも override が無く、`SetWindowSize` を呼ぶの�
 
 **決め手は URP Asset の `Supports HDR` を切ること、1つだけ**だった
 （macOS 26 / Unity 6000.5.8f1 / URP 17.5.0 で、on/off を往復させて確認した）。
+[#97](https://github.com/schwarz9791/chatter-agent/issues/97) で Unity 6000.3.14f1 / URP 17.3.0 に切り替えた後も同じ設定のままで、透過が保たれていることをビルドで再確認した。
 
 | 設定 | 透過に要るか |
 |---|---|
@@ -3334,10 +3335,13 @@ Unity 内蔵オーディオが有効なままだと Unity 側がデバイスを�
 当たるわけではない。★ ただし**シーンを一度でも保存すると値が焼かれる**ので、
 既定を変えるときはシーンも見ること。
 
-★ **`AudioManager.asset` に Unity 6 の新キーが4つ増えている**（`m_EnableOutputSuspension: 1` /
+★ **`AudioManager.asset` に Unity 6 世代の新キーが4つある**（`m_EnableOutputSuspension: 1` /
 `m_AudioFoundation: 0` / `m_OutputChannelLayout: 2` / `m_OutputSamplingRate: 48000`）。
 `BuildScript` が `m_DisableAudio` を書き換えるとき `AssetDatabase.SaveAssets()` が走り、
 Unity がアセット全体を再シリアライズしてテンプレートに無かったフィールドを既定値で書き出したもの。
+[#97](https://github.com/schwarz9791/chatter-agent/issues/97) で Unity 6000.3.14f1 に切り替え、
+FixAll・EditMode テスト・ビルドの一連を通しても4キーとも値は変わらなかった
+（Unity 6000.5.8f1 固有ではなく、6000.3.14f1 でも同じスキーマ・同じ既定値）。
 
 - **値はすべて Unity 6000.5.8f1 の既定値**。Editor バイナリの `-enhancedAudioFoundation` の
   ヘルプが `Default: 48000` / `Stereo (default)` と明記している
@@ -3837,9 +3841,11 @@ B = #70 **27.3%**（26.7 26.8 27.8 28.3 27.3 27.3。途中で小ネタが1本再
 ### ★ Unity CLI
 
 `unity` コマンド（[Unity CLI](https://unity.com/ja/blog/meet-the-unity-cli)）が
-手元に入っている。実体は `/Users/schwarz/.unity/bin/unity`、実測 **`1.0.0-beta.5`**（`unity --version`）。
-`unity doctor` は `auth.loggedIn true` / `editor.0 6000.5.8f1 arm64` を認識し、`unity editors` は
-インストール済みの `6000.5.8f1`（Android, SDK & NDK Tools, OpenJDK, Web）を拾う。導入は公式の
+手元に入っている。実体は `/Users/schwarz/.unity/bin/unity`、実測 **`1.0.0-beta.8`**（`unity --version`）。
+`unity doctor` は `auth.loggedIn true` と、インストール済みの Editor を `editor.0` / `editor.1`
+（現在は `6000.3.14f1 arm64` と `6000.5.8f1 arm64` の2本）として認識する。`unity editors` は
+両方を「Installed」列にパスつきで拾い、どちらも Android / Android SDK & NDK Tools / OpenJDK / Web の
+モジュールを持つ。導入は公式の
 
 ```bash
 curl -fsSL https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh | UNITY_CLI_CHANNEL=beta bash
@@ -3893,9 +3899,10 @@ curl -fsSL https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh | UNITY_
   **`BuildScript.BuildMacOS` の責務のまま**残る
 - ★ **`unity command` / `unity status` は `unity pipeline install` が要る** —
   `Packages/manifest.json` に依存が1本増える。**今は入れていない**
-- ★ `unity editors` が `6000.5.10f1` へのアップグレードを示唆してくるが、
-  **プロジェクトは `6000.5.8f1` 固定**（`ProjectSettings/ProjectVersion.txt` と
-  `scripts/unity.sh` の `UNITY_VERSION`）
+- ★ `unity editors` が `6000.3.14f1` に対して `6000.3.24f1` へのアップグレードを示唆してくるが、
+  **プロジェクトは `6000.3.14f1` 固定**（`ProjectSettings/ProjectVersion.txt` と
+  `scripts/unity.sh` の `UNITY_VERSION`。[#97](https://github.com/schwarz9791/chatter-agent/issues/97)
+  で `6000.5.8f1` から切り替えた）
 
 `scripts/*.sh` を Unity CLI に寄せる移行そのものは
 [#67](https://github.com/schwarz9791/chatter-agent/issues/67) で追う。

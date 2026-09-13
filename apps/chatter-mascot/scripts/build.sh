@@ -48,7 +48,7 @@ run_unity -quit \
   -executeMethod ChatterMascot.EditorTools.BuildScript.BuildMacOS \
   -buildScene "$SCENE" \
   -buildOutput "$OUTPUT" \
-  2>&1 | grep -E "^\[Build\]|^\[Native\]|error CS|Error building|Exception|BuildFailedException"
+  2>&1 | grep -E "^\[Build\]|^\[Native\]|error CS|Error building|Exception|BuildFailedException|Project has invalid dependencies|An error occurred while resolving packages"
 STATUS=${PIPESTATUS[0]}
 set -e
 

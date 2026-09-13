@@ -19,13 +19,13 @@ Android XR グラス（XREAL Aura）の両方をここからビルドする。
 | ウィンドウ制御（macOS） | [UniWindowController](https://github.com/kirurobo/UniWindowController) `com.kirurobo.uniwinc`（MIT） |
 | JSON | `com.unity.nuget.newtonsoft-json` |
 | XR（Android のみ） | `com.unity.xr.androidxr-openxr` + [Android XR Extensions for Unity](https://github.com/android/android-xr-unity-package) |
-| グラフィックス API | Metal（macOS）/ Vulkan（Android XR） |
+| グラフィックス API | Metal（macOS）/ Android は Vulkan（GLES3 フォールバック付き。Vulkan 単独にするのは [#99](https://github.com/schwarz9791/chatter-agent/issues/99)） |
 | 常駐（macOS のみ） | **自作の Objective-C プラグイン** `Assets/Plugins/macOS~/ChatterMascotNative/`（→ [#75](https://github.com/schwarz9791/chatter-agent/issues/75)） |
 
 ### 必要な Unity モジュール
 
 - **Mac Build Support (IL2CPP)** — macOS Standalone のビルドに要る
-- **Android Build Support**（OpenJDK / SDK & NDK 込み）— #97 で要る
+- **Android Build Support**（OpenJDK / SDK & NDK 込み）— Android ビルド（[#97](https://github.com/schwarz9791/chatter-agent/issues/97)）に要る。同梱の SDK / NDK / JDK だけで足り、外部の SDK 設定は要らない
 
 ### Xcode コマンドラインツール（macOS のみ）
 
@@ -63,8 +63,11 @@ CI で「ソースと一致するか」を検証する手段が無い（clang �
 その区別ができない。Newtonsoft の `JObject` なら判定できる。
 → `Assets/ChatterMascot/Runtime/Protocol/SpeechFrame.cs`
 
-★ **プラグインのプラットフォームを絞ること。** UniWindowController の macOS ネイティブプラグインが
-Android ビルドに混ざらないよう Plugin Inspector で macOS に限定し、XR パッケージは Android にだけ効かせる。
+★ **プラグインのプラットフォームを絞ること。** UniWindowController の同梱プラグインは
+**Plugin Inspector では絞れない**（git 参照のパッケージは読み取り専用で、書いたつもりでも
+残らない）ので、`BuildScript.BuildAndroid` がビルド時の delegate で外す（#97。
+→ [`../../docs/mascot.md`](../../docs/mascot.md)「プラットフォームを絞る」）。XR パッケージは
+Android にだけ効かせる（#99）。
 
 ★ **自作プラグイン（`ChatterMascotNative.bundle`）の設定は手で直さないこと。**
 `.bundle` が git に無いので、新規クローンには `.meta` しか無い。Unity が既定でインポートし直すと
@@ -383,6 +386,50 @@ cd apps/chatter-mascot
   **ディレクトリ名に pid が入る**のは、Editor の Play Mode とビルド済み `.app` を同時に
   動かしたときに、後発が先行インスタンスの再生中の WAV を消さないため
 
+### Android（[#97](https://github.com/schwarz9791/chatter-agent/issues/97)）
+
+XR なしの通常 Android アプリとして、接続 → 音声取得 → 再生 → ack と VRM の表示までが通る。
+XR（Full Space）は [#99](https://github.com/schwarz9791/chatter-agent/issues/99)、接続先の恒久化は
+[#98](https://github.com/schwarz9791/chatter-agent/issues/98)。
+
+前提は **Android Build Support（OpenJDK / SDK & NDK 込み）** だけ（6000.3.14f1 のインストールに
+入っている）。
+
+```bash
+cd apps/chatter-mascot
+./scripts/build-android.sh                     # → Build/ChatterMascot.apk（.gitignore 済み）
+
+~/Library/Android/sdk/emulator/emulator -avd XR_Glasses &   # 実機なら USB で繋ぐ
+./scripts/run-android.sh [Build/ChatterMascot.apk] [--no-logcat]
+```
+
+`run-android.sh` は `adb reverse tcp:8570 tcp:8570` → `install -r` → `am start` → `adb logcat -s Unity`
+の順に行う。`adb` は `$HOME/Library/Android/sdk/platform-tools/adb`（`ADB` 環境変数で上書き可）。
+端末側からは「自分自身の 8570」に繋いだつもりで Mac の `chatter-agent-server` に届くので、
+`MascotRunner` の既定 `ws://127.0.0.1:8570` はそのまま。
+
+logcat に出るはずの行:
+
+```
+[Mascot] server: ws://127.0.0.1:8570 / audio: http://127.0.0.1:8570/audio/
+[Mascot] … から 19,259,304 バイト読みました: jar:file:///…/base.apk!/assets/vita.vrm   ← 同梱モデル。persistentDataPath の候補が「読めませんでした」（404）なのは正常
+[Mascot] 無音が続いたのでオーディオ出力を止めました                                  ← 発話が来れば「掴み直しました」が続く
+```
+
+★★ **macOS のマスコットと同じサーバーへ同時に繋がないこと。** ack は累積で、速い方の ack が
+遅い方のまだ喋っていない entry を消す（[`../../docs/protocol.md`](../../docs/protocol.md) の
+「クライアント側の責務」6）。常用のサーバーが動いているなら、`XDG_CONFIG_HOME` と
+`CHATTER_AGENT_PORT` を変えた別のサーバーを立てて `adb reverse tcp:8570 tcp:<そのポート>` で
+そちらへ向ける（手順は [`../../docs/mascot.md`](../../docs/mascot.md)「検証時の接続」。
+合成エンジンは共有でよい）。
+
+★ **Editor（macOS）の Play Mode と Android 実機では再生の実体が違う**（上の「音の出し方」）。
+`AudioClipPlayer` と `StopAudioOutput()` の経路は APK でしか確かめられない。
+
+★ **エミュレータではキャラクターが白飛びする（未解決）。** 原因は特定できていない。
+実機での確認は [#100](https://github.com/schwarz9791/chatter-agent/issues/100)
+（→ [`../../docs/mascot.md`](../../docs/mascot.md)「#97 の実機実測」）。
+
 ---
 
 #### 設定パネルまわり（#76）
@@ -561,11 +608,21 @@ Unity / OpenXR / WebXR アプリは[そもそも Full Space でしか動かな�
 
 ### Android 側の必須設定
 
-`AndroidManifest.xml`:
+`AndroidManifest.xml` に最終的に要るもの:
 
 - `<uses-permission android:name="android.permission.INTERNET" />`
-- `<property android:name="android.window.PROPERTY_XR_ACTIVITY_START_MODE" android:value="XR_ACTIVITY_START_MODE_FULL_SPACE_MANAGED" />`
-- `<uses-feature android:name="android.software.xr.immersive" />`
+- `<application android:usesCleartextTraffic="true">`（`ws://` と `http://` のため）
+- `<property android:name="android.window.PROPERTY_XR_ACTIVITY_START_MODE" android:value="XR_ACTIVITY_START_MODE_FULL_SPACE_UNMANAGED" />`
+  — ★ `MANAGED` は Jetpack XR 専用。OpenXR アプリは `UNMANAGED`
+- `<uses-feature android:name="android.software.xr.api.openxr" android:required="true" android:version="0x00010001" />`
+  — ★ `android.software.xr.immersive` ではない
+
+★ **XR まわりの2つは手で書かない。** `com.unity.xr.androidxr-openxr` がビルド時に注入する
+（[#99](https://github.com/schwarz9791/chatter-agent/issues/99)）。自分で書くのは `INTERNET` と
+cleartext だけで、それも静的な `Assets/Plugins/Android/AndroidManifest.xml` ではなく
+`AndroidManifestPostProcessor`（Gradle 生成後のフック。[#97](https://github.com/schwarz9791/chatter-agent/issues/97)）が
+書く。★ **Unity は `INTERNET` は書くが `usesCleartextTraffic` は書かない**ので、このフックは保険ではない
+（→ [`../../docs/mascot.md`](../../docs/mascot.md)「プラットフォームを絞る」）。
 
 **ネットワーク**（見落としやすい）:
 
@@ -588,8 +645,15 @@ Unity / OpenXR / WebXR アプリは[そもそも Full Space でしか動かな�
 2. SDK Manager から `Android XR ARM 64 v8a` イメージを入れる
 3. Device Manager で **XR Glasses** フォームファクタの AVD を作る
 
+手元には `XR_Glasses`（光学シースルーの模擬）と `XR_Headset2`（ビデオパススルー）の2つの AVD がある。
+起動は `~/Library/Android/sdk/emulator/emulator -avd XR_Glasses`、`adb` は
+`~/Library/Android/sdk/platform-tools/adb`（`scripts/run-android.sh` の既定と同じ）。
+
 **できること**: モデル表示・アニメーション・パネル配置の確認、Passthrough トグル、Environment Dimming
 **できないこと**: 実際のフレームレート、視野角での見え方、ハンドトラッキング精度
+
+★ **エミュレータで見えた色を信用しないこと。** #97 の APK は `XR_Glasses` / `XR_Headset2` の両方で
+キャラクターが白飛びした（macOS ビルドでは正常。原因未特定。→ [`../../docs/mascot.md`](../../docs/mascot.md)「#97 の実機実測」）。
 
 ### 実機（XREAL Aura）で最初に確認すること
 
@@ -612,7 +676,12 @@ Unity / OpenXR / WebXR アプリは[そもそも Full Space でしか動かな�
 
 Unity を **XR機能なしの通常 Android アプリ**としてビルドすれば Home Space の2Dパネルとして動き、
 Android版 Claude アプリ等と並べられる。引き換えに空間的な実在感は失われる。
-また**パネル背景を透過できるかは未検証**で、できない場合はキャラの周りに四角い板が見える。
+
+**パネル背景の透過はエミュレータの範囲で答えが出ている**（#97 の APK がまさにこの形）:
+`XR_Glasses` ではカメラを不透明の黒でクリアしても部屋が透けて見える —— フレームバッファの alpha に
+関わらず**黒は見えない**（光学シースルーの模擬。黒 = 光が無い）ので、透過は何もしなくても成立するが、
+**暗い色は実背景に負けて薄まる**。`XR_Headset2`（ビデオパススルー）では同じ APK が不透明の黒い板になる。
+パネルには `_ × [] [ ]` のタイトルバーが付く。実機での見え方は [#100](https://github.com/schwarz9791/chatter-agent/issues/100)。
 
 ---
 

@@ -426,9 +426,7 @@ logcat に出るはずの行:
 ★ **Editor（macOS）の Play Mode と Android 実機では再生の実体が違う**（上の「音の出し方」）。
 `AudioClipPlayer` と `StopAudioOutput()` の経路は APK でしか確かめられない。
 
-★ **エミュレータではキャラクターが白飛びする（未解決）。** 原因は特定できていない。
-実機での確認は [#100](https://github.com/schwarz9791/chatter-agent/issues/100)
-（→ [`../../docs/mascot.md`](../../docs/mascot.md)「#97 の実機実測」）。
+★ **エミュレータではキャラクターが白飛びする（未解決）。** → [#110](https://github.com/schwarz9791/chatter-agent/issues/110)
 
 ---
 
@@ -652,8 +650,7 @@ cleartext だけで、それも静的な `Assets/Plugins/Android/AndroidManifest
 **できること**: モデル表示・アニメーション・パネル配置の確認、Passthrough トグル、Environment Dimming
 **できないこと**: 実際のフレームレート、視野角での見え方、ハンドトラッキング精度
 
-★ **エミュレータで見えた色を信用しないこと。** #97 の APK は `XR_Glasses` / `XR_Headset2` の両方で
-キャラクターが白飛びした（macOS ビルドでは正常。原因未特定。→ [`../../docs/mascot.md`](../../docs/mascot.md)「#97 の実機実測」）。
+★ **エミュレータで見えた色を信用しないこと。** → [#110](https://github.com/schwarz9791/chatter-agent/issues/110)
 
 ### 実機（XREAL Aura）で最初に確認すること
 

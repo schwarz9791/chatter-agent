@@ -4087,14 +4087,9 @@ adb reverse tcp:8570 tcp:8571        # run-android.sh が張った 8570→8570 �
 | 無音時の解放 | `無音が続いたのでオーディオ出力を止めました` → `オーディオ出力を掴み直しました` → 再び停止。`AudioSettings.Mobile.StopAudioOutput/StartAudioOutput` の経路が動き、発話は落ちない |
 | fps / 音量 | 設定パネルが無いので既定（30 fps / 1.0） |
 
-★★ **キャラクターが大きく白飛びする（未解決。原因は特定していない。→
-[#100](https://github.com/schwarz9791/chatter-agent/issues/100) か新しい Issue）。** Vita の紺の衣装が
-ほぼ白に描かれ、暗い背景に重なる部分だけ紺が残る。同じ `vita.vrm` の macOS ビルドは作者どおりの
-紺／青緑。**APK を分けて試して、どれも結果を変えなかった**: Vulkan ではなく GLES3 を先頭に／カメラ
-背景の alpha を 1（不透明の黒）／`Mobile_RPAsset` の render scale を 0.8 → 1.0／
-`preserveFramebufferAlpha: 1`（Render Over Native UI）。ビデオパススルーの `XR_Headset2` AVD では
-パネルが期待どおり不透明の黒で、**それでも白飛びする**ので光学シースルーの合成の産物ではない。
-エミュレータの GPU は gfxstream（`ro.hardware.egl=angle`、Vulkan は `ranchu`）。
+★ **キャラクターが白飛びする（未解決）。** 切り分けの経過と結果は
+[#110](https://github.com/schwarz9791/chatter-agent/issues/110)。
+
 ★ Unity 6 の Release プレイヤーは logcat にグラフィックス API 名を出さない。
 
 ★ **`XR_Glasses` AVD の Home Space パネルは、カメラを不透明の黒でクリアしても部屋が透けて見える。**

@@ -3944,6 +3944,11 @@ curl -fsSL https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh | UNITY_
 `NativePluginSettings.FixAll`）。新規クローンでは `./scripts/build-native.sh`
 （または、それを呼ぶ `./scripts/build.sh`）を**最初に**走らせる。
 
+★★ **シェーダーのコンパイル中に Unity を殺すと `Library/ShaderCache` が壊れる。** 症状は
+ビルドエラーではなく、次のビルドで **MToon10 の本体パスだけが描かれず、アウトラインの
+暗いシルエットだけが出る**（ログには何も出ない）。`Library/ShaderCache` を消して作り直せば戻る。
+バリアント削減を切るなど全バリアントの再コンパイルを伴う変更は、途中で止めないこと。
+
 ★ **失敗したビルドは `Assets/Resources/`（と `.meta`）を残す。**
 `com.unity.test-framework.performance` の `TestRunBuilder`（`IPreprocessBuildWithReport`）が
 毎 `BuildPlayer` の前に作り `OnPostprocessBuild` で消すが、ビルドが throw すると後始末が走らない。
@@ -3962,6 +3967,17 @@ Unity 6000.3.14f1 同梱の SDK / NDK / JDK だけで足りる（外部の SDK �
 XR 自体は [#99](https://github.com/schwarz9791/chatter-agent/issues/99)、接続先の恒久化は
 [#98](https://github.com/schwarz9791/chatter-agent/issues/98)、実機は
 [#100](https://github.com/schwarz9791/chatter-agent/issues/100)。
+
+### Android では MToon10 を UniUnlit に差し替える
+
+VRM の読み込み直後、`VrmStage.Adopt` が `VrmMaterialCheck.Inspect` の後に
+`UnlitFallbackPolicy.AppliesTo(Application.platform)`（Android のみの許可リスト）で判定し、
+真なら `UnlitFallback.Apply`（`Assets/ChatterMascot/Vrm/`）が全マテリアルを
+`UniGLTF/UniUnlit` へ差し替える。理由は MToon10 の陰影計算が Android で白飛びするため
+（原因は未特定 → [#110](https://github.com/schwarz9791/chatter-agent/issues/110)）。
+テクスチャと色は unlit 化前に読み直しているので正しく出るが、陰影・アウトライン・
+リムライトは失う（表情には影響しない）。実機で MToon10 がそのまま正しく出るなら
+外す判断は [#100](https://github.com/schwarz9791/chatter-agent/issues/100)。
 
 ### Player Settings は `AndroidPlayerSettings.FixAll` が書く（1回走らせてコミット）
 
@@ -4089,6 +4105,7 @@ adb reverse tcp:8570 tcp:8571        # run-android.sh が張った 8570→8570 �
 
 ★ **キャラクターが白飛びする（未解決）。** 切り分けの経過と結果は
 [#110](https://github.com/schwarz9791/chatter-agent/issues/110)。
+対応は UniUnlit への差し替え（→ 上の「Android では MToon10 を UniUnlit に差し替える」）。
 
 ★ Unity 6 の Release プレイヤーは logcat にグラフィックス API 名を出さない。
 

@@ -426,7 +426,9 @@ logcat に出るはずの行:
 ★ **Editor（macOS）の Play Mode と Android 実機では再生の実体が違う**（上の「音の出し方」）。
 `AudioClipPlayer` と `StopAudioOutput()` の経路は APK でしか確かめられない。
 
-★ **エミュレータではキャラクターが白飛びする（未解決）。** → [#110](https://github.com/schwarz9791/chatter-agent/issues/110)
+★ **Android では MToon10 を UniUnlit に差し替えて描く**（陰影・アウトライン無し。MToon10 のライティングが
+白飛びするため。→ [#110](https://github.com/schwarz9791/chatter-agent/issues/110)）。logcat に
+`[Mascot] MToon を UniUnlit に差し替えました: 15 件` が出る
 
 ---
 

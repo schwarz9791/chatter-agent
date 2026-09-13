@@ -283,6 +283,14 @@ namespace ChatterMascot.Vrm
             _gltf = instance.GetComponent<RuntimeGltfInstance>();
             VrmMaterialCheck.Inspect(_gltf);
 
+            // ★ 検査のすぐ後でよい。シェーダーの差し替えは見た目にしか影響せず、
+            //   ControlRig 生成や回転（この下）とは独立している
+            if (UnlitFallbackPolicy.AppliesTo(Application.platform))
+            {
+                var replaced = UnlitFallback.Apply(instance.gameObject);
+                Debug.Log($"[Mascot] MToon を UniUnlit に差し替えました: {replaced} 件");
+            }
+
             // ★ **回す前に ControlRig を作らせること。** Vrm10Runtime は遅延生成で、
             //   放っておくと LateUpdate の初回アクセス（SpringBone.RestoreInitialTransform）で
             //   ＝ FaceCamera の**後**に作られる。

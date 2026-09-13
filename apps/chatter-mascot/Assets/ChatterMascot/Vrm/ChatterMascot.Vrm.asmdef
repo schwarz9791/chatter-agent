@@ -6,6 +6,7 @@
         "VRM10",
         "UniGLTF",
         "UniGLTF.Utils",
+        "UniGLTF.UniUnlit",
         "UniHumanoid",
         "Unity.Timeline",
         "Unity.Collections"

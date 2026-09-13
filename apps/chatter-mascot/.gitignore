@@ -8,6 +8,8 @@
 /[Uu]ser[Ss]ettings/
 /[Mm]emoryCaptures/
 /[Rr]ecordings/
+# ★ Android ビルド（IL2CPP のネイティブ変換）がプロジェクト直下に残す作業ディレクトリ（#97）
+/.utmp/
 
 # ★ .meta は追跡する。対応するアセットを無視するときだけ一緒に無視する
 !/[Aa]ssets/**/*.meta

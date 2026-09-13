@@ -120,6 +120,27 @@ namespace ChatterMascot.Tests
         }
 
         /// <summary>
+        /// ★ Android には共有ファイルシステムが無いので、ユーザー段（<c>~/.config/…/animations</c>）
+        /// ごと落ちる（<c>AssetPathTests.AnimationRootsDropTheUserStepWithoutASharedFileSystem</c>
+        /// と同じ規則を <see cref="AnimationManifest.Build"/> 側で固定する）。
+        /// <c>persistentDataPath</c> 側は desktop の有無に関わらず生きている。
+        /// </summary>
+        [Test]
+        public void SkipsTheUserConfigRootWithoutASharedFileSystem()
+        {
+            var files = new Dictionary<string, string[]>
+            {
+                ["/persist/animations/idle"] = new[] { "/persist/animations/idle/persisted.vrma" },
+                [UserAnimations + "/idle"] = new[] { UserAnimations + "/idle/user.vrma" },
+            };
+            var manifest = AnimationManifest.Build(Env(files, desktop: false));
+            var clips = manifest.Clips(MotionCategory.Idle);
+
+            Assert.That(clips.Count, Is.EqualTo(1));
+            Assert.That(clips[0].Path, Is.EqualTo("/persist/animations/idle/persisted.vrma"));
+        }
+
+        /// <summary>
         /// ★★ <b>同じ <c>FileName</c> は先のルートが勝つ。</b> 後のルートで見つかった同名は捨てる
         /// （ユーザー拡張が同梱の同名ファイルを覆せるように）。
         /// </summary>

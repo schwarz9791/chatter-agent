@@ -21,8 +21,22 @@ namespace ChatterMascot.EditorTools
     ///   deprecated で、後継が <see cref="NamedBuildTarget"/> を取る
     ///   <see cref="PlayerSettings.SetIcons"/>。
     ///
-    /// ★ <b><see cref="IconKind"/> は <see cref="IconKind.Application"/> だけを使うこと。</b>
-    ///   他の値（<c>Setting</c> など）は iOS 専用で、macOS スタンドアロンには存在しない。
+    /// ★ <b>Standalone も Android も <see cref="IconKind.Application"/> だけを使うこと。</b>
+    ///   他の値（<c>Settings</c> など）は iOS 専用で、macOS スタンドアロンには存在しない。
+    ///
+    /// ★★ <b><c>IconKind</c> に <c>Legacy</c> は無い（#97 で実機確認）。</b> Android の
+    ///   Player Settings が Inspector 上で「Legacy / Round / Adaptive」と表示する区分は、
+    ///   このスクリプティング API（<c>GetIconSizes</c> / <c>SetIcons</c>）が受け取る
+    ///   <see cref="IconKind"/> とは<b>別物</b>（<c>PlayerSettings.GetSupportedIconKinds</c> が
+    ///   返す <c>PlatformIconKind</c> の側の区分）。<c>Adaptive</c> / <c>Round</c> は
+    ///   前景・背景を別レイヤーで要求する新しい仕組みで、こちらは今のところ触っていない。
+    ///   <see cref="IconKind.Application"/> を渡すと Inspector の「Legacy」枠に入る
+    ///   （実機で <c>ProjectSettings.asset</c> の <c>m_Kind: 0</c> で確認済み）ので、
+    ///   Standalone と同じ値をそのまま使う。
+    ///
+    /// ★ <b>Android ではアイコンが無くても致命にしないこと。</b> ランチャーの見た目だけの
+    ///   問題で、マスコット自体の動作には関わらない。Standalone の「無いと Dock /
+    ///   メニューバーに何も出ない」とは重みが違う。
     ///
     /// ★ <b><c>macAppStoreCategory</c> はここに入れないこと。</b> あちらは
     ///   <c>ProjectSettings.asset</c> を直接編集した値が権威で、権威を2つ持たない
@@ -101,16 +115,48 @@ namespace ChatterMascot.EditorTools
                 }
             }
 
-            // ★ 配列長は GetIconSizes の戻り値と同じ長さでなければならない（SetIcons のドキュメントに明記）。
-            //   要求サイズごとに別画像を用意していないので、同じテクスチャを全枠に敷く
-            //   （Unity 側がビルド時に各サイズへリサイズする）
-            var icons = new Texture2D[sizes.Length];
-            for (var i = 0; i < icons.Length; i++) icons[i] = texture;
+            PlayerSettings.SetIcons(NamedBuildTarget.Standalone, Fill(texture, sizes.Length), IconKind.Application);
 
-            PlayerSettings.SetIcons(NamedBuildTarget.Standalone, icons, IconKind.Application);
+            FixAndroid(texture);
+
             AssetDatabase.SaveAssets();
-
             Debug.Log("[Icon] Player Settings のアプリアイコンを設定しました");
+        }
+
+        /// <summary>
+        /// Android 側（#97）。<b>空でも <see cref="EditorApplication.Exit"/> しない</b>
+        /// —— 見た目だけの問題で、Standalone の「無いと常駐機能が出ない」ほど重くない。
+        /// </summary>
+        private static void FixAndroid(Texture2D texture)
+        {
+            var sizes = PlayerSettings.GetIconSizes(NamedBuildTarget.Android, IconKind.Application);
+
+            // ★ Standalone と同じく1行に収める（scripts の grep は2行目以降を落とす）。
+            //   ログの表記は Inspector の呼び名（Legacy）に合わせる —— IconKind.Application を
+            //   渡していることはクラス doc で説明済みで、ここでは実際に効く枠の名前を出す
+            Debug.Log($"[Icon] GetIconSizes(Android, Legacy) = [{string.Join(", ", sizes)}]");
+
+            if (sizes.Length == 0)
+            {
+                Debug.LogWarning(
+                    "[Icon] Android の GetIconSizes が空でした（見た目だけの問題なので続行します）");
+                return;
+            }
+
+            PlayerSettings.SetIcons(NamedBuildTarget.Android, Fill(texture, sizes.Length), IconKind.Application);
+        }
+
+        /// <summary>
+        /// 配列長は <see cref="PlayerSettings.GetIconSizes"/> の戻り値と同じでなければならない
+        /// （<see cref="PlayerSettings.SetIcons(NamedBuildTarget,Texture2D[],IconKind)"/> のドキュメントに明記）。
+        /// 要求サイズごとに別画像を用意していないので、同じテクスチャを全枠に敷く
+        /// （Unity 側がビルド時に各サイズへリサイズする）。
+        /// </summary>
+        private static Texture2D[] Fill(Texture2D texture, int count)
+        {
+            var icons = new Texture2D[count];
+            for (var i = 0; i < icons.Length; i++) icons[i] = texture;
+            return icons;
         }
     }
 }

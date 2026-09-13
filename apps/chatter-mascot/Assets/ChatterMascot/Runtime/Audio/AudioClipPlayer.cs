@@ -169,7 +169,14 @@ namespace ChatterMascot.Audio
         {
             var handle = audio as UnityAudioHandle;
             if (handle == null || handle.Clip == null) return;
-            UnityEngine.Object.Destroy(handle.Clip);
+
+            // ★ Destroy は Edit Mode では使えない（"Destroy may not be called from edit
+            //   mode!" というエラーで落ちる）。実機・Play Mode では通常どおり次のフレーム末に
+            //   遅延で破棄させ、Edit Mode（EditMode テストが AudioClipPlayer を直に叩く経路）
+            //   だけ即時破棄に倒す。
+            if (Application.isPlaying) UnityEngine.Object.Destroy(handle.Clip);
+            else UnityEngine.Object.DestroyImmediate(handle.Clip);
+
             handle.Clip = null;
         }
 

@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Xml.Linq;
 using UnityEditor.Android;
+using UnityEditor.Build;
 using UnityEngine;
 
 namespace ChatterMascot.EditorTools
@@ -18,15 +19,14 @@ namespace ChatterMascot.EditorTools
     ///
     /// ★ <b>ここは <see cref="System.Xml.Linq.XDocument"/> で書き換えてよい。</b>
     ///   <c>MacPostBuild</c> の plist と違って、<c>AndroidManifest.xml</c> は
-    ///   DOCTYPE を持たない素直な XML なので、<c>XDocument</c> の再シリアライズで
-    ///   壊れる（plist 側で実測した2つの不具合）が起きない。
+    ///   DOCTYPE を持たない素直な XML なので、<c>XDocument</c> の再シリアライズで壊れない。
     ///
     /// ★ <b>プラットフォームガードは要らない。</b> このフックは Android ビルドのときにしか
     ///   呼ばれない（Unity 側の契約）。
     ///
-    /// ★ <b>失敗してもビルドを落とさないこと。</b> ここで転んで得られる損失は
-    ///   「ネット権限が無い／平文通信ができない」で気づきにくいが、例外を投げて
-    ///   ビルドそのものを失敗させる方が実害が大きい。
+    /// ★ <b>失敗したらビルドを止めること。</b> 注入が抜けた APK はループバック接続の間は
+    ///   気づけず、LAN 上のホストへ http で繋いだときに初めて実行時に落ちる
+    ///   （→ <see cref="AndroidPlayerSettings"/> の <c>insecureHttpOption</c>）。
     /// </summary>
     public sealed class AndroidManifestPostProcessor : IPostGenerateGradleAndroidProject
     {
@@ -38,40 +38,58 @@ namespace ChatterMascot.EditorTools
         /// <summary><paramref name="path"/> は unityLibrary モジュールのルート。</summary>
         public void OnPostGenerateGradleAndroidProject(string path)
         {
+            var manifestPath = Path.Combine(path, "src", "main", "AndroidManifest.xml");
+            if (!File.Exists(manifestPath))
+            {
+                throw new BuildFailedException($"[Build] AndroidManifest.xml が見つかりません: {manifestPath}");
+            }
+
             try
             {
-                var manifestPath = Path.Combine(path, "src", "main", "AndroidManifest.xml");
-                if (!File.Exists(manifestPath))
-                {
-                    Debug.LogWarning($"[Build] AndroidManifest.xml が見つかりません: {manifestPath}");
-                    return;
-                }
-
                 var document = XDocument.Load(manifestPath);
-                var manifest = document.Root;
-                if (manifest == null)
-                {
-                    Debug.LogWarning("[Build] AndroidManifest.xml の manifest 要素が読めませんでした");
-                    return;
-                }
-
-                var addedInternet = EnsureInternetPermission(manifest);
-                var addedCleartext = EnsureCleartextTraffic(manifest);
-
-                if (!addedInternet && !addedCleartext)
+                if (!Apply(document))
                 {
                     Debug.Log("[Build] AndroidManifest.xml: 既に必要な設定を持っています");
                     return;
                 }
 
                 document.Save(manifestPath);
-                if (addedInternet) Debug.Log("[Build] AndroidManifest.xml: INTERNET を追加");
-                if (addedCleartext) Debug.Log("[Build] AndroidManifest.xml: usesCleartextTraffic を追加");
+            }
+            catch (BuildFailedException)
+            {
+                throw;
             }
             catch (Exception e)
             {
-                Debug.LogWarning("[Build] AndroidManifest.xml を編集できませんでした: " + e.Message);
+                throw new BuildFailedException($"[Build] AndroidManifest.xml を編集できませんでした: {e.Message}");
             }
+        }
+
+        /// <summary>
+        /// <paramref name="document"/> へ INTERNET 権限と <c>usesCleartextTraffic</c> を足す。
+        /// 変更したら true、既に両方満たしていれば false。<c>manifest</c> / <c>application</c>
+        /// 要素が読めなければ <see cref="BuildFailedException"/>。
+        /// テストから呼ぶために <c>public</c>。
+        /// </summary>
+        public static bool Apply(XDocument document)
+        {
+            var manifest = document?.Root;
+            if (manifest == null || manifest.Name.LocalName != "manifest")
+            {
+                throw new BuildFailedException("[Build] AndroidManifest.xml の manifest 要素が読めません");
+            }
+
+            var application = manifest.Element("application");
+            if (application == null)
+            {
+                throw new BuildFailedException("[Build] AndroidManifest.xml に application 要素がありません");
+            }
+
+            var addedInternet = EnsureInternetPermission(manifest);
+            var addedCleartext = EnsureCleartextTraffic(application);
+            if (addedInternet) Debug.Log("[Build] AndroidManifest.xml: INTERNET を追加");
+            if (addedCleartext) Debug.Log("[Build] AndroidManifest.xml: usesCleartextTraffic を追加");
+            return addedInternet || addedCleartext;
         }
 
         /// <summary>足したら true。</summary>
@@ -87,19 +105,9 @@ namespace ChatterMascot.EditorTools
             return true;
         }
 
-        /// <summary>
-        /// 書いたら true。<c>application</c> 要素が無ければ何もしない
-        /// （テンプレートが破損している異常系。try/catch の外側で警告済みにはしない）。
-        /// </summary>
-        private static bool EnsureCleartextTraffic(XElement manifest)
+        /// <summary>書いたら true。</summary>
+        private static bool EnsureCleartextTraffic(XElement application)
         {
-            var application = manifest.Element("application");
-            if (application == null)
-            {
-                Debug.LogWarning("[Build] AndroidManifest.xml に application 要素がありません");
-                return false;
-            }
-
             var attribute = application.Attribute(AndroidNs + "usesCleartextTraffic");
             if (attribute != null && attribute.Value == "true") return false;
 

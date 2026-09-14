@@ -19,6 +19,11 @@ SCENE="${1:-Assets/Scenes/Mascot.unity}"
 OUTPUT="${2:-Build/ChatterMascot.apk}"
 
 # ★ **終了コードを捨てないこと。** build.sh / test.sh と同じ PIPESTATUS の形に揃える。
+case "$OUTPUT" in
+  /*) BUILT="$OUTPUT" ;;
+  *)  BUILT="$PROJECT_PATH/$OUTPUT" ;;
+esac
+
 set +e
 run_unity -quit -buildTarget Android \
   -executeMethod ChatterMascot.EditorTools.BuildScript.BuildAndroid \
@@ -28,15 +33,14 @@ run_unity -quit -buildTarget Android \
 STATUS=${PIPESTATUS[0]}
 set -e
 
+# ★ 失敗したら成果物を消す。ビルドの後処理（AndroidManifestPostProcessor など）が
+#   BuildFailedException で止めても、Unity は APK を書き出してから失敗を返す。
+#   残すと run-android.sh が後処理の抜けた APK をそのまま入れる。
 if [ "$STATUS" -ne 0 ]; then
+  /bin/rm -f "$BUILT"
   echo "ビルドに失敗しました (exit=$STATUS)" >&2
   exit "$STATUS"
 fi
-
-case "$OUTPUT" in
-  /*) BUILT="$OUTPUT" ;;
-  *)  BUILT="$PROJECT_PATH/$OUTPUT" ;;
-esac
 
 # 終了コードが 0 でも成果物が無いことはある（出力先の書き込み失敗など）
 if [ ! -f "$BUILT" ]; then

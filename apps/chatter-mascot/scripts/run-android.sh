@@ -62,7 +62,7 @@ fi
 # ★ 端末のループバック 8570 を Mac の chatter-agent-server へ転送する。
 #   MascotRunner の既定 serverUrl（ws://127.0.0.1:8570）はそのままに、
 #   端末側からは「自分自身に繋いだつもり」で Mac のサーバーへ届く。
-#   恒久的な接続先の解決は #98（LAN 経由）で、これは検証用の踏み台。
+#   USB / エミュレータで繋いでいる間だけ成り立つ、検証用の踏み台（LAN 越しの接続先の指定ではない）。
 REVERSE_PORT="${CHATTER_AGENT_PORT:-8570}"
 "$ADB" reverse tcp:8570 "tcp:$REVERSE_PORT"
 echo "転送しました: tcp:8570 -> tcp:$REVERSE_PORT"

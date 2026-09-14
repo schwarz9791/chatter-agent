@@ -7,15 +7,14 @@ namespace ChatterMascot.Vrm
     /// <summary>
     /// 読み込み済みモデルの MToon10 マテリアルを UniUnlit へ差し替える。
     ///
-    /// ★ <b>Android では MToon10 の陰影計算が白飛びする</b>（原因は未特定。UniUnlit は
-    ///   陰影計算そのものを持たないシェーダーなので、テクスチャと基本色をそのまま出す
-    ///   ことでこの症状を避けられる）。
+    /// ★ <b>Android では MToon10 の陰影計算が白飛びするので、陰影計算を持たない
+    ///   UniUnlit で描く。</b>
     /// ★ <b>光学シースルーのグラスでは、暗い色は背景光にどのみち洗われる。</b>
     ///   陰影を失ってフラットな発色になっても、その環境では違和感になりにくい。
     /// ★ <b>表情（ブレンドシェイプ）は影響を受けない。</b> シェーダーを跨いでも
     ///   メッシュの頂点変形自体は変わらない。
-    /// ★ <b>失うもの：アウトライン・陰の階調・リムライト。</b> UniUnlit にはいずれの
-    ///   機能も無い。
+    /// ★ <b>失うもの：アウトライン・陰の階調・リムライト（matcap を含む）。</b> UniUnlit には
+    ///   いずれの機能も無い。
     /// </summary>
     public static class UnlitFallback
     {
@@ -26,6 +25,10 @@ namespace ChatterMascot.Vrm
         private const string MToonCutoffProperty = "_Cutoff";
         private const string MToonColorProperty = "_Color";
         private const string MToonMainTexProperty = "_MainTex";
+
+        // MToon10Prop.TransparentWithZWrite（MToon10Properties.ToUnityShaderLabName）。
+        // Transparent で ZWrite を維持するかどうかのフラグ
+        private const string MToonTransparentWithZWriteProperty = "_TransparentWithZWrite";
 
         /// <summary>
         /// MToon10 の実効カリングモード。<c>_DoubleSided</c> から
@@ -84,6 +87,8 @@ namespace ChatterMascot.Vrm
             var cutoff = material.GetFloat(MToonCutoffProperty);
             var blend = UnlitFallbackPolicy.MapAlphaMode(material.GetInt(MToonAlphaModeProperty));
             var cullMode = (UniUnlitCullMode)material.GetInt(MToonCullModeProperty);
+            var renderQueue = material.renderQueue;
+            var zWrite = material.GetInt(MToonTransparentWithZWriteProperty) != 0;
 
             material.shader = unlitShader;
 
@@ -101,6 +106,13 @@ namespace ChatterMascot.Vrm
             material.SetTextureOffset(UniUnlitUtil.PropNameMainTex, mainTextureOffset);
             material.SetTextureScale(UniUnlitUtil.PropNameMainTex, mainTextureScale);
             context.Validate();
+
+            // ★ Validate() はブレンドモードごとに renderQueue と ZWrite を固定値へ揃える
+            //   （UniUnlitUtil.ValidateProperties の isRenderModeChangedByUser: true）。
+            //   モデル側が意図した描画順（同一メッシュ内のサブメッシュの重なり順）を保つため、
+            //   差し替え前の値をここで書き戻す。
+            material.renderQueue = renderQueue;
+            if (zWrite) material.SetInt(UniUnlitUtil.PropNameZWrite, 1);
         }
 
         private static UniUnlitRenderMode ToUniUnlitRenderMode(UnlitFallbackPolicy.UnlitBlend blend)

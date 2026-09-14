@@ -25,6 +25,8 @@ namespace ChatterMascot.EditorTools
     ///   ★ これは Unity 側の判定で、Android 自体の平文通信の許可（マニフェストの
     ///   <c>usesCleartextTraffic</c>）とは別物。そちらは
     ///   <see cref="AndroidManifestPostProcessor"/> が書く。
+    ///   ★ <b>プラットフォーム別ではなくプロジェクト全体の設定なので、macOS のスタンドアロンにも
+    ///   効く。</b>
     ///
     /// ★ <b>targetSdk は触らない。</b> <c>Automatic</c>（既定）のままにして、
     ///   Unity が対応する最新の SDK に追従させる。

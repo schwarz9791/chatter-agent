@@ -24,14 +24,13 @@ namespace ChatterMascot.EditorTools
     /// ★ <b>Standalone も Android も <see cref="IconKind.Application"/> だけを使うこと。</b>
     ///   他の値（<c>Settings</c> など）は iOS 専用で、macOS スタンドアロンには存在しない。
     ///
-    /// ★★ <b><c>IconKind</c> に <c>Legacy</c> は無い（#97 で実機確認）。</b> Android の
+    /// ★★ <b><c>IconKind</c> に <c>Legacy</c> は無い。</b> Android の
     ///   Player Settings が Inspector 上で「Legacy / Round / Adaptive」と表示する区分は、
     ///   このスクリプティング API（<c>GetIconSizes</c> / <c>SetIcons</c>）が受け取る
     ///   <see cref="IconKind"/> とは<b>別物</b>（<c>PlayerSettings.GetSupportedIconKinds</c> が
     ///   返す <c>PlatformIconKind</c> の側の区分）。<c>Adaptive</c> / <c>Round</c> は
-    ///   前景・背景を別レイヤーで要求する新しい仕組みで、こちらは今のところ触っていない。
-    ///   <see cref="IconKind.Application"/> を渡すと Inspector の「Legacy」枠に入る
-    ///   （実機で <c>ProjectSettings.asset</c> の <c>m_Kind: 0</c> で確認済み）ので、
+    ///   前景・背景を別レイヤーで要求する区分で、ここでは扱わない。
+    ///   <see cref="IconKind.Application"/> を渡すと Inspector の「Legacy」枠に入るので、
     ///   Standalone と同じ値をそのまま使う。
     ///
     /// ★ <b>Android ではアイコンが無くても致命にしないこと。</b> ランチャーの見た目だけの

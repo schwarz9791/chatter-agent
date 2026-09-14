@@ -16,6 +16,7 @@ namespace ChatterMascot.Tests
     {
         private GameObject _templateObject;
         private AudioClipPlayer _player;
+        private UnityAudioHandle _handle;
 
         [SetUp]
         public void SetUp()
@@ -28,6 +29,7 @@ namespace ChatterMascot.Tests
         [TearDown]
         public void TearDown()
         {
+            if (_handle != null) _player.Discard(_handle);
             Object.DestroyImmediate(_templateObject);
         }
 
@@ -38,16 +40,14 @@ namespace ChatterMascot.Tests
             var wav = WavBuilder.Build(new short[2400]);
 
             string error;
-            var handle = _player.Prepare(wav, "test", out error) as UnityAudioHandle;
+            _handle = _player.Prepare(wav, "test", out error) as UnityAudioHandle;
 
             Assert.That(error, Is.Null);
-            Assert.That(handle, Is.Not.Null);
-            Assert.That(handle.Clip, Is.Not.Null);
-            Assert.That(handle.DurationMs, Is.EqualTo(100));
-            Assert.That(handle.Envelope, Is.Not.Null);
-            Assert.That(handle.EnvelopeFrameMs, Is.EqualTo(LipSyncEnvelope.DefaultFrameMs));
-
-            _player.Discard(handle);
+            Assert.That(_handle, Is.Not.Null);
+            Assert.That(_handle.Clip, Is.Not.Null);
+            Assert.That(_handle.DurationMs, Is.EqualTo(100));
+            Assert.That(_handle.Envelope, Is.Not.Null);
+            Assert.That(_handle.EnvelopeFrameMs, Is.EqualTo(LipSyncEnvelope.DefaultFrameMs));
         }
 
         [Test]
@@ -66,8 +66,8 @@ namespace ChatterMascot.Tests
         //   WavDecoder.Decode 側も同じ WavDecoder.BytesPerSample で弾かれる。つまり
         //   AudioClip の生成そのものが失敗し、AudioClipPlayer.Prepare はエンベロープを
         //   組む前に null を返す —— 「AudioClip は作れるのにエンベロープだけ作れない」
-        //   入力を WavBuilder で作る方法は今のところ無い（Decode とエンベロープが
-        //   同じ BytesPerSample を見ているので、対応ビット深度が両者で割れることがない）。
+        //   入力を WavBuilder で作る方法は無い（Decode とエンベロープが同じ
+        //   BytesPerSample を見ているので、対応ビット深度が両者で割れることがない）。
         //   この経路（Envelope == null でも Prepare 自体は成功する契約）を守るテストは、
         //   ここではなく LipSyncEnvelope.BuildOrWarn* がプラットフォーム非依存に踏んでいる
         //   （→ LipSyncEnvelope のクラス doc）。

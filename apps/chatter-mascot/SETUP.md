@@ -400,13 +400,14 @@ cd apps/chatter-mascot
 ./scripts/build-android.sh                     # → Build/ChatterMascot.apk（.gitignore 済み）
 
 ~/Library/Android/sdk/emulator/emulator -avd XR_Glasses &   # 実機なら USB で繋ぐ
-./scripts/run-android.sh [Build/ChatterMascot.apk] [--no-logcat]
+./scripts/run-android.sh [APK] [--no-logcat]                # 順不同。APK の既定は Build/ChatterMascot.apk
 ```
 
-`run-android.sh` は `adb reverse tcp:8570 tcp:8570` → `install -r` → `am start` → `adb logcat -s Unity`
-の順に行う。`adb` は `$HOME/Library/Android/sdk/platform-tools/adb`（`ADB` 環境変数で上書き可）。
-端末側からは「自分自身の 8570」に繋いだつもりで Mac の `chatter-agent-server` に届くので、
-`MascotRunner` の既定 `ws://127.0.0.1:8570` はそのまま。
+`run-android.sh` は `adb reverse tcp:8570 tcp:${CHATTER_AGENT_PORT:-8570}` → `install -r` →
+`am start` → `adb logcat -s Unity` の順に行う（`--no-logcat` を渡すと logcat は省く）。`adb` は
+`$HOME/Library/Android/sdk/platform-tools/adb`（`ADB` 環境変数で上書き可）。転送先は既定で 8570
+のままなので、端末側からは「自分自身の 8570」に繋いだつもりで Mac の `chatter-agent-server` に届く
+（`MascotRunner` の既定 `ws://127.0.0.1:8570` はそのまま）。
 
 logcat に出るはずの行:
 
@@ -419,9 +420,9 @@ logcat に出るはずの行:
 ★★ **macOS のマスコットと同じサーバーへ同時に繋がないこと。** ack は累積で、速い方の ack が
 遅い方のまだ喋っていない entry を消す（[`../../docs/protocol.md`](../../docs/protocol.md) の
 「クライアント側の責務」6）。常用のサーバーが動いているなら、`XDG_CONFIG_HOME` と
-`CHATTER_AGENT_PORT` を変えた別のサーバーを立てて `adb reverse tcp:8570 tcp:<そのポート>` で
-そちらへ向ける（手順は [`../../docs/mascot.md`](../../docs/mascot.md)「検証時の接続」。
-合成エンジンは共有でよい）。
+`CHATTER_AGENT_PORT` を変えた別のサーバーを立て、`run-android.sh` にも同じ `CHATTER_AGENT_PORT`
+を渡してそちらへ向ける（`CHATTER_AGENT_PORT=8571 ./scripts/run-android.sh`。手順は
+[`../../docs/mascot.md`](../../docs/mascot.md)「検証時の接続」。合成エンジンは共有でよい）。
 
 ★ **Editor（macOS）の Play Mode と Android 実機では再生の実体が違う**（上の「音の出し方」）。
 `AudioClipPlayer` と `StopAudioOutput()` の経路は APK でしか確かめられない。

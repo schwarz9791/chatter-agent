@@ -3905,9 +3905,9 @@ curl -fsSL https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh | UNITY_
 - ★ **`unity command` / `unity status` は `unity pipeline install` が要る** —
   `Packages/manifest.json` に依存が1本増える。**今は入れていない**
 - ★ `unity editors` が `6000.3.14f1` に対して `6000.3.24f1` へのアップグレードを示唆してくるが、
-  **プロジェクトは `6000.3.14f1` 固定**（`ProjectSettings/ProjectVersion.txt` と
-  `scripts/unity.sh` の `UNITY_VERSION`。[#97](https://github.com/schwarz9791/chatter-agent/issues/97)
-  で `6000.5.8f1` から切り替えた）
+  **プロジェクトは `6000.3.14f1` 固定**（`ProjectSettings/ProjectVersion.txt` が唯一の版の書き場所で、
+  `scripts/unity.sh` はここから読む。`UNITY_VERSION` 環境変数を渡したときだけ上書きされる。
+  [#97](https://github.com/schwarz9791/chatter-agent/issues/97) で `6000.5.8f1` から切り替えた）
 
 `scripts/*.sh` を Unity CLI に寄せる移行そのものは
 [#67](https://github.com/schwarz9791/chatter-agent/issues/67) で追う。
@@ -3968,6 +3968,11 @@ XR 自体は [#99](https://github.com/schwarz9791/chatter-agent/issues/99)、接
 [#98](https://github.com/schwarz9791/chatter-agent/issues/98)、実機は
 [#100](https://github.com/schwarz9791/chatter-agent/issues/100)。
 
+★★ **`-buildTarget Android` はアクティブなビルドターゲットを Library に残す。** その後
+`test.sh` / `build.sh` を明示無しで開くと Android のまま動き、EditMode テストが Android の
+`#if` でコンパイルされたり、`build.sh` が `BuildPlayer` の中で切り替えと再インポートを待ったりする。
+両スクリプトとも `-buildTarget OSXUniversal` を明示して踏まないようにしている。
+
 ### Android では MToon10 を UniUnlit に差し替える
 
 VRM の読み込み直後、`VrmStage.Adopt` が `VrmMaterialCheck.Inspect` の後に
@@ -3999,8 +4004,11 @@ VRM の読み込み直後、`VrmStage.Adopt` が `VrmMaterialCheck.Inspect` の�
 `Assets/Plugins/Android/AndroidManifest.xml` は無い。`AndroidManifestPostProcessor`
 （`IPostGenerateGradleAndroidProject`。`path` は unityLibrary のルートで、
 `src/main/AndroidManifest.xml` を `XDocument` で編集する）が `INTERNET` と
-`<application android:usesCleartextTraffic="true">` を保証する。冪等で、失敗してもビルドは落とさない
-（警告のみ）。静的な1枚を置かないのは、[#99](https://github.com/schwarz9791/chatter-agent/issues/99) の
+`<application android:usesCleartextTraffic="true">` を保証する。冪等で、失敗したら
+`BuildFailedException` でビルドを止める（注入漏れを成功扱いにしないため）。★ **Unity は後処理が
+`BuildFailedException` を投げても APK を出力先へ書き出してから `Failed` を返す**（`usesCleartextTraffic` の
+無い APK が残ることを確かめた）ので、`build-android.sh` は失敗したら成果物を消す。静的な1枚を置かないのは、
+[#99](https://github.com/schwarz9791/chatter-agent/issues/99) の
 XR パッケージも同じフックで同じマニフェストへ注入してくるので、「最終形を決める仕組み」を1つに保つため。
 
 ★★ **Unity 6000.3 は `INTERNET` を自分で書く（`ForceInternetPermission`）が、`usesCleartextTraffic` は
@@ -4067,19 +4075,21 @@ IL2CPP の作業ディレクトリ `.utmp/` は `.gitignore` 済み。
 
 ### 検証時の接続
 
-`scripts/run-android.sh` が `adb reverse tcp:8570 tcp:8570` を張るので、`MascotRunner` の既定
-`ws://127.0.0.1:8570` のままで Mac のサーバーに届く。恒久的な接続先は
-[#98](https://github.com/schwarz9791/chatter-agent/issues/98)。
+`scripts/run-android.sh` が `adb reverse tcp:8570 tcp:${CHATTER_AGENT_PORT:-8570}` を張るので、
+既定のまま実行すれば `MascotRunner` の既定 `ws://127.0.0.1:8570` のままで Mac のサーバーに届く。
+恒久的な接続先は [#98](https://github.com/schwarz9791/chatter-agent/issues/98)。
 
 ★★ **1つのランタイムルートに繋ぐクライアントは1台**（→ [`protocol.md`](./protocol.md) の
 「クライアント側の責務」6）。デスクトップのマスコットが常用のサーバーに繋がっている間に Android を
-確かめるなら、**別のランタイムルートで別のサーバー**を立てる。合成エンジンは共有でよい:
+確かめるなら、**別のランタイムルートで別のサーバー**を立て、`run-android.sh` に同じポートを渡す。
+合成エンジンは共有でよい:
 
 ```bash
 cd core
 XDG_CONFIG_HOME=/tmp/cm-android CHATTER_AGENT_PORT=8571 \
   CHATTER_AGENT_TTS_URL=http://127.0.0.1:10101 npm run start:server
-adb reverse tcp:8570 tcp:8571        # run-android.sh が張った 8570→8570 を上書きする
+cd ../apps/chatter-mascot
+CHATTER_AGENT_PORT=8571 ./scripts/run-android.sh
 ```
 
 発話を流すには hook と同じ形の payload を `<runtime>/spool/<message_id>.0.json` に置き、

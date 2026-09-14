@@ -154,10 +154,8 @@ namespace ChatterMascot.Audio
                 Clip = clip,
                 DurationMs = header.DurationMs,
                 // ★ **作れなくても Prepare は成功させる**（→ LipSyncEnvelope.BuildOrWarn）。
-                // ★ ここは AudioClip 用とエンベロープ用で**サンプルを二度デコードしている**。
-                //   消すには Decode から float[] を貰う形にする必要があるが、1発話あたり
-                //   数百 KB を一度余分になめるだけ（約 1ms）なので今はやらない。
-                //   この実装が主役になるのは Android（#97）なので、そのときに測って判断する
+                // ★ AudioClip 用とエンベロープ用でサンプルを二度デコードしている。消すには
+                //   Decode から float[] を貰う形にする必要があり、その API 変更に見合わない
                 Envelope = LipSyncEnvelope.BuildOrWarn(
                     wav, header, LipSyncEnvelope.DefaultFrameMs, ref _warnedEnvelope, Warn),
                 EnvelopeFrameMs = LipSyncEnvelope.DefaultFrameMs,
@@ -169,7 +167,14 @@ namespace ChatterMascot.Audio
         {
             var handle = audio as UnityAudioHandle;
             if (handle == null || handle.Clip == null) return;
-            UnityEngine.Object.Destroy(handle.Clip);
+
+            // ★ Destroy は Edit Mode では使えない（"Destroy may not be called from edit
+            //   mode!" というエラーで落ちる）。実機・Play Mode では通常どおり次のフレーム末に
+            //   遅延で破棄させ、Edit Mode（EditMode テストが AudioClipPlayer を直に叩く経路）
+            //   だけ即時破棄に倒す。
+            if (Application.isPlaying) UnityEngine.Object.Destroy(handle.Clip);
+            else UnityEngine.Object.DestroyImmediate(handle.Clip);
+
             handle.Clip = null;
         }
 

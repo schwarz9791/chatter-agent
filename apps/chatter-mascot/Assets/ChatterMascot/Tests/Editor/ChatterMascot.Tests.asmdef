@@ -3,6 +3,7 @@
     "rootNamespace": "ChatterMascot.Tests",
     "references": [
         "ChatterMascot.Runtime",
+        "ChatterMascot.Editor",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner",
         "Unity.Nuget.Newtonsoft-Json"

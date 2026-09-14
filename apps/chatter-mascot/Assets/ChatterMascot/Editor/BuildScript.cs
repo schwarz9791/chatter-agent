@@ -17,7 +17,7 @@ namespace ChatterMascot.EditorTools
     ///   <c>-batchmode</c> はダイアログを出さないので、この失敗の仕方をしない。
     ///
     /// <code>
-    /// /Applications/Unity/Hub/Editor/6000.5.8f1/Unity.app/Contents/MacOS/Unity \
+    /// /Applications/Unity/Hub/Editor/6000.3.14f1-arm64/Unity.app/Contents/MacOS/Unity \
     ///   -batchmode -quit -nographics \
     ///   -projectPath apps/chatter-mascot \
     ///   -executeMethod ChatterMascot.EditorTools.BuildScript.BuildMacOS \
@@ -177,6 +177,89 @@ namespace ChatterMascot.EditorTools
                 return;
             }
             EditorApplication.Exit(0);
+        }
+
+        public static void BuildAndroid()
+        {
+            var scene = Argument("-buildScene") ?? "Assets/Scenes/Mascot.unity";
+            var output = Argument("-buildOutput") ?? "Build/ChatterMascot.apk";
+
+            var projectRoot = Directory.GetParent(Application.dataPath).FullName;
+            var absolute = Path.IsPathRooted(output) ? output : Path.Combine(projectRoot, output);
+
+            EditorUserBuildSettings.buildAppBundle = false;
+
+            var options = new BuildPlayerOptions
+            {
+                scenes = new[] { scene },
+                locationPathName = absolute,
+                target = BuildTarget.Android,
+                targetGroup = BuildTargetGroup.Android,
+                options = BuildOptions.None,
+            };
+
+            Debug.Log($"[Build] scene={scene} output={absolute}");
+
+            // ★ **DisableUnityAudioDuringBuild はここでは呼ばないこと。** Android は
+            //   Unity 内蔵オーディオで鳴らす（AudioClipPlayer + AudioSettings.Mobile.
+            //   StopAudioOutput() で無音時に手放す）ので、コミットされた m_DisableAudio: 0 が
+            //   そのまま Android の出荷値そのもの。ここで ON にすると、鳴らす手段ごと
+            //   潰した無音ビルドができあがる。
+            ExcludeDesktopWindowPluginsFromBuild();
+
+            var summary = BuildPipeline.BuildPlayer(options).summary;
+
+            Debug.Log($"[Build] result={summary.result} errors={summary.totalErrors} " +
+                      $"time={(int)summary.totalTime.TotalSeconds}s size={summary.totalSize}");
+
+            if (summary.result != BuildResult.Succeeded)
+            {
+                EditorApplication.Exit(1);
+                return;
+            }
+            EditorApplication.Exit(0);
+        }
+
+        /// <summary>
+        /// <c>com.kirurobo.uniwinc</c>（UniWindowController）が同梱するネイティブプラグインを
+        /// すべて、この呼び出しのビルドから外す。デスクトップ専用パッケージで、
+        /// Android が読み込むものは1つも無い。
+        ///
+        /// ★★ <b>パッケージの <c>PluginImporter</c> 設定そのものを直さないこと。</b>
+        ///   このパッケージは <c>git</c> 参照（<c>Packages/manifest.json</c>）で解決されており
+        ///   Unity 側で読み取り専用扱いになる。<c>SetCompatibleWithAnyPlatform</c> +
+        ///   <c>SaveAndReimport</c> は成功したように見えて、実際にはメタファイルへ書き込まれない
+        ///   （<c>NativePluginSettings</c> が自前の <c>.bundle</c> に使っている手当ては効かない）。
+        ///
+        /// ★ <b>だから <see cref="PluginImporter.SetIncludeInBuildDelegate"/> で外す。</b>
+        ///   メタファイルを書き換えず、このビルド呼び出しの間だけ「ビルドに含めるか」を
+        ///   差し替えるコールバックなので、読み取り専用のパッケージにも効く。
+        ///
+        /// ★ <b>GUID やファイルパスを決め打ちにしないこと。</b> <c>Library/PackageCache</c> の
+        ///   パスはパッケージのリビジョンハッシュを含みバージョンが上がるたびに変わるうえ、
+        ///   同梱プラグインの構成自体もパッケージの改版で増減しうる。
+        ///   <see cref="PluginImporter.GetAllImporters"/> を舐めて
+        ///   <c>assetPath</c> がこのパッケージ配下かどうかで判定する。
+        /// </summary>
+        private static void ExcludeDesktopWindowPluginsFromBuild()
+        {
+            const string packagePrefix = "Packages/com.kirurobo.uniwinc/";
+
+            var excluded = 0;
+            foreach (var importer in PluginImporter.GetAllImporters())
+            {
+                if (!importer.assetPath.StartsWith(packagePrefix, StringComparison.Ordinal)) continue;
+
+                importer.SetIncludeInBuildDelegate(_ => false);
+                excluded++;
+            }
+
+            if (excluded == 0)
+            {
+                Debug.LogWarning($"[Build] {packagePrefix} 配下のネイティブプラグインが見つかりませんでした");
+                return;
+            }
+            Debug.Log($"[Build] com.kirurobo.uniwinc のネイティブプラグイン {excluded} 件をこのビルドから外しました");
         }
 
         /// <summary>

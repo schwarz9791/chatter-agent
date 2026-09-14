@@ -12,6 +12,9 @@ shift || true
 #   メソッドを増やしたらパターンも足すこと。
 #   `Failed to resolve` / `Cannot perform upm operation` はパッケージ解決の失敗
 #   （UniVRM を manifest.json に足した直後の初回解決で踏む）。
+#   `Project has invalid dependencies` / `An error occurred while resolving packages` は
+#   manifest.json が存在しないビルトインモジュールを指しているときの失敗で、
+#   上の2つとは文言が別（Editor バージョンを跨ぐ変更で踏む）。
 #
 # ★ **終了コードを捨てないこと。** `| grep ... || true` にすると、呼び出した
 #   Editor メソッドの EditorApplication.Exit(1)（例: IconSettings.FixAll がアセット欠落で
@@ -20,7 +23,7 @@ shift || true
 #   PIPESTATUS で受ける（test.sh / build.sh と同じ形）
 set +e
 run_unity -quit -executeMethod "$METHOD" "$@" 2>&1 \
-  | grep -E "^\[Fixups\]|^\[Build\]|^\[Native\]|^\[VrmProbe\]|^\[Icon\]|error CS|Aborting batchmode|Unhandled exception|Failed to resolve|Cannot perform upm operation"
+  | grep -E "^\[Fixups\]|^\[Build\]|^\[Native\]|^\[VrmProbe\]|^\[Icon\]|error CS|Aborting batchmode|Unhandled exception|Failed to resolve|Cannot perform upm operation|Project has invalid dependencies|An error occurred while resolving packages"
 STATUS=${PIPESTATUS[0]}
 set -e
 exit $STATUS

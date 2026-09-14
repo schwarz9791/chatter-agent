@@ -922,8 +922,9 @@ Android ではそのアセンブリが存在しないので解決先が無く、
 `VrmStage.AddLoadedHandler` は、もう読み終わっていたら即座に呼ぶ。
 
 ★ **他人のコンポーネントは移せない。** `Mascot.unity` には `UniWindowController` プレハブが
-置いてあるので、**Android ビルドでは missing script が1件出たままになる**。
-剥がすならビルド時処理で、それは [#97](https://github.com/schwarz9791/chatter-agent/issues/97)。
+置いてあるので、そのままでは **Android ビルドで missing script が出る**。
+[#97](https://github.com/schwarz9791/chatter-agent/issues/97) の `AndroidSceneStripper` が
+ビルド時に asmdef の規則で剥がす（→「プラットフォームを絞る」）。
 
 ### ★ `scripts/run.sh` の grep を通らないログは存在しないのと同じ
 
@@ -1024,6 +1025,7 @@ prefab にもシーンにも override が無く、`SetWindowSize` を呼ぶの�
 
 **決め手は URP Asset の `Supports HDR` を切ること、1つだけ**だった
 （macOS 26 / Unity 6000.5.8f1 / URP 17.5.0 で、on/off を往復させて確認した）。
+[#97](https://github.com/schwarz9791/chatter-agent/issues/97) で Unity 6000.3.14f1 / URP 17.3.0 に切り替えた後も同じ設定のままで、透過が保たれていることをビルドで再確認した。
 
 | 設定 | 透過に要るか |
 |---|---|
@@ -2979,6 +2981,8 @@ Unity は「`.meta` はあるがアセットが無い」と見て**孤児とし�
 ★ **`build.sh` はこの穴を踏まない。** Unity より先に `build-native.sh` を呼ぶため。
 踏むのは **`test.sh` と `run.sh` を、バンドルが無い状態で走らせたとき**
 （→ [#95](https://github.com/schwarz9791/chatter-agent/issues/95)。直すのは別の PR）。
+[#97](https://github.com/schwarz9791/chatter-agent/issues/97) の新規ワークツリーでも同じ形で踏んだ
+（`build-android.sh` も `build-native.sh` を呼ばないので、Android だけ触る場合も先に作っておくこと）。
 
 ★★ **ビルドは通ってしまう。** `.app` の `Contents/PlugIns/` にはバンドルが入るし、
 EditMode テストも全部通る。**気づけるのは `git diff` だけ** —— batchmode で Unity を回したら
@@ -3334,10 +3338,13 @@ Unity 内蔵オーディオが有効なままだと Unity 側がデバイスを�
 当たるわけではない。★ ただし**シーンを一度でも保存すると値が焼かれる**ので、
 既定を変えるときはシーンも見ること。
 
-★ **`AudioManager.asset` に Unity 6 の新キーが4つ増えている**（`m_EnableOutputSuspension: 1` /
+★ **`AudioManager.asset` に Unity 6 世代の新キーが4つある**（`m_EnableOutputSuspension: 1` /
 `m_AudioFoundation: 0` / `m_OutputChannelLayout: 2` / `m_OutputSamplingRate: 48000`）。
 `BuildScript` が `m_DisableAudio` を書き換えるとき `AssetDatabase.SaveAssets()` が走り、
 Unity がアセット全体を再シリアライズしてテンプレートに無かったフィールドを既定値で書き出したもの。
+[#97](https://github.com/schwarz9791/chatter-agent/issues/97) で Unity 6000.3.14f1 に切り替え、
+FixAll・EditMode テスト・ビルドの一連を通しても4キーとも値は変わらなかった
+（Unity 6000.5.8f1 固有ではなく、6000.3.14f1 でも同じスキーマ・同じ既定値）。
 
 - **値はすべて Unity 6000.5.8f1 の既定値**。Editor バイナリの `-enhancedAudioFoundation` の
   ヘルプが `Default: 48000` / `Stereo (default)` と明記している
@@ -3657,6 +3664,8 @@ cd apps/chatter-mascot
 ./scripts/test.sh                                         # EditMode テスト
 ./scripts/build.sh                                        # 本番シーン → Build/ChatterMascot.app
 ./scripts/build.sh Assets/Scenes/TransparencyProbe.unity Build/TransparencyProbe.app
+./scripts/build-android.sh                                # 本番シーン → Build/ChatterMascot.apk（#97）
+./scripts/run-android.sh                                  # adb reverse + install + 起動 + logcat
 ```
 
 **どれも Editor を閉じてから。**
@@ -3837,9 +3846,11 @@ B = #70 **27.3%**（26.7 26.8 27.8 28.3 27.3 27.3。途中で小ネタが1本再
 ### ★ Unity CLI
 
 `unity` コマンド（[Unity CLI](https://unity.com/ja/blog/meet-the-unity-cli)）が
-手元に入っている。実体は `/Users/schwarz/.unity/bin/unity`、実測 **`1.0.0-beta.5`**（`unity --version`）。
-`unity doctor` は `auth.loggedIn true` / `editor.0 6000.5.8f1 arm64` を認識し、`unity editors` は
-インストール済みの `6000.5.8f1`（Android, SDK & NDK Tools, OpenJDK, Web）を拾う。導入は公式の
+手元に入っている。実体は `/Users/schwarz/.unity/bin/unity`、実測 **`1.0.0-beta.8`**（`unity --version`）。
+`unity doctor` は `auth.loggedIn true` と、インストール済みの Editor を `editor.0` / `editor.1`
+（現在は `6000.3.14f1 arm64` と `6000.5.8f1 arm64` の2本）として認識する。`unity editors` は
+両方を「Installed」列にパスつきで拾い、どちらも Android / Android SDK & NDK Tools / OpenJDK / Web の
+モジュールを持つ。導入は公式の
 
 ```bash
 curl -fsSL https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh | UNITY_CLI_CHANNEL=beta bash
@@ -3893,15 +3904,264 @@ curl -fsSL https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh | UNITY_
   **`BuildScript.BuildMacOS` の責務のまま**残る
 - ★ **`unity command` / `unity status` は `unity pipeline install` が要る** —
   `Packages/manifest.json` に依存が1本増える。**今は入れていない**
-- ★ `unity editors` が `6000.5.10f1` へのアップグレードを示唆してくるが、
-  **プロジェクトは `6000.5.8f1` 固定**（`ProjectSettings/ProjectVersion.txt` と
-  `scripts/unity.sh` の `UNITY_VERSION`）
+- ★ `unity editors` が `6000.3.14f1` に対して `6000.3.24f1` へのアップグレードを示唆してくるが、
+  **プロジェクトは `6000.3.14f1` 固定**（`ProjectSettings/ProjectVersion.txt` が唯一の版の書き場所で、
+  `scripts/unity.sh` はここから読む。`UNITY_VERSION` 環境変数を渡したときだけ上書きされる。
+  [#97](https://github.com/schwarz9791/chatter-agent/issues/97) で `6000.5.8f1` から切り替えた）
 
 `scripts/*.sh` を Unity CLI に寄せる移行そのものは
 [#67](https://github.com/schwarz9791/chatter-agent/issues/67) で追う。
 
+### Unity の版を切り替えたときに踏んだこと（#97: 6000.5.8f1 → 6000.3.14f1）
+
+[#99](https://github.com/schwarz9791/chatter-agent/issues/99) で入れる Android XR パッケージ
+（`com.google.xr.extensions` 1.3.1）が `package.json` で `"unity": "6000.3"` を宣言していて、
+6000.5 では SPATIAL 機能の版が衝突する。**XR パッケージを1つも足す前に** Editor の版を落とした。
+
+★★ **`com.unity.modules.physicscore2d` は 6000.5 で新設されたビルトインモジュール。**
+`Packages/manifest.json` に残したまま 6000.3 を起動するとパッケージ解決が
+`Project has invalid dependencies: com.unity.modules.physicscore2d ... cannot be found` で失敗するが、
+**`scripts/run.sh` は何も出さずに exit 1 した**（grep にこの文言が無かった。
+→「`scripts/run.sh` の grep を通らないログは存在しないのと同じ」）。`run.sh` / `build.sh` の grep に
+`Project has invalid dependencies|An error occurred while resolving packages` を足してある。
+**Editor のマイナー版をまたぐときは、移行先の版で動いているプロジェクトと `manifest.json` を diff して、
+そこに無いモジュールを外すこと。**
+
+- ビルトインパッケージの版は Editor に付いて動く: URP 17.5.0 → 17.3.0 / ugui 2.5.0 → 2.0.0 /
+  test-framework 1.7.0 → 1.6.0（推移的に collections / burst / mathematics / shadergraph /
+  render-pipelines.core も）
+- `ProjectSettings.asset` の `serializedVersion` 29 → 28。ほかの差分はスキーマだけ。
+  `AudioManager.asset` は不変（→「プロジェクト設定まわりで踏んだこと」）
+- macOS の透過は切り替え後にビルドして目視で再確認した
+  （→「Unity 6 の URP で透過しないのは `Supports HDR` のせい」）
+
+★★ **新規ワークツリーでは `./scripts/build-native.sh` より先に Unity を起動しないこと。**
+`.bundle` は git に無いので、無い状態で Unity（`./scripts/run.sh …FixAll` など）が走ると
+`.bundle.meta` が孤児として捨てられ、あとから `.bundle` を作ると**別の GUID・`PluginImporter` の
+プラットフォーム設定無しの最小 `.meta`** で再インポートされる（#93 で踏んだものを #97 でまた踏んだ。
+→「`.bundle` が無い状態で Unity を起動すると `.bundle.meta` が壊れる」）。直し方は
+`git checkout -- Assets/Plugins/macOS/ChatterMascotNative.bundle.meta`（要れば
+`NativePluginSettings.FixAll`）。新規クローンでは `./scripts/build-native.sh`
+（または、それを呼ぶ `./scripts/build.sh`）を**最初に**走らせる。
+
+★★ **シェーダーのコンパイル中に Unity を殺すと `Library/ShaderCache` が壊れる。** 症状は
+ビルドエラーではなく、次のビルドで **MToon10 の本体パスだけが描かれず、アウトラインの
+暗いシルエットだけが出る**（ログには何も出ない）。`Library/ShaderCache` を消して作り直せば戻る。
+バリアント削減を切るなど全バリアントの再コンパイルを伴う変更は、途中で止めないこと。
+
+★ **失敗したビルドは `Assets/Resources/`（と `.meta`）を残す。**
+`com.unity.test-framework.performance` の `TestRunBuilder`（`IPreprocessBuildWithReport`）が
+毎 `BuildPlayer` の前に作り `OnPostprocessBuild` で消すが、ビルドが throw すると後始末が走らない。
+我々のものではない。**消すだけでよく、コミットしないこと。**
+
 ## プラットフォームを絞る
 
-★ **UniWindowController の macOS ネイティブプラグインが Android ビルドに混ざらないよう
-Plugin Inspector で macOS に限定すること。** XR パッケージは Android にだけ効かせる
-（→ [#99](https://github.com/schwarz9791/chatter-agent/issues/99)）。
+★ **UniWindowController の macOS ネイティブプラグインを Android ビルドに混ぜない。** XR パッケージは
+Android にだけ効かせる（→ [#99](https://github.com/schwarz9791/chatter-agent/issues/99)）。
+**Plugin Inspector で絞る手は git 参照のパッケージには効かない**（→ 下の「同梱プラグインはビルド時の
+delegate で外す」）。
+
+[#97](https://github.com/schwarz9791/chatter-agent/issues/97) で **Android（XR なし）のビルドが通っている。**
+Unity 6000.3.14f1 同梱の SDK / NDK / JDK だけで足りる（外部の SDK 設定は要らない）。
+初回は約6分、差分ビルドは約1分、APK は約 68MB（2026-09-13 実測）。
+XR 自体は [#99](https://github.com/schwarz9791/chatter-agent/issues/99)、接続先の恒久化は
+[#98](https://github.com/schwarz9791/chatter-agent/issues/98)、実機は
+[#100](https://github.com/schwarz9791/chatter-agent/issues/100)。
+
+★★ **`-buildTarget Android` はアクティブなビルドターゲットを Library に残す。** その後
+`test.sh` / `build.sh` を明示無しで開くと Android のまま動き、EditMode テストが Android の
+`#if` でコンパイルされたり、`build.sh` が `BuildPlayer` の中で切り替えと再インポートを待ったりする。
+両スクリプトとも `-buildTarget OSXUniversal` を明示して踏まないようにしている。
+
+### Android では MToon10 を UniUnlit に差し替える
+
+VRM の読み込み直後、`VrmStage.Adopt` が `VrmMaterialCheck.Inspect` の後に
+`UnlitFallbackPolicy.AppliesTo(Application.platform)`（Android のみの許可リスト）で判定し、
+真なら `UnlitFallback.Apply`（`Assets/ChatterMascot/Vrm/`）が全マテリアルを
+`UniGLTF/UniUnlit` へ差し替える。理由は MToon10 の陰影計算が Android で白飛びするため
+（原因は未特定 → [#110](https://github.com/schwarz9791/chatter-agent/issues/110)）。
+テクスチャと色は unlit 化前に読み直しているので正しく出るが、陰影・アウトライン・
+リムライトは失う（表情には影響しない）。実機で MToon10 がそのまま正しく出るなら
+外す判断は [#100](https://github.com/schwarz9791/chatter-agent/issues/100)。
+
+### Player Settings は `AndroidPlayerSettings.FixAll` が書く（1回走らせてコミット）
+
+| 項目 | 値 | なぜ |
+|---|---|---|
+| アプリケーション ID | `tech.sukima.chattermascot` | ★ **Android はハイフンを許さない**（Java のパッケージ名規則）。Standalone は `tech.sukima.chatter-mascot` のまま |
+| minSdk | 30 | 動いている Android XR サンプルの値 |
+| `ForceInternetPermission` | オン | Unity が `INTERNET` を書く根拠 |
+| `insecureHttpOption` | `AlwaysAllowed` | ★ 下記 |
+| targetSdk | Automatic（触らない） | 6000.3 同梱の SDK が platforms 34 / 35 / 36 を持つので 36 に解決される。★ **37 から `ACCESS_LOCAL_NETWORK` がランタイム権限になる**（→ [#98](https://github.com/schwarz9791/chatter-agent/issues/98) で決める） |
+
+★ **`insecureHttpOption` は Unity 自身の門で、Android の `usesCleartextTraffic` とは別物。**
+`UnityWebRequest` は既定で http を拒むが**ループバックだけは例外**なので、`adb reverse` で
+繋いでいる間は何も失敗しない。[#98](https://github.com/schwarz9791/chatter-agent/issues/98) で
+最初に LAN のホストへ繋いだとき、**音声の GET だけ**が落ちる。
+
+### マニフェストは静的に置かず、Gradle 生成後に注入する
+
+`Assets/Plugins/Android/AndroidManifest.xml` は無い。`AndroidManifestPostProcessor`
+（`IPostGenerateGradleAndroidProject`。`path` は unityLibrary のルートで、
+`src/main/AndroidManifest.xml` を `XDocument` で編集する）が `INTERNET` と
+`<application android:usesCleartextTraffic="true">` を保証する。冪等で、失敗したら
+`BuildFailedException` でビルドを止める（注入漏れを成功扱いにしないため）。★ **Unity は後処理が
+`BuildFailedException` を投げても APK を出力先へ書き出してから `Failed` を返す**（`usesCleartextTraffic` の
+無い APK が残ることを確かめた）ので、`build-android.sh` は失敗したら成果物を消す。静的な1枚を置かないのは、
+[#99](https://github.com/schwarz9791/chatter-agent/issues/99) の
+XR パッケージも同じフックで同じマニフェストへ注入してくるので、「最終形を決める仕組み」を1つに保つため。
+
+★★ **Unity 6000.3 は `INTERNET` を自分で書く（`ForceInternetPermission`）が、`usesCleartextTraffic` は
+書かない。** Gradle がマニフェストを作り直したビルドで `[Build] AndroidManifest.xml: usesCleartextTraffic を追加`
+が出た。後処理は保険ではなく**必須**。
+
+確認は APK を直接読む（`aapt2` は Editor の `PlaybackEngines/AndroidPlayer/SDK/build-tools/<ver>/` にある）:
+
+```bash
+aapt2 dump xmltree Build/ChatterMascot.apk --file AndroidManifest.xml
+```
+
+★ `MacPostBuild` は plist に `XDocument` を禁じている（DOCTYPE の問題）が、`AndroidManifest.xml` に
+DOCTYPE は無いので `XDocument` でよい。
+
+### シーンに焼かれたデスクトップ限定コンポーネントはビルド時に剥がす
+
+`AndroidSceneStripper`（`IProcessSceneWithReport`。Android のときだけ。`report == null` は
+Play Mode なので何もしない）が、コンポーネントの型が属するアセンブリの asmdef が Android を
+含まなければ外す。判定は `AsmdefPlatformFilter`（Unity の規則をそのまま写した純粋関数）:
+`includePlatforms` が非空ならホワイトリスト → そうでなく `excludePlatforms` が非空ならブラックリスト →
+どちらも空なら含む → **読めなければ残す**。型の決め打ちリストではないので、デスクトップ限定
+パッケージが増えてもこのクラスは変えない（→「デスクトップ限定アセンブリの `MonoBehaviour` を
+シーンに置かない」）。
+
+`Mascot.unity` で外れるのは `UniWindowController/UniWindowController`（空になった GameObject ごと）と
+`ModelAnchor/ModelPlaceholder/UniWindowMoveHandle`。ログは
+`[Build] Android 非対応のコンポーネントを外しました:` で始まる。
+
+★★ **GameObject を消すのは「このパスで空にしたもの」だけ。** `Main Camera/GazeTarget` は仕様として
+Transform しか持たない空オブジェクトで、初版は「空だから」と消していた（`VrmCharacter` が実行時に
+作り直すので実害は無かったが、意図して置いたものを巻き込む規則は誤り）。
+
+★ ログが出るのは Unity がシーンを実際に処理し直したときだけ。差分ビルドでは出ないことがある。
+
+### 同梱プラグインはビルド時の delegate で外す（`PluginImporter` は書けない）
+
+`com.kirurobo.uniwinc` は `LibUniWinC.dll` を x86 / x64 の2本同梱していて、どちらも既定で
+「Any Platform」。そのまま Android をビルドすると
+`Cannot include plugin '…LibUniWinC.dll'… since plugin with the same name and architecture was already added`
+で落ちる。
+
+★★ **git 参照のパッケージは読み取り専用で、`PluginImporter.SetCompatibleWithAnyPlatform` +
+`SaveAndReimport` は成功したように見えて永続化されない**（自前の `.bundle` に
+`NativePluginSettings.FixAll` が使っている手は効かない）。`BuildScript.BuildAndroid` は
+`ExcludeDesktopWindowPluginsFromBuild()` で `PluginImporter.GetAllImporters()` を舐め、
+`Packages/com.kirurobo.uniwinc/` 配下の3件（`.bundle` / x64 dll / x86 dll）に
+`SetIncludeInBuildDelegate(_ => false)` を掛ける。**その1回のビルド呼び出しの間だけ**効き、
+メタファイルは触らない。GUID やパスは決め打ちしない（`Library/PackageCache` のパスは
+リビジョンハッシュを含む）。
+
+### アイコン
+
+`IconSettings.FixAll` は Android にも `IconKind.Application` で登録する。★ **`IconKind.Legacy` は
+存在しない** —— `Application` を渡すと Inspector の「Legacy」枠に入る。Adaptive / Round は別の API
+（`PlatformIconKind`）で、触っていない。Android 側はサイズ一覧が空でも落とさない。
+
+### 音は Unity 内蔵オーディオのまま
+
+`BuildAndroid` は `Disable Unity Audio` を切り替えない。コミットされている `m_DisableAudio: 0` が
+Android の出荷値そのもの（→「無音時にオーディオ出力デバイスを掴まない」）。
+`scripts/build-android.sh` には `build-native.sh` の呼び出しも `AudioManager.asset` の trap も無い。
+IL2CPP の作業ディレクトリ `.utmp/` は `.gitignore` 済み。
+
+### 検証時の接続
+
+`scripts/run-android.sh` が `adb reverse tcp:8570 tcp:${CHATTER_AGENT_PORT:-8570}` を張るので、
+既定のまま実行すれば `MascotRunner` の既定 `ws://127.0.0.1:8570` のままで Mac のサーバーに届く。
+恒久的な接続先は [#98](https://github.com/schwarz9791/chatter-agent/issues/98)。
+
+★★ **1つのランタイムルートに繋ぐクライアントは1台**（→ [`protocol.md`](./protocol.md) の
+「クライアント側の責務」6）。デスクトップのマスコットが常用のサーバーに繋がっている間に Android を
+確かめるなら、**別のランタイムルートで別のサーバー**を立て、`run-android.sh` に同じポートを渡す。
+合成エンジンは共有でよい:
+
+```bash
+cd core
+XDG_CONFIG_HOME=/tmp/cm-android CHATTER_AGENT_PORT=8571 \
+  CHATTER_AGENT_TTS_URL=http://127.0.0.1:10101 npm run start:server
+cd ../apps/chatter-mascot
+CHATTER_AGENT_PORT=8571 ./scripts/run-android.sh
+```
+
+発話を流すには hook と同じ形の payload を `<runtime>/spool/<message_id>.0.json` に置き、
+同じ環境変数で `plugin/bin/chatter-agent-speak.mjs` を走らせる:
+
+```json
+{"session_id":"…","hook_event_name":"MessageDisplay","turn_id":"…","message_id":"…","index":0,"final":true,"delta":"…"}
+```
+
+#### #97 の実機実測（2026-09-13 / Android XR エミュレータ `XR_Glasses` API 34 arm64 / `vita.vrm`）
+
+★ **エミュレータであって実機ではない。** 実機（XREAL Aura）は
+[#100](https://github.com/schwarz9791/chatter-agent/issues/100)。
+
+| 確認したこと | 結果 |
+|---|---|
+| 起動 | APK が入り `[Mascot] server: ws://127.0.0.1:8570` で接続する |
+| VRM | `jar:file:///…/base.apk!/assets/vita.vrm`（19,259,304 バイト）を `UnityWebRequest` で約 5.3 秒で読む。`VRM10/Universal Render Pipeline/MToon10` のマテリアル 15、expression 18。`idle_loop.vrma` も APK から。"referenced script … missing" も例外も無し |
+| 探索順 | `persistentDataPath` の候補（`/storage/emulated/0/Android/data/tech.sukima.chattermascot/files/model.vrm` / `idle.vrma`）は 404、ユーザー設定の候補は飛ばされる（想定どおり） |
+| 発話 | 接続時に未読 1 件 + 追加 2 件が届き、3 件とも ack（`seq<=3`）でキューが空になる。音は Mac のスピーカーからエミュレータ経由で聞こえる |
+| 無音時の解放 | `無音が続いたのでオーディオ出力を止めました` → `オーディオ出力を掴み直しました` → 再び停止。`AudioSettings.Mobile.StopAudioOutput/StartAudioOutput` の経路が動き、発話は落ちない |
+| fps / 音量 | 設定パネルが無いので既定（30 fps / 1.0） |
+
+★ **キャラクターが白飛びする（未解決）。** 切り分けの経過と結果は
+[#110](https://github.com/schwarz9791/chatter-agent/issues/110)。
+対応は UniUnlit への差し替え（→ 上の「Android では MToon10 を UniUnlit に差し替える」）。
+
+★ Unity 6 の Release プレイヤーは logcat にグラフィックス API 名を出さない。
+
+★ **`XR_Glasses` AVD の Home Space パネルは、カメラを不透明の黒でクリアしても部屋が透けて見える。**
+フレームバッファの alpha に関わらず**黒は見えない**（光学シースルーの模擬。黒 = 光が無い）。
+`XR_Headset2` では同じ APK が不透明の黒いパネルになる。SETUP.md の Home Space 代替案にあった
+「パネル背景を透過できるか」はエミュレータの範囲で答えが出た —— グラスでは何もしなくても透けるが、
+**暗い色は実背景に負けて薄まる**。`XR_Glasses` のパネルには `_ × [] [ ]` のタイトルバーが付く。
+
+環境: `~/Library/Android/sdk/emulator/emulator -avd XR_Glasses` で起動、`adb` は
+`~/Library/Android/sdk/platform-tools/adb`。
+
+#### 二度デコードの実測（#97）— 据え置き
+
+`AudioClipPlayer.Prepare` は WAV を `AudioClip` 用（`WavDecoder.Decode`）と
+エンベロープ用（`LipSyncEnvelope.BuildOrWarn`）で二度デコードしている。消すには
+`Decode` から `float[]` を貰う形に API を変える必要があるため、先に所要時間を測って
+要否を決めた。
+
+**測り方**（2026-09-13 / `XR_Glasses` エミュレータ / AivisSpeech 24kHz・16bit・mono / n=12）:
+`Prepare` に `System.Diagnostics.Stopwatch` を一時的に仕込んだ計測用ビルドを
+`./scripts/build-android.sh` で作り、1回目のデコード（`AudioClip` 生成まで含む）と
+2回目のエンベロープ生成をそれぞれ計測して `Debug.Log` に1行ずつ出し、logcat から拾った。
+
+| bytes | decode(ms) | envelope(ms) |
+|---|---|---|
+| 107216 | 0.76 | 0.62 |
+| 602382 | 12.41 | 79.38 |
+| 155344 | 0.23 | 0.21 |
+| 278418 | 55.74 | 5.94 |
+| 531146 | 8.53 | 0.73 |
+| 154320 | 0.27 | 9.14 |
+| 331380 | 4.58 | 12.73 |
+| 610000 | 1.70 | 8.28 |
+| 689872 | 0.80 | 26.66 |
+| 346832 | 4.57 | 0.53 |
+| 66662 | 0.12 | 0.09 |
+| 641742 | 7.89 | 4.66 |
+
+中央値: decode ≈ 3.1ms / envelope ≈ 5.3ms。最大: decode 55.7ms / envelope 79.4ms。
+**サイズとの相関は無い**（同じ 600KB 級で 79ms と 0.7ms）。
+
+**決定: 据え置き。** 二度目のデコードは一度目と同じオーダーで、ばらつきは実行環境の
+ジッタが支配する。消しても中央値で数 ms しか変わらず、`WavDecoder` の API を変える
+（`Decode` から `float[]` を返す形にする）価値が無い。
+
+★ **エミュレータであって実機ではない。** 実機（XREAL Aura）での再測定は
+[#100](https://github.com/schwarz9791/chatter-agent/issues/100)。計測コードはこの決定の後
+`AudioClipPlayer.cs` から取り除いてある。

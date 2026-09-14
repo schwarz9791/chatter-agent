@@ -7,13 +7,38 @@
 #   呼び出し側からは「ハングした」としか見えない。
 set -euo pipefail
 
-UNITY_VERSION="${UNITY_VERSION:-6000.5.8f1}"
-UNITY_BIN="/Applications/Unity/Hub/Editor/${UNITY_VERSION}/Unity.app/Contents/MacOS/Unity"
 PROJECT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-if [ ! -x "$UNITY_BIN" ]; then
-  echo "Unity が見つかりません: $UNITY_BIN" >&2
-  echo "UNITY_VERSION で指定できます（現在: $UNITY_VERSION）" >&2
+if [ -n "${UNITY_VERSION:-}" ]; then
+  # ★ 明示指定はそれだけを見る。サフィックス違いへのフォールバックはしない。
+  CANDIDATES=("$UNITY_VERSION")
+else
+  # ★ 版の書き場所を ProjectSettings/ProjectVersion.txt の1つにする。
+  #   版を切り替えるたびにこのスクリプトを直す必要がなくなる。
+  VERSION_FILE="$PROJECT_PATH/ProjectSettings/ProjectVersion.txt"
+  PROJECT_VERSION="$(sed -n 's/^m_EditorVersion: //p' "$VERSION_FILE" | head -1)"
+  if [ -z "$PROJECT_VERSION" ]; then
+    echo "m_EditorVersion を読めません: $VERSION_FILE" >&2
+    exit 1
+  fi
+  CANDIDATES=("$PROJECT_VERSION" "${PROJECT_VERSION}-arm64")
+fi
+
+UNITY_BIN=""
+for candidate in "${CANDIDATES[@]}"; do
+  bin="/Applications/Unity/Hub/Editor/${candidate}/Unity.app/Contents/MacOS/Unity"
+  if [ -x "$bin" ]; then
+    UNITY_BIN="$bin"
+    break
+  fi
+done
+
+if [ -z "$UNITY_BIN" ]; then
+  echo "Unity が見つかりません。探した場所:" >&2
+  for candidate in "${CANDIDATES[@]}"; do
+    echo "  /Applications/Unity/Hub/Editor/${candidate}/Unity.app/Contents/MacOS/Unity" >&2
+  done
+  echo "UNITY_VERSION で指定できます" >&2
   exit 1
 fi
 

@@ -8,7 +8,8 @@
         "VRM10",
         "UniGLTF",
         "UniGLTF.Utils",
-        "Unity.InputSystem"
+        "Unity.InputSystem",
+        "Unity.Nuget.Newtonsoft-Json"
     ],
     "includePlatforms": [
         "Editor"

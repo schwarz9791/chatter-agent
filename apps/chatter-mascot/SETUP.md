@@ -389,8 +389,10 @@ cd apps/chatter-mascot
 ### Android（[#97](https://github.com/schwarz9791/chatter-agent/issues/97)）
 
 XR なしの通常 Android アプリとして、接続 → 音声取得 → 再生 → ack と VRM の表示までが通る。
-XR（Full Space）は [#99](https://github.com/schwarz9791/chatter-agent/issues/99)、接続先の恒久化は
-[#98](https://github.com/schwarz9791/chatter-agent/issues/98)。
+XR（Full Space）は [#99](https://github.com/schwarz9791/chatter-agent/issues/99)。**接続先の指定と
+LAN 越しの接続**は [#98](https://github.com/schwarz9791/chatter-agent/issues/98) —— ビルドし直さず
+`settings.json` を書き換えるだけで Mac の `chatter-agent-server` に繋がる。手順は
+[`../../docs/mascot.md`](../../docs/mascot.md)「LAN 接続（#98）」。
 
 前提は **Android Build Support（OpenJDK / SDK & NDK 込み）** だけ（6000.3.14f1 のインストールに
 入っている）。
@@ -407,7 +409,9 @@ cd apps/chatter-mascot
 `am start` → `adb logcat -s Unity` の順に行う（`--no-logcat` を渡すと logcat は省く）。`adb` は
 `$HOME/Library/Android/sdk/platform-tools/adb`（`ADB` 環境変数で上書き可）。転送先は既定で 8570
 のままなので、端末側からは「自分自身の 8570」に繋いだつもりで Mac の `chatter-agent-server` に届く
-（`MascotRunner` の既定 `ws://127.0.0.1:8570` はそのまま）。
+（`MascotRunner` の既定 `ws://127.0.0.1:8570` はそのまま）。★ この経路はサーバーから見るとループバック
+接続になるので、LAN 越しの接続やトークンの検証にはならない（→ `configure-android.sh` を使う
+「LAN 接続（#98）」）。
 
 logcat に出るはずの行:
 
@@ -499,16 +503,23 @@ osascript -e 'tell application "System Events" to tell process "Chatter Mascot" 
   },
   "display": {
     "frameRate": 30
-  }
+  },
+  "connection": { "serverUrl": "", "token": "" }
 }
 ```
 
 ★ **`display.frameRate` は #88 で追加した。** `30` か `60` のみ（既定 `30`）。
 `Application.targetFrameRate` の上限を設定パネルの「モーション」→「フレームレート」から
-変えられる。**その2値以外は既定へフォールバックする**（クランプではない）。デスクトップ
-だけの項目——Android / XR には設定パネルが無いので、この JSON の既定がそのまま使われる
-（→ [#98](https://github.com/schwarz9791/chatter-agent/issues/98)）。60 fps の CPU コストは
+変えられる。**その2値以外は既定へフォールバックする**（クランプではない）。書くのは
+デスクトップの設定パネルだけ——Android には設定パネルが無いが、`settings.json` は共有しているので
+（→ [#98](https://github.com/schwarz9791/chatter-agent/issues/98)。「LAN 接続（#98）」）、ファイルに
+書かれていなければこの JSON の既定がそのまま使われる。60 fps の CPU コストは
 [`../../docs/mascot.md`](../../docs/mascot.md) の「#88 時点の実測」に実測がある。
+
+★ **`connection`（`serverUrl` / `token`）は #98 で追加した。** 空文字は「未指定」。
+デスクトップの設定パネルはこのセクションを書かない（LAN 接続の設定は `configure-android.sh` か
+手編集）が、往復のたびに落ちないよう常に出力する。→ [`../../docs/mascot.md`](../../docs/mascot.md)
+「LAN 接続（#98）」。
 
 ★★ **「大きさ」もここに無い。** ウィンドウの大きさは `window.json` が持っていて、
 スライダーはその写しでしかない（**現在の高さ ÷ 540** が倍率。既定の高さは #88 で
@@ -628,10 +639,19 @@ cleartext だけで、それも静的な `Assets/Plugins/Android/AndroidManifest
 **ネットワーク**（見落としやすい）:
 
 - **`ACCESS_LOCAL_NETWORK` はランタイム権限**で、**targetSdk 37 以降で必須**。ローカルアドレスへの
-  TCP 接続・mDNS・`.local` 解決がすべて対象 — [Local network permission](https://developer.android.com/privacy-and-security/local-network-permission)
+  TCP 接続・mDNS・`.local` 解決が対象で、**`UnityWebRequest` / `ClientWebSocket` のようなライブラリ経由の
+  通信も含む** — [Local network permission](https://developer.android.com/privacy-and-security/local-network-permission)。
+  ★ 今の targetSdk は Automatic 解決で 37 未満なので該当しない。このランタイム要求はまだコード化していない
+  ——37 に上がったら要る（→ [`../../docs/mascot.md`](../../docs/mascot.md)「Player Settings は
+  `AndroidPlayerSettings.FixAll` が書く」）
 - **`ws://`（非TLS）を使うなら cleartext 許可が必要**。Android 9 以降デフォルト無効 —
-  [Network Security Configuration](https://developer.android.com/privacy-and-security/security-config)
-- 接続先は**まず手動 IP 入力**でよい。後から `NsdManager`（`android.net.nsd`）で mDNS 検出を足す
+  [Network Security Configuration](https://developer.android.com/privacy-and-security/security-config)。
+  非 XR の Android（[#97](https://github.com/schwarz9791/chatter-agent/issues/97)）はすでに
+  `AndroidManifestPostProcessor` と `insecureHttpOption` で満たしている
+- 接続先の手動入力は**すでに入っている**（[#98](https://github.com/schwarz9791/chatter-agent/issues/98)。
+  `settings.json` の `connection.serverUrl` / `configure-android.sh` — 手順は
+  [`../../docs/mascot.md`](../../docs/mascot.md)「LAN 接続（#98）」）。後から
+  `NsdManager`（`android.net.nsd`）で mDNS 検出を足すのは未着手
 
 ★ **エンジンの `--host 0.0.0.0 --cors_policy_mode all` は不要になった**（#29）。
 叩くのは同じ Mac 上の `chatter-agent-server` だけ。

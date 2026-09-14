@@ -18,14 +18,16 @@ core/src/
 │   ├── worker.ts            ドレインループ。応答待ち通知の整形もここ
 │   └── workerState.ts       プロセスを跨いで持ち回る重複抑制の状態
 ├── server/       chatter-agent-server（配信キュー → WebSocket 配信 + 音声の HTTP 配布）
-│   ├── index.ts             合成ルート。ロック → bind → 古いキューの掃除 → ポーリング
+│   ├── index.ts             合成ルート。ロック → トークン確保 → bind → 古いキューの掃除 → ポーリング
 │   ├── dispatcher.ts        配信済み seq と**採番の世代**の判断。フレームの組み立てもここ（ユニットテストのため純粋な部品に切り出してある）
 │   ├── audioStore.ts        ★合成のキャッシュと single-flight。ディスクを持たない（issue #29）
 │   ├── engineProcess.ts     ★合成エンジンを起こす条件の判断と、プロセスグループごとの停止（issue #51）
-│   ├── httpServer.ts        ルーティング（`/audio/…` と `/v1/*`）と、書き込み口の3重の絞り（issue #76）
+│   ├── httpServer.ts        ルーティング（`/audio/…` と `/v1/*`）。認証の関所（issue #98）と、書き込み口の3重の絞り（issue #76）
 │   ├── controlApi.ts        ★設定パネルの制御 API（`/v1/*`）。**HTTP を知らない層**（issue #76）
-│   ├── loopback.ts          peer がループバックか（純粋関数）。書き込み口を絞るのに使う（issue #76）
-│   ├── wsServer.ts          配信と ack。Origin 検査、外部 http.Server への相乗りもここ
+│   ├── auth.ts              非ループバックからの `Authorization: Bearer` を検証する（純粋関数。issue #98）
+│   ├── lanToken.ts          共有トークンの読み書き（`{root}/server.token`。無ければ生成。issue #98）
+│   ├── loopback.ts          peer がループバックか（純粋関数）。`auth.ts` の免除判定と、書き込み口を絞るのに使う（issue #76 / #98）
+│   ├── wsServer.ts          配信と ack。トークン認証（issue #98）→ Origin 検査、外部 http.Server への相乗りもここ
 │   └── throttledWarn.ts     同じ警告を間引く（503 の連発と Origin 拒否。黙らせずに件数を出す）
 ├── tts/          音声合成エンジンのクライアント（issue #29 で player/ から移設）
 │   └── voicevoxClient.ts    AivisSpeech / VOICEVOX 互換 API（fetch + AbortSignal.timeout）
@@ -39,7 +41,7 @@ core/src/
 ├── core/         契約と基盤
 │   ├── types.ts             SpeechRecord / SpeechFrame / SpeechEpoch / LEGACY_EPOCH / Emotion / SpeechKind / SpeakMessage
 │   ├── audioPath.ts         `/audio/<epoch>-<seq>.wav` の組み立てと検証。server と player が共有する
-│   ├── paths.ts             ← cc-mascot-xr 流用
+│   ├── paths.ts             ← cc-mascot-xr 流用。`getServerTokenPath` は `server.token`（issue #98）
 │   ├── config.ts            ← cc-mascot-xr configStore 流用
 │   ├── configPatch.ts       ★`PATCH /v1/config` の検証と書き戻しの組み立て（純粋関数。issue #76）
 │   ├── version.ts           バンドルに焼き込むバージョン。`package.json` との一致はテストが固定する
@@ -354,12 +356,21 @@ server / player はこのファイルを読みも書きもしない（読むの�
 | キー | 既定値 | 環境変数 |
 |---|---|---|
 | `port` | `8570` | `CHATTER_AGENT_PORT` |
-| `host` | `"0.0.0.0"` | `CHATTER_AGENT_HOST` |
+| `host` | `"127.0.0.1"` | `CHATTER_AGENT_HOST` |
 | `speakPrompts` | `true` | `CHATTER_AGENT_SPEAK_PROMPTS` |
 | `speechLogMaxBytes` | `5242880` | `CHATTER_AGENT_SPEECH_LOG_MAX_BYTES` |
 | `speechQueueMaxEntries` | `500` | `CHATTER_AGENT_SPEECH_QUEUE_MAX_ENTRIES` |
 | `spoolMaxAgeHours` | `6` | `CHATTER_AGENT_SPOOL_MAX_AGE_HOURS` |
 | `allowedOrigins` | `[]` | `CHATTER_AGENT_ALLOWED_ORIGINS`（カンマ区切り） |
+
+★ **LAN から繋ぐ（Android など）には `host` を `0.0.0.0` などへ明示的に変える必要がある。**
+非ループバックからの接続には共有トークンが要る（→ [`protocol.md`](./protocol.md) の「セキュリティ」）。
+このトークンは**config のキーでも環境変数でもない** —— `GET /v1/config` が設定を丸ごと返すので、
+キーにすると漏れる。置き場は `{root}/server.token`（`server/lanToken.ts` が生成・管理する）1箇所に絞ってある。
+
+★ player が別ホストのサーバーに繋ぐときだけ要るトークンは `CHATTER_AGENT_PLAYER_TOKEN`。
+理由は同じ（config に置くと `GET /v1/config` の snapshot で漏れる）なので、`player/index.ts` が
+`process.env` から直接読む —— `ChatterAgentConfig` のキーにはしていない。
 
 ### 感情判定は「文が感情的か」ではなく「作業で何が起きているか」で決める
 
@@ -563,9 +574,10 @@ player だけが読むキー。**これも別ファイルに分けない**（理
   転送エラー（試行回数を消費する＝発話が捨てられる）に化けた。しかも `synthesize` は2往復なので
   **最悪は `synthesisTimeoutMs` の2倍**で、既定の45秒でも足りなかった。いまはサーバーが
   `GET` の応答を自分で打ち切って 503 を返すので、この制約そのものが無い
-- ★ **`playerServerUrl` が `host` と別なのは、既定の `0.0.0.0` が bind アドレスであって接続先ではないから。**
-  空のときは `0.0.0.0` / `::` を `127.0.0.1` に読み替えて組み立てる。音声の取得元も
-  この URL の authority から導く（サーバーは自分の到達アドレスを知らない → `core/audioPath.ts`）
+- ★ **`playerServerUrl` が `host` と別なのは、`0.0.0.0` / `::`（LAN 公開のため明示的に指定したとき）が
+  bind アドレスであって接続先ではないから。** 空のときはこれらを `127.0.0.1` に読み替えて組み立てる。
+  音声の取得元もこの URL の authority から導く（サーバーは自分の到達アドレスを知らない → `core/audioPath.ts`）
+- ★ 非ループバックのサーバーに繋ぐときだけ、`CHATTER_AGENT_PLAYER_TOKEN` が要る（→ 上の「設定と環境変数」）
 
 `chatter-agent-speak`（`summarizer/` の AI要約）だけが読むキー。**これも別ファイルに分けないこと。**
 理由は player のキーと同じだが、**警告を吐く側が逆になる**: これは `chatter-agent-speak` だけが読むキーなので、
@@ -708,7 +720,6 @@ delta 単位の早期確定を復活させるなら同じ回帰をもう一度�
 | | |
 |---|---|
 | [#2](https://github.com/schwarz9791/chatter-agent/issues/2) | テキスト整形規則の見直し（上記）。**実機で強調記号を踏んだ** — `**強調。**` が `**強調。` と `** 続き` に割れて読み上げられる |
-| [#3](https://github.com/schwarz9791/chatter-agent/issues/3) | WebSocket の**認証**。Origin 検査は入ったが、LAN 上の他端末は素通り |
 | [#5](https://github.com/schwarz9791/chatter-agent/issues/5) | Linux で `birthtimeNs` が当てにならない（spool の命名で解く）。**macOS だけを対象にしている間は実害なし** |
 | [#7](https://github.com/schwarz9791/chatter-agent/issues/7) | `cleanOrphans` の追加走査 |
 
@@ -717,3 +728,7 @@ delta 単位の早期確定を復活させるなら同じ回帰をもう一度�
 > 1回しか走らない。**ただし `readMessage` は毎 delta で全 delta ファイルを読み直す**ので、
 > ファイル読み取りの二乗性は残っている（480 delta で実測 474ms だった正規表現のコストとは別物で、
 > 現状は問題になっていない）。
+>
+> WebSocket / HTTP の認証（[#3](https://github.com/schwarz9791/chatter-agent/issues/3)）は、既定 bind を
+> ループバックにし、非ループバックには共有トークンを要求する形で決着している。残存リスク
+> （DNS リバインディング）は [`protocol.md`](./protocol.md) の「セキュリティ」。

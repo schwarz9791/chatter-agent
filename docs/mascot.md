@@ -48,8 +48,10 @@
 `FrameRateBudget.SetBaseline` の経路で反映される。`Application.targetFrameRate` へ直接
 書かないのは、VRM 読み込み中の一時的な引き上げ（`FrameRateBudget.Boost`）を上書きで
 消さないため。選択肢に無い値（`settings.json` を手で壊した場合など）は**クランプではなく
-既定へフォールバック**（警告ログつき）。Android/XR には設定パネルが無いので、この JSON の
-既定がそのまま使われる（→ #98）。
+既定へフォールバック**（警告ログつき）。Android には設定パネルが無いが、`settings.json`
+（`Application.persistentDataPath`）の共有キーとして `display.frameRate` も読む
+（`MascotSettingsHost`。→ 下の「LAN 接続（#98）」）。ファイルに書かれていなければこの JSON の
+既定がそのまま使われる。
 
 ### #59 時点の実測: フレームレート上限ありでの常駐 CPU
 
@@ -2875,8 +2877,9 @@ API not found (/v1). Update chatter-agent-server.
   観測した事実だけを出して、対処だけ添える
 - ★★ **このクライアントにとって 404 は「口が無い」だけ**だが、サーバー側にはもう1つ
   404 を返す枝がある（**ループバック以外からの書き込み**を「口の存在ごと見せない」で断る絞り）。
-  同じマシンで動く前提なので今は当たらないが、**#98 で別ホストに繋ぐようになると
-  書き込みだけ 404 になる** —— そのときはメソッドで出し分けること
+  同じマシンで動く前提なので通常は当たらないが、**別ホストのサーバーに繋いだ場合
+  （`-serverUrl` / `connection.serverUrl`。issue #98）はそこが崩れる** —— 書き込みだけ
+  404 になるので、そこを直すならメソッドで出し分けること
 - ★ `Player.log` にも1行残す。パネルの note は**開いている間しか見えない**うえ、
   3項目がまとめて無効になる原因は後から突き合わせたくなる種類の情報
 
@@ -2887,7 +2890,7 @@ API not found (/v1). Update chatter-agent-server.
 （`audioSource.volume = 1.5` は黙って 1.0 になり、`AudioClipPlayer.CopySettings` はその 1.0 を
 各 voice に写す）。つまり**スライダーの右半分が XR では no-op** になる。
 
-`settings.json` は **XR（#98）と共有する前提**なので、doc を「macOS だけ 2.0 まで効く」と
+`settings.json` は **Android と共有している**（issue #98）ので、doc を「macOS だけ 2.0 まで効く」と
 書き直す逃げ道は採らなかった。**同じファイルの同じキーが、開いた環境によって意味を変える**のは
 設定として成立しない。上限を 1.0 に下げてある（`SettingsMapping.VolumeMax`）。
 
@@ -3992,12 +3995,12 @@ VRM の読み込み直後、`VrmStage.Adopt` が `VrmMaterialCheck.Inspect` の�
 | minSdk | 30 | 動いている Android XR サンプルの値 |
 | `ForceInternetPermission` | オン | Unity が `INTERNET` を書く根拠 |
 | `insecureHttpOption` | `AlwaysAllowed` | ★ 下記 |
-| targetSdk | Automatic（触らない） | 6000.3 同梱の SDK が platforms 34 / 35 / 36 を持つので 36 に解決される。★ **37 から `ACCESS_LOCAL_NETWORK` がランタイム権限になる**（→ [#98](https://github.com/schwarz9791/chatter-agent/issues/98) で決める） |
+| targetSdk | Automatic（触らない） | 6000.3 同梱の SDK が platforms 34 / 35 / 36 を持つので 36 に解決される。★ **37 から `ACCESS_LOCAL_NETWORK` がランタイム権限になる**が、このランタイム要求はコード化していない。37 に上がったら要る |
 
 ★ **`insecureHttpOption` は Unity 自身の門で、Android の `usesCleartextTraffic` とは別物。**
-`UnityWebRequest` は既定で http を拒むが**ループバックだけは例外**なので、`adb reverse` で
-繋いでいる間は何も失敗しない。[#98](https://github.com/schwarz9791/chatter-agent/issues/98) で
-最初に LAN のホストへ繋いだとき、**音声の GET だけ**が落ちる。
+`UnityWebRequest` は既定で http を拒むが**ループバックだけは例外**。LAN のホストへ http で
+繋ぐ経路（[#98](https://github.com/schwarz9791/chatter-agent/issues/98)。→ 下の「LAN 接続」）
+があるので、`AlwaysAllowed` にしてそちらも通している。これが無いと**音声の GET だけ**が落ちる。
 
 ### マニフェストは静的に置かず、Gradle 生成後に注入する
 
@@ -4077,7 +4080,9 @@ IL2CPP の作業ディレクトリ `.utmp/` は `.gitignore` 済み。
 
 `scripts/run-android.sh` が `adb reverse tcp:8570 tcp:${CHATTER_AGENT_PORT:-8570}` を張るので、
 既定のまま実行すれば `MascotRunner` の既定 `ws://127.0.0.1:8570` のままで Mac のサーバーに届く。
-恒久的な接続先は [#98](https://github.com/schwarz9791/chatter-agent/issues/98)。
+
+★ **これはサーバーから見るとループバック接続。** トークンの経路を確かめたいときは使わないこと
+（→ 下の「LAN 接続（#98）」）。
 
 ★★ **1つのランタイムルートに繋ぐクライアントは1台**（→ [`protocol.md`](./protocol.md) の
 「クライアント側の責務」6）。デスクトップのマスコットが常用のサーバーに繋がっている間に Android を
@@ -4098,6 +4103,112 @@ CHATTER_AGENT_PORT=8571 ./scripts/run-android.sh
 ```json
 {"session_id":"…","hook_event_name":"MessageDisplay","turn_id":"…","message_id":"…","index":0,"final":true,"delta":"…"}
 ```
+
+### LAN 接続（#98）
+
+ビルドし直さず、`settings.json` を書き換えるだけで Android から Mac の
+`chatter-agent-server` に繋がる。
+
+#### 設定ファイルの置き場と優先順位
+
+| 環境 | 置き場所 | 解決 |
+|---|---|---|
+| デスクトップ | `{RuntimeDirectory}/mascot/settings.json`（`~/.config/chatter-agent/mascot/settings.json`。`window.json` と同じディレクトリ） | `SettingsLocation.Resolve` |
+| Android | `Application.persistentDataPath/settings.json` | 同上 |
+
+接続先とトークンは `connection` セクションに持つ。
+
+```json
+{ "connection": { "serverUrl": "ws://192.168.1.10:8570", "token": "…" } }
+```
+
+優先順位は **`-serverUrl`（起動引数）＞ `connection.serverUrl` ＞ `[SerializeField]` の既定**
+（`MascotRunner.ResolveServerUrl`）。トークンは `connection.token` からしか読まない
+（起動引数は無い）。
+
+★★ **どちらも `Awake` で**、専用のストアを作らず**起動時に1回だけ**読む。ファイルを
+書き換えても**次回の起動まで反映されない** —— 接続を1回きり捕まえる設計（`MascotRunner.ServerUrl`
+の doc）を保つため。採用した出どころ（起動引数 / 設定ファイル / 既定）とトークンの有無はログ（デスクトップは
+Player.log、Android は `adb logcat -s Unity`）に出る。
+
+#### Mac 側の準備
+
+サーバーを `host: 0.0.0.0`（または LAN に見える具体的な IP）で起動しないと、Android からは
+繋がらない（既定はループバックのみ。→ [`protocol.md`](./protocol.md) の「セキュリティ」）。
+
+```bash
+CHATTER_AGENT_HOST=0.0.0.0 npm run start:server
+```
+
+起動ログに接続先候補（`ws://<LAN IP>:<port>`）とトークンファイルの**パス**が出る
+（値そのものは出ない）。
+
+#### `configure-android.sh`
+
+```bash
+./scripts/configure-android.sh                          # en0/en1 の IP + CHATTER_AGENT_PORT（既定 8570）から自動組み立て
+./scripts/configure-android.sh ws://192.168.1.10:8570    # 接続先を明示
+./scripts/configure-android.sh --no-restart              # 端末側のアプリを再起動しない
+```
+
+トークンは `${XDG_CONFIG_HOME:-$HOME/.config}/chatter-agent/server.token` から読む
+（先にサーバーを起動しておくこと）。端末側の `settings.json` は `adb pull` → `connection` だけ
+差し替え → `adb push` するので、共有キー（音量・ミュートなど）は消えない。
+
+★ 別ルートの検証用サーバー（`XDG_CONFIG_HOME` / `CHATTER_AGENT_PORT` を変えて立てたもの）に
+繋ぐときは、`configure-android.sh` を呼ぶときにも**同じ** `XDG_CONFIG_HOME` / `CHATTER_AGENT_PORT`
+を渡すこと。揃えないとトークンファイルの場所と既定ポートがずれ、常用のサーバーの
+トークン・接続先を組み立ててしまう。
+
+★★ **`adb reverse`（`10.0.2.2` 経由を含む）は、サーバーから見るとループバック接続になる。**
+ループバックはトークンを免除されるので、トークン無し・誤りのどちらでも繋がってしまい、
+トークンの経路を検証したことにならない。トークンを確かめるときは端末の実 IP から
+Mac の LAN IP へ接続する経路（`configure-android.sh` が書く経路）を使うこと。
+
+#### Android で効くキーと効かないキー
+
+`settings.json` の書き手は `MascotSettingsHost`（`Vrm/`）に一本化されていて、
+「設定 → シーン」の反映経路（ミュート・音量・フレームレート上限・待機モーション・視線・
+瞬き）はデスクトップと Android で共通。1秒ポーリングで外部変更も拾う。
+
+| キー | Android で効くか |
+|---|---|
+| `audio.mute` / `audio.volume` | 効く |
+| `display.frameRate` | 効く（設定パネルは無いので、`settings.json` を手で編集するか `adb push` で書く。`configure-android.sh` は `connection` しか書き換えない） |
+| `character.idleMotion` / `character.cursorGaze` / `character.blink` | 効く（視線は `CursorProvider` が無いので自律的な漂いになる） |
+| `connection.serverUrl` / `connection.token` | 効く（起動時に1回だけ） |
+| `character.vrm` | **効かない。** VRM の探索は `AssetEnv.HasUserConfigDirectory` のときだけユーザー段を見るが、Android はこれが `false`（共有ファイルシステムが無い） |
+| `audio.muteHotKey` / `ui.hideHotKey` | **効かない。** グローバルショートカットはデスクトップ固有のネイティブプラグイン（`StatusItemBridge`）にしか無い |
+
+#### 繋がらないときの症状と切り分け
+
+Android のログは `adb logcat -s Unity`。★★ **Android では 401 と「接続を拒否された」が同じ定型文で
+始まる。** 見分けるのは内側の例外が付くかどうか —— 401 のときは `ClientWebSocket` の例外に
+ステータスがどこにも載らないので、`トークンが無いか違います` のヒントは付かない（デスクトップで
+ステータスが内側に載る環境なら付く）。
+
+| 症状（ログ） | 原因 | 確かめ方 |
+|---|---|---|
+| `[Mascot] 接続エラー: Unable to connect to the remote server`（**内側の例外が付かない**）。サーバー側に `[WS] Rejected unauthorized connection: <端末の IP>` | トークンが無いか違う（`401`） | 起動ログの `[Mascot] トークン: 設定あり / 設定なし`。`connection.token` が `server.token` と一致しているか（`configure-android.sh` を同じ `XDG_CONFIG_HOME` で撃ち直す） |
+| `[Mascot] 接続エラー: Unable to connect to the remote server → mono-io-layer-error (111)` | 相手のポートが開いていない。サーバーが止まっている、または `host` がループバックのまま | Mac 側の起動ログに「LAN からは繋げません（host=127.0.0.1）」が出ていないか |
+| （未実測）Mac から `curl http://<LAN IP>:<port>/v1/health` は `401` が返るのに、端末からは届かない | macOS のローカルネットワーク許可が拒否されている | システム設定 → プライバシーとセキュリティ → ローカルネットワーク。**この許可は node ではなく起動元のターミナルアプリに紐づく** —— 過去に拒否していると 127.0.0.1 からは繋がるのに LAN からだけ症状が出る |
+| （未実測）WS は `接続しました` まで進むが、音声の取得だけ失敗する | `insecureHttpOption` が `AlwaysAllowed` になっていない（`UnityWebRequest` だけが掛かる門） | `Edit > Project Settings > Player` の `Configuration > Insecure HTTP Option`。出荷値は `AndroidPlayerSettings.FixAll` が書く |
+| （未実測）targetSdk 37 以上で全部繋がらない | `ACCESS_LOCAL_NETWORK` のランタイム許可が要る | 現状は Automatic 解決で 37 未満なので該当しない（→ 上の `AndroidPlayerSettings.FixAll` の表） |
+| `[Mascot] serverUrl: 既定を使います ("ws://127.0.0.1:8570")` | 設定が読まれていない。パス違い・JSON が壊れている・`connection.serverUrl` が不正（警告が出る） | `adb shell cat /sdcard/Android/data/tech.sukima.chattermascot/files/settings.json`。`adb reverse` が張られていると既定のままでも繋がってしまい気付かない |
+| `[Mascot] serverUrl: 起動引数を使います (…)` | `-serverUrl` が設定より優先されている | 起動引数を外す |
+
+#### ★★ close フレーム無しで切れた後、Android では `Abort` しないと再接続が止まる
+
+サーバーの `terminate()` など close ハンドシェイクを伴わない切断の後、使い終えた `ClientWebSocket` を
+`Dispose()` だけで捨てると、Android では**非ループバックの相手に対して次の `ConnectAsync` が返らなくなる**。
+`切断されました（close フレーム無し。…）。繋ぎ直します` を最後にログが止まり、`接続エラー` も出ない
+（アプリはフリーズしていない）。**ループバック（`adb reverse`）では起きない**ので、`run-android.sh` の
+経路だけで確かめていると見えない。仕組みは特定できていない（`ServicePointManager` の接続数には余裕があった）。
+
+`SpeechClient.AbortAndDispose` が先に `Abort()` してから破棄する。加えて `ConnectAsync` には期限
+（`ConnectTimeoutMs`）を付けてあり、返らない接続は `接続が N 秒以内に確立しませんでした` として
+警告してバックオフに戻る —— 同じ種類の詰まりが別の原因で起きても、再接続ループが無言で止まる形にはならない。
+切断を決定的に起こすには、検証用サーバーを `kill -9` する（close フレームが出ない）。
 
 #### #97 の実機実測（2026-09-13 / Android XR エミュレータ `XR_Glasses` API 34 arm64 / `vita.vrm`）
 

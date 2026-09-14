@@ -149,11 +149,11 @@ namespace ChatterMascot.Desktop
         private bool _refreshing;
         private bool _open;
 
-        public SettingsPanelBridge(ISettingsHost host, string serverUrl, Func<MascotRunner> runner)
+        public SettingsPanelBridge(ISettingsHost host, string serverUrl, string serverToken, Func<MascotRunner> runner)
         {
             _host = host;
             _runner = runner;
-            _client = new CoreConfigClient(ServerUrl.ToHttpBase(serverUrl), RequestTimeoutMs);
+            _client = new CoreConfigClient(ServerUrl.ToHttpBase(serverUrl), RequestTimeoutMs, serverToken);
 
             _context.ProductName = Application.productName;
             _context.Version = Application.version;

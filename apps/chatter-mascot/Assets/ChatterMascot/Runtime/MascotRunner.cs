@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading.Tasks;
 using ChatterMascot.Audio;
 using ChatterMascot.Net;
 using ChatterMascot.Playback;
 using ChatterMascot.Protocol;
 using ChatterMascot.Settings;
+using ChatterMascot.Vrm;
 using UnityEngine;
 
 namespace ChatterMascot
@@ -220,6 +222,15 @@ namespace ChatterMascot
         }
 
         /// <summary>
+        /// 非ループバックの接続に要る共有トークン（<c>connection.token</c>）。空なら未指定。
+        ///
+        /// ★ <see cref="ServerUrl"/> と同じ <c>settings.json</c> から <c>Awake</c> で1回だけ読む
+        ///   （→ <see cref="ResolveServerUrl"/>）。<b>値そのものをログに出さないこと</b> ——
+        ///   出してよいのは「あるかどうか」だけ。
+        /// </summary>
+        public string ServerToken { get; private set; } = "";
+
+        /// <summary>
         /// 設定パネルのテスト音声を鳴らす（#76）。失敗したら理由、成功なら <c>null</c>。
         ///
         /// ★ <b>通常の再生経路をそのまま通す。</b> 別経路で鳴らすと、
@@ -402,7 +413,9 @@ namespace ChatterMascot
         }
 
         /// <summary>
-        /// <c>-serverUrl</c> の上書きを <see cref="serverUrl"/> へ焼く。
+        /// <see cref="serverUrl"/> と <see cref="ServerToken"/> を決める。優先順位は
+        /// <c>-serverUrl</c>（起動引数）＞ <c>settings.json</c> の <c>connection.serverUrl</c> ＞
+        /// <c>[SerializeField]</c> の既定。
         ///
         /// ★★ <b><c>Start</c> ではなく <c>Awake</c> で行うこと。</b> 設定パネル（#76）は
         ///   <c>StatusItemBridge.Bridge.Start()</c> から <see cref="ServerUrl"/> を読んで
@@ -415,16 +428,65 @@ namespace ChatterMascot
         ///   <b>シーンの <c>Awake</c> はすべて終わった後</b>に <c>Start</c> が来る ——
         ///   ここへ移せば順序が決まる。
         ///
-        /// ★ <b>検証（<see cref="IsValidServerUrl"/>）は <c>Start</c> のまま。</b> あちらは
+        /// ★ <b>検証（<c>ServerUrl.IsValid</c>）は <c>Start</c> のまま。</b> あちらは
         ///   「<c>_client</c> を作れるか」の話で、読み手の順序とは別の関心事。
+        ///
+        /// ★★ <b>設定ファイルは専用のストアを作らず、ここで直接・1回だけ読む。</b> 書き手は
+        ///   <c>MascotSettingsHost</c> だけで、こちらは<b>読むだけで一切書かない</b>ので、
+        ///   2つのストアが同じファイルへ競合して書く問題は起こらない。
+        ///   接続先を起動後に書き換えても<b>次回の起動まで反映されない</b>のは、
+        ///   接続を1回きり捕まえる設計（上の doc）と同じ理由。
         /// </summary>
         private void ResolveServerUrl()
         {
-            var overridden = CommandLine.Argument("-serverUrl");
-            if (string.IsNullOrEmpty(overridden)) return;
+            var fromFile = ReadConnectionSettings(SettingsLocation.Resolve(AssetEnvFactory.Current()));
+            ServerToken = fromFile.Token ?? "";
+            // ★ 値は出さない。401 の切り分けには「持っているか」だけで足りる
+            Debug.Log(ServerToken.Length > 0 ? "[Mascot] トークン: 設定あり" : "[Mascot] トークン: 設定なし");
 
-            Debug.Log($"[Mascot] serverUrl をコマンドラインで上書きします: \"{overridden}\"");
-            serverUrl = overridden;
+            var overridden = CommandLine.Argument("-serverUrl");
+            if (!string.IsNullOrEmpty(overridden))
+            {
+                Debug.Log($"[Mascot] serverUrl: 起動引数を使います (\"{overridden}\")");
+                serverUrl = overridden;
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(fromFile.ServerUrl))
+            {
+                Debug.Log($"[Mascot] serverUrl: 設定ファイルを使います (\"{fromFile.ServerUrl}\")");
+                serverUrl = fromFile.ServerUrl;
+                return;
+            }
+
+            Debug.Log($"[Mascot] serverUrl: 既定を使います (\"{serverUrl}\")");
+        }
+
+        /// <summary>読めなければ（無い・壊れている）既定を返す。<c>SettingsJson</c> と同じ「throw しない」作法。</summary>
+        private static MascotSettings ReadConnectionSettings(string path)
+        {
+            if (string.IsNullOrEmpty(path) || !File.Exists(path)) return MascotSettings.Defaults;
+
+            string raw;
+            try
+            {
+                raw = File.ReadAllText(path);
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[Mascot] settings.json を読めませんでした: " + e.Message);
+                return MascotSettings.Defaults;
+            }
+
+            MascotSettings settings;
+            string error;
+            // ★ キー単位の警告は渡さない。同じファイルを MascotSettingsHost も読んで警告するので、
+            //   ここでも出すと起動のたびに同じ行が2回ずつ並ぶ
+            if (!SettingsJson.TryParse(raw, out settings, out error, null))
+            {
+                return MascotSettings.Defaults;
+            }
+            return settings;
         }
 
         /// <summary>
@@ -569,7 +631,9 @@ namespace ChatterMascot
             //
             // ★★ **上書きそのものは Awake で済ませてある**（→ ResolveServerUrl）。ここに残すと、
             //   同じ Start パスに居る StatusItemBridge が**先に ServerUrl を読みうる**。
-            if (!IsValidServerUrl(serverUrl))
+            // ★ 完全修飾で呼ぶこと。 このクラスは同名の public string ServerUrl プロパティを持つので、
+            //   using しただけの型名は解決できない
+            if (!ChatterMascot.Net.ServerUrl.IsValid(serverUrl))
             {
                 Debug.LogError($"[Mascot] serverUrl が不正です: \"{serverUrl}\"。" +
                                "ws:// か wss:// で始まる絶対 URL を指定してください（例: ws://127.0.0.1:8570）");
@@ -605,9 +669,9 @@ namespace ChatterMascot
             }
             // 音声は WebSocket と同じ authority から取る。サーバーは自分の到達アドレスを
             // 知らないので、フレームには相対パスしか載らない
-            _fetcher = new AudioFetcher(AudioFetcher.DeriveAudioBaseUrl(serverUrl), audioFetchTimeoutMs);
+            _fetcher = new AudioFetcher(AudioFetcher.DeriveAudioBaseUrl(serverUrl), audioFetchTimeoutMs, ServerToken);
 
-            _client = new SpeechClient(serverUrl);
+            _client = new SpeechClient(serverUrl, ServerToken);
             _client.FrameReceived += OnFrame;
             _client.Connected += OnConnected;
             _client.Disconnected += () => Dispatch(PlaybackEvent.Disconnected());
@@ -1049,17 +1113,6 @@ namespace ChatterMascot
         {
             _handles.Remove(Key(epoch, seq));
             _player?.Discard(audio);
-        }
-
-        /// <summary>
-        /// ★ スキームまで見ること。<c>Uri.TryCreate</c> は <c>http://…</c> も
-        ///   <c>file:///…</c> も通すが、<c>ClientWebSocket</c> は <c>ws</c> / <c>wss</c> しか繋げない。
-        /// </summary>
-        private static bool IsValidServerUrl(string url)
-        {
-            Uri parsed;
-            if (!Uri.TryCreate(url, UriKind.Absolute, out parsed)) return false;
-            return parsed.Scheme == "ws" || parsed.Scheme == "wss";
         }
 
         private static string Key(int epoch, long seq)

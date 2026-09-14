@@ -19,5 +19,18 @@ namespace ChatterMascot.Net
             var scheme = uri.Scheme == "wss" ? "https" : "http";
             return scheme + "://" + uri.Authority;
         }
+
+        /// <summary>
+        /// <c>ws://</c> / <c>wss://</c> の絶対 URL か。
+        ///
+        /// ★ スキームまで見ること。<c>Uri.TryCreate</c> は <c>http://…</c> も
+        ///   <c>file:///…</c> も通すが、<c>ClientWebSocket</c> は <c>ws</c> / <c>wss</c> しか繋げない。
+        /// </summary>
+        public static bool IsValid(string url)
+        {
+            Uri parsed;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out parsed)) return false;
+            return parsed.Scheme == "ws" || parsed.Scheme == "wss";
+        }
     }
 }

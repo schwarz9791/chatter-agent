@@ -378,5 +378,82 @@ namespace ChatterMascot.Tests
             Assert.That(written, Does.Contain("\"display\""));
             Assert.That(written, Does.Contain("\"frameRate\": 30"));
         }
+
+        // ── connection ───────────────────────────
+
+        [Test]
+        public void RoundTripsTheConnectionSection()
+        {
+            var written = SettingsJson.Write(
+                MascotSettings.Defaults.WithServerUrl("ws://192.168.1.5:8570").WithToken("s3cr3t"));
+            var parsed = Parse(written);
+
+            Assert.That(parsed.ServerUrl, Is.EqualTo("ws://192.168.1.5:8570"));
+            Assert.That(parsed.Token, Is.EqualTo("s3cr3t"));
+            Assert.That(_warnings, Is.Empty);
+        }
+
+        /// <summary>★ デスクトップの設定パネルは connection を触らないが、保存のたびに落ちないこと</summary>
+        [Test]
+        public void WritesTheConnectionSectionEvenWhenUnset()
+        {
+            var written = SettingsJson.Write(MascotSettings.Defaults);
+
+            Assert.That(written, Does.Contain("\"connection\""));
+            Assert.That(written, Does.Contain("\"serverUrl\": \"\""));
+            Assert.That(written, Does.Contain("\"token\": \"\""));
+        }
+
+        [Test]
+        public void EmptyServerUrlMeansUnspecified()
+        {
+            var parsed = Parse("{\"connection\":{\"serverUrl\":\"\"}}");
+
+            Assert.That(parsed.ServerUrl, Is.Empty);
+            Assert.That(_warnings, Is.Empty);
+        }
+
+        /// <summary>★ ws:// / wss:// 以外は既定（空）へ倒す。設定パネルを壊さないため throw しない。</summary>
+        [Test]
+        public void FallsBackToTheDefaultForAnInvalidServerUrl()
+        {
+            var parsed = Parse("{\"connection\":{\"serverUrl\":\"http://example.com\"}}");
+
+            Assert.That(parsed.ServerUrl, Is.Empty);
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        [Test]
+        public void AcceptsAWssServerUrl()
+        {
+            var parsed = Parse("{\"connection\":{\"serverUrl\":\"wss://mascot.example:443\"}}");
+
+            Assert.That(parsed.ServerUrl, Is.EqualTo("wss://mascot.example:443"));
+            Assert.That(_warnings, Is.Empty);
+        }
+
+        [Test]
+        public void TrimsTheToken()
+        {
+            var parsed = Parse("{\"connection\":{\"token\":\" s3cr3t \"}}");
+
+            Assert.That(parsed.Token, Is.EqualTo("s3cr3t"));
+        }
+
+        [Test]
+        public void IgnoresUnknownKeysUnderConnection()
+        {
+            Parse("{\"connection\":{\"nope\":1}}");
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        [Test]
+        public void WarnsWhenConnectionIsNotAnObject()
+        {
+            var parsed = Parse("{\"connection\": 1}");
+
+            Assert.That(parsed.ServerUrl, Is.Empty);
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
     }
 }

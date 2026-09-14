@@ -43,8 +43,10 @@ fi
 #   一度でも成功していれば古い .app が残っているので、**コンパイルエラーでも
 #   「できました」と言って exit 0 する**（＝直っていないバイナリを直ったつもりで起動する）。
 #   test.sh と同じ PIPESTATUS の形に揃える。
+# ★ -buildTarget OSXUniversal を明示する。アクティブなビルドターゲットが Android のまま
+#   残っていた場合、指定しないと BuildPlayer の中で切り替えと再インポートを待つ。
 set +e
-run_unity -quit \
+run_unity -quit -buildTarget OSXUniversal \
   -executeMethod ChatterMascot.EditorTools.BuildScript.BuildMacOS \
   -buildScene "$SCENE" \
   -buildOutput "$OUTPUT" \

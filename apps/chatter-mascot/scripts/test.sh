@@ -16,8 +16,11 @@ rm -f "$RESULTS"
 
 # ★ -runTests は -quit を付けない（Test Runner が自分で終了する）。
 #   付けるとテストが走り切る前に落ちる
+# ★ -buildTarget OSXUniversal を明示する。build-android.sh の後はアクティブな
+#   ビルドターゲットが Android のまま Library に残り、指定しなければ EditMode テストが
+#   Android の #if でコンパイルされる。
 set +e
-run_unity -runTests -testPlatform EditMode -testResults "$RESULTS" 2>&1 | grep -vE "^\s*$"
+run_unity -buildTarget OSXUniversal -runTests -testPlatform EditMode -testResults "$RESULTS" 2>&1 | grep -vE "^\s*$"
 STATUS=${PIPESTATUS[0]}
 set -e
 

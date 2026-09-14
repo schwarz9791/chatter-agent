@@ -17,6 +17,7 @@ import type * as http from "http";
 import { WebSocketServer } from "ws";
 import type { WebSocket } from "ws";
 import { isValidEpoch, type SpeechEpoch } from "../core/types";
+import { isAuthorized } from "./auth";
 import { createThrottledWarn } from "./throttledWarn";
 
 export interface WsServer {
@@ -42,6 +43,11 @@ export interface WsServerOptions {
    *   ここで閉じないとポートが解放されない。
    */
   server?: http.Server;
+  /**
+   * 非ループバックの接続に要求するトークン（→ `server/auth.ts` / `server/lanToken.ts`）。
+   * ループバックの接続はこれを持たなくても通る。
+   */
+  token: string;
   /** 0 で無効化（テスト用） */
   heartbeatIntervalMs?: number;
   maxBufferedBytes?: number;
@@ -127,9 +133,12 @@ export function parseAck(raw: string): { seq: number; epoch: SpeechEpoch | null 
 }
 
 /**
- * ブラウザからの接続を弾く。
+ * 接続の可否を判定する。判定の順は **トークン → Origin**。
  *
- * WebSocket は CORS の対象外なので、これが無いと**ユーザーが開いた任意の Web ページ**が
+ * 非ループバックの相手にはまずトークン認証を要求する（→ `server/auth.ts`）。不正なら
+ * `401` で拒否する。ループバックは免除されるので、以下の Origin 検査だけを通ればよい。
+ *
+ * WebSocket は CORS の対象外なので、Origin 検査が無いと**ユーザーが開いた任意の Web ページ**が
  * `new WebSocket("ws://127.0.0.1:8570")` で会話を読め、ack を投げてマスコットを黙らせられる。
  * `host` を 127.0.0.1 にしても塞がらない。
  *
@@ -138,29 +147,42 @@ export function parseAck(raw: string): { seq: number; epoch: SpeechEpoch | null 
  * である相手を通す唯一の経路がこれ。前方一致やワイルドカードは入れない（緩めるほど上の脅威に近づく）。
  *
  * Unity（WebGL 以外）/ ネイティブクライアントは `Origin` を送らないので、リストの中身に関わらず通る。
- * LAN 上の他端末に対する認証は別途必要（Issue #3）。
  */
-function createVerifyClient(
+export function createVerifyClient(
   allowedOrigins: string[],
-): (info: { origin?: string; req: { headers: Record<string, unknown> } }) => boolean {
+  token: string,
+): (
+  info: { origin?: string; req: http.IncomingMessage },
+  callback: (result: boolean, code?: number, message?: string) => void,
+) => void {
   const allowed = new Set(allowedOrigins);
   // ★ 間引くこと。`origin` はクライアント任意の文字列なので、ポートを叩き続ける
   //   ページがあればログを埋められる。キーの数にも上限が要る（`origin` ごとに
   //   状態を持つと無制限に増える Map になる）
-  const warn = createThrottledWarn();
+  const warnOrigin = createThrottledWarn();
+  const warnAuth = createThrottledWarn();
 
-  return (info) => {
+  return (info, callback) => {
+    const remoteAddress = info.req.socket.remoteAddress;
+    if (!isAuthorized(remoteAddress, info.req.headers.authorization, token)) {
+      warnAuth(`[WS] Rejected unauthorized connection: ${remoteAddress ?? "unknown"}`);
+      callback(false, 401, "Unauthorized");
+      return;
+    }
+
     const origin = info.origin ?? info.req.headers.origin;
-    if (typeof origin !== "string" || origin.length === 0) return true;
-    if (allowed.has(origin)) return true;
+    if (typeof origin !== "string" || origin.length === 0 || allowed.has(origin)) {
+      callback(true);
+      return;
+    }
 
     // 拒否理由を分けて出す。空リストなら「そもそも許可リストが無い」、そうでなければ「リストに無い」
-    warn(
+    warnOrigin(
       allowed.size === 0
         ? `[WS] Rejected origin (allowedOrigins is empty): ${origin}`
         : `[WS] Rejected origin (not in allowedOrigins): ${origin}`,
     );
-    return false;
+    callback(false);
   };
 }
 
@@ -175,7 +197,7 @@ export function createWsServer(options: WsServerOptions): Promise<WsServer> {
       // listen は下で、この構築が終わってから行う
       ...(external ? { server: external } : { host: options.host, port: options.port }),
       maxPayload: MAX_PAYLOAD_BYTES,
-      verifyClient: createVerifyClient(options.allowedOrigins ?? []),
+      verifyClient: createVerifyClient(options.allowedOrigins ?? [], options.token),
     });
     const alive = new WeakSet<WebSocket>();
     let boundAddress = { host: options.host, port: options.port };

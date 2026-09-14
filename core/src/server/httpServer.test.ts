@@ -11,6 +11,8 @@ import type { SpeechRecord } from "../core/types";
 
 const HOST = "127.0.0.1";
 const EPOCH = "gen-1";
+/** 非ループバック向けの検証で使う固定トークン。ループバックのテストは通す必要が無いので使わない */
+const TOKEN = "test-token-value";
 
 const servers: http.Server[] = [];
 const tmpDirs: string[] = [];
@@ -69,6 +71,7 @@ function stubControl(): ControlApi {
 async function start(overrides: Partial<HttpServerDeps> = {}): Promise<string> {
   const server = createHttpServer({
     store: createAudioStore({ currentVoice: () => VOICE, synthesize: () => Promise.resolve(wavOf(12)) }),
+    token: TOKEN,
     lookup: (seq: number) => (seq === 1 ? record(1) : null),
     allowedOrigins: [],
     disabled: () => false,
@@ -282,6 +285,71 @@ describe("GET /audio/<epoch>-<seq>.wav", () => {
   });
 });
 
+describe("トークン認証（#98）", () => {
+  it("ループバックはトークンを送らなくても通る", async () => {
+    const base = await start();
+    expect((await fetch(`${base}/audio/${EPOCH}-000000000001.wav`)).status).toBe(200);
+  });
+
+  it("ループバックは誤ったトークンでも通る（免除）", async () => {
+    const base = await start();
+    const res = await fetch(`${base}/audio/${EPOCH}-000000000001.wav`, {
+      headers: { authorization: "Bearer wrong" },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("★★ 非ループバック × トークン無し → 401（www-authenticate 付き）", async () => {
+    const socketPath = await startUnix();
+    const res = await requestUnix(socketPath, { method: "GET", path: "/audio/gen-1-000000000001.wav" });
+    expect(res.status).toBe(401);
+    expect(res.headers["www-authenticate"]).toBe("Bearer");
+  });
+
+  it("★★ 非ループバック × トークン誤り → 401", async () => {
+    const socketPath = await startUnix();
+    const res = await requestUnix(socketPath, {
+      method: "GET",
+      path: "/audio/gen-1-000000000001.wav",
+      headers: { authorization: "Bearer wrong-token" },
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("★★ 非ループバック × トークン正しい → 通過", async () => {
+    const socketPath = await startUnix();
+    const res = await requestUnix(socketPath, {
+      method: "GET",
+      path: "/audio/gen-1-000000000001.wav",
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("スキームの大小文字は無視する（RFC 6750）", async () => {
+    const socketPath = await startUnix();
+    const res = await requestUnix(socketPath, {
+      method: "GET",
+      path: "/audio/gen-1-000000000001.wav",
+      headers: { authorization: `bearer ${TOKEN}` },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  /** ★ 未認証の LAN の相手には、ルートの有無も 404 も見せない（存在しないパスでも 401 が先） */
+  it("★ 未認証なら、存在しないパスでも 404 ではなく 401", async () => {
+    const socketPath = await startUnix();
+    const res = await requestUnix(socketPath, { method: "GET", path: "/nope" });
+    expect(res.status).toBe(401);
+  });
+
+  it("OPTIONS にも同じ関所がかかる", async () => {
+    const socketPath = await startUnix();
+    const res = await requestUnix(socketPath, { method: "OPTIONS", path: "/v1/config" });
+    expect(res.status).toBe(401);
+  });
+});
+
 describe("Origin（WebSocket と同じ規則）", () => {
   it("許可リストに無い Origin は 403", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -343,6 +411,7 @@ describe("Origin（WebSocket と同じ規則）", () => {
 async function startUnix(overrides: Partial<HttpServerDeps> = {}): Promise<string> {
   const server = createHttpServer({
     store: createAudioStore({ currentVoice: () => VOICE, synthesize: () => Promise.resolve(wavOf(12)) }),
+    token: TOKEN,
     lookup: (seq: number) => (seq === 1 ? record(1) : null),
     allowedOrigins: [],
     disabled: () => false,
@@ -507,6 +576,11 @@ describe("制御 API のルーティング（#76）", () => {
 });
 
 describe("書き込み口の3重の絞り（#76）", () => {
+  // ★ このブロックは「トークンを持つ LAN の相手」を再現する（#98 の認証を通した先の話）。
+  //   トークン無しでは認証の関所（上の「トークン認証」describe）で 401 になり、
+  //   ここが見たい絞り1〜3まで到達しない
+  const AUTH_HEADERS = { authorization: `Bearer ${TOKEN}` };
+
   /**
    * ★★ 絞り1。**403 ではなく 404** —— 403 は「口はあるが権限が無い」と教えることになる。
    *   存在そのものを見せない
@@ -516,7 +590,7 @@ describe("書き込み口の3重の絞り（#76）", () => {
     const res = await requestUnix(socketPath, {
       method: "PATCH",
       path: "/v1/config",
-      headers: JSON_HEADERS,
+      headers: { ...JSON_HEADERS, ...AUTH_HEADERS },
       body: "{}",
     });
     expect(res.status).toBe(404);
@@ -527,7 +601,7 @@ describe("書き込み口の3重の絞り（#76）", () => {
     const res = await requestUnix(socketPath, {
       method: "POST",
       path: "/v1/tts/preview",
-      headers: JSON_HEADERS,
+      headers: { ...JSON_HEADERS, ...AUTH_HEADERS },
       body: "{}",
     });
     expect(res.status).toBe(404);
@@ -536,7 +610,7 @@ describe("書き込み口の3重の絞り（#76）", () => {
   /** ★ 読みは絞らない（LAN の XR クライアントが話者一覧を引けなくなる） */
   it("★ ループバックでない相手でも GET は通る", async () => {
     const socketPath = await startUnix();
-    const res = await requestUnix(socketPath, { method: "GET", path: "/v1/config" });
+    const res = await requestUnix(socketPath, { method: "GET", path: "/v1/config", headers: AUTH_HEADERS });
     expect(res.status).toBe(200);
     expect(JSON.parse(res.text)).toEqual({ called: "getConfig" });
   });
@@ -544,7 +618,7 @@ describe("書き込み口の3重の絞り（#76）", () => {
   /** ★ `Allow` に載せるのは「その相手が使えるメソッド」。404 になるものを名乗らない */
   it("★ ループバックでない相手には書き込みメソッドを名乗らない", async () => {
     const socketPath = await startUnix();
-    const res = await requestUnix(socketPath, { method: "OPTIONS", path: "/v1/config" });
+    const res = await requestUnix(socketPath, { method: "OPTIONS", path: "/v1/config", headers: AUTH_HEADERS });
     expect(res.status).toBe(204);
     expect(res.headers.allow).toBe("GET, HEAD, OPTIONS");
   });

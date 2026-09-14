@@ -17,8 +17,10 @@ export interface ChatterAgentConfig {
   /** WebSocket の待受ポート。8563 / 8564 は AivisSpeech 等が使うので避けてある */
   port: number;
   /**
-   * WebSocket の bind アドレス。LAN の Android から繋ぐため既定は 0.0.0.0。
-   * ★ 無認証で LAN 全体に露出する。信頼できないネットワークでは 127.0.0.1 にすること。
+   * WebSocket の bind アドレス。既定は `127.0.0.1`（ループバックのみ）。
+   * LAN から繋ぐ（Android 等）には `0.0.0.0` などへ明示的に変える必要がある。
+   * ★ 非ループバックからの接続には共有トークンが要る（→ `server/auth.ts` / `server/lanToken.ts`）。
+   *   ループバックはトークンを持っていなくても通る。
    */
   host: string;
   /** 応答待ち通知（kind: "prompt"）を読み上げるか */
@@ -170,8 +172,8 @@ export interface ChatterAgentConfig {
   /**
    * player の接続先。空なら `port` と `host` から導出する。
    *
-   * ★ `host` をそのまま使えない。既定の `0.0.0.0` は **bind アドレスであって接続先ではない**。
-   *   導出では `0.0.0.0` / `::` を `127.0.0.1` に読み替える。
+   * ★ `host` をそのまま使えない。`0.0.0.0` / `::`（LAN 公開のため明示的に指定したとき）は
+   *   **bind アドレスであって接続先ではない**。導出ではこれらを `127.0.0.1` に読み替える。
    */
   playerServerUrl: string;
   /**
@@ -251,7 +253,7 @@ export interface ChatterAgentConfig {
 export function createDefaultConfig(): ChatterAgentConfig {
   return {
     port: 8570,
-    host: "0.0.0.0",
+    host: "127.0.0.1",
     speakPrompts: true,
     speechLogMaxBytes: 5 * 1024 * 1024,
     speechQueueMaxEntries: 500,

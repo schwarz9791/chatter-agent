@@ -15,8 +15,11 @@ export type AudioFetchResult =
   /** 200。WAV が取れた */
   | { kind: "ready"; wav: ArrayBuffer }
   /**
-   * 503。サーバーはいるが音声を用意できない（エンジンが落ちている / 合成が返らない）。
-   * **あとで取りに来い**という意味なので、試行回数を消費せずに待つ。
+   * 503、または 401（トークンが無いか違う）。**あとで取りに来い**という意味なので、
+   * 試行回数を消費せずに待つ。
+   *
+   * ★ **401 を failed に混ぜないこと。** 混ぜると `synthesisAttempts` を消費して ack まで
+   *   進み、キューの本文が消える（→ `CLAUDE.md`「絶対に守ること」7 の 503 と同じ理屈）。
    */
   | { kind: "unavailable"; reason: string }
   /**
@@ -40,6 +43,11 @@ export interface AudioFetcherOptions {
    * 返らない相手を掴むと head-of-line blocking で以後すべてが無音になる。
    */
   timeoutMs: number;
+  /**
+   * 非ループバックのサーバーに繋ぐときだけ要るトークン（→ `player/index.ts`）。
+   * 空なら `Authorization` ヘッダを送らない。
+   */
+  token?: string;
 }
 
 export interface AudioFetcher {
@@ -67,7 +75,8 @@ async function reason(res: Response, fallback: string): Promise<string> {
 }
 
 export function createAudioFetcher(options: AudioFetcherOptions): AudioFetcher {
-  const { baseUrl, timeoutMs } = options;
+  const { baseUrl, timeoutMs, token } = options;
+  const headers = token ? { authorization: `Bearer ${token}` } : undefined;
 
   return {
     baseUrl,
@@ -75,7 +84,7 @@ export function createAudioFetcher(options: AudioFetcherOptions): AudioFetcher {
     async fetchAudio(audioPath) {
       let res: Response;
       try {
-        res = await fetch(`${baseUrl}${audioPath}`, { signal: AbortSignal.timeout(timeoutMs) });
+        res = await fetch(`${baseUrl}${audioPath}`, { signal: AbortSignal.timeout(timeoutMs), headers });
       } catch (err) {
         const timedOut = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
         return { kind: "failed", reason: timedOut ? `${timeoutMs}ms で返りませんでした` : String(err) };
@@ -89,6 +98,9 @@ export function createAudioFetcher(options: AudioFetcherOptions): AudioFetcher {
       //     Node 24.19.0 で測ると**短いボディでは `cancel()` でも未読でも 30 リクエストで
       //     2 接続**だった（58〜59 本になるのは 2MB のボディに `cancel()` したとき）。
       //     接続数を理由にしない。
+      if (res.status === 401) {
+        return { kind: "unavailable", reason: await reason(res, "トークンが無いか違います (401)") };
+      }
       if (res.status === 503) {
         return { kind: "unavailable", reason: await reason(res, "サーバーが音声を用意できていません (503)") };
       }

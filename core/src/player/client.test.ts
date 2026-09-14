@@ -35,6 +35,8 @@ interface Stub {
   /** 接続してきたソケット（新しい順ではなく接続順） */
   sockets: WsSocket[];
   received: string[];
+  /** 接続ごとの `Authorization` ヘッダ（無ければ undefined。接続順） */
+  authorizations: (string | undefined)[];
 }
 
 /** 接続してきたクライアントに、connection ハンドラから**同期で**送る（server の catchUp と同じ形） */
@@ -48,10 +50,12 @@ async function stub(onConnect?: (socket: WsSocket) => void): Promise<Stub> {
     server,
     sockets: [],
     received: [],
+    authorizations: [],
   };
 
-  server.on("connection", (socket) => {
+  server.on("connection", (socket, req) => {
     out.sockets.push(socket);
+    out.authorizations.push(req.headers.authorization);
     socket.on("message", (data) => out.received.push(String(data)));
     onConnect?.(socket);
   });
@@ -122,6 +126,22 @@ describe("接続", () => {
     const s = await stub();
     const { events } = connect(s.url);
     await until(() => events.includes("connected"));
+  });
+});
+
+describe("トークン（#98）", () => {
+  it("token を渡すと Authorization ヘッダで送る", async () => {
+    const s = await stub();
+    connect(s.url, { token: "s3cr3t" });
+    await until(() => s.authorizations.length === 1);
+    expect(s.authorizations).toEqual(["Bearer s3cr3t"]);
+  });
+
+  it("token を渡さなければ Authorization ヘッダを送らない", async () => {
+    const s = await stub();
+    connect(s.url);
+    await until(() => s.authorizations.length === 1);
+    expect(s.authorizations).toEqual([undefined]);
   });
 });
 

@@ -103,6 +103,11 @@ async function main(): Promise<void> {
   const url = config.get("playerServerUrl") || deriveServerUrl(config.get("host"), config.get("port"));
   const tmpDir = getPlayerTmpDir();
 
+  // ★ config キーにしない。別ホストのサーバーに繋ぐときだけ要り、`GET /v1/config` が
+  //   snapshot() を丸ごと返すので config に置くと漏れる（→ server/lanToken.ts）。
+  //   ループバックのサーバーはこれを要求しない。空なら何も送らない
+  const token = process.env.CHATTER_AGENT_PLAYER_TOKEN || undefined;
+
   console.log(`[Player] config: ${config.filePath}`);
   console.log(`[Player] server: ${url}`);
 
@@ -111,6 +116,7 @@ async function main(): Promise<void> {
   const audioFetcher = createAudioFetcher({
     baseUrl: deriveAudioBaseUrl(url),
     timeoutMs: config.get("audioFetchTimeoutMs"),
+    token,
   });
   console.log(`[Player] audio: ${audioFetcher.baseUrl}/audio/`);
 
@@ -166,6 +172,7 @@ async function main(): Promise<void> {
 
   client = createSpeechClient({
     url,
+    token,
     onFrame: (raw) => {
       const record = parseSpeechFrame(raw);
       if (!record) {

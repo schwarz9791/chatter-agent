@@ -20,8 +20,8 @@ namespace ChatterMascot.EditorTools
     ///
     /// ★ <b><c>insecureHttpOption</c> を <c>AlwaysAllowed</c> にする理由。</b>
     ///   <c>UnityWebRequest</c> は既定で http を拒むが、ループバック（<c>127.0.0.1</c>）だけは
-    ///   例外なので、<c>adb reverse</c> で繋いでいる間は気づけない。#98 で LAN 上のホストへ
-    ///   http で繋ぐようになった瞬間に音声の取得だけが落ちるので、ここで倒しておく。
+    ///   例外なので、<c>adb reverse</c> で繋いでいる間は気づけない。LAN 上のホストへ
+    ///   http で繋ぐと音声の取得だけが落ちるので、ここで倒しておく。
     ///   ★ これは Unity 側の判定で、Android 自体の平文通信の許可（マニフェストの
     ///   <c>usesCleartextTraffic</c>）とは別物。そちらは
     ///   <see cref="AndroidManifestPostProcessor"/> が書く。

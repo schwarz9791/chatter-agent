@@ -12,7 +12,7 @@ namespace ChatterMascot.EditorTools
     /// <c>INTERNET</c> 権限と <c>usesCleartextTraffic</c> を足す（#97 / #98）。
     ///
     /// ★ <b>なぜ <c>Assets/Plugins/Android/AndroidManifest.xml</c> を静的に置かないか。</b>
-    ///   #99 で入る XR 向けパッケージも、同じマニフェストへ同じフック
+    ///   XR 向けパッケージも、同じマニフェストへ同じフック
     ///   （<see cref="IPostGenerateGradleAndroidProject"/>）で注入してくる。静的な1枚を
     ///   置くと「最終形を決める仕組み」が静的ファイルとこのフックの2つに分かれ、
     ///   どちらが勝つか・マージされるのかが読み手に伝わらない。仕組みを1つに保つ。

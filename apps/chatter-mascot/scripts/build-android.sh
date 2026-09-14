@@ -18,12 +18,12 @@ source "$(dirname "${BASH_SOURCE[0]}")/unity.sh"
 SCENE="${1:-Assets/Scenes/Mascot.unity}"
 OUTPUT="${2:-Build/ChatterMascot.apk}"
 
-# ★ **終了コードを捨てないこと。** build.sh / test.sh と同じ PIPESTATUS の形に揃える。
 case "$OUTPUT" in
   /*) BUILT="$OUTPUT" ;;
   *)  BUILT="$PROJECT_PATH/$OUTPUT" ;;
 esac
 
+# ★ **終了コードを捨てないこと。** build.sh / test.sh と同じ PIPESTATUS の形に揃える。
 set +e
 run_unity -quit -buildTarget Android \
   -executeMethod ChatterMascot.EditorTools.BuildScript.BuildAndroid \

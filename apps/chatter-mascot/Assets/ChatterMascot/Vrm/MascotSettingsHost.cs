@@ -12,8 +12,8 @@ namespace ChatterMascot.Vrm
     /// <c>StatusItemBridge</c> が <see cref="ChangedExternally"/> を購読して担う。
     ///
     /// ★ <b>置き場所が Vrm asmdef なのは、<see cref="MascotRunner"/> と <see cref="VrmCharacter"/>
-    ///   の両方に触るため。</b>（<c>Runtime</c> → <c>Vrm</c> の一方向参照はあるが逆は無いので、
-    ///   <c>Runtime</c> 側には置けない）。
+    ///   の両方に触るため。</b>（<c>Vrm</c> → <c>Runtime</c> の一方向参照はあるが逆は無いので、
+    ///   <c>Runtime</c> 側からは <c>VrmCharacter</c> を参照できず、置けない）。
     /// </summary>
     public sealed class MascotSettingsHost : MonoBehaviour
     {
@@ -122,7 +122,8 @@ namespace ChatterMascot.Vrm
         ///   VRM を出さないシーンでも同じ常駐物が動く。
         ///
         /// ★ Android では視線（<c>CursorGazeEnabled</c>）の注入元（<c>CursorProvider</c>）が
-        ///   存在しないので自律的な漂いに倒れるだけで、この反映自体はデスクトップと同じでよい。
+        ///   存在しないので自律的な漂いに倒れるだけで、fps を除けばこの反映自体は
+        ///   デスクトップと同じでよい（→ <c>SettingsMapping.AppliesFrameRate</c>）。
         /// </summary>
         private void ApplySettingsToScene()
         {
@@ -133,8 +134,12 @@ namespace ChatterMascot.Vrm
             {
                 runner.Volume = Current.Volume;
                 // ★ FrameRateBudget.SetBaseline 経由なので、VRM 読み込み中の一時的な
-                //   引き上げ（Boost）を踏み荒らさない
-                runner.SetTargetFrameRate(Current.FrameRate);
+                //   引き上げ（Boost）を踏み荒らさない。★ Android には適用しない
+                //   （→ SettingsMapping.AppliesFrameRate）
+                if (SettingsMapping.AppliesFrameRate(Application.platform))
+                {
+                    runner.SetTargetFrameRate(Current.FrameRate);
+                }
             }
 
             // ★★ ここで VrmStage の headroom を触らないこと。 あれは「bounds をどれだけ

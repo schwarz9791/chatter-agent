@@ -118,9 +118,10 @@ namespace ChatterMascot.Settings
         /// 表示のフレームレート上限（<b>30 か 60</b>。→ <see cref="SettingsMapping.FrameRateChoices"/>）。
         ///
         /// ★ 書くのはデスクトップの設定パネル（#88）だけで、<c>MascotRunner</c> の
-        ///   <c>FrameRateBudget.SetBaseline</c> に反映される。Android には設定パネルが無いので、
-        ///   <c>settings.json</c> に書かれていなければ既定（<see cref="SettingsMapping.DefaultFrameRate"/>）が
-        ///   使われる（→ <c>MascotRunner.targetFrameRate</c> の doc）。
+        ///   <c>FrameRateBudget.SetBaseline</c> に反映される。<b>Android では反映しない</b>
+        ///   （→ <see cref="SettingsMapping.AppliesFrameRate"/>）——この値が <c>settings.json</c> に
+        ///   書かれていても、シーンの <c>[SerializeField]</c> の既定がそのまま使われる
+        ///   （→ <c>MascotRunner.targetFrameRate</c> の doc）。
         /// </summary>
         public int FrameRate { get; }
 
@@ -195,6 +196,15 @@ namespace ChatterMascot.Settings
         public MascotSettings WithFrameRate(int value) => Copy(frameRate: value);
         public MascotSettings WithServerUrl(string value) => Copy(serverUrl: value);
         public MascotSettings WithToken(string value) => Copy(token: value);
+
+        /// <summary>
+        /// 「すべての設定をリセット」用。<b>接続先とトークンだけは残す</b>。
+        ///
+        /// ★ 確認ダイアログが列挙する項目にも設定パネルの項目にも <see cref="ServerUrl"/> /
+        ///   <see cref="Token"/> は無いので、単純に <see cref="Defaults"/> へ戻すと
+        ///   消えたことに気付けないまま次の起動で既定の接続先に繋ぐ。
+        /// </summary>
+        public MascotSettings ResetKeepingConnection() => Defaults.WithServerUrl(ServerUrl).WithToken(Token);
 
         /// <summary>
         /// ★★ <b>プロパティを足したらここにも足すこと</b>（→ 型の doc）。

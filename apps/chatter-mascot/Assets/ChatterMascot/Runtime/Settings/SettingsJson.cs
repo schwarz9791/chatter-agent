@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using System.IO;
+using System.Text.RegularExpressions;
 using ChatterMascot.Net;
 using ChatterMascot.Ui;
 using Newtonsoft.Json;
@@ -56,7 +57,8 @@ namespace ChatterMascot.Settings
                     ["vrm"] = settings.VrmFileName ?? "",
                 },
                 // ★ 書くのはデスクトップの設定パネルだけ（→ MascotSettings.FrameRate の doc）。
-                //   settings.json は Android と共有するので、キーの置き場所はここでよい
+                //   settings.json は Android とファイルを共有するが、Android はこの値を
+                //   反映しない（→ SettingsMapping.AppliesFrameRate）ので、キーの置き場所はここでよい
                 ["display"] = new JObject
                 {
                     ["frameRate"] = settings.FrameRate,
@@ -348,6 +350,18 @@ namespace ChatterMascot.Settings
             return fallback;
         }
 
+        /// <summary>
+        /// サーバーが生成するトークン（<c>core/src/server/lanToken.ts</c> の <c>TOKEN_PATTERN</c>）と
+        /// 同じ文字集合に絞る。
+        ///
+        /// ★★ <b>ここが入口。</b> この値はそのまま WebSocket / HTTP のヘッダに載るので、
+        ///   改行など制御文字を含む値を通すと、送信側の実装によっては例外や
+        ///   ヘッダインジェクションになりうる。通す場所を1つに絞れば、送る側
+        ///   （<c>SpeechClient</c> / <c>AudioFetcher</c> / <c>CoreConfigClient</c>）は
+        ///   検査を持たなくてよい。
+        /// </summary>
+        private static readonly Regex TokenPattern = new Regex("^[A-Za-z0-9_-]+$", RegexOptions.Compiled);
+
         private static string ReadToken(JToken value, string key, string fallback, Action<string> warn)
         {
             if (value.Type != JTokenType.String)
@@ -356,7 +370,14 @@ namespace ChatterMascot.Settings
                 return fallback;
             }
 
-            return value.Value<string>().Trim();
+            var text = value.Value<string>().Trim();
+            // ★ 空文字は「未指定」（→ MascotSettings.Token の doc）。検査の対象外
+            if (text.Length == 0) return "";
+            if (TokenPattern.IsMatch(text)) return text;
+
+            // ★ 値そのものは出さない。トークンをログに残さない規律は MascotRunner と揃える
+            Warn(warn, $"{key} に使える文字は英数字と _ - だけです。既定を使います");
+            return fallback;
         }
 
         private static bool ReadBool(JToken value, string key, bool fallback, Action<string> warn)

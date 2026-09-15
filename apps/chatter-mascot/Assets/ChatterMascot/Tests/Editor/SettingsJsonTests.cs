@@ -441,6 +441,47 @@ namespace ChatterMascot.Tests
         }
 
         [Test]
+        public void AcceptsATokenWithUnderscoresAndDashes()
+        {
+            var parsed = Parse("{\"connection\":{\"token\":\"a1_B2-c3\"}}");
+
+            Assert.That(parsed.Token, Is.EqualTo("a1_B2-c3"));
+            Assert.That(_warnings, Is.Empty);
+        }
+
+        /// <summary>
+        /// ★ ヘッダに載せられない文字集合はここで弾く（→ サーバーの <c>lanToken.ts</c> の
+        ///   <c>TOKEN_PATTERN</c> と同じ）。改行を許すと <c>SetRequestHeader</c> が例外を投げうる。
+        /// </summary>
+        [Test]
+        public void RejectsATokenWithANewlineInTheMiddle()
+        {
+            var parsed = Parse("{\"connection\":{\"token\":\"abc\\ndef\"}}");
+
+            Assert.That(parsed.Token, Is.Empty);
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        [Test]
+        public void RejectsATokenWithInternalWhitespace()
+        {
+            var parsed = Parse("{\"connection\":{\"token\":\"abc def\"}}");
+
+            Assert.That(parsed.Token, Is.Empty);
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        /// <summary>★ <c>openssl rand -base64</c> の出力（<c>+</c> <c>/</c> <c>=</c>）は通さない</summary>
+        [Test]
+        public void RejectsATokenWithBase64SpecialCharacters()
+        {
+            var parsed = Parse("{\"connection\":{\"token\":\"abc+def/ghi=\"}}");
+
+            Assert.That(parsed.Token, Is.Empty);
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        [Test]
         public void IgnoresUnknownKeysUnderConnection()
         {
             Parse("{\"connection\":{\"nope\":1}}");

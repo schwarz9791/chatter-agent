@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Threading;
 using ChatterMascot.Settings;
 using NUnit.Framework;
+using UnityEngine;
 
 namespace ChatterMascot.Tests
 {
@@ -209,6 +210,22 @@ namespace ChatterMascot.Tests
             Assert.That(SettingsMapping.NormalizeFrameRate(45), Is.EqualTo(SettingsMapping.DefaultFrameRate));
             Assert.That(SettingsMapping.NormalizeFrameRate(0), Is.EqualTo(SettingsMapping.DefaultFrameRate));
             Assert.That(SettingsMapping.NormalizeFrameRate(-1), Is.EqualTo(SettingsMapping.DefaultFrameRate));
+        }
+
+        /// <summary>
+        /// ★ 許可リストで書いてあること（→ <see cref="SettingsMapping.AppliesFrameRate"/> の doc）。
+        ///   Android は #99 まで、settings.json の値を反映しない。
+        /// </summary>
+        [Test]
+        public void AppliesFrameRateOnDesktopOnly()
+        {
+            Assert.That(SettingsMapping.AppliesFrameRate(RuntimePlatform.OSXPlayer), Is.True);
+            Assert.That(SettingsMapping.AppliesFrameRate(RuntimePlatform.OSXEditor), Is.True);
+            Assert.That(SettingsMapping.AppliesFrameRate(RuntimePlatform.WindowsPlayer), Is.True);
+            Assert.That(SettingsMapping.AppliesFrameRate(RuntimePlatform.WindowsEditor), Is.True);
+            Assert.That(SettingsMapping.AppliesFrameRate(RuntimePlatform.LinuxPlayer), Is.True);
+            Assert.That(SettingsMapping.AppliesFrameRate(RuntimePlatform.LinuxEditor), Is.True);
+            Assert.That(SettingsMapping.AppliesFrameRate(RuntimePlatform.Android), Is.False);
         }
     }
 }

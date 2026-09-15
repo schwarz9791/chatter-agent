@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using UnityEngine;
 
 namespace ChatterMascot.Settings
 {
@@ -198,6 +199,32 @@ namespace ChatterMascot.Settings
                 if (FrameRateChoices[i] == value) return value;
             }
             return DefaultFrameRate;
+        }
+
+        /// <summary>
+        /// <c>display.frameRate</c> を反映していいプラットフォームか（→ <c>MascotRunner.targetFrameRate</c>
+        /// の doc）。
+        ///
+        /// ★ <b>許可リストで書くこと</b>（<c>Vrm.UnlitFallbackPolicy.AppliesTo</c> と同じ流儀）。
+        ///   否定形にすると、これから増えるプラットフォームが確かめないまま巻き込まれる。
+        ///   選べる値がちょうど2つ（30 / 60）しか無く、ヘッドセットのリフレッシュレートに
+        ///   合わせる話（#99）が入るまでは、それ以外のプラットフォームで上書きすると
+        ///   意図しない値に黙って揃えてしまう。
+        /// </summary>
+        public static bool AppliesFrameRate(RuntimePlatform platform)
+        {
+            switch (platform)
+            {
+                case RuntimePlatform.OSXPlayer:
+                case RuntimePlatform.OSXEditor:
+                case RuntimePlatform.WindowsPlayer:
+                case RuntimePlatform.WindowsEditor:
+                case RuntimePlatform.LinuxPlayer:
+                case RuntimePlatform.LinuxEditor:
+                    return true;
+                default:
+                    return false;
+            }
         }
     }
 }

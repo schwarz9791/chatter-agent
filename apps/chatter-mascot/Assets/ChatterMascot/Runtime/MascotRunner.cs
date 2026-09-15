@@ -43,9 +43,9 @@ namespace ChatterMascot
         ///
         /// ★ <b>デスクトップでは設定パネルの <c>display.frameRate</c>（#88）がこの値を上書きする</b>
         ///   —— <see cref="SetTargetFrameRate"/> 経由で、<c>Awake</c> の後（設定を読み終えたところ）
-        ///   から効く。<b>Android / XR には設定パネルが無い</b>ので、この <c>[SerializeField]</c> の
-        ///   既定（＝ <c>settings.json</c> を読めなかったときの既定でもある。→
-        ///   <c>Settings.SettingsMapping.DefaultFrameRate</c>）がそのまま使われる。
+        ///   から効く。<b>Android では反映しない</b>（→
+        ///   <c>Settings.SettingsMapping.AppliesFrameRate</c>）—— <c>settings.json</c> に値が
+        ///   書かれていても、この <c>[SerializeField]</c> の既定がそのまま権威になる。
         ///   ヘッドセットのリフレッシュレートに合わせる話（#99）が入るまではここが権威。
         /// </summary>
         [Header("表示")]
@@ -227,6 +227,11 @@ namespace ChatterMascot
         /// ★ <see cref="ServerUrl"/> と同じ <c>settings.json</c> から <c>Awake</c> で1回だけ読む
         ///   （→ <see cref="ResolveServerUrl"/>）。<b>値そのものをログに出さないこと</b> ——
         ///   出してよいのは「あるかどうか」だけ。
+        /// ★★ <b>起動引数（<c>-serverUrl</c>）で接続先を上書きしたときは空にする。</b>
+        ///   トークンは接続先と対になる値なので、URL だけ差し替えてトークンを残すと、
+        ///   別ホストへ元のサーバーの資格情報を平文で送ることになる。トークンを渡す
+        ///   起動引数は無い（<c>ps</c> に値が見えるため）——トークンが要る接続先は
+        ///   <c>settings.json</c> の <c>connection</c> で指定する。
         /// </summary>
         public string ServerToken { get; private set; } = "";
 
@@ -417,6 +422,9 @@ namespace ChatterMascot
         /// <c>-serverUrl</c>（起動引数）＞ <c>settings.json</c> の <c>connection.serverUrl</c> ＞
         /// <c>[SerializeField]</c> の既定。
         ///
+        /// ★★ <b>起動引数で上書きしたときは <see cref="ServerToken"/> の doc を見ること</b>
+        ///   —— ファイルのトークンは使わない。
+        ///
         /// ★★ <b><c>Start</c> ではなく <c>Awake</c> で行うこと。</b> 設定パネル（#76）は
         ///   <c>StatusItemBridge.Bridge.Start()</c> から <see cref="ServerUrl"/> を読んで
         ///   <c>CoreConfigClient</c> の接続先を<b>1回きり</b>捕まえる。あちらも <c>Start</c> なので
@@ -439,22 +447,31 @@ namespace ChatterMascot
         /// </summary>
         private void ResolveServerUrl()
         {
-            var fromFile = ReadConnectionSettings(SettingsLocation.Resolve(AssetEnvFactory.Current()));
-            ServerToken = fromFile.Token ?? "";
-            // ★ 値は出さない。401 の切り分けには「持っているか」だけで足りる
-            Debug.Log(ServerToken.Length > 0 ? "[Mascot] トークン: 設定あり" : "[Mascot] トークン: 設定なし");
+            var settingsPath = SettingsLocation.Resolve(AssetEnvFactory.Current());
+            var fromFile = ReadConnectionSettings(settingsPath);
 
             var overridden = CommandLine.Argument("-serverUrl");
             if (!string.IsNullOrEmpty(overridden))
             {
+                // ★ ファイルのトークンは使わない（→ ServerToken の doc）。判定はここ1箇所で足りる
+                ServerToken = "";
+                Debug.Log("[Mascot] トークン: 起動引数で接続先を上書きしたので使いません");
                 Debug.Log($"[Mascot] serverUrl: 起動引数を使います (\"{overridden}\")");
                 serverUrl = overridden;
                 return;
             }
 
+            ServerToken = fromFile.Token ?? "";
+            // ★ 値は出さない。401 の切り分けには「持っているか」だけで足りる
+            Debug.Log(ServerToken.Length > 0 ? "[Mascot] トークン: 設定あり" : "[Mascot] トークン: 設定なし");
+
             if (!string.IsNullOrEmpty(fromFile.ServerUrl))
             {
-                Debug.Log($"[Mascot] serverUrl: 設定ファイルを使います (\"{fromFile.ServerUrl}\")");
+                // ★ ファイルのパスと「Inspector の値は使っていない」を添える。Editor の再生でも
+                //   ここを通るので、デスクトップで connection を試したことがあると気付かないまま
+                //   Inspector の serverUrl を変えても反映されない
+                Debug.Log($"[Mascot] serverUrl: 設定ファイル (\"{settingsPath}\") の \"{fromFile.ServerUrl}\" " +
+                          "を使います（Inspector の値は使っていません）");
                 serverUrl = fromFile.ServerUrl;
                 return;
             }

@@ -143,6 +143,10 @@ namespace ChatterMascot.Desktop
             /// <c>settings.json</c> の反映元。<b>読み書きはここに1本化されている</b> ——
             ///   ストアを2つ作ると同じファイルを2人が read-modify-write して、
             ///   先に書いた方の変更が消える（→ <c>MascotSettingsHost.Apply</c> の doc）。
+            ///
+            /// ★ <b>無ければ <c>Start</c> で Bridge ごと無効にする。</b> それより後ろでは
+            ///   常に非 null（<c>OnDestroy</c> の購読解除だけは、初期化の途中で抜けた経路の
+            ///   ために null チェックを残してある）。
             /// </summary>
             private ChatterMascot.Vrm.MascotSettingsHost _settingsHost;
 
@@ -193,17 +197,15 @@ namespace ChatterMascot.Desktop
                 // ★ Start で取ること。MascotSettingsHost は AfterSceneLoad で生えた時点で
                 //   Instance が立ち、Start はすべての AfterSceneLoad の後に来るので順序が決まる
                 _settingsHost = ChatterMascot.Vrm.MascotSettingsHost.Instance;
-                if (_settingsHost != null)
+                if (_settingsHost == null)
                 {
-                    _settings = _settingsHost.Current;
-                    _settingsHost.ChangedExternally += OnSettingsChangedExternally;
+                    // ★ 通常は起きない（Install は native プラグインの有無を問わない）。設定の
+                    //   反映も保存も持たない Bridge を動かす理由が無いので、ここで畳む
+                    Debug.LogWarning("[Mascot] MascotSettingsHost が見つかりません。メニューバーには出ません");
+                    enabled = false;
+                    return;
                 }
-                else
-                {
-                    // ★ 通常は起きない（Install は native プラグインの有無を問わない）。
-                    //   保存されないまま既定で動かす——メニューバー自体は出したい
-                    Debug.LogWarning("[Mascot] MascotSettingsHost が見つかりません。設定は保存されません");
-                }
+                _settings = _settingsHost.Current;
 
                 _icon1xPath = Path.Combine(Application.streamingAssetsPath, Icon1xFile);
                 _icon2xPath = Path.Combine(Application.streamingAssetsPath, Icon2xFile);
@@ -215,6 +217,11 @@ namespace ChatterMascot.Desktop
                     return;
                 }
                 ChatterMascotNative.CM_SetEventCallback(Callback);
+
+                // ★ 初期化が成功してから購読すること。 先に購読すると、初期化に失敗して
+                //   enabled = false になった Bridge にも外部変更が届き、コールバックの無い
+                //   ショートカットだけが RegisterHotKeys → CM_HotKeyRegister で奪われる
+                _settingsHost.ChangedExternally += OnSettingsChangedExternally;
 
                 // ★ メニューより先に登録すること。 ラベルにショートカットの表記が乗るので、
                 //   後にすると初回のメニューだけ表記が抜ける
@@ -613,8 +620,7 @@ namespace ChatterMascot.Desktop
                 var previousMute = _settings.MuteHotKey;
                 var previousHide = _settings.HideHotKey;
 
-                if (_settingsHost != null) _settingsHost.Apply(next);
-                else Debug.LogWarning("[Mascot] MascotSettingsHost が無いので設定を保存できません");
+                _settingsHost.Apply(next);
                 _settings = next;
 
                 if (!string.Equals(previousMute, _settings.MuteHotKey, StringComparison.Ordinal) ||
@@ -637,7 +643,7 @@ namespace ChatterMascot.Desktop
 
             void ISettingsHost.ResetUnitySettings()
             {
-                ((ISettingsHost)this).ApplySettings(MascotSettings.Defaults);
+                ((ISettingsHost)this).ApplySettings(_settings.ResetKeepingConnection());
                 WindowGeometry.Reset();
             }
 

@@ -15,10 +15,17 @@
  */
 
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { createConfigStore } from "../core/config";
 import { acquireLock } from "../core/lock";
-import { getServerLockDir, getSpeechQueueDir, getSummarizerHomeDir, getSummarizerSessionsPath } from "../core/paths";
+import {
+  getServerLockDir,
+  getServerTokenPath,
+  getSpeechQueueDir,
+  getSummarizerHomeDir,
+  getSummarizerSessionsPath,
+} from "../core/paths";
 import { registerSummarizerSession } from "../core/summarizerSessions";
 import { createSpeechQueue } from "../core/speechQueue";
 import { createVoicevoxClient, flattenStyles, hasStyle } from "../tts/voicevoxClient";
@@ -27,6 +34,8 @@ import { createControlApi } from "./controlApi";
 import { describeEngineSkip, resolveEngineSpawn, startEngine, type EngineProcess } from "./engineProcess";
 import { createDispatcher, type Dispatcher } from "./dispatcher";
 import { createHttpServer } from "./httpServer";
+import { ensureServerToken } from "./lanToken";
+import { isLoopbackAddress } from "./loopback";
 import { createWsServer } from "./wsServer";
 
 /**
@@ -148,6 +157,38 @@ function installShutdown(cleanup: () => Promise<void>): void {
   process.on("uncaughtException", (err) => console.error("[Server] Uncaught exception:", err));
 }
 
+/**
+ * LAN からの到達性を起動ログに出す。
+ *
+ * ★ bind がループバックなら、そもそも LAN から繋がらないことだけを言う。それ以外なら
+ *   接続先の候補（非 internal な IPv4）と、トークンファイルの**パス**を出す。
+ *   **トークンの値そのものは出さない**（→ `server/lanToken.ts`）。
+ */
+function logLanReachability(host: string, port: number, tokenPath: string): void {
+  if (isLoopbackAddress(host) || host === "localhost") {
+    console.log(`[Server] LAN からは繋げません（host=${host}）。Android から繋ぐなら host を 0.0.0.0 に`);
+    return;
+  }
+
+  const candidates = lanIPv4Addresses();
+  if (candidates.length > 0) {
+    console.log("[Server] LAN からの接続先候補:");
+    for (const ip of candidates) console.log(`[Server]   ws://${ip}:${port}`);
+  }
+  console.log(`[Server] LAN からの接続にはトークンが要ります: ${tokenPath}`);
+}
+
+/** 非 internal な IPv4 アドレスの一覧（`os.networkInterfaces()` から） */
+function lanIPv4Addresses(): string[] {
+  const out: string[] = [];
+  for (const addresses of Object.values(os.networkInterfaces())) {
+    for (const addr of addresses ?? []) {
+      if (addr.family === "IPv4" && !addr.internal) out.push(addr.address);
+    }
+  }
+  return out;
+}
+
 async function main(): Promise<void> {
   // ★ ロックは bind より前に取ること。配信キューのパス（{root}/speech）にはポートも
   //   インスタンス識別子も入っていないので、2台目が別ポートで bind に成功すると、
@@ -167,6 +208,21 @@ async function main(): Promise<void> {
 
   fs.mkdirSync(path.dirname(queueDir), { recursive: true });
   const queue = createSpeechQueue(queueDir);
+
+  // ★ listen（＝実際の bind）より前に用意する。非ループバックからの接続はこれを要求する
+  //   （→ server/auth.ts）。config のキーにも環境変数にもしない ——
+  //   `GET /v1/config` が snapshot() を丸ごと返すので、置くと漏れる
+  const tokenPath = getServerTokenPath();
+  const { token, created } = ensureServerToken(tokenPath);
+  if (created === "new") {
+    console.log(
+      `[Server] トークンを新しく作りました: ${tokenPath}（LAN から繋ぐ端末を設定済みなら、configure-android.sh で書き込み直してください）`,
+    );
+  } else if (created === "replaced") {
+    console.warn(
+      `[Server] ${tokenPath} の内容が壊れていたので作り直しました。設定済みの端末は configure-android.sh で書き込み直してください`,
+    );
+  }
 
   // ★ 音声はプロセス内にしか持たない（`audioStore.ts`）。合成は GET が来たときに走るので、
   //   誰も繋いでいない間はエンジンを一度も叩かない
@@ -316,6 +372,7 @@ async function main(): Promise<void> {
 
   const httpServer = createHttpServer({
     store: audioStore,
+    token,
     control,
     // ★ 本文の権威はキュー。ack / trim で消えた entry の音声は作らない
     lookup: (seq) => queue.read(seq),
@@ -339,6 +396,7 @@ async function main(): Promise<void> {
     host: config.get("host"),
     port: config.get("port"),
     server: httpServer,
+    token,
     allowedOrigins: config.get("allowedOrigins"),
     onConnect: (send) => dispatcher.catchUp(send),
     onAck: (seq, epoch) => dispatcher.ack(seq, epoch),
@@ -357,9 +415,7 @@ async function main(): Promise<void> {
   } else {
     console.log("[Server] ttsEnabled=false: 音声は配りません（クライアントは無音で ack します）");
   }
-  if (bound.host === "0.0.0.0") {
-    console.warn("[Server] 0.0.0.0 は無認証で LAN 全体に露出します。信頼できない網では host を 127.0.0.1 に");
-  }
+  logLanReachability(bound.host, bound.port, tokenPath);
 
   // ★ サーバーは1台しかいない前提（上のロック）なので、「2台目が1台目のキューを消す」
   //   事故はここでは考えなくてよい。掃除は STARTUP_KEEP_MS の時間条件だけで判断する

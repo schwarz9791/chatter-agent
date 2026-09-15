@@ -22,7 +22,8 @@ namespace ChatterMascot.Protocol
         //   **末尾の改行の手前にもマッチする**ので、`^…$` だと `gen-1\n` が通ってしまう。
         //   写し元の JS の `$` にはその挙動が無い。
         //
-        // ★ RegexOptions.Compiled を使わないこと。IL2CPP は実行時のコード生成ができない。
+        // ★ RegexOptions.Compiled を付けないこと。IL2CPP のクラスライブラリには RegexCompiler が無く、
+        //   例外にもならず黙って無視される —— Android では何も変わらないのに、効いているように読める。
         private static readonly Regex Pattern = new Regex(@"\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\z", RegexOptions.None);
 
         public static bool IsValid(string value)

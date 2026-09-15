@@ -5,16 +5,19 @@
  */
 
 import { describe, it, expect, afterEach, vi } from "vitest";
+import type * as http from "http";
 import { WebSocket } from "ws";
-import { createWsServer, parseAck } from "./wsServer";
+import { createVerifyClient, createWsServer, parseAck } from "./wsServer";
 import type { WsServer, WsServerOptions } from "./wsServer";
 
 const HOST = "127.0.0.1";
+/** 非ループバック向けの検証で使う固定トークン。ループバックのテストは通す必要が無いので使わない */
+const TOKEN = "test-token-value";
 const servers: WsServer[] = [];
 const sockets: WebSocket[] = [];
 
 async function start(overrides: Partial<WsServerOptions> = {}): Promise<WsServer> {
-  const server = await createWsServer({ host: HOST, port: 0, heartbeatIntervalMs: 0, ...overrides });
+  const server = await createWsServer({ host: HOST, port: 0, heartbeatIntervalMs: 0, token: TOKEN, ...overrides });
   servers.push(server);
   return server;
 }
@@ -100,11 +103,11 @@ describe("createWsServer", () => {
   });
 
   it("close 後に同じポートを再 listen できる", async () => {
-    const first = await createWsServer({ host: HOST, port: 0, heartbeatIntervalMs: 0 });
+    const first = await createWsServer({ host: HOST, port: 0, heartbeatIntervalMs: 0, token: TOKEN });
     const { port } = first.address();
     await first.close();
 
-    const second = await createWsServer({ host: HOST, port, heartbeatIntervalMs: 0 });
+    const second = await createWsServer({ host: HOST, port, heartbeatIntervalMs: 0, token: TOKEN });
     servers.push(second);
     expect(second.address().port).toBe(port);
   });
@@ -112,7 +115,7 @@ describe("createWsServer", () => {
   it("使用中のポートは EADDRINUSE で reject する（監視を始める前に落ちる）", async () => {
     const server = await start();
     const { port } = server.address();
-    await expect(createWsServer({ host: HOST, port, heartbeatIntervalMs: 0 })).rejects.toMatchObject({
+    await expect(createWsServer({ host: HOST, port, heartbeatIntervalMs: 0, token: TOKEN })).rejects.toMatchObject({
       code: "EADDRINUSE",
     });
   });
@@ -228,6 +231,82 @@ describe("ack", () => {
     // 例外を投げた後でも broadcast が届く＝ソケットもプロセスも生きている
     server.broadcast("live");
     expect(await client.waitFor(1)).toEqual(["live"]);
+  });
+});
+
+describe("トークン認証（#98）", () => {
+  it("ループバックはトークンを送らなくても繋がる", async () => {
+    const server = await start();
+    await connect(server);
+    expect(server.clientCount()).toBe(1);
+  });
+
+  it("ループバックは誤ったトークンでも繋がる（免除。同じマシンの同じユーザーはトークンファイルを直接読める）", async () => {
+    const server = await start();
+    const { port } = server.address();
+    const socket = new WebSocket(`ws://${HOST}:${port}`, { headers: { authorization: "Bearer wrong" } });
+    sockets.push(socket);
+    await new Promise<void>((resolve, reject) => {
+      socket.once("open", () => resolve());
+      socket.once("error", reject);
+    });
+    expect(server.clientCount()).toBe(1);
+  });
+
+  /**
+   * ★ 非ループバックの接続を TCP で再現するのは環境依存になる（CI にそのインターフェースが
+   *   あるとは限らない）。`createVerifyClient` を直接呼んで `req.socket.remoteAddress` を
+   *   LAN のアドレスに差し替えて検証する（`httpServer.test.ts` の Unix ソケットと同じ動機）。
+   */
+  function fakeReq(remoteAddress: string, authorization?: string): http.IncomingMessage {
+    return {
+      socket: { remoteAddress },
+      headers: authorization ? { authorization } : {},
+    } as unknown as http.IncomingMessage;
+  }
+
+  it("非ループバック × トークン無し → 拒否（401）", () => {
+    const verify = createVerifyClient([], TOKEN);
+    const result: { ok?: boolean; code?: number } = {};
+    verify({ req: fakeReq("192.168.1.5") }, (ok, code) => {
+      result.ok = ok;
+      result.code = code;
+    });
+    expect(result).toEqual({ ok: false, code: 401 });
+  });
+
+  it("非ループバック × トークン誤り → 拒否（401）", () => {
+    const verify = createVerifyClient([], TOKEN);
+    const result: { ok?: boolean; code?: number } = {};
+    verify({ req: fakeReq("192.168.1.5", "Bearer wrong-token") }, (ok, code) => {
+      result.ok = ok;
+      result.code = code;
+    });
+    expect(result).toEqual({ ok: false, code: 401 });
+  });
+
+  it("非ループバック × トークン正しい → 通過", () => {
+    const verify = createVerifyClient([], TOKEN);
+    const result: { ok?: boolean } = {};
+    verify({ req: fakeReq("192.168.1.5", `Bearer ${TOKEN}`) }, (ok) => {
+      result.ok = ok;
+    });
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("★ 判定順はトークン→Origin（トークン不正はコードを明示するので、Origin 拒否の分岐まで進んでいないと分かる）", () => {
+    const verify = createVerifyClient(["http://allowed.example.com"], TOKEN);
+    const result: { ok?: boolean; code?: number } = {};
+    verify(
+      { origin: "http://not-allowed.example.com", req: fakeReq("192.168.1.5", "Bearer wrong-token") },
+      (ok, code) => {
+        result.ok = ok;
+        result.code = code;
+      },
+    );
+    // Origin 拒否はコードを渡さない（下の describe 参照）。ここが 401 なのは
+    // トークンの拒否分岐が先に走ったことの証拠
+    expect(result).toEqual({ ok: false, code: 401 });
   });
 });
 

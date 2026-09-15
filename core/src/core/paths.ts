@@ -126,6 +126,16 @@ export function getServerLockDir(e: PathEnv = currentPathEnv()): string {
 }
 
 /**
+ * 非ループバックからの接続に要求する共有トークン（→ `server/lanToken.ts` / `server/auth.ts`）。
+ *
+ * ★ config.json にも環境変数にも置かない。`GET /v1/config` は設定を丸ごと返すので、
+ *   キーにすると漏れる。秘密の置き場はこのファイル1つに絞る。
+ */
+export function getServerTokenPath(e: PathEnv = currentPathEnv()): string {
+  return path.join(getRuntimeDir(e), "server.token");
+}
+
+/**
  * 発話クライアント（player）の単一インスタンスロック。書き方は `getLockDir` と同じ。
  *
  * ★ 「二重に鳴ってうるさい」ではなく、**2台目が1台目のキューを破壊するから**取る。

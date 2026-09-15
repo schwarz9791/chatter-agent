@@ -58,6 +58,37 @@ describe("fetchAudio", () => {
     expect((await createAudioFetcher({ baseUrl: base, timeoutMs: 2000 }).fetchAudio(PATH)).kind).toBe("unavailable");
   });
 
+  it("★ 401 も unavailable（数えると ack まで進みキューの本文が消える。503 と同じ理屈）", async () => {
+    const base = await start((_req, res) => {
+      res.writeHead(401).end();
+    });
+    const result = await createAudioFetcher({ baseUrl: base, timeoutMs: 2000 }).fetchAudio(PATH);
+    expect(result.kind).toBe("unavailable");
+    if (result.kind === "unavailable") expect(result.reason).toContain("401");
+  });
+
+  it("トークンを渡すと Authorization ヘッダで送る", async () => {
+    let received: string | undefined;
+    const base = await start((req, res) => {
+      received = req.headers.authorization;
+      res.writeHead(200, { "content-type": "audio/wav" });
+      res.end(Buffer.alloc(1));
+    });
+    await createAudioFetcher({ baseUrl: base, timeoutMs: 2000, token: "s3cr3t" }).fetchAudio(PATH);
+    expect(received).toBe("Bearer s3cr3t");
+  });
+
+  it("トークンが空なら Authorization ヘッダを送らない", async () => {
+    let received: string | undefined;
+    const base = await start((req, res) => {
+      received = req.headers.authorization;
+      res.writeHead(200, { "content-type": "audio/wav" });
+      res.end(Buffer.alloc(1));
+    });
+    await createAudioFetcher({ baseUrl: base, timeoutMs: 2000 }).fetchAudio(PATH);
+    expect(received).toBeUndefined();
+  });
+
   it("★ 404 は gone（諦めて ack する）", async () => {
     const base = await start((_req, res) => {
       res.writeHead(404).end("not found\n");

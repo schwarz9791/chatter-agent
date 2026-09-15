@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Threading;
 using ChatterMascot.Settings;
 using NUnit.Framework;
+using UnityEngine;
 
 namespace ChatterMascot.Tests
 {
@@ -176,7 +177,7 @@ namespace ChatterMascot.Tests
         /// <summary>
         /// ★★ <b>音量の上限は 1.0。</b> 1.0 超えが効くのは macOS（<c>afplay -v</c>）だけで、
         ///   Android の <c>AudioSource.volume</c> は Unity 側で 0〜1 にクランプされる。
-        ///   <c>settings.json</c> は XR（#98）と共有するので、
+        ///   <c>settings.json</c> は Android と共有するので、
         ///   <b>プラットフォームで意味の変わる範囲を持たせない</b>。
         /// </summary>
         [Test]
@@ -209,6 +210,22 @@ namespace ChatterMascot.Tests
             Assert.That(SettingsMapping.NormalizeFrameRate(45), Is.EqualTo(SettingsMapping.DefaultFrameRate));
             Assert.That(SettingsMapping.NormalizeFrameRate(0), Is.EqualTo(SettingsMapping.DefaultFrameRate));
             Assert.That(SettingsMapping.NormalizeFrameRate(-1), Is.EqualTo(SettingsMapping.DefaultFrameRate));
+        }
+
+        /// <summary>
+        /// ★ 許可リストで書いてあること（→ <see cref="SettingsMapping.AppliesFrameRate"/> の doc）。
+        ///   Android は #99 まで、settings.json の値を反映しない。
+        /// </summary>
+        [Test]
+        public void AppliesFrameRateOnDesktopOnly()
+        {
+            Assert.That(SettingsMapping.AppliesFrameRate(RuntimePlatform.OSXPlayer), Is.True);
+            Assert.That(SettingsMapping.AppliesFrameRate(RuntimePlatform.OSXEditor), Is.True);
+            Assert.That(SettingsMapping.AppliesFrameRate(RuntimePlatform.WindowsPlayer), Is.True);
+            Assert.That(SettingsMapping.AppliesFrameRate(RuntimePlatform.WindowsEditor), Is.True);
+            Assert.That(SettingsMapping.AppliesFrameRate(RuntimePlatform.LinuxPlayer), Is.True);
+            Assert.That(SettingsMapping.AppliesFrameRate(RuntimePlatform.LinuxEditor), Is.True);
+            Assert.That(SettingsMapping.AppliesFrameRate(RuntimePlatform.Android), Is.False);
         }
     }
 }

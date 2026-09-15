@@ -74,6 +74,22 @@ namespace ChatterMascot.Net
         /// </summary>
         private const int MaxFrameBytes = 4 * 1024 * 1024;
 
+        /// <summary>
+        /// <c>ConnectAsync</c> 1回に許す時間。
+        ///
+        /// ★ ハンドシェイクは本来すぐ終わる。ここが無いと、相手が応答しないケースで
+        ///   <c>ConnectAsync</c> が永遠に返らず、再接続ループそのものが止まる
+        ///   （バックオフも次の警告も出ない、いちばん困る壊れ方）。
+        ///   長すぎると無音の原因が見えなくなり、短すぎると遅い回線で毎回失敗する—その間を取る。
+        /// </summary>
+        private const int ConnectTimeoutMs = 15000;
+
+        /// <summary>例外チェーンを遡る上限段数。長い連鎖で Warn の1行が読めなくなるのを防ぐ。</summary>
+        private const int ExceptionChainMaxDepth = 5;
+
+        /// <summary>連結した例外チェーンの文字数上限。</summary>
+        private const int ExceptionChainMaxChars = 500;
+
         /// <summary>受け取った生フレーム。パースは呼び出し側。</summary>
         public event Action<string> FrameReceived;
 
@@ -83,6 +99,7 @@ namespace ChatterMascot.Net
         public event Action<string> Warn;
 
         private readonly string _url;
+        private readonly string _token;
         private readonly CancellationTokenSource _cancellation = new CancellationTokenSource();
 
         private ClientWebSocket _socket;
@@ -128,9 +145,16 @@ namespace ChatterMascot.Net
 
         private readonly Random _random = new Random();
 
-        public SpeechClient(string url)
+        /// <param name="url">接続先の <c>ws://</c> / <c>wss://</c>。</param>
+        /// <param name="token">
+        /// 非ループバックの接続に要る共有トークン。空か <c>null</c> なら
+        /// <c>Authorization</c> ヘッダを付けない —— ループバック接続はトークンを免除されるので、
+        /// それが普通の使い方。
+        /// </param>
+        public SpeechClient(string url, string token)
         {
             _url = url;
+            _token = token;
         }
 
         public void Start()
@@ -164,20 +188,44 @@ namespace ChatterMascot.Net
                 // ★ half-open の検出はこれと SilenceWatchdogMs の2本立て。
                 //   ClientWebSocket は ping を受けても通知しないので、送る側だけ設定できる
                 socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(30);
+                // ★ 空なら付けない。ループバックはサーバー側で免除されるので、
+                //   常用のデスクトップ接続はこの分岐に入らない
+                if (!string.IsNullOrEmpty(_token))
+                {
+                    socket.Options.SetRequestHeader("Authorization", "Bearer " + _token);
+                }
                 _socket = socket;
 
-                try
+                using (var connectCts = CancellationTokenSource.CreateLinkedTokenSource(_cancellation.Token))
                 {
-                    await socket.ConnectAsync(new Uri(_url), _cancellation.Token);
-                }
-                catch (Exception e)
-                {
-                    if (_closed) break;
-                    // 起動直後にサーバーが居ないのは通常のこと。毎回スタックを出さない
-                    Warn?.Invoke("接続エラー: " + e.Message);
-                    socket.Dispose();
-                    await BackoffAsync();
-                    continue;
+                    connectCts.CancelAfter(ConnectTimeoutMs);
+                    try
+                    {
+                        await socket.ConnectAsync(new Uri(_url), connectCts.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        if (_closed) break;
+                        Warn?.Invoke($"接続エラー: 接続が {ConnectTimeoutMs / 1000} 秒以内に確立しませんでした");
+                        AbortAndDispose(socket);
+                        await BackoffAsync();
+                        continue;
+                    }
+                    catch (Exception e)
+                    {
+                        if (_closed) break;
+                        // 起動直後にサーバーが居ないのは通常のこと。毎回スタックを出さない
+                        var detail = DescribeExceptionChain(e);
+                        var message = "接続エラー: " + detail;
+                        if (LooksUnauthorized(detail))
+                        {
+                            message += "。トークンが無いか違います（settings.json の connection.token）";
+                        }
+                        Warn?.Invoke(message);
+                        AbortAndDispose(socket);
+                        await BackoffAsync();
+                        continue;
+                    }
                 }
 
                 _openedAtMs = NowMs();
@@ -188,11 +236,12 @@ namespace ChatterMascot.Net
 
                 await ReceiveLoopAsync(socket);
 
-                // ★ **Dispose の前に読むこと。** 閉じた後は CloseStatus が取れない
+                // ★ **破棄の前に読むこと。** 閉じた後は CloseStatus が取れない
                 var closeDetail = DescribeClose(socket);
 
                 if (_socket == socket) _socket = null;
-                socket.Dispose();
+                // ★ **Dispose だけで捨てないこと**（→ AbortAndDispose）
+                AbortAndDispose(socket);
                 if (_closed) break;
 
                 // 安定して繋がっていられたなら、次の切断は「たまたま」として最短から試す
@@ -266,6 +315,69 @@ namespace ChatterMascot.Net
             // ★ 1013（try again later）は WebSocketCloseStatus に定義が無いので数値で出す
             var code = ((int)status.Value).ToString();
             return string.IsNullOrEmpty(description) ? " (code=" + code + ")" : " (code=" + code + " " + description + ")";
+        }
+
+        /// <summary>
+        /// 接続エラーのメッセージが 401 を示しているか。<b>純粋関数</b>（テストで固定するため）。
+        ///
+        /// ★ <c>ClientWebSocket.ConnectAsync</c> はハンドシェイク前の 401 を専用の型やプロパティでは
+        ///   持たず、<c>WebSocketException</c> の<b>メッセージ文字列</b>にステータスコードを埋め込む。
+        ///   実行環境によっては外側の例外にステータスコードが出ず、<c>InnerException</c> 側に
+        ///   入ることがあるため、呼び出し側は <see cref="DescribeExceptionChain"/> で連結した
+        ///   文字列を渡すこと。ここで見るのはその文字列だけ。
+        ///
+        /// ★ <b>ステータスがどこにも出ない環境もある</b>（Android では 401 でも定型文だけになる）。
+        ///   そのときはこのヒントは付かないので、切り分けは <c>docs/mascot.md</c> の表で行う。
+        /// </summary>
+        public static bool LooksUnauthorized(string message)
+        {
+            return message != null && message.Contains("401");
+        }
+
+        /// <summary>
+        /// 例外と <c>InnerException</c> を辿って、メッセージを連結する。<b>純粋関数</b>。
+        ///
+        /// ★ 外側の例外だけでは原因が分からないことがある——<c>ConnectAsync</c> の失敗は
+        ///   実行環境によって外側が定型文（例: 接続を拒否された場合と汎用の到達不能が同文）に
+        ///   なり、実際の理由は内側に入る。<see cref="Warn"/> にはこの連結を出し、
+        ///   <see cref="LooksUnauthorized"/> の判定もこれに対して行う。
+        /// </summary>
+        public static string DescribeExceptionChain(Exception e)
+        {
+            if (e == null) return string.Empty;
+
+            var sb = new StringBuilder();
+            var current = e;
+            var depth = 0;
+            while (current != null && depth < ExceptionChainMaxDepth)
+            {
+                if (sb.Length > 0) sb.Append(" → ");
+                sb.Append(current.Message);
+                current = current.InnerException;
+                depth++;
+            }
+            if (current != null) sb.Append(" → …");
+
+            var text = sb.ToString();
+            return text.Length > ExceptionChainMaxChars
+                ? text.Substring(0, ExceptionChainMaxChars) + "…"
+                : text;
+        }
+
+        /// <summary>
+        /// 接続に使い終えたソケットを片付ける。
+        ///
+        /// ★★ <b>破棄だけでは足りない。</b> close フレームを伴わない切断（相手の
+        ///   <c>terminate()</c>、こちらの watchdog）の後に破棄だけで捨てると、Android では
+        ///   <b>非ループバックの相手に対して次の <c>ConnectAsync</c> が返らなくなり</b>、
+        ///   再接続ループが警告も出さずに止まる（ループバックでは起きないので、
+        ///   <c>adb reverse</c> 経由の検証では見えない）。先に <c>Abort()</c> で手放してから破棄する。
+        ///   未接続のソケットに呼んでも害は無い。
+        /// </summary>
+        private static void AbortAndDispose(ClientWebSocket socket)
+        {
+            try { socket.Abort(); } catch (Exception) { /* 未接続、または既に破棄済み */ }
+            socket.Dispose();
         }
 
         private async Task ReceiveLoopAsync(ClientWebSocket socket)

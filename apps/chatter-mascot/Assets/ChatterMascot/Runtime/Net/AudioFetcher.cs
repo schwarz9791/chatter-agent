@@ -11,8 +11,9 @@ namespace ChatterMascot.Net
         Ready,
 
         /// <summary>
-        /// 503。サーバーはいるが音声を用意できない（エンジンが落ちている / 合成が返らない）。
-        /// <b>あとで取りに来い</b>という意味なので、試行回数を消費せずに待つ。
+        /// 503、または 401（トークンが無いか違う）。<b>あとで取りに来い</b>という意味なので、
+        /// 試行回数を消費せずに待つ ——401 を Failed に数えると ack まで進み、
+        /// キューの本文が消える（設定を直しても復元できない。404 に落とさない理由と同じ）。
         /// </summary>
         Unavailable,
 
@@ -63,6 +64,7 @@ namespace ChatterMascot.Net
 
         public readonly string BaseUrl;
         private readonly int _timeoutSeconds;
+        private readonly string _token;
 
         /// <param name="baseUrl">
         /// 音声の取得元。WebSocket の接続先から導出する（<c>ws://host:port</c> → <c>http://host:port</c>）。
@@ -77,11 +79,13 @@ namespace ChatterMascot.Net
         /// ★ <b>サーバー側の設定と突き合わせる必要は無い</b> — サーバーが応答を
         ///   <c>synthesisTimeoutMs</c> で打ち切って 503 を返すので、待たされ続ける側は塞がっている。
         /// </param>
-        public AudioFetcher(string baseUrl, int timeoutMs)
+        /// <param name="token">非ループバックの接続に要る共有トークン。空か <c>null</c> なら付けない。</param>
+        public AudioFetcher(string baseUrl, int timeoutMs, string token)
         {
             BaseUrl = baseUrl;
             // UnityWebRequest.timeout は秒単位の int。0 は「無制限」なので必ず 1 以上にする
             _timeoutSeconds = Math.Max(1, (int)Math.Ceiling(timeoutMs / 1000.0));
+            _token = token;
         }
 
         /// <summary>
@@ -103,6 +107,10 @@ namespace ChatterMascot.Net
                 // ★ DownloadHandlerBuffer で受けること。GetAudioClip だとステータスごとの分岐と
                 //   本文（診断の理由）が取れない
                 request.downloadHandler = new DownloadHandlerBuffer();
+                if (!string.IsNullOrEmpty(_token))
+                {
+                    request.SetRequestHeader("Authorization", "Bearer " + _token);
+                }
 
                 try
                 {
@@ -118,6 +126,13 @@ namespace ChatterMascot.Net
                 if (request.responseCode == 503)
                 {
                     return AudioFetchResult.Unavailable(Reason(request, "サーバーが音声を用意できていません (503)"));
+                }
+                // ★ 401 も Unavailable。Failed に数えると SynthesisAttempts が燃え尽きて
+                //   ack まで進み、キューの本文が消える——設定を直しても復元できない（404 と同じ理屈）
+                if (request.responseCode == 401)
+                {
+                    return AudioFetchResult.Unavailable(
+                        Reason(request, "トークンが無いか違います（settings.json の connection.token）"));
                 }
                 if (request.responseCode == 404)
                 {

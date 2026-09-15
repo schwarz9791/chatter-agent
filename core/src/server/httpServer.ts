@@ -4,12 +4,17 @@
  * ```
  * GET /audio/<epoch>-<seq>.wav
  *   200  合成済み、または今から合成して返した（完了までレスポンスを保留する）
+ *   401  非ループバックからの未認証アクセス（トークン無し・誤り）
  *   403  Origin が allowedOrigins に無い
  *   404  永久に用意できない（キューから消えた / epoch 違い / 読み上げる中身が無い）
  *   503  エンジンに繋がらない・合成が返らない。**あとで取りに来い**
  *
  * /v1/*   設定パネル（#76）の制御 API。中身は `server/controlApi.ts`
  * ```
+ *
+ * ★★ **非ループバックからの接続は、ルーティングより前にトークン認証を通る**
+ *   （→ `server/auth.ts`）。ループバックは免除される。未認証の相手には、ルートの有無も
+ *   書き込み口の 404 も見せない（`resolveRoute` より前に置く理由）。
  *
  * ★ **404 と 503 を混ぜないこと。** クライアントは 503 では試行回数を減らさずに
  *   待ち、404 では諦めて ack する。混ぜると、エンジンを起動し忘れているだけで
@@ -36,12 +41,18 @@ import { parseAudioPath } from "../core/audioPath";
 import type { SpeechRecord } from "../core/types";
 import { hasSpeakableText } from "../text/speakable";
 import { SynthesisUnavailableError, type AudioStore } from "./audioStore";
+import { isAuthorized } from "./auth";
 import type { ControlApi, ControlResponse } from "./controlApi";
 import { isLoopbackAddress } from "./loopback";
 import { createThrottledWarn } from "./throttledWarn";
 
 export interface HttpServerDeps {
   store: AudioStore;
+  /**
+   * 非ループバックの接続に要求するトークン（→ `server/auth.ts` / `server/lanToken.ts`）。
+   * ループバックの接続はこれを持たなくても通る。
+   */
+  token: string;
   /**
    * 1回の GET を保留する上限。超えたら 503 を返す。
    *
@@ -325,6 +336,16 @@ export function createHttpServer(deps: HttpServerDeps): http.Server {
   });
 
   async function handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    // ★★ 認証の関所。**`resolveRoute` より前に置く**。未認証の LAN の相手には、
+    //   ルートの有無も書き込み口の 404 も見せない。403 でも 404 でもなく 401 にするのは、
+    //   トークン違いとパス違いをクライアントのログで見分けられるようにするため。
+    //   ループバックは免除する（→ `server/auth.ts`）。OPTIONS もこの関所を通る。
+    if (!isAuthorized(req.socket.remoteAddress, req.headers.authorization, deps.token)) {
+      warn(`[HTTP] Rejected unauthorized request from ${req.socket.remoteAddress ?? "unknown"}`);
+      res.setHeader("www-authenticate", "Bearer");
+      return endWith(res, 401, "unauthorized\n");
+    }
+
     const pathname = (req.url ?? "").split("?")[0] ?? "";
     const method = req.method ?? "";
     const route = resolveRoute(pathname);

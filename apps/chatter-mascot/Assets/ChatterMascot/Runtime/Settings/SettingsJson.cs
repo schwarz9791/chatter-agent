@@ -1,6 +1,8 @@
 using System;
 using System.Globalization;
 using System.IO;
+using System.Text.RegularExpressions;
+using ChatterMascot.Net;
 using ChatterMascot.Ui;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -54,12 +56,19 @@ namespace ChatterMascot.Settings
                     ["blink"] = settings.Blink,
                     ["vrm"] = settings.VrmFileName ?? "",
                 },
-                // ★ いまはデスクトップの設定パネルからしか書かない項目（→ MascotSettings.FrameRate
-                //   の doc）。settings.json 自体は XR（#98）と共有する前提なので、キーの置き場所は
-                //   ここでよい —— ヘッドセットのリフレッシュレートに合わせる話が入るまでは既定のまま
+                // ★ 書くのはデスクトップの設定パネルだけ（→ MascotSettings.FrameRate の doc）。
+                //   settings.json は Android とファイルを共有するが、Android はこの値を
+                //   反映しない（→ SettingsMapping.AppliesFrameRate）ので、キーの置き場所はここでよい
                 ["display"] = new JObject
                 {
                     ["frameRate"] = settings.FrameRate,
+                },
+                // ★ 空文字は「未指定」（→ MascotSettings.ServerUrl / Token の doc）。デスクトップの
+                //   設定パネルは connection を書かないが、ここに含めておけば保存のたびに落ちない
+                ["connection"] = new JObject
+                {
+                    ["serverUrl"] = settings.ServerUrl ?? "",
+                    ["token"] = settings.Token ?? "",
                 },
             };
             return root.ToString(Formatting.Indented) + "\n";
@@ -138,6 +147,10 @@ namespace ChatterMascot.Settings
 
                     case "display":
                         result = ReadDisplay(property.Value, result, warn);
+                        break;
+
+                    case "connection":
+                        result = ReadConnection(property.Value, result, warn);
                         break;
 
                     default:
@@ -284,6 +297,89 @@ namespace ChatterMascot.Settings
                 }
             }
             return settings;
+        }
+
+        /// <summary>
+        /// 接続先とトークン（→ <see cref="MascotSettings.ServerUrl"/> / <see cref="MascotSettings.Token"/> の doc）。
+        /// </summary>
+        private static MascotSettings ReadConnection(JToken raw, MascotSettings settings, Action<string> warn)
+        {
+            var connection = raw as JObject;
+            if (connection == null)
+            {
+                Warn(warn, $"connection がオブジェクトではありません（{Describe(raw)}）。既定を使います");
+                return settings;
+            }
+
+            foreach (var property in connection)
+            {
+                switch (property.Key)
+                {
+                    case "serverUrl":
+                        settings = settings.WithServerUrl(
+                            ReadServerUrl(property.Value, "connection.serverUrl", settings.ServerUrl, warn));
+                        break;
+
+                    case "token":
+                        settings = settings.WithToken(
+                            ReadToken(property.Value, "connection.token", settings.Token, warn));
+                        break;
+
+                    default:
+                        Warn(warn, $"知らないキー \"connection.{property.Key}\" は無視します");
+                        break;
+                }
+            }
+            return settings;
+        }
+
+        /// <summary>空文字は「未指定」として通す。空でなければ <c>ws</c> / <c>wss</c> の絶対 URL であること。</summary>
+        private static string ReadServerUrl(JToken value, string key, string fallback, Action<string> warn)
+        {
+            if (value.Type != JTokenType.String)
+            {
+                Warn(warn, $"{key} が文字列ではありません（{value}）。既定を使います");
+                return fallback;
+            }
+
+            var text = value.Value<string>().Trim();
+            if (text.Length == 0) return "";
+            if (ServerUrl.IsValid(text)) return text;
+
+            Warn(warn, $"{key} は ws:// か wss:// で始まる絶対 URL である必要があります（{text}）。既定を使います");
+            return fallback;
+        }
+
+        /// <summary>
+        /// サーバーが生成するトークン（<c>core/src/server/lanToken.ts</c> の <c>TOKEN_PATTERN</c>）と
+        /// 同じ文字集合に絞る。
+        ///
+        /// ★★ <b>ここが入口。</b> この値はそのまま WebSocket / HTTP のヘッダに載るので、
+        ///   改行など制御文字を含む値を通すと、送信側の実装によっては例外や
+        ///   ヘッダインジェクションになりうる。通す場所を1つに絞れば、送る側
+        ///   （<c>SpeechClient</c> / <c>AudioFetcher</c> / <c>CoreConfigClient</c>）は
+        ///   検査を持たなくてよい。
+        ///
+        /// ★ <c>\A</c> / <c>\z</c> と <c>RegexOptions.None</c> の理由は <c>SpeechEpoch.Pattern</c> と同じ。
+        /// </summary>
+        private static readonly Regex TokenPattern = new Regex(@"\A[A-Za-z0-9_-]+\z", RegexOptions.None);
+
+        private static string ReadToken(JToken value, string key, string fallback, Action<string> warn)
+        {
+            if (value.Type != JTokenType.String)
+            {
+                Warn(warn, $"{key} が文字列ではありません（{value}）。既定を使います");
+                return fallback;
+            }
+
+            var text = value.Value<string>().Trim();
+            // ★ 空文字は「未指定」（→ MascotSettings.Token の doc）。検査の対象外
+            if (text.Length == 0) return "";
+            if (TokenPattern.IsMatch(text)) return text;
+
+            // ★ 値そのものは出さない。トークンをログに残さない規律は MascotRunner と揃える
+            Warn(warn, $"{key} に使える文字は英数字と _ - だけです。既定を使います");
+            return fallback;
         }
 
         private static bool ReadBool(JToken value, string key, bool fallback, Action<string> warn)

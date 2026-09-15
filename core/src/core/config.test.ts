@@ -17,7 +17,7 @@ let filePath: string;
 
 const DEFAULTS: ChatterAgentConfig = {
   port: 8570,
-  host: "0.0.0.0",
+  host: "127.0.0.1",
   speakPrompts: true,
   speechLogMaxBytes: 5 * 1024 * 1024,
   speechQueueMaxEntries: 500,
@@ -84,10 +84,10 @@ afterEach(() => {
 });
 
 describe("createDefaultConfig", () => {
-  it("WebSocketの既定はポート8570・0.0.0.0バインド", () => {
+  it("WebSocketの既定はポート8570・127.0.0.1バインド（ループバックのみ）", () => {
     const c = createDefaultConfig();
     expect(c.port).toBe(8570);
-    expect(c.host).toBe("0.0.0.0");
+    expect(c.host).toBe("127.0.0.1");
   });
 
   it("発話ログとspoolの既定", () => {
@@ -148,7 +148,7 @@ describe("createConfigStore", () => {
     expect(s.get("port")).toBe(9000);
     expect(s.get("speakPrompts")).toBe(false);
     expect(s.get("speechQueueMaxEntries")).toBe(10);
-    expect(s.get("host")).toBe("0.0.0.0"); // 未指定は既定のまま
+    expect(s.get("host")).toBe("127.0.0.1"); // 未指定は既定のまま
   });
 
   it("環境変数が設定ファイルより優先される", () => {

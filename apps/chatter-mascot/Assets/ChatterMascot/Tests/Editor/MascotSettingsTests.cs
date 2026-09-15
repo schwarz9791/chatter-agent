@@ -36,6 +36,27 @@ namespace ChatterMascot.Tests
             Assert.That(settings.MuteHotKey, Is.EqualTo(HotKeySpec.Default));
         }
 
+        /// <summary>
+        /// ★ 「すべての設定をリセット」は接続先だけ残す（→ <see cref="MascotSettings.ResetKeepingConnection"/>
+        ///   の doc）。確認ダイアログにもパネルにも接続先の項目が無いので、消えると気付けない。
+        /// </summary>
+        [Test]
+        public void ResetKeepingConnectionKeepsServerUrlAndToken()
+        {
+            var settings = MascotSettings.Defaults
+                .WithServerUrl("wss://mascot.example:443")
+                .WithToken("s3cr3t")
+                .WithMuted(true)
+                .WithVolume(0.3f);
+
+            var reset = settings.ResetKeepingConnection();
+
+            Assert.That(reset.ServerUrl, Is.EqualTo("wss://mascot.example:443"));
+            Assert.That(reset.Token, Is.EqualTo("s3cr3t"));
+            Assert.That(reset.Muted, Is.EqualTo(MascotSettings.Defaults.Muted));
+            Assert.That(reset.Volume, Is.EqualTo(MascotSettings.Defaults.Volume));
+        }
+
         [Test]
         public void EqualValuesAreEqual()
         {

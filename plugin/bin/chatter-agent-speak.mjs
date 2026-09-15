@@ -147,7 +147,7 @@ function getSummarizerLogPath(e = currentPathEnv()) {
 function createDefaultConfig() {
 	return {
 		port: 8570,
-		host: "0.0.0.0",
+		host: "127.0.0.1",
 		speakPrompts: true,
 		speechLogMaxBytes: 5242880,
 		speechQueueMaxEntries: 500,

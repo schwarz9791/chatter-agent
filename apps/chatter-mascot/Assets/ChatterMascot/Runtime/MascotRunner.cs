@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading.Tasks;
 using ChatterMascot.Audio;
 using ChatterMascot.Net;
 using ChatterMascot.Playback;
 using ChatterMascot.Protocol;
 using ChatterMascot.Settings;
+using ChatterMascot.Vrm;
 using UnityEngine;
 
 namespace ChatterMascot
@@ -41,9 +43,9 @@ namespace ChatterMascot
         ///
         /// ★ <b>デスクトップでは設定パネルの <c>display.frameRate</c>（#88）がこの値を上書きする</b>
         ///   —— <see cref="SetTargetFrameRate"/> 経由で、<c>Awake</c> の後（設定を読み終えたところ）
-        ///   から効く。<b>Android / XR には設定パネルが無い</b>ので、この <c>[SerializeField]</c> の
-        ///   既定（＝ <c>settings.json</c> を読めなかったときの既定でもある。→
-        ///   <c>Settings.SettingsMapping.DefaultFrameRate</c>）がそのまま使われる。
+        ///   から効く。<b>Android では反映しない</b>（→
+        ///   <c>Settings.SettingsMapping.AppliesFrameRate</c>）—— <c>settings.json</c> に値が
+        ///   書かれていても、この <c>[SerializeField]</c> の既定がそのまま権威になる。
         ///   ヘッドセットのリフレッシュレートに合わせる話（#99）が入るまではここが権威。
         /// </summary>
         [Header("表示")]
@@ -218,6 +220,20 @@ namespace ChatterMascot
         {
             get { return serverUrl; }
         }
+
+        /// <summary>
+        /// 非ループバックの接続に要る共有トークン（<c>connection.token</c>）。空なら未指定。
+        ///
+        /// ★ <see cref="ServerUrl"/> と同じ <c>settings.json</c> から <c>Awake</c> で1回だけ読む
+        ///   （→ <see cref="ResolveServerUrl"/>）。<b>値そのものをログに出さないこと</b> ——
+        ///   出してよいのは「あるかどうか」だけ。
+        /// ★★ <b>起動引数（<c>-serverUrl</c>）で接続先を上書きしたときは空にする。</b>
+        ///   トークンは接続先と対になる値なので、URL だけ差し替えてトークンを残すと、
+        ///   別ホストへ元のサーバーの資格情報を平文で送ることになる。トークンを渡す
+        ///   起動引数は無い（<c>ps</c> に値が見えるため）——トークンが要る接続先は
+        ///   <c>settings.json</c> の <c>connection</c> で指定する。
+        /// </summary>
+        public string ServerToken { get; private set; } = "";
 
         /// <summary>
         /// 設定パネルのテスト音声を鳴らす（#76）。失敗したら理由、成功なら <c>null</c>。
@@ -402,7 +418,12 @@ namespace ChatterMascot
         }
 
         /// <summary>
-        /// <c>-serverUrl</c> の上書きを <see cref="serverUrl"/> へ焼く。
+        /// <see cref="serverUrl"/> と <see cref="ServerToken"/> を決める。優先順位は
+        /// <c>-serverUrl</c>（起動引数）＞ <c>settings.json</c> の <c>connection.serverUrl</c> ＞
+        /// <c>[SerializeField]</c> の既定。
+        ///
+        /// ★★ <b>起動引数で上書きしたときは <see cref="ServerToken"/> の doc を見ること</b>
+        ///   —— ファイルのトークンは使わない。
         ///
         /// ★★ <b><c>Start</c> ではなく <c>Awake</c> で行うこと。</b> 設定パネル（#76）は
         ///   <c>StatusItemBridge.Bridge.Start()</c> から <see cref="ServerUrl"/> を読んで
@@ -415,16 +436,74 @@ namespace ChatterMascot
         ///   <b>シーンの <c>Awake</c> はすべて終わった後</b>に <c>Start</c> が来る ——
         ///   ここへ移せば順序が決まる。
         ///
-        /// ★ <b>検証（<see cref="IsValidServerUrl"/>）は <c>Start</c> のまま。</b> あちらは
+        /// ★ <b>検証（<c>ServerUrl.IsValid</c>）は <c>Start</c> のまま。</b> あちらは
         ///   「<c>_client</c> を作れるか」の話で、読み手の順序とは別の関心事。
+        ///
+        /// ★★ <b>設定ファイルは専用のストアを作らず、ここで直接・1回だけ読む。</b> 書き手は
+        ///   <c>MascotSettingsHost</c> だけで、こちらは<b>読むだけで一切書かない</b>ので、
+        ///   2つのストアが同じファイルへ競合して書く問題は起こらない。
+        ///   接続先を起動後に書き換えても<b>次回の起動まで反映されない</b>のは、
+        ///   接続を1回きり捕まえる設計（上の doc）と同じ理由。
         /// </summary>
         private void ResolveServerUrl()
         {
-            var overridden = CommandLine.Argument("-serverUrl");
-            if (string.IsNullOrEmpty(overridden)) return;
+            var settingsPath = SettingsLocation.Resolve(AssetEnvFactory.Current());
+            var fromFile = ReadConnectionSettings(settingsPath);
 
-            Debug.Log($"[Mascot] serverUrl をコマンドラインで上書きします: \"{overridden}\"");
-            serverUrl = overridden;
+            var overridden = CommandLine.Argument("-serverUrl");
+            if (!string.IsNullOrEmpty(overridden))
+            {
+                // ★ ファイルのトークンは使わない（→ ServerToken の doc）。判定はここ1箇所で足りる
+                ServerToken = "";
+                Debug.Log("[Mascot] トークン: 起動引数で接続先を上書きしたので使いません");
+                Debug.Log($"[Mascot] serverUrl: 起動引数を使います (\"{overridden}\")");
+                serverUrl = overridden;
+                return;
+            }
+
+            ServerToken = fromFile.Token ?? "";
+            // ★ 値は出さない。401 の切り分けには「持っているか」だけで足りる
+            Debug.Log(ServerToken.Length > 0 ? "[Mascot] トークン: 設定あり" : "[Mascot] トークン: 設定なし");
+
+            if (!string.IsNullOrEmpty(fromFile.ServerUrl))
+            {
+                // ★ ファイルのパスと「Inspector の値は使っていない」を添える。Editor の再生でも
+                //   ここを通るので、デスクトップで connection を試したことがあると気付かないまま
+                //   Inspector の serverUrl を変えても反映されない
+                Debug.Log($"[Mascot] serverUrl: 設定ファイル (\"{settingsPath}\") の \"{fromFile.ServerUrl}\" " +
+                          "を使います（Inspector の値は使っていません）");
+                serverUrl = fromFile.ServerUrl;
+                return;
+            }
+
+            Debug.Log($"[Mascot] serverUrl: 既定を使います (\"{serverUrl}\")");
+        }
+
+        /// <summary>読めなければ（無い・壊れている）既定を返す。<c>SettingsJson</c> と同じ「throw しない」作法。</summary>
+        private static MascotSettings ReadConnectionSettings(string path)
+        {
+            if (string.IsNullOrEmpty(path) || !File.Exists(path)) return MascotSettings.Defaults;
+
+            string raw;
+            try
+            {
+                raw = File.ReadAllText(path);
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[Mascot] settings.json を読めませんでした: " + e.Message);
+                return MascotSettings.Defaults;
+            }
+
+            MascotSettings settings;
+            string error;
+            // ★ キー単位の警告は渡さない。同じファイルを MascotSettingsHost も読んで警告するので、
+            //   ここでも出すと起動のたびに同じ行が2回ずつ並ぶ
+            if (!SettingsJson.TryParse(raw, out settings, out error, null))
+            {
+                return MascotSettings.Defaults;
+            }
+            return settings;
         }
 
         /// <summary>
@@ -569,7 +648,9 @@ namespace ChatterMascot
             //
             // ★★ **上書きそのものは Awake で済ませてある**（→ ResolveServerUrl）。ここに残すと、
             //   同じ Start パスに居る StatusItemBridge が**先に ServerUrl を読みうる**。
-            if (!IsValidServerUrl(serverUrl))
+            // ★ 完全修飾で呼ぶこと。 このクラスは同名の public string ServerUrl プロパティを持つので、
+            //   using しただけの型名は解決できない
+            if (!ChatterMascot.Net.ServerUrl.IsValid(serverUrl))
             {
                 Debug.LogError($"[Mascot] serverUrl が不正です: \"{serverUrl}\"。" +
                                "ws:// か wss:// で始まる絶対 URL を指定してください（例: ws://127.0.0.1:8570）");
@@ -605,9 +686,9 @@ namespace ChatterMascot
             }
             // 音声は WebSocket と同じ authority から取る。サーバーは自分の到達アドレスを
             // 知らないので、フレームには相対パスしか載らない
-            _fetcher = new AudioFetcher(AudioFetcher.DeriveAudioBaseUrl(serverUrl), audioFetchTimeoutMs);
+            _fetcher = new AudioFetcher(AudioFetcher.DeriveAudioBaseUrl(serverUrl), audioFetchTimeoutMs, ServerToken);
 
-            _client = new SpeechClient(serverUrl);
+            _client = new SpeechClient(serverUrl, ServerToken);
             _client.FrameReceived += OnFrame;
             _client.Connected += OnConnected;
             _client.Disconnected += () => Dispatch(PlaybackEvent.Disconnected());
@@ -1049,17 +1130,6 @@ namespace ChatterMascot
         {
             _handles.Remove(Key(epoch, seq));
             _player?.Discard(audio);
-        }
-
-        /// <summary>
-        /// ★ スキームまで見ること。<c>Uri.TryCreate</c> は <c>http://…</c> も
-        ///   <c>file:///…</c> も通すが、<c>ClientWebSocket</c> は <c>ws</c> / <c>wss</c> しか繋げない。
-        /// </summary>
-        private static bool IsValidServerUrl(string url)
-        {
-            Uri parsed;
-            if (!Uri.TryCreate(url, UriKind.Absolute, out parsed)) return false;
-            return parsed.Scheme == "ws" || parsed.Scheme == "wss";
         }
 
         private static string Key(int epoch, long seq)

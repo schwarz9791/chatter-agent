@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using UnityEngine;
 
 namespace ChatterMascot.Settings
 {
@@ -24,7 +25,7 @@ namespace ChatterMascot.Settings
         /// ★★ <b>1.0 より上へ戻さないこと。</b> 1.0 超えが効くのは macOS
         ///   （<c>afplay -v</c>）だけで、Android の <see cref="UnityEngine.AudioSource.volume"/> は
         ///   <b>Unity 側で 0〜1 にクランプされる</b>（<c>AudioClipPlayer.CopySettings</c> は
-        ///   そのクランプ後の値を写す）。<c>settings.json</c> は XR（#98）と共有する前提なので、
+        ///   そのクランプ後の値を写す）。<c>settings.json</c> は Android と共有するので、
         ///   <b>プラットフォームによって意味の変わる範囲を持たせない</b> ——
         ///   大きくしたいなら <c>AudioMixer</c> が要るが、それは<b>両方で効く形にしてから</b>入れる。
         ///
@@ -198,6 +199,32 @@ namespace ChatterMascot.Settings
                 if (FrameRateChoices[i] == value) return value;
             }
             return DefaultFrameRate;
+        }
+
+        /// <summary>
+        /// <c>display.frameRate</c> を反映していいプラットフォームか（→ <c>MascotRunner.targetFrameRate</c>
+        /// の doc）。
+        ///
+        /// ★ <b>許可リストで書くこと</b>（<c>Vrm.UnlitFallbackPolicy.AppliesTo</c> と同じ流儀）。
+        ///   否定形にすると、これから増えるプラットフォームが確かめないまま巻き込まれる。
+        ///   選べる値がちょうど2つ（30 / 60）しか無く、ヘッドセットのリフレッシュレートに
+        ///   合わせる話（#99）が入るまでは、それ以外のプラットフォームで上書きすると
+        ///   意図しない値に黙って揃えてしまう。
+        /// </summary>
+        public static bool AppliesFrameRate(RuntimePlatform platform)
+        {
+            switch (platform)
+            {
+                case RuntimePlatform.OSXPlayer:
+                case RuntimePlatform.OSXEditor:
+                case RuntimePlatform.WindowsPlayer:
+                case RuntimePlatform.WindowsEditor:
+                case RuntimePlatform.LinuxPlayer:
+                case RuntimePlatform.LinuxEditor:
+                    return true;
+                default:
+                    return false;
+            }
         }
     }
 }

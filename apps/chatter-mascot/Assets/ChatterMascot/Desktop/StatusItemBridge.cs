@@ -27,9 +27,6 @@ namespace ChatterMascot.Desktop
     /// </summary>
     public static class StatusItemBridge
     {
-        private const string SettingsDirectory = "mascot";
-        private const string SettingsFile = "settings.json";
-
         /// <summary>アイコン。<c>StreamingAssets</c> はビルド後 <c>.app</c> 内のコピーを読む</summary>
         private const string Icon1xFile = "trayTemplate.png";
         private const string Icon2xFile = "trayTemplate@2x.png";
@@ -76,17 +73,6 @@ namespace ChatterMascot.Desktop
             var go = new GameObject(nameof(StatusItemBridge)) { hideFlags = HideFlags.HideAndDontSave };
             UnityEngine.Object.DontDestroyOnLoad(go);
             go.AddComponent<Bridge>();
-        }
-
-        /// <summary>
-        /// <c>{XDG_CONFIG_HOME:-~/.config}/chatter-agent/mascot/settings.json</c>。
-        /// ★ <c>window.json</c> と同じディレクトリ（ユーザーから見た「設定はここ1箇所」を崩さない）。
-        /// </summary>
-        internal static string ResolveSettingsPath()
-        {
-            var root = AssetPath.RuntimeDirectory(AssetEnvFactory.Current());
-            if (string.IsNullOrEmpty(root)) return null;
-            return Path.Combine(root, SettingsDirectory, SettingsFile);
         }
 
         [AOT.MonoPInvokeCallback(typeof(NativeEventCallback))]
@@ -142,9 +128,6 @@ namespace ChatterMascot.Desktop
 
         private sealed class Bridge : MonoBehaviour, ISettingsHost
         {
-            /// <summary>設定ファイルの更新を見る間隔。★ 毎フレーム stat しないこと</summary>
-            private const float SettingsPollSeconds = 1f;
-
             /// <summary>
             /// Dock 非表示の念押しを入れるまで。
             ///
@@ -156,9 +139,23 @@ namespace ChatterMascot.Desktop
             /// </summary>
             private const float ActivationPolicyDelaySeconds = 1f;
 
-            private SettingsStore _store;
-            private string _settingsPath;
+            /// <summary>
+            /// <c>settings.json</c> の反映元。<b>読み書きはここに1本化されている</b> ——
+            ///   ストアを2つ作ると同じファイルを2人が read-modify-write して、
+            ///   先に書いた方の変更が消える（→ <c>MascotSettingsHost.Apply</c> の doc）。
+            ///
+            /// ★ <b>無ければ <c>Start</c> で Bridge ごと無効にする。</b> それより後ろでは
+            ///   常に非 null（<c>OnDestroy</c> の購読解除だけは、初期化の途中で抜けた経路の
+            ///   ために null チェックを残してある）。
+            /// </summary>
+            private ChatterMascot.Vrm.MascotSettingsHost _settingsHost;
+
+            /// <summary>
+            /// ホットキーの差分判定とメニューが読む値。★ <b>更新するのは
+            /// <see cref="ISettingsHost.ApplySettings"/> と外部変更の購読だけ</b>。
+            /// </summary>
             private MascotSettings _settings = MascotSettings.Defaults;
+
             private HotKeySpec _muteHotKey;
             private HotKeySpec _hideHotKey;
             private bool _muteHotKeyRegistered;
@@ -168,11 +165,7 @@ namespace ChatterMascot.Desktop
             private Camera _camera;
             private ChatterMascot.Vrm.VrmCharacter _character;
 
-            /// <summary>
-            /// 設定パネル（#76）。★ <b><see cref="SettingsStore"/> をここが持っているので、
-            /// パネルは <see cref="ISettingsHost"/> 越しに触る</b> —— ストアを2つ作ると
-            /// 同じファイルを2人が read-modify-write して、先に書いた方の変更が消える。
-            /// </summary>
+            /// <summary>設定パネル（#76）。<see cref="ISettingsHost"/> 越しに <see cref="_settingsHost"/> を触る。</summary>
             private SettingsPanelBridge _panel;
 
             /// <summary>
@@ -193,7 +186,6 @@ namespace ChatterMascot.Desktop
             private string _icon2xPath;
             private int _pid;
 
-            private float _nextSettingsPollAt;
             private float _activationPolicyAt;
             private bool _activationPolicyApplied;
             private bool _shown;
@@ -201,11 +193,19 @@ namespace ChatterMascot.Desktop
             private void Start()
             {
                 _pid = Process.GetCurrentProcess().Id;
-                _settingsPath = ResolveSettingsPath();
-                _store = new SettingsStore(
-                    ReadSettings, StampSettings, WriteSettings,
-                    message => Debug.LogWarning("[Mascot] " + message));
-                _settings = _store.Current;
+
+                // ★ Start で取ること。MascotSettingsHost は AfterSceneLoad で生えた時点で
+                //   Instance が立ち、Start はすべての AfterSceneLoad の後に来るので順序が決まる
+                _settingsHost = ChatterMascot.Vrm.MascotSettingsHost.Instance;
+                if (_settingsHost == null)
+                {
+                    // ★ 通常は起きない（Install は native プラグインの有無を問わない）。設定の
+                    //   反映も保存も持たない Bridge を動かす理由が無いので、ここで畳む
+                    Debug.LogWarning("[Mascot] MascotSettingsHost が見つかりません。メニューバーには出ません");
+                    enabled = false;
+                    return;
+                }
+                _settings = _settingsHost.Current;
 
                 _icon1xPath = Path.Combine(Application.streamingAssetsPath, Icon1xFile);
                 _icon2xPath = Path.Combine(Application.streamingAssetsPath, Icon2xFile);
@@ -218,10 +218,10 @@ namespace ChatterMascot.Desktop
                 }
                 ChatterMascotNative.CM_SetEventCallback(Callback);
 
-                // ★ ミュートだけでなく全部を反映すること。#75 の頃は `settings.json` に
-                //   ミュートとショートカットしか無かったが、#76 で大きさ・音量・モーションが
-                //   入った。ここを飛ばすと**起動のたびに既定へ戻って見える**
-                ApplySettingsToScene();
+                // ★ 初期化が成功してから購読すること。 先に購読すると、初期化に失敗して
+                //   enabled = false になった Bridge にも外部変更が届き、コールバックの無い
+                //   ショートカットだけが RegisterHotKeys → CM_HotKeyRegister で奪われる
+                _settingsHost.ChangedExternally += OnSettingsChangedExternally;
 
                 // ★ メニューより先に登録すること。 ラベルにショートカットの表記が乗るので、
                 //   後にすると初回のメニューだけ表記が抜ける
@@ -230,12 +230,11 @@ namespace ChatterMascot.Desktop
                 _shown = ChatterMascotNative.CM_StatusItemShow(MenuJson.Write(BuildMenu()));
                 if (!_shown) Debug.LogWarning("[Native] ステータスバーに出せませんでした");
 
-                _nextSettingsPollAt = Time.realtimeSinceStartup + SettingsPollSeconds;
                 _activationPolicyAt = Time.realtimeSinceStartup + ActivationPolicyDelaySeconds;
 
                 AllowInputWithoutFocus();
 
-                _panel = new SettingsPanelBridge(this, ResolveServerUrl(), ResolveRunner);
+                _panel = new SettingsPanelBridge(this, ResolveServerUrl(), ResolveServerToken(), ResolveRunner);
                 _instance = this;
 
                 // ★ 検証用の入口。メニューバーも右クリックも自動化はできる（→ docs/mascot.md）が、
@@ -313,17 +312,24 @@ namespace ChatterMascot.Desktop
                 return runner != null ? runner.ServerUrl : "ws://127.0.0.1:8570";
             }
 
+            /// <summary>★ <see cref="ResolveServerUrl"/> と同じ理由で <c>MascotRunner</c> から取る。</summary>
+            private string ResolveServerToken()
+            {
+                var runner = ResolveRunner();
+                return runner != null ? runner.ServerToken : "";
+            }
+
             private void Update()
             {
                 DrainEvents();
                 PumpActivationPolicy();
-                PumpSettings();
                 if (_panel != null) _panel.Tick();
             }
 
             private void OnDestroy()
             {
                 if (_instance == this) _instance = null;
+                if (_settingsHost != null) _settingsHost.ChangedExternally -= OnSettingsChangedExternally;
                 if (_panel != null) _panel.Close();
 
                 // ★ この順序を守ること。 逆だと、終了中の menu action が
@@ -416,11 +422,10 @@ namespace ChatterMascot.Desktop
             private void ToggleMute()
             {
                 var muted = !_settings.Muted;
-                _settings = _settings.WithMuted(muted);
 
-                ApplyMuteToRunner();
-                _store.Save(_settings);
-                UpdateMenu();
+                // ★ host.Apply 経由に一本化する（→ MascotSettingsHost.Apply の doc）。
+                //   ここだけ別経路で反映 + 保存すると、経路が2本に増える
+                ((ISettingsHost)this).ApplySettings(_settings.WithMuted(muted));
 
                 Debug.Log(muted ? "[Mascot] ミュートしました" : "[Mascot] ミュートを解除しました");
             }
@@ -464,26 +469,19 @@ namespace ChatterMascot.Desktop
             }
 
             /// <summary>
-            /// 設定ファイルが外から書き換わっていたら拾う。
+            /// 設定ファイルが外から書き換わっていたら拾う（<see cref="ChatterMascot.Vrm.MascotSettingsHost"/>
+            /// のポーリングが検出し、シーンへの反映も済ませたあとに届く）。
             ///
             /// ★ <b>設定パネル（#76）が入っても、この経路は残す。</b> ファイルを直接編集する人は
             ///   居るし、パネルが開けない状況（ネイティブのバンドルが無い等）では
             ///   手編集が唯一の変更手段になる。
             /// </summary>
-            private void PumpSettings()
+            private void OnSettingsChangedExternally(MascotSettings previous, MascotSettings next)
             {
-                if (Time.realtimeSinceStartup < _nextSettingsPollAt) return;
-                _nextSettingsPollAt = Time.realtimeSinceStartup + SettingsPollSeconds;
+                _settings = next;
 
-                if (!_store.Refresh()) return;
-
-                var previousMute = _settings.MuteHotKey;
-                var previousHide = _settings.HideHotKey;
-                _settings = _store.Current;
-
-                ApplySettingsToScene();
-                if (!string.Equals(previousMute, _settings.MuteHotKey, StringComparison.Ordinal) ||
-                    !string.Equals(previousHide, _settings.HideHotKey, StringComparison.Ordinal))
+                if (!string.Equals(previous.MuteHotKey, next.MuteHotKey, StringComparison.Ordinal) ||
+                    !string.Equals(previous.HideHotKey, next.HideHotKey, StringComparison.Ordinal))
                 {
                     RegisterHotKeys();
                 }
@@ -597,54 +595,6 @@ namespace ChatterMascot.Desktop
                 return spec;
             }
 
-            private void ApplyMuteToRunner()
-            {
-                var runner = ResolveRunner();
-                if (runner == null) return;
-                runner.Mute.Muted = _settings.Muted;
-            }
-
-            /// <summary>
-            /// <c>settings.json</c> の値をシーンへ反映する。
-            ///
-            /// ★★ <b>ここが「設定 → 見た目・音」の唯一の経路。</b> 起動時にも、
-            ///   パネルからの変更でも、ファイルを直接編集したときにも同じものが通る。
-            ///   経路を分けると「パネルからは効くのに、ファイルを直したときだけ効かない」
-            ///   （またはその逆）が生まれる。
-            ///
-            /// ★ <b>対象が居なくても警告しないこと。</b> <c>TransparencyProbe</c> のような
-            ///   VRM を出さないシーンでも同じ常駐物が動く。
-            /// </summary>
-            private void ApplySettingsToScene()
-            {
-                ApplyMuteToRunner();
-
-                var runner = ResolveRunner();
-                if (runner != null)
-                {
-                    runner.Volume = _settings.Volume;
-                    // ★ #88。デスクトップだけの項目（→ MascotSettings.FrameRate の doc）。
-                    //   FrameRateBudget.SetBaseline 経由なので、VRM 読み込み中の一時的な
-                    //   引き上げ（Boost）を踏み荒らさない
-                    runner.SetTargetFrameRate(_settings.FrameRate);
-                }
-
-                // ★★ ここで `VrmStage` の `headroom` を触らないこと。 あれは「bounds をどれだけ
-                //   余裕を持って収めるか」の係数で、1 を下回るとモデルが画面からはみ出す
-                //   （実機で頭と足が対称に欠けた）。キャラの大きさは**ウィンドウ**で変える
-                //   （→ WindowGeometry.SetSize）。窓が変われば VrmStage が自動で収め直す。
-                //   ★ #76 の初版は `VrmStage.Headroom` という setter を生やしていたが、
-                //     大きさを窓で変えることにした時点で呼び出し元が無くなったので消した
-                //     （doc が存在しない `SettingsMapping.HeadroomFor` を指したまま残っていた）
-                var character = ResolveCharacter();
-                if (character != null)
-                {
-                    character.IdleMotion = _settings.IdleMotion;
-                    character.CursorGazeEnabled = _settings.CursorGaze;
-                    character.BlinkEnabled = _settings.Blink;
-                }
-            }
-
             /// <summary>
             /// ★ <c>ResolveRunner</c> / <c>ResolveCamera</c> と同じ理由で1回引いたら使い回す。
             ///   #70 派生の「モーションを確認」は <c>ISettingsHost.MotionClips</c> をパネルの
@@ -670,9 +620,8 @@ namespace ChatterMascot.Desktop
                 var previousMute = _settings.MuteHotKey;
                 var previousHide = _settings.HideHotKey;
 
+                _settingsHost.Apply(next);
                 _settings = next;
-                ApplySettingsToScene();
-                _store.Save(_settings);
 
                 if (!string.Equals(previousMute, _settings.MuteHotKey, StringComparison.Ordinal) ||
                     !string.Equals(previousHide, _settings.HideHotKey, StringComparison.Ordinal))
@@ -684,7 +633,7 @@ namespace ChatterMascot.Desktop
                 // ★★ ここでパネルを作り直さないこと。 画面には既に新しい値が出ているし、
                 //   作り直すと**ドラッグ中のスライダーごとビューが破棄される**（実機で
                 //   「つまみが掴めない」として出た）。作り直すのは「外から変わったとき」だけ
-                //   （→ PumpSettings / SettingsPanelBridge.Refresh）
+                //   （→ OnSettingsChangedExternally / SettingsPanelBridge.Refresh）
             }
 
             void ISettingsHost.ResetWindow()
@@ -694,7 +643,7 @@ namespace ChatterMascot.Desktop
 
             void ISettingsHost.ResetUnitySettings()
             {
-                ((ISettingsHost)this).ApplySettings(MascotSettings.Defaults);
+                ((ISettingsHost)this).ApplySettings(_settings.ResetKeepingConnection());
                 WindowGeometry.Reset();
             }
 
@@ -786,40 +735,6 @@ namespace ChatterMascot.Desktop
 
                 _camera = Camera.main;
                 return _camera;
-            }
-
-            private string ReadSettings()
-            {
-                if (string.IsNullOrEmpty(_settingsPath)) return null;
-                if (!File.Exists(_settingsPath)) return null;
-                return File.ReadAllText(_settingsPath);
-            }
-
-            /// <summary>
-            /// ★ 内容のハッシュにしないこと（読まずに済ませるための仕組み）。
-            ///   core の <c>createConfigStore</c> と同じ <c>mtime:size</c>。
-            /// </summary>
-            private string StampSettings()
-            {
-                if (string.IsNullOrEmpty(_settingsPath)) return null;
-
-                var info = new FileInfo(_settingsPath);
-                if (!info.Exists) return null;
-                return info.LastWriteTimeUtc.Ticks + ":" + info.Length;
-            }
-
-            /// <summary>★ 別名で書いてから置き換える（→ <c>WindowGeometry.WriteState</c> と同じ）</summary>
-            private void WriteSettings(string text)
-            {
-                if (string.IsNullOrEmpty(_settingsPath)) throw new IOException("保存先を決められません");
-
-                var directory = Path.GetDirectoryName(_settingsPath);
-                if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
-
-                var tmp = _settingsPath + ".tmp";
-                File.WriteAllText(tmp, text);
-                if (File.Exists(_settingsPath)) File.Replace(tmp, _settingsPath, null);
-                else File.Move(tmp, _settingsPath);
             }
         }
     }

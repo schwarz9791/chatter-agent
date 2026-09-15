@@ -42,7 +42,8 @@ namespace ChatterMascot.Settings
             float volume,
             bool idleMotion, bool cursorGaze, bool blink,
             string vrmFileName,
-            int frameRate)
+            int frameRate,
+            string serverUrl, string token)
         {
             Muted = muted;
             MuteHotKey = muteHotKey;
@@ -53,6 +54,8 @@ namespace ChatterMascot.Settings
             Blink = blink;
             VrmFileName = vrmFileName;
             FrameRate = frameRate;
+            ServerUrl = serverUrl;
+            Token = token;
         }
 
         public bool Muted { get; }
@@ -114,12 +117,30 @@ namespace ChatterMascot.Settings
         /// <summary>
         /// 表示のフレームレート上限（<b>30 か 60</b>。→ <see cref="SettingsMapping.FrameRateChoices"/>）。
         ///
-        /// ★ <b>デスクトップだけの項目。</b> 設定パネル（#88）が書き、<c>MascotRunner</c> の
-        ///   <c>FrameRateBudget.SetBaseline</c> に反映される。Android / XR には設定パネルが無いので、
-        ///   この JSON の既定（<see cref="SettingsMapping.DefaultFrameRate"/>）がそのまま使われる
+        /// ★ 書くのはデスクトップの設定パネル（#88）だけで、<c>MascotRunner</c> の
+        ///   <c>FrameRateBudget.SetBaseline</c> に反映される。<b>Android では反映しない</b>
+        ///   （→ <see cref="SettingsMapping.AppliesFrameRate"/>）——この値が <c>settings.json</c> に
+        ///   書かれていても、シーンの <c>[SerializeField]</c> の既定がそのまま使われる
         ///   （→ <c>MascotRunner.targetFrameRate</c> の doc）。
         /// </summary>
         public int FrameRate { get; }
+
+        /// <summary>
+        /// 接続先（<c>ws://</c> / <c>wss://</c> の絶対 URL）。空なら未指定（→ <c>MascotRunner</c> の既定 /
+        /// 起動引数に譲る）。
+        ///
+        /// ★★ <b>起動時に1回だけ読まれる</b>（<see cref="MascotRunner.ResolveServerUrl"/>）。
+        ///   ファイルを書き換えても、<b>次回の起動まで反映されない</b> ——
+        ///   接続を1回きり捕まえる設計（→ <c>MascotRunner.ServerUrl</c> の doc）を保つため。
+        /// </summary>
+        public string ServerUrl { get; }
+
+        /// <summary>
+        /// 非ループバックの接続に要る共有トークン。空なら未指定。
+        ///
+        /// ★ <see cref="ServerUrl"/> と同じく<b>起動時に1回だけ</b>読まれる。
+        /// </summary>
+        public string Token { get; }
 
         public static MascotSettings Defaults
         {
@@ -130,7 +151,8 @@ namespace ChatterMascot.Settings
                     1f,
                     true, true, true,
                     "",
-                    SettingsMapping.DefaultFrameRate);
+                    SettingsMapping.DefaultFrameRate,
+                    "", "");
             }
         }
 
@@ -146,7 +168,8 @@ namespace ChatterMascot.Settings
             float? volume = null,
             bool? idleMotion = null, bool? cursorGaze = null, bool? blink = null,
             string vrmFileName = null,
-            int? frameRate = null)
+            int? frameRate = null,
+            string serverUrl = null, string token = null)
         {
             return new MascotSettings(
                 muted ?? Muted,
@@ -157,7 +180,9 @@ namespace ChatterMascot.Settings
                 cursorGaze ?? CursorGaze,
                 blink ?? Blink,
                 vrmFileName ?? VrmFileName,
-                frameRate ?? FrameRate);
+                frameRate ?? FrameRate,
+                serverUrl ?? ServerUrl,
+                token ?? Token);
         }
 
         public MascotSettings WithMuted(bool value) => Copy(muted: value);
@@ -169,6 +194,17 @@ namespace ChatterMascot.Settings
         public MascotSettings WithBlink(bool value) => Copy(blink: value);
         public MascotSettings WithVrmFileName(string value) => Copy(vrmFileName: value);
         public MascotSettings WithFrameRate(int value) => Copy(frameRate: value);
+        public MascotSettings WithServerUrl(string value) => Copy(serverUrl: value);
+        public MascotSettings WithToken(string value) => Copy(token: value);
+
+        /// <summary>
+        /// 「すべての設定をリセット」用。<b>接続先とトークンだけは残す</b>。
+        ///
+        /// ★ 確認ダイアログが列挙する項目にも設定パネルの項目にも <see cref="ServerUrl"/> /
+        ///   <see cref="Token"/> は無いので、単純に <see cref="Defaults"/> へ戻すと
+        ///   消えたことに気付けないまま次の起動で既定の接続先に繋ぐ。
+        /// </summary>
+        public MascotSettings ResetKeepingConnection() => Defaults.WithServerUrl(ServerUrl).WithToken(Token);
 
         /// <summary>
         /// ★★ <b>プロパティを足したらここにも足すこと</b>（→ 型の doc）。
@@ -186,7 +222,9 @@ namespace ChatterMascot.Settings
                 && CursorGaze == other.CursorGaze
                 && Blink == other.Blink
                 && string.Equals(VrmFileName, other.VrmFileName, StringComparison.Ordinal)
-                && FrameRate == other.FrameRate;
+                && FrameRate == other.FrameRate
+                && string.Equals(ServerUrl, other.ServerUrl, StringComparison.Ordinal)
+                && string.Equals(Token, other.Token, StringComparison.Ordinal);
         }
 
         public override bool Equals(object obj)
@@ -205,6 +243,8 @@ namespace ChatterMascot.Settings
             hash = (hash * 397) ^ (Blink ? 1 : 0);
             hash = (hash * 397) ^ (VrmFileName != null ? VrmFileName.GetHashCode() : 0);
             hash = (hash * 397) ^ FrameRate;
+            hash = (hash * 397) ^ (ServerUrl != null ? ServerUrl.GetHashCode() : 0);
+            hash = (hash * 397) ^ (Token != null ? Token.GetHashCode() : 0);
             return hash;
         }
     }

@@ -34,6 +34,11 @@ const ACK_FLUSH_MS = 20;
 
 export interface SpeechClientOptions {
   url: string;
+  /**
+   * 非ループバックのサーバーに繋ぐときだけ要るトークン（→ `player/index.ts`）。
+   * 空なら `Authorization` ヘッダを送らない。
+   */
+  token?: string;
   /** 受け取った生フレーム。パースは呼び出し側 */
   onFrame: (raw: string) => void;
   onConnected: () => void;
@@ -69,8 +74,9 @@ export interface SpeechClient {
 /**
  * `playerServerUrl` が空のときの接続先。
  *
- * ★ `host` をそのまま使えない。既定の `0.0.0.0` は **bind アドレスであって接続先ではない**。
- *   macOS では偶然 localhost に繋がるが、意図した挙動ではないし `::` では破綻する。
+ * ★ `host` をそのまま使えない。`0.0.0.0` / `::`（LAN 公開のため明示的に指定したとき）は
+ *   **bind アドレスであって接続先ではない**。macOS では `0.0.0.0` へ繋ぐと偶然 localhost に
+ *   届くが、意図した挙動ではないし `::` では破綻する。
  */
 export function deriveServerUrl(host: string, port: number): string {
   const target = host === "0.0.0.0" || host === "::" || host === "" ? "127.0.0.1" : host;
@@ -146,7 +152,11 @@ export function createSpeechClient(options: SpeechClientOptions): SpeechClient {
 
     // ★ Origin ヘッダを付けないこと。`allowedOrigins` の既定は空で、Origin 付きの接続は
     //   すべて拒否される。Node の ws クライアントは既定で付けないので、足さなければよい
-    const next = new WebSocket(options.url);
+    //
+    // ★ トークンは空なら送らない。ループバックのサーバーはこれを要求しない（→ server/auth.ts）
+    const next = options.token
+      ? new WebSocket(options.url, { headers: { authorization: `Bearer ${options.token}` } })
+      : new WebSocket(options.url);
     socket = next;
 
     // ★ message ハンドラは open を待たずにここで張る。接続直後の追いつきは
@@ -176,8 +186,10 @@ export function createSpeechClient(options: SpeechClientOptions): SpeechClient {
     next.on("ping", () => armWatchdog());
 
     next.on("unexpected-response", (_req, res) => {
-      // 401 は Origin 検査。ネイティブから張っている限り起きないが、理由が分からないと詰まる
-      const hint = res.statusCode === 401 ? "（allowedOrigins に弾かれた可能性があります）" : "";
+      // 401 は Origin 検査、またはトークン認証（非ループバックのみ）。ネイティブから
+      // ループバックへ張っている限り起きないが、理由が分からないと詰まる
+      const hint =
+        res.statusCode === 401 ? "（allowedOrigins に弾かれたか、CHATTER_AGENT_PLAYER_TOKEN が無いか違います）" : "";
       console.error(`[Player] ハンドシェイクに失敗しました: ${res.statusCode}${hint}`);
 
       // ★ このハンドラを張ったら、自分で接続を畳むこと。

@@ -35,8 +35,9 @@ namespace ChatterMascot.Protocol
         /// <summary>
         /// サーバー上の<b>相対</b>パス（<c>/audio/&lt;epoch&gt;-&lt;seq&gt;.wav</c>）。
         ///
-        /// ★ サーバーは自分がどのアドレスで到達されたかを知らない（既定の bind は
-        ///   <c>0.0.0.0</c> で、これは接続先ではない）。authority を補うのはクライアントの責務。
+        /// ★ サーバーは自分がどのアドレスで到達されたかを知らない（bind アドレスは
+        ///   接続先とは限らない —— LAN 公開では <c>0.0.0.0</c>）。authority を補うのは
+        ///   クライアントの責務。
         /// </summary>
         public readonly string Path;
 

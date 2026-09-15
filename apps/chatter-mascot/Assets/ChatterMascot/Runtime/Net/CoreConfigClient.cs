@@ -48,7 +48,7 @@ namespace ChatterMascot.Net
     ///
     /// ★★ <b>書き込み（<c>PATCH</c> / <c>POST</c>）はサーバー側でループバック限定になっている。</b>
     ///   このクライアントが同じマシンで動く前提（→ <c>docs/protocol.md</c> の「制御 API」）。
-    ///   XR（#98）から設定を書く道はまだ無い。
+    ///   別ホストのサーバーに繋いだクライアント（Android など）から設定を書く道は無い。
     ///
     /// ★ <b><c>Origin</c> を付けないこと。</b> 付いた書き込みはサーバーが 403 で弾く
     ///   （WebView からの CSRF を塞ぐ仕掛け）。<c>UnityWebRequest</c> は既定で送らないので、
@@ -81,6 +81,7 @@ namespace ChatterMascot.Net
 
         public readonly string BaseUrl;
         private readonly int _timeoutSeconds;
+        private readonly string _token;
 
         /// <param name="baseUrl"><c>http://host:port</c>（→ <see cref="ServerUrl.ToHttpBase"/>）</param>
         /// <param name="timeoutMs">
@@ -89,11 +90,13 @@ namespace ChatterMascot.Net
         /// <see cref="TtsPreviewAsync"/> なら <c>synthesisTimeoutMs</c>（既定30秒）の
         /// <b>最悪2倍</b>まで粘るので、<b>どちらにも別の予算を渡すこと</b>。
         /// </param>
-        public CoreConfigClient(string baseUrl, int timeoutMs)
+        /// <param name="token">非ループバックの接続に要る共有トークン。空か <c>null</c> なら付けない。</param>
+        public CoreConfigClient(string baseUrl, int timeoutMs, string token)
         {
             BaseUrl = baseUrl;
             // UnityWebRequest.timeout は秒単位の int。0 は「無制限」なので必ず 1 以上にする
             _timeoutSeconds = ToSeconds(timeoutMs);
+            _token = token;
         }
 
         private static int ToSeconds(int timeoutMs)
@@ -169,6 +172,7 @@ namespace ChatterMascot.Net
             {
                 request.timeout = timeoutSeconds;
                 request.downloadHandler = new DownloadHandlerBuffer();
+                SetAuthHeader(request);
                 await SendAsync(request);
                 return ReadJson(request);
             }
@@ -195,7 +199,18 @@ namespace ChatterMascot.Net
             request.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(body ?? "{}"));
             request.downloadHandler = new DownloadHandlerBuffer();
             request.SetRequestHeader("Content-Type", "application/json");
+            SetAuthHeader(request);
             return request;
+        }
+
+        /// <summary>空か <c>null</c> なら付けない。書き込みはトークンがあってもループバック限定で、
+        /// トークンが効くのは非ループバックからの読み取りだけ。</summary>
+        private void SetAuthHeader(UnityWebRequest request)
+        {
+            if (!string.IsNullOrEmpty(_token))
+            {
+                request.SetRequestHeader("Authorization", "Bearer " + _token);
+            }
         }
 
         private static bool Succeeded(UnityWebRequest request)
@@ -255,8 +270,8 @@ namespace ChatterMascot.Net
         ///   もう1つ 404 を返す枝がある（<b>ループバック以外からの書き込み</b>を
         ///   「口の存在ごと見せない」で断る絞り。→ <c>docs/protocol.md</c>）が、
         ///   このクライアントは同じマシンで動く前提なので当たらない。
-        ///   ★ <b>#98 で別ホストのサーバーに繋ぐようになったら、そこが崩れる</b> ——
-        ///   書き込みだけ 404 になるので、そのときはメソッドで出し分けること。
+        ///   ★ <b>別ホストのサーバーに繋いだ場合（<c>-serverUrl</c> / <c>connection.serverUrl</c>）は
+        ///   そこが崩れる</b> —— 書き込みだけ 404 になるので、そこを直すならメソッドで出し分けること。
         /// </summary>
         public static string DescribeFailure(long status, string body)
         {

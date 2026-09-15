@@ -359,8 +359,10 @@ namespace ChatterMascot.Settings
         ///   ヘッダインジェクションになりうる。通す場所を1つに絞れば、送る側
         ///   （<c>SpeechClient</c> / <c>AudioFetcher</c> / <c>CoreConfigClient</c>）は
         ///   検査を持たなくてよい。
+        ///
+        /// ★ <c>\A</c> / <c>\z</c> と <c>RegexOptions.None</c> の理由は <c>SpeechEpoch.Pattern</c> と同じ。
         /// </summary>
-        private static readonly Regex TokenPattern = new Regex("^[A-Za-z0-9_-]+$", RegexOptions.Compiled);
+        private static readonly Regex TokenPattern = new Regex(@"\A[A-Za-z0-9_-]+\z", RegexOptions.None);
 
         private static string ReadToken(JToken value, string key, string fallback, Action<string> warn)
         {

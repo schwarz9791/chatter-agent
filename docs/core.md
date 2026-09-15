@@ -363,7 +363,9 @@ server / player はこのファイルを読みも書きもしない（読むの�
 | `spoolMaxAgeHours` | `6` | `CHATTER_AGENT_SPOOL_MAX_AGE_HOURS` |
 | `allowedOrigins` | `[]` | `CHATTER_AGENT_ALLOWED_ORIGINS`（カンマ区切り） |
 
-★ **LAN から繋ぐ（Android など）には `host` を `0.0.0.0` などへ明示的に変える必要がある。**
+★ **LAN から繋ぐ（Android など）には `host` を `0.0.0.0` へ明示的に変える必要がある。**
+具体的な LAN IP で bind すると、同じ Mac の player やマスコットからの接続も非ループバックに
+見える（player にはトークンが要り、マスコットは `127.0.0.1` で繋げない）ので `0.0.0.0` にする。
 非ループバックからの接続には共有トークンが要る（→ [`protocol.md`](./protocol.md) の「セキュリティ」）。
 このトークンは**config のキーでも環境変数でもない** —— `GET /v1/config` が設定を丸ごと返すので、
 キーにすると漏れる。置き場は `{root}/server.token`（`server/lanToken.ts` が生成・管理する）1箇所に絞ってある。

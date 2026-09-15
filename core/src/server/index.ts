@@ -213,7 +213,16 @@ async function main(): Promise<void> {
   //   （→ server/auth.ts）。config のキーにも環境変数にもしない ——
   //   `GET /v1/config` が snapshot() を丸ごと返すので、置くと漏れる
   const tokenPath = getServerTokenPath();
-  const token = ensureServerToken(tokenPath);
+  const { token, created } = ensureServerToken(tokenPath);
+  if (created === "new") {
+    console.log(
+      `[Server] トークンを新しく作りました: ${tokenPath}（LAN から繋ぐ端末を設定済みなら、configure-android.sh で書き込み直してください）`,
+    );
+  } else if (created === "replaced") {
+    console.warn(
+      `[Server] ${tokenPath} の内容が壊れていたので作り直しました。設定済みの端末は configure-android.sh で書き込み直してください`,
+    );
+  }
 
   // ★ 音声はプロセス内にしか持たない（`audioStore.ts`）。合成は GET が来たときに走るので、
   //   誰も繋いでいない間はエンジンを一度も叩かない

@@ -28,16 +28,31 @@ function generateToken(): string {
   return crypto.randomBytes(TOKEN_BYTES).toString("base64url");
 }
 
-/** 読めて、かつ生成したトークンと同じ形のときだけ「既存」として扱う。空・壊れていれば null */
-function readExisting(filePath: string): string | null {
+/** `readExisting` の結果。既存を読めた場合と、生成し直しが要る2通りを区別する */
+type ReadResult = { found: true; token: string } | { found: false; reason: "missing" | "invalid" };
+
+/**
+ * 読めて、かつ生成したトークンと同じ形のときだけ「既存」として扱う。
+ * ファイルが無い（`ENOENT`）のと、読めない・空・壊れているのを区別する —— 前者だけが
+ * 「初回生成」で、後者はすべて「作り直し」（呼び出し側がログの出し分けに使う）。
+ */
+function readExisting(filePath: string): ReadResult {
   let text: string;
   try {
     text = fs.readFileSync(filePath, "utf-8");
-  } catch {
-    return null;
+  } catch (err) {
+    const reason = (err as NodeJS.ErrnoException)?.code === "ENOENT" ? "missing" : "invalid";
+    return { found: false, reason };
   }
   const trimmed = text.trim();
-  return TOKEN_PATTERN.test(trimmed) ? trimmed : null;
+  return TOKEN_PATTERN.test(trimmed) ? { found: true, token: trimmed } : { found: false, reason: "invalid" };
+}
+
+/** `ensureServerToken` の戻り値。ログの出し分けに使う（→ `server/index.ts`） */
+export interface EnsuredToken {
+  token: string;
+  /** `null`: 既存をそのまま使った / `"new"`: 無かったので作った / `"replaced"`: あったが壊れていたので作り直した */
+  created: null | "new" | "replaced";
 }
 
 /**
@@ -47,9 +62,9 @@ function readExisting(filePath: string): string | null {
  * 0600 にする —— rename はファイルの権限をそのまま引き継ぐので、既定の権限で公開された
  * 状態の窓を作らない。
  */
-export function ensureServerToken(filePath: string): string {
+export function ensureServerToken(filePath: string): EnsuredToken {
   const existing = readExisting(filePath);
-  if (existing !== null) return existing;
+  if (existing.found) return { token: existing.token, created: null };
 
   const token = generateToken();
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -59,5 +74,5 @@ export function ensureServerToken(filePath: string): string {
   //   その権限のまま書かれるので、rename の前に明示的に絞る
   fs.chmodSync(tmp, FILE_MODE);
   fs.renameSync(tmp, filePath);
-  return token;
+  return { token, created: existing.reason === "missing" ? "new" : "replaced" };
 }

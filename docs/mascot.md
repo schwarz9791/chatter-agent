@@ -48,10 +48,10 @@
 `FrameRateBudget.SetBaseline` の経路で反映される。`Application.targetFrameRate` へ直接
 書かないのは、VRM 読み込み中の一時的な引き上げ（`FrameRateBudget.Boost`）を上書きで
 消さないため。選択肢に無い値（`settings.json` を手で壊した場合など）は**クランプではなく
-既定へフォールバック**（警告ログつき）。Android には設定パネルが無いが、`settings.json`
-（`Application.persistentDataPath`）の共有キーとして `display.frameRate` も読む
-（`MascotSettingsHost`。→ 下の「LAN 接続（#98）」）。ファイルに書かれていなければこの JSON の
-既定がそのまま使われる。
+既定へフォールバック**（警告ログつき）。**反映は許可リストで絞ったプラットフォームだけ**
+（`SettingsMapping.AppliesFrameRate`。デスクトップの Player / Editor が対象）——Android は
+`settings.json` の `display.frameRate` を読んでも反映しない（→ 下の「LAN 接続（#98）」の
+「Android で効くキーと効かないキー」）。
 
 ### #59 時点の実測: フレームレート上限ありでの常駐 CPU
 
@@ -4124,7 +4124,8 @@ CHATTER_AGENT_PORT=8571 ./scripts/run-android.sh
 
 優先順位は **`-serverUrl`（起動引数）＞ `connection.serverUrl` ＞ `[SerializeField]` の既定**
 （`MascotRunner.ResolveServerUrl`）。トークンは `connection.token` からしか読まない
-（起動引数は無い）。
+（起動引数は無い）。**`-serverUrl` で接続先を上書きしたときは `connection.token` を使わない**
+（別のホストへトークンを送らないため）。トークンが要る接続先は `connection` で指定する。
 
 ★★ **どちらも `Awake` で**、専用のストアを作らず**起動時に1回だけ**読む。ファイルを
 書き換えても**次回の起動まで反映されない** —— 接続を1回きり捕まえる設計（`MascotRunner.ServerUrl`
@@ -4133,8 +4134,9 @@ Player.log、Android は `adb logcat -s Unity`）に出る。
 
 #### Mac 側の準備
 
-サーバーを `host: 0.0.0.0`（または LAN に見える具体的な IP）で起動しないと、Android からは
-繋がらない（既定はループバックのみ。→ [`protocol.md`](./protocol.md) の「セキュリティ」）。
+サーバーを `host: 0.0.0.0` で起動しないと、Android からは繋がらない（既定はループバックのみ。
+具体的な LAN IP で bind すると、同じ Mac の player やマスコットから繋げなくなる。→
+[`protocol.md`](./protocol.md) の「セキュリティ」）。
 
 ```bash
 CHATTER_AGENT_HOST=0.0.0.0 npm run start:server
@@ -4168,13 +4170,13 @@ Mac の LAN IP へ接続する経路（`configure-android.sh` が書く経路）
 #### Android で効くキーと効かないキー
 
 `settings.json` の書き手は `MascotSettingsHost`（`Vrm/`）に一本化されていて、
-「設定 → シーン」の反映経路（ミュート・音量・フレームレート上限・待機モーション・視線・
-瞬き）はデスクトップと Android で共通。1秒ポーリングで外部変更も拾う。
+「設定 → シーン」の反映経路（ミュート・音量・待機モーション・視線・瞬き）はデスクトップと
+Android で共通。1秒ポーリングで外部変更も拾う。
 
 | キー | Android で効くか |
 |---|---|
 | `audio.mute` / `audio.volume` | 効く |
-| `display.frameRate` | 効く（設定パネルは無いので、`settings.json` を手で編集するか `adb push` で書く。`configure-android.sh` は `connection` しか書き換えない） |
+| `display.frameRate` | **効かない。** Android ではシーンの `targetFrameRate`（`[SerializeField]`）が権威（ヘッドセットのリフレッシュレートは 30/60 では表せない。→ #99） |
 | `character.idleMotion` / `character.cursorGaze` / `character.blink` | 効く（視線は `CursorProvider` が無いので自律的な漂いになる） |
 | `connection.serverUrl` / `connection.token` | 効く（起動時に1回だけ） |
 | `character.vrm` | **効かない。** VRM の探索は `AssetEnv.HasUserConfigDirectory` のときだけユーザー段を見るが、Android はこれが `false`（共有ファイルシステムが無い） |

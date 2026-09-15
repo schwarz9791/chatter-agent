@@ -510,15 +510,16 @@ osascript -e 'tell application "System Events" to tell process "Chatter Mascot" 
 
 ★ **`display.frameRate` は #88 で追加した。** `30` か `60` のみ（既定 `30`）。
 `Application.targetFrameRate` の上限を設定パネルの「モーション」→「フレームレート」から
-変えられる。**その2値以外は既定へフォールバックする**（クランプではない）。書くのは
-デスクトップの設定パネルだけ——Android には設定パネルが無いが、`settings.json` は共有しているので
-（→ [#98](https://github.com/schwarz9791/chatter-agent/issues/98)。「LAN 接続（#98）」）、ファイルに
-書かれていなければこの JSON の既定がそのまま使われる。60 fps の CPU コストは
-[`../../docs/mascot.md`](../../docs/mascot.md) の「#88 時点の実測」に実測がある。
+変えられる。**その2値以外は既定へフォールバックする**（クランプではない）。書くのはデスクトップの
+設定パネルだけで、**反映もデスクトップ限定**（`SettingsMapping.AppliesFrameRate`）——Android は
+`settings.json` を共有していてもこのキーは読むだけで反映しない（ヘッドセットのリフレッシュレートは
+30/60 では表せない。→ [#99](https://github.com/schwarz9791/chatter-agent/issues/99)）。60 fps の
+CPU コストは [`../../docs/mascot.md`](../../docs/mascot.md) の「#88 時点の実測」に実測がある。
 
 ★ **`connection`（`serverUrl` / `token`）は #98 で追加した。** 空文字は「未指定」。
 デスクトップの設定パネルはこのセクションを書かない（LAN 接続の設定は `configure-android.sh` か
-手編集）が、往復のたびに落ちないよう常に出力する。→ [`../../docs/mascot.md`](../../docs/mascot.md)
+手編集）が、往復のたびに落ちないよう常に出力する。**「すべての設定をリセット」でも消えない**
+（`MascotSettings.ResetKeepingConnection`）。→ [`../../docs/mascot.md`](../../docs/mascot.md)
 「LAN 接続（#98）」。
 
 ★★ **「大きさ」もここに無い。** ウィンドウの大きさは `window.json` が持っていて、

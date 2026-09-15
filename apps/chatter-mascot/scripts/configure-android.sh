@@ -6,8 +6,9 @@
 #   ./scripts/configure-android.sh --no-restart
 #   ./scripts/configure-android.sh ws://192.168.1.10:8570 --no-restart
 #
-# ★ 接続先を省略すると en0 → en1 の IP アドレスと CHATTER_AGENT_PORT（既定 8570）から
-#   ws://<ip>:<port> を組み立てる。どちらの IF からも IP が取れなければ引数で指定すること。
+# ★ 接続先を省略すると en0 → en1 の IP アドレスとポートから ws://<ip>:<port> を組み立てる。
+#   どちらの IF からも IP が取れなければ引数で指定すること。ポートの優先順位はサーバーと同じ
+#   `CHATTER_AGENT_PORT` ＞ config.json の `port` ＞ 既定の 8570（→ docs/core.md の「設定と環境変数」）。
 #
 # ★ トークンは ${XDG_CONFIG_HOME:-$HOME/.config}/chatter-agent/server.token から読む。
 #   chatter-agent-server の起動時に生成される共有シークレットなので、無ければ先にサーバーを
@@ -67,7 +68,16 @@ else
     echo "IP アドレスを取得できませんでした（en0 / en1）。接続先を引数で指定してください" >&2
     exit 1
   fi
-  PORT="${CHATTER_AGENT_PORT:-8570}"
+
+  PORT="${CHATTER_AGENT_PORT:-}"
+  if [ -z "$PORT" ]; then
+    CONFIG_PATH="${CHATTER_AGENT_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/chatter-agent/config.json}"
+    CONFIG_PORT="$(plutil -extract port raw -o - "$CONFIG_PATH" 2>/dev/null || true)"
+    case "$CONFIG_PORT" in
+      ''|*[!0-9]*) PORT="8570" ;;
+      *) PORT="$CONFIG_PORT" ;;
+    esac
+  fi
   SERVER_URL="ws://$IP:$PORT"
 fi
 

@@ -60,6 +60,8 @@ namespace ChatterMascot.Xr
 
             // デスクトップ向けのオートフレーミングはカメラを動かすので、頭部トラッキングと競合する
             stage.AutoFrame = false;
+            // ★ VRM の読み込み（VrmStage.Start から）より前に拡縮しておくこと。読み込み時に
+            //   VrmStage が spring bone へ縮尺を焼き込む（→ VrmStage.BakeSpringBoneScale）
             stage.ModelAnchor.localScale = Vector3.one * settings.XrScale;
 
             var origin = BuildOrigin(camera);

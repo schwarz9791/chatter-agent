@@ -329,6 +329,11 @@ namespace ChatterMascot.Vrm
             //     前提にしている。回すのをやめられない以上、順序で辻褄を合わせるしかない。
             _ = instance.Runtime;
 
+            if (modelAnchor != null && !Mathf.Approximately(modelAnchor.UniformedLossyScale(), 1f))
+            {
+                BakeSpringBoneScale(instance, modelAnchor.UniformedLossyScale());
+            }
+
             // ★ **bounds より先に回すこと。** ボーンのワールド位置から組む箱も
             //   ワールド軸に沿うので、回したあとで測り直さないとカメラ距離がずれる
             FaceCamera(instance);
@@ -351,6 +356,36 @@ namespace ChatterMascot.Vrm
             _nextBoneRecheckAt = 0f;
 
             foreach (var handler in _handlers) Invoke(handler, Model);
+        }
+
+        /// <summary>
+        /// <c>ModelAnchor</c> の縮尺を spring bone のパラメータに焼き込み、spring bone を作り直す。
+        ///
+        /// ★ <b>UniVRM の spring bone は、当たり半径・剛性・重力を親の拡縮に追従させない。</b>
+        ///   コライダーの半径は毎フレーム拡縮されるので、焼き込まないと小さくした頭のコライダーに
+        ///   元の太さの髪が押し出され、横に流れたまま固まる。骨の長さは作り直しのときに
+        ///   <c>lossyScale</c> から測り直される（読み込み時は親に入る前の長さを持っている）。
+        /// ★ <b>剛性と重力も縮尺倍にする。</b> 骨の長さが縮尺倍になるので、そのままだと
+        ///   見た目の角速度が変わる（<c>BlittableModelLevel.SupportsScalingAtRuntime</c> と同じ補正。
+        ///   あちらはバッファの作り直しで既定に戻るので使わない）。
+        /// </summary>
+        private static void BakeSpringBoneScale(Vrm10Instance instance, float scale)
+        {
+            foreach (var joint in instance.GetComponentsInChildren<VRM10SpringBoneJoint>(true))
+            {
+                joint.m_jointRadius *= scale;
+                joint.m_stiffnessForce *= scale;
+                joint.m_gravityPower *= scale;
+            }
+
+            if (instance.Runtime.SpringBone.ReconstructSpringBone())
+            {
+                Debug.Log($"[Mascot] spring bone に縮尺 {scale:F2} を焼き込みました");
+            }
+            else
+            {
+                Debug.LogWarning("[Mascot] spring bone の作り直しが実行中だったので、縮尺を焼き込めませんでした");
+            }
         }
 
         private void LateUpdate()

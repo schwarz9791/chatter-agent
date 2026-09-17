@@ -4296,8 +4296,10 @@ Android ビルドは OpenXR（`com.unity.xr.androidxr-openxr`）で Full Space �
    ワールドの −Z へ向けるので、`ModelAnchor` を回しても読み込みのときに打ち消される。キャラクターは
    `ModelAnchor` の位置で −Z を向いたまま、**頭がその正面に来るように Origin を置く**（`XrPlacement.Solve`。
    不変条件は `XrPlacementTests`）
-3. **大きさは `ModelAnchor.localScale` で変える。XR Origin は拡縮しない**（眼間距離の扱いが変わる）。
-   `MeasureBounds` / `FitCollider` はワールド座標で測るので追従する
+3. **大きさは `ModelAnchor.localScale` で変える。XR Origin は拡縮しない。** Origin を拡縮したときに
+   眼間距離まで拡縮されるかはランタイム任せで、されなければ実機では「机の上の小人」ではなく
+   「遠くの等身大」に見える（エミュレータの画像では判別できない）。`MeasureBounds` / `FitCollider` は
+   ワールド座標で測るので追従する。spring bone は追従しないので、読み込み時に縮尺を焼き込む（→ 下）
 4. **配置は `settings.json` の `xr`（`scale` / `distance` / `azimuth` / `feetBelowEye`）で変える。**
    既定は「机の上のミニチュアを、正面の画面を避けた右側に」。Android には設定 UI が無いので、
    端末のファイルを書き換える（→ `SETUP.md`）。デスクトップのパネルには出さないが、往復で落とさない
@@ -4336,6 +4338,24 @@ Android ビルドは OpenXR（`com.unity.xr.androidxr-openxr`）で Full Space �
 transform を読むと、まだ書き込まれていない値を拾う。`XrStage` は `InputDevices.GetDeviceAtXRNode(CenterEye)`
 から、追跡状態と `centerEyePosition` / `centerEyeRotation` を同じデバイスで読む。
 
+### ★★ `ModelAnchor` を拡縮すると、髪が横に流れたまま固まる（spring bone は拡縮に追従しない）
+
+UniVRM の spring bone は、**コライダーの半径は毎フレーム `lossyScale` を掛けるのに、骨の当たり半径
+（`m_jointRadius`）・剛性・重力は掛けない。** 骨の長さは初期化時の `lossyScale` で測るが、読み込み時の
+初期化は `ModelAnchor` の下に入る前（等倍）に済んでいる。0.18 倍にすると、小さくなった頭のコライダーに
+等身大の太さの髪が押し出され、**左の後ろ上の髪が横に流れた形で固まった**（2026-09-17 / `XR_Glasses`）。
+
+`VrmStage.BakeSpringBoneScale` が、`ModelAnchor` が等倍でないときだけ、全ジョイントの当たり半径・剛性・
+重力に縮尺を掛けてから `ReconstructSpringBone()` で作り直す（骨の長さもここで測り直される）。
+剛性と重力を掛けるのは、骨が縮尺倍に短くなっても見た目の角速度を変えないため。
+
+★ **`BlittableModelLevel.SupportsScalingAtRuntime` は使わない。** 剛性と重力に拡縮を掛けるフラグだが、
+`SetModelLevel` で渡した値は結合バッファの作り直し（spring bone の登録や作り直しのたび）で既定に戻る。
+しかも骨の当たり半径には効かない。
+
+★ **拡縮は VRM の読み込みより前に済ませること。** `XrStage` は `AfterSceneLoad` で拡縮し、読み込みは
+`VrmStage.Start` から始まるので間に合う。
+
 ### ★ XR Origin に `HideFlags.HideAndDontSave` を付けない
 
 `FindFirstObjectByType` から見えなくなる（→「`HideFlags.HideAndDontSave` のオブジェクトは
@@ -4357,12 +4377,13 @@ transform を読むと、まだ書き込まれていない値を拾う。`XrStag
 
 | AVD（システムイメージ） | 結果 |
 |---|---|
-| `XR_Glasses`（Google Play XR Preview API v4） | `xrDesktopMode=full-space-unmanaged` で起動し、セッションは `FOCUSED` まで進む。空間固定・縮尺（0.18）・待機モーション・発話 → ack まで通る |
+| `XR_Glasses`（Google Play XR Preview API v4） | `xrDesktopMode=full-space-unmanaged` で起動し、セッションは `FOCUSED` まで進む。空間固定・縮尺（0.18。髪は spring bone への焼き込みで XR 化前と同じ形）・待機モーション・発話 → ack まで通る |
 | `XR_Headset2`（Google Play XR API v1） | アプリは `READY` まで進むが、`com.android.systemui` が `Buffer processing hung up due to stuck fence. Indicates GPU hang` で ANR する。**使わない** |
 
 - スワップチェーンはテクスチャ配列が `XR_ERROR_FEATURE_UNSUPPORTED` で一度失敗し、配列なしに落ちて描ける
 - **背景は黒く、部屋は見えない。** 原因は切り分けていない（→ #119 / #100）。光学シースルーの実機では黒は透明
 - `adb exec-out screencap -p` で撮ると、グラスの表示視野の外は黒く切り落とされて写る
+- エミュレータのウィンドウでは、視野の中央でもキャラクターがやや縦につぶれて見える。`screencap` の画像（正方形）では比率は自然で、ディスプレイ（1920×1200）と片目の推奨描画サイズ（2560×2558）の縦横比が違う。実機での比率は #100
 - 新しい APK の初回起動は、Home Space のときと同じく 30 秒以上白い
 
 ### ビルド設定（`AndroidPlayerSettings.FixAll`）

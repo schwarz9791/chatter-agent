@@ -18,8 +18,8 @@ Android XR グラス（XREAL Aura）の両方をここからビルドする。
 | VRM | [UniVRM](https://github.com/vrm-c/UniVRM) |
 | ウィンドウ制御（macOS） | [UniWindowController](https://github.com/kirurobo/UniWindowController) `com.kirurobo.uniwinc`（MIT） |
 | JSON | `com.unity.nuget.newtonsoft-json` |
-| XR（Android のみ） | `com.unity.xr.androidxr-openxr` + [Android XR Extensions for Unity](https://github.com/android/android-xr-unity-package) |
-| グラフィックス API | Metal（macOS）/ Android は Vulkan（GLES3 フォールバック付き。Vulkan 単独にするのは [#99](https://github.com/schwarz9791/chatter-agent/issues/99)） |
+| XR（Android のみ） | `com.unity.xr.androidxr-openxr`（Android XR Extensions for Unity は入れていない → [#119](https://github.com/schwarz9791/chatter-agent/issues/119)） |
+| グラフィックス API | Metal（macOS）/ Android は **Vulkan 単独**（URP で Android XR を使うときの必須設定。[#99](https://github.com/schwarz9791/chatter-agent/issues/99)） |
 | 常駐（macOS のみ） | **自作の Objective-C プラグイン** `Assets/Plugins/macOS~/ChatterMascotNative/`（→ [#75](https://github.com/schwarz9791/chatter-agent/issues/75)） |
 
 ### 必要な Unity モジュール
@@ -66,8 +66,8 @@ CI で「ソースと一致するか」を検証する手段が無い（clang �
 ★ **プラグインのプラットフォームを絞ること。** UniWindowController の同梱プラグインは
 **Plugin Inspector では絞れない**（git 参照のパッケージは読み取り専用で、書いたつもりでも
 残らない）ので、`BuildScript.BuildAndroid` がビルド時の delegate で外す（#97。
-→ [`../../docs/mascot.md`](../../docs/mascot.md)「プラットフォームを絞る」）。XR パッケージは
-Android にだけ効かせる（#99）。
+→ [`../../docs/mascot.md`](../../docs/mascot.md)「プラットフォームを絞る」）。XR ローダーは
+Android にだけ割り当てる（`AndroidPlayerSettings.FixAll`。#99）。
 
 ★ **自作プラグイン（`ChatterMascotNative.bundle`）の設定は手で直さないこと。**
 `.bundle` が git に無いので、新規クローンには `.meta` しか無い。Unity が既定でインポートし直すと
@@ -229,6 +229,7 @@ Assets/ChatterMascot/
                 SettingsJson.cs / MascotSettings.cs
     Vrm/        AssetPath.cs        ★ .vrm / .vrma の探索順（純粋。下の表）
                 VrmFraming.cs       ★ 画面に収まるカメラ距離（純粋）
+    Xr/         XrPlacement.cs      ★ 起動時の頭の姿勢 → XR Origin の配置（純粋。#99）
     CommandLine.cs                  起動引数（-serverUrl / -vrm / -buildScene が共有）
     FrameRateBudget.cs              フレームレート上限の「戻す先」と「一時的に借りる」
     MascotRunner.cs                 ドライバ。コマンドを実行して結果をイベントで戻す
@@ -237,6 +238,8 @@ Assets/ChatterMascot/
     VrmAssetLoader.cs               候補を順に読む（UnityWebRequest。★ 自前の期限つき）
     VrmMaterialCheck.cs             シェーダーストリッピングの自己診断
     AssetEnvFactory.cs              Application を触る唯一の場所
+  Xr/                               ChatterMascot.Xr — Editor + Android のみ（#99）
+    XrStage.cs                      ★ XR が起動したときだけ XR Origin を組んで空間固定する（シーンに置かない）
   Desktop/                          ChatterMascot.Desktop — Editor + macOS/Windows のみ
     DragHandles.cs                  「Collider を持つものに UniWindowMoveHandle」
     VrmDragHandleBinder.cs          ★ MonoBehaviour にしない（下記）
@@ -388,8 +391,9 @@ cd apps/chatter-mascot
 
 ### Android（[#97](https://github.com/schwarz9791/chatter-agent/issues/97)）
 
-XR なしの通常 Android アプリとして、接続 → 音声取得 → 再生 → ack と VRM の表示までが通る。
-XR（Full Space）は [#99](https://github.com/schwarz9791/chatter-agent/issues/99)。**接続先の指定と
+接続 → 音声取得 → 再生 → ack と VRM の表示までが通る。**OpenXR が起動すれば Full Space で
+キャラクターを空間に固定して立たせ、起動しなければ通常の Android アプリ（平面表示）のまま動く**
+（[#99](https://github.com/schwarz9791/chatter-agent/issues/99)。→ [`../../docs/mascot.md`](../../docs/mascot.md)「XR（Full Space）」）。**接続先の指定と
 LAN 越しの接続**は [#98](https://github.com/schwarz9791/chatter-agent/issues/98) —— ビルドし直さず
 `settings.json` を書き換えるだけで Mac の `chatter-agent-server` に繋がる。手順は
 [`../../docs/mascot.md`](../../docs/mascot.md)「LAN 接続（#98）」。
@@ -418,8 +422,25 @@ logcat に出るはずの行:
 ```
 [Mascot] server: ws://127.0.0.1:8570 / audio: http://127.0.0.1:8570/audio/
 [Mascot] … から 19,259,304 バイト読みました: jar:file:///…/base.apk!/assets/vita.vrm   ← 同梱モデル。persistentDataPath の候補が「読めませんでした」（404）なのは正常
+[Mascot] XR: 空間固定 headLocalPosition=… → originPosition=… originYaw=…              ← XR が起動していなければ「XR: 起動していないので平面表示のまま」
 [Mascot] 無音が続いたのでオーディオ出力を止めました                                  ← 発話が来れば「掴み直しました」が続く
 ```
+
+★ **キャラクターの大きさと置き場所は端末の `settings.json` の `xr` で変える**（Android に設定 UI は無い）。
+既定は机の上のミニチュア。等身大で床に立たせるなら、たとえば:
+
+```bash
+ADB=~/Library/Android/sdk/platform-tools/adb
+F=/sdcard/Android/data/tech.sukima.chattermascot/files/settings.json
+$ADB pull $F settings.json        # 無ければ {} から書く。ほかのキー（connection など）は残す
+# "xr": { "scale": 1.0, "distance": 2.0, "azimuth": 20, "feetBelowEye": 1.2 }
+$ADB push settings.json $F
+$ADB shell am force-stop tech.sukima.chattermascot   # 起動時に1回だけ読むので起動し直す
+```
+
+`scale` は身長の倍率（0.05〜1.0）、`distance` は目からの水平距離（m）、`azimuth` は起動時の正面から
+右回りの角度（度）、`feetBelowEye` は足元が目より何 m 下か。範囲外は警告して既定に戻る。
+★ **グラスの表示視野は狭い。** 方位や下への深さを大きくすると、描けていても視野の縁で切れて見えない
 
 ★★ **macOS のマスコットと同じサーバーへ同時に繋がないこと。** ack は累積で、速い方の ack が
 遅い方のまだ喋っていない entry を消す（[`../../docs/protocol.md`](../../docs/protocol.md) の
@@ -504,7 +525,8 @@ osascript -e 'tell application "System Events" to tell process "Chatter Mascot" 
   "display": {
     "frameRate": 30
   },
-  "connection": { "serverUrl": "", "token": "" }
+  "connection": { "serverUrl": "", "token": "" },
+  "xr": { "scale": 0.18, "distance": 0.6, "azimuth": 20, "feetBelowEye": 0.2 }
 }
 ```
 
@@ -512,8 +534,8 @@ osascript -e 'tell application "System Events" to tell process "Chatter Mascot" 
 `Application.targetFrameRate` の上限を設定パネルの「モーション」→「フレームレート」から
 変えられる。**その2値以外は既定へフォールバックする**（クランプではない）。書くのはデスクトップの
 設定パネルだけで、**反映もデスクトップ限定**（`SettingsMapping.AppliesFrameRate`）——Android は
-`settings.json` を共有していてもこのキーは読むだけで反映しない（ヘッドセットのリフレッシュレートは
-30/60 では表せない。→ [#99](https://github.com/schwarz9791/chatter-agent/issues/99)）。60 fps の
+`settings.json` を共有していてもこのキーは読むだけで反映しない（XR ではランタイムがフレームペーシングを
+握る。→ [`../../docs/mascot.md`](../../docs/mascot.md)「XR（Full Space）」）。60 fps の
 CPU コストは [`../../docs/mascot.md`](../../docs/mascot.md) の「#88 時点の実測」に実測がある。
 
 ★ **`connection`（`serverUrl` / `token`）は #98 で追加した。** 空文字は「未指定」。
@@ -521,6 +543,10 @@ CPU コストは [`../../docs/mascot.md`](../../docs/mascot.md) の「#88 時点
 手編集）が、往復のたびに落ちないよう常に出力する。**「すべての設定をリセット」でも消えない**
 （`MascotSettings.ResetKeepingConnection`）。→ [`../../docs/mascot.md`](../../docs/mascot.md)
 「LAN 接続（#98）」。
+
+★ **`xr`（`scale` / `distance` / `azimuth` / `feetBelowEye`）は #99 で追加した。** Android XR での
+キャラクターの大きさと置き場所。デスクトップのパネルには出さないが、`connection` と同じく往復で落とさない。
+デスクトップの「大きさ」（ウィンドウの倍率。下記）とは別物。
 
 ★★ **「大きさ」もここに無い。** ウィンドウの大きさは `window.json` が持っていて、
 スライダーはその写しでしかない（**現在の高さ ÷ 540** が倍率。既定の高さは #88 で
@@ -661,7 +687,11 @@ cleartext だけで、それも静的な `Assets/Plugins/Android/AndroidManifest
 
 ### エミュレータでの検証
 
-実機がなくても Android XR Emulator でモデル表示までは確認できる。
+実機がなくても Android XR Emulator で **Full Space・空間固定・発話まで**確認できる。
+
+★ **公式ドキュメントは「Emulator は Unity / OpenXR アプリに対応しない」と書いているが、システムイメージに
+OpenXR ランタイムが入っていて動く。** ただし `XR_Glasses`（Google Play XR Preview API v4 イメージ）で使うこと。
+`XR_Headset2`（API v1 イメージ）は systemui が GPU ハングで固まる（→ [`../../docs/mascot.md`](../../docs/mascot.md)「XR（Full Space）」）。
 
 1. **Android Studio Canary** を入れる（必須） — [Install and configure Android Studio for XR](https://developer.android.com/develop/xr/jetpack-xr-sdk/get-studio)
 2. SDK Manager から `Android XR ARM 64 v8a` イメージを入れる
@@ -671,8 +701,8 @@ cleartext だけで、それも静的な `Assets/Plugins/Android/AndroidManifest
 起動は `~/Library/Android/sdk/emulator/emulator -avd XR_Glasses`、`adb` は
 `~/Library/Android/sdk/platform-tools/adb`（`scripts/run-android.sh` の既定と同じ）。
 
-**できること**: モデル表示・アニメーション・パネル配置の確認、Passthrough トグル、Environment Dimming
-**できないこと**: 実際のフレームレート、視野角での見え方、ハンドトラッキング精度
+**できること**: Full Space での表示・空間固定の配置・アニメーション・発話の確認
+**できないこと**: 実際のフレームレート、実機の視野角での見え方、ハンドトラッキング精度、背景の部屋（Full Space では黒い）
 
 ★ **エミュレータで見えた色を信用しないこと。** → [#110](https://github.com/schwarz9791/chatter-agent/issues/110)
 

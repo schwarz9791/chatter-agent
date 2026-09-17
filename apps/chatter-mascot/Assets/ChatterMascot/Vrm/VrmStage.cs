@@ -42,6 +42,27 @@ namespace ChatterMascot.Vrm
         [SerializeField] private bool autoFrame = true;
 
         /// <summary>
+        /// <see cref="autoFrame"/> の外部からの切り替え口。
+        ///
+        /// ★ <b>XR（<c>XrStage</c>）が空間固定を組むときに切る。</b> カメラは頭の姿勢に
+        ///   従うので、デスクトップ向けのオートフレーミングがカメラを動かすと空間固定と競合する。
+        /// </summary>
+        public bool AutoFrame
+        {
+            get => autoFrame;
+            set => autoFrame = value;
+        }
+
+        /// <summary>
+        /// 読み込んだモデルをぶら下げている <c>ModelAnchor</c>。
+        ///
+        /// ★ <b>XR（<c>XrStage</c>）がキャラクターの足元（ワールド位置）とスケールの
+        ///   両方をここから取る。</b> <c>GameObject.Find</c> で名前から探さない
+        ///   （→ <c>SceneFixups</c> が既に結線している）。
+        /// </summary>
+        public Transform ModelAnchor => modelAnchor;
+
+        /// <summary>
         /// ★ <b>#88 で 1.1 → 1.25 に増やした。</b> 腕は <c>VrmBounds.IsFramingBone</c> で
         ///   フレーミングの箱から除外してあるので、腕を上げる・広げるモーション（#70）の
         ///   はみ出しはこの垂直方向の余白で吸収する。<c>boneBoundsMarginMeters</c> を

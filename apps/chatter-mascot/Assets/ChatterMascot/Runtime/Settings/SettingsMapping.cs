@@ -45,6 +45,33 @@ namespace ChatterMascot.Settings
         public const float SpeedStep = 0.1f;
 
         /// <summary>
+        /// Android XR の空間固定パラメータの範囲と既定値（→ <see cref="MascotSettings.XrScale"/> ほかの doc）。
+        ///
+        /// ★★ <b><see cref="ScaleMin"/> / <see cref="ScaleMax"/>（デスクトップのウィンドウ倍率）とは
+        ///   別物。</b> 混同しないよう、こちらは必ず <c>Xr</c> を頭に付けて区別する。
+        /// ★ 刻み（<c>Step</c>）は持たない。デスクトップの設定パネルにスライダーを出さないので、
+        ///   刻みへ丸める理由が無い（→ <see cref="SettingsJson"/> の <c>xr</c> 読み取り）。
+        /// ★ 既定は「机の上のミニチュアを、正面の画面を避けた右側に」置く。グラスの表示視野は
+        ///   ヘッドセットより狭いので、方位と足元の深さは<b>起動時の正面を向いたまま全身が視野に
+        ///   収まる</b>範囲に留める（外すと、描けているのに視野の縁で切れて見えない）。
+        /// </summary>
+        public const float XrScaleMin = 0.05f;
+        public const float XrScaleMax = 1.0f;
+        public const float XrDefaultScale = 0.18f;
+
+        public const float XrDistanceMin = 0.2f;
+        public const float XrDistanceMax = 5.0f;
+        public const float XrDefaultDistance = 0.6f;
+
+        public const float XrAzimuthMin = -180f;
+        public const float XrAzimuthMax = 180f;
+        public const float XrDefaultAzimuth = 20f;
+
+        public const float XrFeetBelowEyeMin = -1.0f;
+        public const float XrFeetBelowEyeMax = 2.0f;
+        public const float XrDefaultFeetBelowEye = 0.2f;
+
+        /// <summary>
         /// UI の「大きさ」→ <b>ウィンドウの大きさ</b>（ポイント）。
         ///
         /// ★★ <b><c>VrmStage.headroom</c> を動かさないこと。</b> あれはカメラを後ろへ下げる

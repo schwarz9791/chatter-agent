@@ -70,6 +70,15 @@ namespace ChatterMascot.Settings
                     ["serverUrl"] = settings.ServerUrl ?? "",
                     ["token"] = settings.Token ?? "",
                 },
+                // ★ デスクトップの設定パネルは書かないが、往復で落とさないよう含めておく
+                //   （→ connection と同じ扱い）
+                ["xr"] = new JObject
+                {
+                    ["scale"] = settings.XrScale,
+                    ["distance"] = settings.XrDistance,
+                    ["azimuth"] = settings.XrAzimuth,
+                    ["feetBelowEye"] = settings.XrFeetBelowEye,
+                },
             };
             return root.ToString(Formatting.Indented) + "\n";
         }
@@ -151,6 +160,10 @@ namespace ChatterMascot.Settings
 
                     case "connection":
                         result = ReadConnection(property.Value, result, warn);
+                        break;
+
+                    case "xr":
+                        result = ReadXr(property.Value, result, warn);
                         break;
 
                     default:
@@ -333,6 +346,56 @@ namespace ChatterMascot.Settings
             return settings;
         }
 
+        /// <summary>
+        /// Android XR の空間固定パラメータ（→ <see cref="MascotSettings.XrScale"/> ほかの doc）。
+        /// <b>audio / ui / character / connection と同じ作法</b>：オブジェクトでなければ既定を使い、
+        /// 未知キーは警告して無視する。
+        /// </summary>
+        private static MascotSettings ReadXr(JToken raw, MascotSettings settings, Action<string> warn)
+        {
+            var xr = raw as JObject;
+            if (xr == null)
+            {
+                Warn(warn, $"xr がオブジェクトではありません（{Describe(raw)}）。既定を使います");
+                return settings;
+            }
+
+            foreach (var property in xr)
+            {
+                switch (property.Key)
+                {
+                    case "scale":
+                        settings = settings.WithXrScale(ReadXrNumber(
+                            property.Value, "xr.scale", settings.XrScale,
+                            SettingsMapping.XrScaleMin, SettingsMapping.XrScaleMax, warn));
+                        break;
+
+                    case "distance":
+                        settings = settings.WithXrDistance(ReadXrNumber(
+                            property.Value, "xr.distance", settings.XrDistance,
+                            SettingsMapping.XrDistanceMin, SettingsMapping.XrDistanceMax, warn));
+                        break;
+
+                    case "azimuth":
+                        settings = settings.WithXrAzimuth(ReadXrNumber(
+                            property.Value, "xr.azimuth", settings.XrAzimuth,
+                            SettingsMapping.XrAzimuthMin, SettingsMapping.XrAzimuthMax, warn));
+                        break;
+
+                    case "feetBelowEye":
+                        settings = settings.WithXrFeetBelowEye(ReadXrNumber(
+                            property.Value, "xr.feetBelowEye", settings.XrFeetBelowEye,
+                            SettingsMapping.XrFeetBelowEyeMin, SettingsMapping.XrFeetBelowEyeMax, warn));
+                        break;
+
+                    default:
+                        Warn(warn, $"知らないキー \"xr.{property.Key}\" は無視します");
+                        break;
+                }
+            }
+            return settings;
+        }
+
         /// <summary>空文字は「未指定」として通す。空でなければ <c>ws</c> / <c>wss</c> の絶対 URL であること。</summary>
         private static string ReadServerUrl(JToken value, string key, string fallback, Action<string> warn)
         {
@@ -418,6 +481,39 @@ namespace ChatterMascot.Settings
                 Warn(warn, $"{key} を {SettingsMapping.Format(normalized)} に丸めました（元の値: {SettingsMapping.Format(raw)}）");
             }
             return normalized;
+        }
+
+        /// <summary>
+        /// XR の空間固定パラメータ用の数値読み取り。<b>クランプしないこと</b>
+        /// （→ <see cref="ReadFrameRate"/> と同じ判断）。
+        ///
+        /// ★ <b><see cref="ReadNumber"/>（音量。範囲外を刻みに丸めてクランプする）とは違う。</b>
+        ///   ここは UI のスライダーを持たないので「一番近い有効な値」に丸める意味が無い。
+        ///   型違い・非有限・範囲外はすべて警告して <paramref name="fallback"/> へ倒す。
+        /// </summary>
+        private static float ReadXrNumber(
+            JToken value, string key, float fallback, float min, float max, Action<string> warn)
+        {
+            if (value.Type != JTokenType.Float && value.Type != JTokenType.Integer)
+            {
+                Warn(warn, $"{key} が数値ではありません（{value}）。既定を使います");
+                return fallback;
+            }
+
+            var raw = value.Value<float>();
+            if (float.IsNaN(raw) || float.IsInfinity(raw))
+            {
+                Warn(warn, $"{key} が数値として扱えません（{value}）。既定を使います");
+                return fallback;
+            }
+
+            if (raw < min || raw > max)
+            {
+                Warn(warn, $"{key} は {min}〜{max} の範囲である必要があります（{raw}）。既定を使います");
+                return fallback;
+            }
+
+            return raw;
         }
 
         /// <summary>

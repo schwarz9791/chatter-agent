@@ -1,0 +1,230 @@
+using System;
+using System.Collections;
+using System.IO;
+using ChatterMascot.Settings;
+using ChatterMascot.Vrm;
+using Unity.XR.CoreUtils;
+using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.XR;
+using UnityEngine.XR;
+using UnityEngine.XR.Management;
+
+namespace ChatterMascot.Xr
+{
+    /// <summary>
+    /// Android XR で、キャラクターを空間に固定し頭部トラッキングへ対応させる。
+    ///
+    /// ★ <b><c>MonoBehaviour</c> にしない。シーンに置かない。</b> <c>Desktop/CursorGazeSource</c> と
+    ///   同じ理由 —— このアセンブリは Editor と Android でしかコンパイルされない
+    ///   （<c>includePlatforms</c>）。<c>RuntimeInitializeOnLoadMethod</c> なら、対象外の
+    ///   プラットフォームでは<b>アセンブリごと存在しない</b>ので属性の走査対象にすらならず、
+    ///   <c>#if</c> もプラットフォーム分岐も要らない。
+    ///
+    /// ★ <b>動かすのはキャラクターではなく XR Origin。</b> <c>VrmStage.FaceCamera</c> が
+    ///   モデルをワールド−Zへ向ける処理をするので、<c>ModelAnchor</c> を回すと
+    ///   読み込みのたびに打ち消される（→ <see cref="XrPlacement"/> の doc）。
+    ///
+    /// ★ <b>空間固定は起動時に1回きり。</b> 頭が追跡状態になるのを待って
+    ///   <see cref="XrPlacement"/> で Origin の位置とヨーを決めたら、以後は触らない。
+    /// </summary>
+    public static class XrStage
+    {
+        /// <summary>頭が追跡状態になるのを待つ上限（秒）。超えたら、そのときのローカル姿勢で置く。</summary>
+        private const float TrackingWaitTimeoutSeconds = 5f;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        private static void Bind()
+        {
+            if (XRGeneralSettings.Instance?.Manager?.activeLoader == null)
+            {
+                Debug.Log("[Mascot] XR: 起動していないので平面表示のまま");
+                return;
+            }
+
+            var stage = UnityEngine.Object.FindFirstObjectByType<VrmStage>(FindObjectsInactive.Include);
+            if (stage == null || stage.ModelAnchor == null)
+            {
+                Debug.LogWarning("[Mascot] XR: VrmStage / ModelAnchor が見つからないので空間固定を組めません");
+                return;
+            }
+
+            var camera = Camera.main;
+            if (camera == null)
+            {
+                Debug.LogWarning("[Mascot] XR: Camera.main が無いので空間固定を組めません");
+                return;
+            }
+
+            var settings = ReadSettings();
+
+            // デスクトップ向けのオートフレーミングはカメラを動かすので、頭部トラッキングと競合する
+            stage.AutoFrame = false;
+            stage.ModelAnchor.localScale = Vector3.one * settings.XrScale;
+
+            var origin = BuildOrigin(camera);
+
+            // 頭が追跡状態になるまで待ってから配置する。static からの非同期待ちなので、
+            // ここだけ動的に生やす内部 MonoBehaviour でコルーチンを回す
+            var runner = origin.gameObject.AddComponent<TrackingWaiter>();
+            runner.Begin(origin, stage.ModelAnchor, settings);
+        }
+
+        /// <summary>
+        /// ★ <c>MascotSettingsHost.Instance</c> には頼らない。あちらも <c>AfterSceneLoad</c> で
+        ///   生成される別クラスで、<b>同じタイミング同士の前後関係は保証されない</b>
+        ///   （→ <c>MascotRunner.ResolveServerUrl</c> の doc と同じ理由）。<c>MascotRunner</c> の
+        ///   <c>ReadConnectionSettings</c> と同じパターンで自分で1回だけファイルを読む。
+        /// </summary>
+        private static MascotSettings ReadSettings()
+        {
+            var path = SettingsLocation.Resolve(AssetEnvFactory.Current());
+            if (string.IsNullOrEmpty(path) || !File.Exists(path)) return MascotSettings.Defaults;
+
+            string raw;
+            try
+            {
+                raw = File.ReadAllText(path);
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[Mascot] XR: settings.json を読めませんでした: " + e.Message);
+                return MascotSettings.Defaults;
+            }
+
+            MascotSettings parsed;
+            string error;
+            // ★ キー単位の警告は渡さない。同じファイルを MascotSettingsHost も読んで警告するので、
+            //   ここでも出すと起動のたびに同じ行が2回ずつ並ぶ（→ MascotRunner.ReadConnectionSettings と同じ判断）
+            if (!SettingsJson.TryParse(raw, out parsed, out error, null)) return MascotSettings.Defaults;
+            return parsed;
+        }
+
+        /// <summary>
+        /// 非アクティブの GameObject に XROrigin を組み立てる。<b>この順序を守ること</b>
+        ///   —— <c>Camera.main</c> を非アクティブ階層の下へ一時的に付け替えてから
+        ///   <c>TrackedPoseDriver</c> を足し、最後に Origin を有効化する。
+        /// </summary>
+        private static XROrigin BuildOrigin(Camera camera)
+        {
+            // ★ HideFlags を付けないこと。HideAndDontSave のオブジェクトは FindFirstObjectByType から
+            //   見えず、XROrigin を探す側（AR Foundation の各 Manager など）が見つけられなくなる
+            var originGo = new GameObject("XR Origin");
+            originGo.SetActive(false);
+
+            var cameraOffsetGo = new GameObject("Camera Offset");
+            cameraOffsetGo.transform.SetParent(originGo.transform, false);
+
+            var origin = originGo.AddComponent<XROrigin>();
+            origin.RequestedTrackingOriginMode = XROrigin.TrackingOriginMode.Device;
+            origin.CameraYOffset = 0f;
+
+            // ★ ローカル姿勢は明示的にゼロにすること。SetParent(…, false) はローカルの値を
+            //   引き継ぐだけで、シーンに置いたデスクトップ用のカメラ位置がそのまま残る
+            camera.transform.SetParent(cameraOffsetGo.transform, false);
+            camera.transform.SetLocalPositionAndRotation(Vector3.zero, Quaternion.identity);
+
+            var driver = camera.gameObject.AddComponent<TrackedPoseDriver>();
+            driver.trackingType = TrackedPoseDriver.TrackingType.RotationAndPosition;
+            driver.positionInput = new InputActionProperty(new InputAction(binding: "<XRHMD>/centerEyePosition"));
+            driver.rotationInput = new InputActionProperty(new InputAction(binding: "<XRHMD>/centerEyeRotation"));
+
+            origin.Camera = camera;
+            origin.CameraFloorOffsetObject = cameraOffsetGo;
+
+            // ここで初めて Awake / OnEnable が走る
+            originGo.SetActive(true);
+            return origin;
+        }
+
+        /// <summary>
+        /// 頭が追跡状態になるのを待ってから <see cref="XrPlacement"/> で1回だけ配置する。
+        /// ★ <c>XrStage</c> が動的に生成するだけで、シーンには置かない。
+        /// </summary>
+        private sealed class TrackingWaiter : MonoBehaviour
+        {
+            private XROrigin _origin;
+            private Transform _modelAnchor;
+            private MascotSettings _settings;
+
+            public void Begin(XROrigin origin, Transform modelAnchor, MascotSettings settings)
+            {
+                _origin = origin;
+                _modelAnchor = modelAnchor;
+                _settings = settings;
+                StartCoroutine(WaitThenPlace());
+            }
+
+            private IEnumerator WaitThenPlace()
+            {
+                var deadline = Time.realtimeSinceStartup + TrackingWaitTimeoutSeconds;
+                var framesSinceOriginApplied = 0;
+
+                while (Time.realtimeSinceStartup < deadline)
+                {
+                    // ★ XROrigin が要求したトラッキング原点に切り替わるまで読まないこと。切り替わる前は
+                    //   ランタイム既定の原点（床基準）の値が返り、切り替えで原点が頭へ移ると、
+                    //   その値で置いたキャラが頭の上へ外れる。切り替えたフレームの値も揃っていない
+                    //   ことがあるので1フレーム置く（要求しているモードは BuildOrigin の Device）
+                    if (_origin.CurrentTrackingOriginMode != TrackingOriginModeFlags.Device)
+                    {
+                        framesSinceOriginApplied = 0;
+                        yield return null;
+                        continue;
+                    }
+                    if (framesSinceOriginApplied++ < 1)
+                    {
+                        yield return null;
+                        continue;
+                    }
+
+                    // ★ 頭の姿勢は追跡状態を確かめたのと同じデバイスから読むこと。カメラの transform を
+                    //   読むと、TrackedPoseDriver がまだ書き込んでいないフレームの値（原点）を拾う
+                    // ★ CommonUsages は UnityEngine.InputSystem にも同名の型があるので完全修飾する
+                    var device = InputDevices.GetDeviceAtXRNode(XRNode.CenterEye);
+                    if (device.isValid &&
+                        device.TryGetFeatureValue(UnityEngine.XR.CommonUsages.trackingState, out var state) &&
+                        (state & (InputTrackingState.Position | InputTrackingState.Rotation)) ==
+                        (InputTrackingState.Position | InputTrackingState.Rotation) &&
+                        device.TryGetFeatureValue(UnityEngine.XR.CommonUsages.centerEyePosition, out var position) &&
+                        device.TryGetFeatureValue(UnityEngine.XR.CommonUsages.centerEyeRotation, out var rotation))
+                    {
+                        Place(position, rotation);
+                        Destroy(this);
+                        yield break;
+                    }
+
+                    yield return null;
+                }
+
+                Debug.LogWarning($"[Mascot] XR: トラッキング原点の切り替えと頭の追跡が {TrackingWaitTimeoutSeconds:F0} 秒以内に揃いませんでした。" +
+                                  "そのときのカメラのローカル姿勢で空間固定します");
+                var head = _origin.Camera.transform;
+                Place(head.localPosition, head.localRotation);
+                Destroy(this);
+            }
+
+            private void Place(Vector3 headLocalPosition, Quaternion headLocalRotation)
+            {
+                var forward = headLocalRotation * Vector3.forward;
+                forward.y = 0f;
+                var headLocalYaw = forward.sqrMagnitude > 1e-6f
+                    ? Mathf.Atan2(forward.x, forward.z) * Mathf.Rad2Deg
+                    : 0f;
+
+                XrPlacement.Solve(
+                    headLocalPosition, headLocalYaw, _modelAnchor.position,
+                    _settings.XrDistance, _settings.XrAzimuth, _settings.XrFeetBelowEye,
+                    out var originPosition, out var originYawDegrees);
+
+                _origin.transform.SetPositionAndRotation(originPosition, Quaternion.Euler(0f, originYawDegrees, 0f));
+
+                Debug.Log("[Mascot] XR: 空間固定 " +
+                          $"headLocalPosition={headLocalPosition} headLocalYaw={headLocalYaw:F1} " +
+                          $"distance={_settings.XrDistance:F2} azimuth={_settings.XrAzimuth:F1} " +
+                          $"feetBelowEye={_settings.XrFeetBelowEye:F2} → " +
+                          $"originPosition={originPosition} originYaw={originYawDegrees:F1}");
+            }
+        }
+    }
+}

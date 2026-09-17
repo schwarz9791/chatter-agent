@@ -1,0 +1,20 @@
+{
+    "name": "ChatterMascot.Xr",
+    "rootNamespace": "ChatterMascot.Xr",
+    "references": [
+        "ChatterMascot.Runtime",
+        "ChatterMascot.Vrm",
+        "Unity.XR.Management",
+        "Unity.XR.CoreUtils",
+        "Unity.InputSystem"
+    ],
+    "includePlatforms": ["Editor", "Android"],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

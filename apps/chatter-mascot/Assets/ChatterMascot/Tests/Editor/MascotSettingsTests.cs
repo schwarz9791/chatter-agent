@@ -24,6 +24,10 @@ namespace ChatterMascot.Tests
             Assert.That(defaults.Blink, Is.True);
             Assert.That(defaults.VrmFileName, Is.Empty);
             Assert.That(defaults.FrameRate, Is.EqualTo(SettingsMapping.DefaultFrameRate));
+            Assert.That(defaults.XrScale, Is.EqualTo(SettingsMapping.XrDefaultScale));
+            Assert.That(defaults.XrDistance, Is.EqualTo(SettingsMapping.XrDefaultDistance));
+            Assert.That(defaults.XrAzimuth, Is.EqualTo(SettingsMapping.XrDefaultAzimuth));
+            Assert.That(defaults.XrFeetBelowEye, Is.EqualTo(SettingsMapping.XrDefaultFeetBelowEye));
         }
 
         [Test]

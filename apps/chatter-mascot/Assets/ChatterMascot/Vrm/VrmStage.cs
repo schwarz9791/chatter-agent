@@ -603,7 +603,7 @@ namespace ChatterMascot.Vrm
         ///   <c>InverseTransformPoint</c> を通す。<b><c>height</c> / <c>radius</c> は
         ///   <c>lossyScale</c> で実行時にさらに掛けられる</b>ので、<c>ModelAnchor</c> に
         ///   等倍以外のスケールを入れると当たり判定だけ二重に拡縮される
-        ///   （現状 <c>SceneFixups</c> が等倍で作るので表面化していない）。
+        ///   （当たり判定を使うのは等倍のデスクトップだけなので表面化しない）。
         /// </summary>
         private static void FitCollider(CapsuleCollider collider, Bounds bounds)
         {

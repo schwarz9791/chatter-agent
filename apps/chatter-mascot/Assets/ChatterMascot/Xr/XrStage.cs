@@ -30,7 +30,7 @@ namespace ChatterMascot.Xr
     /// </summary>
     public static class XrStage
     {
-        /// <summary>頭が追跡状態になるのを待つ上限（秒）。超えたら、そのときのローカル姿勢で置く。</summary>
+        /// <summary>原点が切り替わってから、頭が追跡状態になるのを待つ上限（秒）。超えたら、そのときのローカル姿勢で置く。</summary>
         private const float TrackingWaitTimeoutSeconds = 5f;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -125,6 +125,8 @@ namespace ChatterMascot.Xr
             //   引き継ぐだけで、シーンに置いたデスクトップ用のカメラ位置がそのまま残る
             camera.transform.SetParent(cameraOffsetGo.transform, false);
             camera.transform.SetLocalPositionAndRotation(Vector3.zero, Quaternion.identity);
+            // シーンの値はデスクトップの距離向けで、手元のキャラを覗き込むと切れる
+            camera.nearClipPlane = 0.01f;
 
             var driver = camera.gameObject.AddComponent<TrackedPoseDriver>();
             driver.trackingType = TrackedPoseDriver.TrackingType.RotationAndPosition;
@@ -159,18 +161,27 @@ namespace ChatterMascot.Xr
 
             private IEnumerator WaitThenPlace()
             {
-                var deadline = Time.realtimeSinceStartup + TrackingWaitTimeoutSeconds;
+                var startTime = Time.realtimeSinceStartup;
+                var switchWarned = false;
+                float? deadline = null;
                 var framesSinceOriginApplied = 0;
 
-                while (Time.realtimeSinceStartup < deadline)
+                while (true)
                 {
                     // ★ XROrigin が要求したトラッキング原点に切り替わるまで読まないこと。切り替わる前は
                     //   ランタイム既定の原点（床基準）の値が返り、切り替えで原点が頭へ移ると、
                     //   その値で置いたキャラが頭の上へ外れる。切り替えたフレームの値も揃っていない
                     //   ことがあるので1フレーム置く（要求しているモードは BuildOrigin の Device）
+                    // ★ 切り替えは期限なしで待つ（切り替え前の原点で置くと同じ外れ方をする）
                     if (_origin.CurrentTrackingOriginMode != TrackingOriginModeFlags.Device)
                     {
                         framesSinceOriginApplied = 0;
+                        if (!switchWarned && Time.realtimeSinceStartup - startTime > TrackingWaitTimeoutSeconds)
+                        {
+                            switchWarned = true;
+                            Debug.LogWarning($"[Mascot] XR: トラッキング原点が {TrackingWaitTimeoutSeconds:F0} 秒たっても " +
+                                              "Device に切り替わりません。切り替わるまで配置を待ちます");
+                        }
                         yield return null;
                         continue;
                     }
@@ -179,6 +190,8 @@ namespace ChatterMascot.Xr
                         yield return null;
                         continue;
                     }
+
+                    deadline ??= Time.realtimeSinceStartup + TrackingWaitTimeoutSeconds;
 
                     // ★ 頭の姿勢は追跡状態を確かめたのと同じデバイスから読むこと。カメラの transform を
                     //   読むと、TrackedPoseDriver がまだ書き込んでいないフレームの値（原点）を拾う
@@ -196,10 +209,11 @@ namespace ChatterMascot.Xr
                         yield break;
                     }
 
+                    if (Time.realtimeSinceStartup >= deadline.Value) break;
                     yield return null;
                 }
 
-                Debug.LogWarning($"[Mascot] XR: トラッキング原点の切り替えと頭の追跡が {TrackingWaitTimeoutSeconds:F0} 秒以内に揃いませんでした。" +
+                Debug.LogWarning($"[Mascot] XR: トラッキング原点の切り替え後、頭の追跡が {TrackingWaitTimeoutSeconds:F0} 秒以内に揃いませんでした。" +
                                   "そのときのカメラのローカル姿勢で空間固定します");
                 var head = _origin.Camera.transform;
                 Place(head.localPosition, head.localRotation);

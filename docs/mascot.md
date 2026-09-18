@@ -4303,8 +4303,9 @@ Android ビルドは OpenXR（`com.unity.xr.androidxr-openxr`）で Full Space �
    不変条件は `XrPlacementTests`）
 3. **大きさは `ModelAnchor.localScale` で変える。XR Origin は拡縮しない。** Origin を拡縮したときに
    眼間距離まで拡縮されるかはランタイム任せで、されなければ実機では「机の上の小人」ではなく
-   「遠くの等身大」に見える（エミュレータの画像では判別できない）。`MeasureBounds` / `FitCollider` は
-   ワールド座標で測るので追従する。spring bone は追従しないので、読み込み時に縮尺を焼き込む（→ 下）
+   「遠くの等身大」に見える（エミュレータの画像では判別できない）。`MeasureBounds` はワールド座標で
+   測るので追従する。`FitCollider` は二重に拡縮されるが、当たり判定を使うのはデスクトップ（等倍）だけ。
+   spring bone は追従しないので、読み込み時に縮尺を焼き込む（→ 下）
 4. **配置は `settings.json` の `xr`（`scale` / `distance` / `azimuth` / `feetBelowEye`）で変える。**
    既定は「机の上のミニチュアを、正面の画面を避けた右側に」。Android には設定 UI が無いので、
    端末のファイルを書き換える（→ `SETUP.md`）。デスクトップのパネルには出さないが、往復で落とさない
@@ -4329,7 +4330,8 @@ Android ビルドは OpenXR（`com.unity.xr.androidxr-openxr`）で Full Space �
 
 実測（2026-09-17 / `XR_Glasses`）: 配置の瞬間は `CurrentTrackingOriginMode=Unknown`・頭 `(0, 1.60, 0)`、
 1秒後には `Device`・頭 `(0, 0, 0)`。`XrStage` は `CurrentTrackingOriginMode` が `Device` になってから
-1フレーム置いて読む。
+1フレーム置いて読む。切り替えは期限なしで待ち、期限は切り替え後の頭の追跡待ちにだけかける
+（期限で切り替え前に置くと同じ外れ方をする）。
 
 ### ★★ `SetParent(parent, false)` はローカル姿勢をゼロにしない
 

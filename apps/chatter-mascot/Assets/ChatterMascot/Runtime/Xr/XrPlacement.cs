@@ -25,7 +25,7 @@ namespace ChatterMascot.Xr
             float distance, float azimuthDegrees, float feetBelowEye,
             out Vector3 originPosition, out float originYawDegrees)
         {
-            // キャラは −Z を向いているので、頭がキャラの正面（+Z 側）に来る
+            // キャラは −Z を向いているので、頭がキャラの正面（−Z 側）に来る
             var headWorldPosition = characterFeet + new Vector3(0f, feetBelowEye, -distance);
 
             originYawDegrees = -azimuthDegrees - headLocalYawDegrees;

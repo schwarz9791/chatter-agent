@@ -43,7 +43,8 @@ namespace ChatterMascot.Settings
             bool idleMotion, bool cursorGaze, bool blink,
             string vrmFileName,
             int frameRate,
-            string serverUrl, string token)
+            string serverUrl, string token,
+            float xrScale, float xrDistance, float xrAzimuth, float xrFeetBelowEye)
         {
             Muted = muted;
             MuteHotKey = muteHotKey;
@@ -56,6 +57,10 @@ namespace ChatterMascot.Settings
             FrameRate = frameRate;
             ServerUrl = serverUrl;
             Token = token;
+            XrScale = xrScale;
+            XrDistance = xrDistance;
+            XrAzimuth = xrAzimuth;
+            XrFeetBelowEye = xrFeetBelowEye;
         }
 
         public bool Muted { get; }
@@ -142,6 +147,27 @@ namespace ChatterMascot.Settings
         /// </summary>
         public string Token { get; }
 
+        /// <summary>
+        /// Android XR でのキャラクターの大きさ（<c>ModelAnchor.localScale</c> の一様倍率）。
+        ///
+        /// ★ <b>デスクトップの「キャラクターの大きさ」（<see cref="SettingsMapping.ScaleMin"/> ほか）
+        ///   とは別概念。</b> あちらはウィンドウの倍率、こちらは VRM モデル自体のスケール。
+        ///   範囲・既定は <see cref="SettingsMapping.XrScaleMin"/> / <see cref="SettingsMapping.XrScaleMax"/> /
+        ///   <see cref="SettingsMapping.XrDefaultScale"/>。
+        /// ★ デスクトップの設定パネルには出さない。Android には設定 UI が無いので、
+        ///   端末の <c>settings.json</c> を直接書き換える。
+        /// </summary>
+        public float XrScale { get; }
+
+        /// <summary>Android XR での、目からキャラまでの水平距離（メートル）。空間固定を組む起動時に1回だけ使う。</summary>
+        public float XrDistance { get; }
+
+        /// <summary>Android XR での、起動時の正面から右回りに何度の方向へキャラを置くか。</summary>
+        public float XrAzimuth { get; }
+
+        /// <summary>Android XR での、キャラの足元が目より何 m 下か。</summary>
+        public float XrFeetBelowEye { get; }
+
         public static MascotSettings Defaults
         {
             get
@@ -152,7 +178,9 @@ namespace ChatterMascot.Settings
                     true, true, true,
                     "",
                     SettingsMapping.DefaultFrameRate,
-                    "", "");
+                    "", "",
+                    SettingsMapping.XrDefaultScale, SettingsMapping.XrDefaultDistance,
+                    SettingsMapping.XrDefaultAzimuth, SettingsMapping.XrDefaultFeetBelowEye);
             }
         }
 
@@ -169,7 +197,8 @@ namespace ChatterMascot.Settings
             bool? idleMotion = null, bool? cursorGaze = null, bool? blink = null,
             string vrmFileName = null,
             int? frameRate = null,
-            string serverUrl = null, string token = null)
+            string serverUrl = null, string token = null,
+            float? xrScale = null, float? xrDistance = null, float? xrAzimuth = null, float? xrFeetBelowEye = null)
         {
             return new MascotSettings(
                 muted ?? Muted,
@@ -182,7 +211,11 @@ namespace ChatterMascot.Settings
                 vrmFileName ?? VrmFileName,
                 frameRate ?? FrameRate,
                 serverUrl ?? ServerUrl,
-                token ?? Token);
+                token ?? Token,
+                xrScale ?? XrScale,
+                xrDistance ?? XrDistance,
+                xrAzimuth ?? XrAzimuth,
+                xrFeetBelowEye ?? XrFeetBelowEye);
         }
 
         public MascotSettings WithMuted(bool value) => Copy(muted: value);
@@ -196,6 +229,10 @@ namespace ChatterMascot.Settings
         public MascotSettings WithFrameRate(int value) => Copy(frameRate: value);
         public MascotSettings WithServerUrl(string value) => Copy(serverUrl: value);
         public MascotSettings WithToken(string value) => Copy(token: value);
+        public MascotSettings WithXrScale(float value) => Copy(xrScale: value);
+        public MascotSettings WithXrDistance(float value) => Copy(xrDistance: value);
+        public MascotSettings WithXrAzimuth(float value) => Copy(xrAzimuth: value);
+        public MascotSettings WithXrFeetBelowEye(float value) => Copy(xrFeetBelowEye: value);
 
         /// <summary>
         /// 「すべての設定をリセット」用。<b>接続先とトークンだけは残す</b>。
@@ -224,7 +261,11 @@ namespace ChatterMascot.Settings
                 && string.Equals(VrmFileName, other.VrmFileName, StringComparison.Ordinal)
                 && FrameRate == other.FrameRate
                 && string.Equals(ServerUrl, other.ServerUrl, StringComparison.Ordinal)
-                && string.Equals(Token, other.Token, StringComparison.Ordinal);
+                && string.Equals(Token, other.Token, StringComparison.Ordinal)
+                && XrScale.Equals(other.XrScale)
+                && XrDistance.Equals(other.XrDistance)
+                && XrAzimuth.Equals(other.XrAzimuth)
+                && XrFeetBelowEye.Equals(other.XrFeetBelowEye);
         }
 
         public override bool Equals(object obj)
@@ -245,6 +286,10 @@ namespace ChatterMascot.Settings
             hash = (hash * 397) ^ FrameRate;
             hash = (hash * 397) ^ (ServerUrl != null ? ServerUrl.GetHashCode() : 0);
             hash = (hash * 397) ^ (Token != null ? Token.GetHashCode() : 0);
+            hash = (hash * 397) ^ XrScale.GetHashCode();
+            hash = (hash * 397) ^ XrDistance.GetHashCode();
+            hash = (hash * 397) ^ XrAzimuth.GetHashCode();
+            hash = (hash * 397) ^ XrFeetBelowEye.GetHashCode();
             return hash;
         }
     }

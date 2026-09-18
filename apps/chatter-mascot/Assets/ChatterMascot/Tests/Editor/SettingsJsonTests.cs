@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using ChatterMascot.Settings;
 using ChatterMascot.Ui;
+using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 
 namespace ChatterMascot.Tests
@@ -206,13 +207,17 @@ namespace ChatterMascot.Tests
 
         /// <summary>
         /// ★★ キャラクターの大きさは <c>window.json</c> が持つ。
-        ///   ここに書くと権威が2つになるので、**書かないし読まない**
+        ///   ここに書くと権威が2つになるので、<c>character</c> には**書かないし読まない**
         ///   （前の版が書いた <c>character.scale</c> は未知キーとして警告して無視する）。
+        ///
+        /// ★ <b><c>character</c> セクションに絞って見ること。</b> <c>xr.scale</c>
+        ///   （→ <see cref="MascotSettings.XrScale"/>）は別概念で、こちらは正当に書く。
         /// </summary>
         [Test]
         public void DoesNotStoreTheCharacterSize()
         {
-            Assert.That(SettingsJson.Write(MascotSettings.Defaults), Does.Not.Contain("scale"));
+            var character = (JObject)JObject.Parse(SettingsJson.Write(MascotSettings.Defaults))["character"];
+            Assert.That(character.ContainsKey("scale"), Is.False);
 
             MascotSettings parsed;
             string error;
@@ -495,6 +500,164 @@ namespace ChatterMascot.Tests
 
             Assert.That(parsed.ServerUrl, Is.Empty);
             Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        // ── xr ───────────────────────────
+
+        [Test]
+        public void RoundTripsTheXrSection()
+        {
+            var written = SettingsJson.Write(MascotSettings.Defaults
+                .WithXrScale(0.3f).WithXrDistance(1.2f).WithXrAzimuth(-90f).WithXrFeetBelowEye(0.8f));
+            var parsed = Parse(written);
+
+            Assert.That(parsed.XrScale, Is.EqualTo(0.3f));
+            Assert.That(parsed.XrDistance, Is.EqualTo(1.2f));
+            Assert.That(parsed.XrAzimuth, Is.EqualTo(-90f));
+            Assert.That(parsed.XrFeetBelowEye, Is.EqualTo(0.8f));
+            Assert.That(_warnings, Is.Empty);
+        }
+
+        /// <summary>★ デスクトップの設定パネルは xr を触らないが、保存のたびに落ちないこと</summary>
+        [Test]
+        public void WritesTheXrSectionEvenWhenUnset()
+        {
+            var written = SettingsJson.Write(MascotSettings.Defaults);
+
+            Assert.That(written, Does.Contain("\"xr\""));
+            Assert.That(written, Does.Contain("\"scale\""));
+            Assert.That(written, Does.Contain("\"distance\""));
+            Assert.That(written, Does.Contain("\"azimuth\""));
+            Assert.That(written, Does.Contain("\"feetBelowEye\""));
+        }
+
+        [Test]
+        public void FallsBackToTheDefaultWhenScaleIsAString()
+        {
+            var parsed = Parse("{\"xr\":{\"scale\":\"0.3\"}}");
+
+            Assert.That(parsed.XrScale, Is.EqualTo(SettingsMapping.XrDefaultScale));
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        [Test]
+        public void FallsBackToTheDefaultWhenScaleIsNotFinite()
+        {
+            var parsed = Parse("{\"xr\":{\"scale\":NaN}}");
+
+            Assert.That(parsed.XrScale, Is.EqualTo(SettingsMapping.XrDefaultScale));
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        /// <summary>★ <see cref="SettingsJson"/> の <c>xr</c> はクランプしない。範囲外はそのまま既定へ倒す</summary>
+        [Test]
+        public void FallsBackToTheDefaultWhenScaleIsOutOfRange()
+        {
+            var parsed = Parse("{\"xr\":{\"scale\":1.5}}");
+
+            Assert.That(parsed.XrScale, Is.EqualTo(SettingsMapping.XrDefaultScale));
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        [Test]
+        public void FallsBackToTheDefaultWhenDistanceIsOutOfRange()
+        {
+            var parsed = Parse("{\"xr\":{\"distance\":10}}");
+
+            Assert.That(parsed.XrDistance, Is.EqualTo(SettingsMapping.XrDefaultDistance));
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        [Test]
+        public void FallsBackToTheDefaultWhenAzimuthIsOutOfRange()
+        {
+            var parsed = Parse("{\"xr\":{\"azimuth\":200}}");
+
+            Assert.That(parsed.XrAzimuth, Is.EqualTo(SettingsMapping.XrDefaultAzimuth));
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        [Test]
+        public void FallsBackToTheDefaultWhenFeetBelowEyeIsOutOfRange()
+        {
+            var parsed = Parse("{\"xr\":{\"feetBelowEye\":5}}");
+
+            Assert.That(parsed.XrFeetBelowEye, Is.EqualTo(SettingsMapping.XrDefaultFeetBelowEye));
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        [Test]
+        public void AcceptsTheXrRangeBoundaries()
+        {
+            var parsed = Parse(
+                "{\"xr\":{\"scale\":0.05,\"distance\":5.0,\"azimuth\":-180,\"feetBelowEye\":2.0}}");
+
+            Assert.That(parsed.XrScale, Is.EqualTo(SettingsMapping.XrScaleMin));
+            Assert.That(parsed.XrDistance, Is.EqualTo(SettingsMapping.XrDistanceMax));
+            Assert.That(parsed.XrAzimuth, Is.EqualTo(SettingsMapping.XrAzimuthMin));
+            Assert.That(parsed.XrFeetBelowEye, Is.EqualTo(SettingsMapping.XrFeetBelowEyeMax));
+            Assert.That(_warnings, Is.Empty);
+        }
+
+        [Test]
+        public void IgnoresUnknownKeysUnderXr()
+        {
+            Parse("{\"xr\":{\"nope\":1}}");
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        [Test]
+        public void WarnsWhenXrIsNotAnObject()
+        {
+            var parsed = Parse("{\"xr\": 1}");
+
+            Assert.That(parsed.XrScale, Is.EqualTo(SettingsMapping.XrDefaultScale));
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        // ── long を超える整数（Newtonsoft は BigInteger で持つ） ───────────────────
+
+        /// <summary>
+        /// ★ 型検査（Integer）は通ってしまう値。<c>SpeechFrameParser.TryAsInteger</c> と同じ罠で、
+        ///   例外を出さずそのキーだけ既定へ倒すこと。
+        /// </summary>
+        [Test]
+        public void FallsBackPerKeyWhenNumbersExceedLong()
+        {
+            var parsed = Parse(
+                "{\"audio\":{\"volume\":100000000000000000000}," +
+                "\"xr\":{\"scale\":100000000000000000000}}");
+
+            Assert.That(parsed.Volume, Is.EqualTo(MascotSettings.Defaults.Volume));
+            Assert.That(parsed.XrScale, Is.EqualTo(SettingsMapping.XrDefaultScale));
+            Assert.That(_warnings, Has.Count.EqualTo(2));
+        }
+
+        /// <summary>frameRate は <c>long</c> には収まる値（<c>int</c> 超え）でも既定へ倒す。</summary>
+        [Test]
+        public void FallsBackToTheDefaultFrameRateWhenTheValueExceedsInt()
+        {
+            var parsed = Parse("{\"display\":{\"frameRate\":3000000000}}");
+
+            Assert.That(parsed.FrameRate, Is.EqualTo(SettingsMapping.DefaultFrameRate));
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        /// <summary>frameRate が <c>long</c> も超える（<c>BigInteger</c>）ときも同じ経路で既定へ倒す。</summary>
+        [Test]
+        public void FallsBackToTheDefaultFrameRateWhenTheValueExceedsLong()
+        {
+            var parsed = Parse("{\"display\":{\"frameRate\":100000000000000000000}}");
+
+            Assert.That(parsed.FrameRate, Is.EqualTo(SettingsMapping.DefaultFrameRate));
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        /// <summary>version がここで <c>long</c> を超えても、既定へ倒さず読み込み全体を拒否する。</summary>
+        [Test]
+        public void RejectsAVersionExceedingLong()
+        {
+            Reject("{\"version\":100000000000000000000}");
         }
     }
 }

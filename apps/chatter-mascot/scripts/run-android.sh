@@ -50,12 +50,12 @@ case "$APK" in
 esac
 
 if [ ! -x "$ADB" ]; then
-  echo "adb が見つかりません: $ADB（ADB 環境変数で指定できます）" >&2
+  echo "adb が見つかりません: ${ADB}（ADB 環境変数で指定できます）" >&2
   exit 1
 fi
 
 if [ ! -f "$APK" ]; then
-  echo "APK がありません: $APK（先に ./scripts/build-android.sh）" >&2
+  echo "APK がありません: ${APK}（先に ./scripts/build-android.sh）" >&2
   exit 1
 fi
 

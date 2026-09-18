@@ -35,8 +35,9 @@
 `targetFrameRate` は VSync が有効だと**無視される**ので、`vSyncCount: 0` のままの方が
 確実に効く（透過ウィンドウで VSync が効くかも確かめていない）。
 
-★ **既定の 30fps はデスクトップ限定。** Android XR ではヘッドセットのリフレッシュレートに
-合わせる必要がある（→ #99）。`MascotRunner` の Inspector で変えられる。
+★ **既定の 30fps は XR が起動していないときの上限。** XR（Full Space）ではランタイムが
+フレームペーシングを握り、`Application.targetFrameRate` は効かない（→「XR（Full Space）」）。
+`MascotRunner` の Inspector で変えられる。
 
 ★ **「リップシンクが入ったら 30fps で足りるか見直す」という宿題は #58 で閉じた。
 結論は 30fps 据え置き。** → 下の「30fps で口が足りるかの決着（#58）」
@@ -1786,6 +1787,11 @@ Inspector 上も正常に見える。**ビルドしたアプリのログを読�
 回帰テスト: `SpeechFrameTests.HugeSeqIsRejectedWithoutThrowing`。
 既存の `OnlyPositiveSafeIntegerSeq` の `9007199254740992` は **`long` に収まる**ので、
 このケースを踏めていなかった。
+
+`settings.json`（`SettingsJson`）の数値読み取りも同じ手当て（`TryValue<T>` が `Value<T>()` を
+try/catch で囲む）で、読めなければ警告してそのキーだけ既定へ倒す。`int` で読む項目
+（`display.frameRate`）は、`long` には収まる値でも `int` を超えると `OverflowException` になる。
+回帰テスト: `SettingsJsonTests.FallsBackPerKeyWhenNumbersExceedLong` ほか。
 
 ### ★ 購読者の例外を接続の外へ出さない
 
@@ -3959,8 +3965,8 @@ curl -fsSL https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh | UNITY_
 
 ## プラットフォームを絞る
 
-★ **UniWindowController の macOS ネイティブプラグインを Android ビルドに混ぜない。** XR パッケージは
-Android にだけ効かせる（→ [#99](https://github.com/schwarz9791/chatter-agent/issues/99)）。
+★ **UniWindowController の macOS ネイティブプラグインを Android ビルドに混ぜない。** XR ローダーは
+Android にだけ割り当てる（→「XR（Full Space）」）。
 **Plugin Inspector で絞る手は git 参照のパッケージには効かない**（→ 下の「同梱プラグインはビルド時の
 delegate で外す」）。
 
@@ -4176,7 +4182,8 @@ Android で共通。1秒ポーリングで外部変更も拾う。
 | キー | Android で効くか |
 |---|---|
 | `audio.mute` / `audio.volume` | 効く |
-| `display.frameRate` | **効かない。** Android ではシーンの `targetFrameRate`（`[SerializeField]`）が権威（ヘッドセットのリフレッシュレートは 30/60 では表せない。→ #99） |
+| `display.frameRate` | **効かない。** XR ではランタイムがフレームペーシングを握り、XR が起動しなかったときはシーンの `targetFrameRate`（`[SerializeField]`）が権威 |
+| `xr.scale` / `xr.distance` / `xr.azimuth` / `xr.feetBelowEye` | 効く（XR が起動したときだけ。起動時に1回だけ読む。→「XR（Full Space）」） |
 | `character.idleMotion` / `character.cursorGaze` / `character.blink` | 効く（視線は `CursorProvider` が無いので自律的な漂いになる） |
 | `connection.serverUrl` / `connection.token` | 効く（起動時に1回だけ） |
 | `character.vrm` | **効かない。** VRM の探索は `AssetEnv.HasUserConfigDirectory` のときだけユーザー段を見るが、Android はこれが `false`（共有ファイルシステムが無い） |
@@ -4278,3 +4285,129 @@ Android のログは `adb logcat -s Unity`。★★ **Android では 401 と「�
 ★ **エミュレータであって実機ではない。** 実機（XREAL Aura）での再測定は
 [#100](https://github.com/schwarz9791/chatter-agent/issues/100)。計測コードはこの決定の後
 `AudioClipPlayer.cs` から取り除いてある。
+
+## XR（Full Space）
+
+Android ビルドは OpenXR（`com.unity.xr.androidxr-openxr`）で Full Space に入り、キャラクターを空間に固定して立たせる
+（[#99](https://github.com/schwarz9791/chatter-agent/issues/99)）。Android XR Extensions for Unity
+（`com.google.xr.extensions`）は入れていない（→ [#119](https://github.com/schwarz9791/chatter-agent/issues/119)）。
+実機（XREAL Aura）での見え方・視野・距離感は [#100](https://github.com/schwarz9791/chatter-agent/issues/100)。
+
+### 空間配置の決めごと
+
+1. **空間固定。起動時に1回だけ、頭の姿勢を基準に置き、以後は動かさない。** 頭に追従させると、
+   [#71](https://github.com/schwarz9791/chatter-agent/issues/71) で歩かせたときに相対位置が二重に動く
+2. **動かすのはキャラクターではなく XR Origin（位置とヨーだけ）。** `VrmStage.FaceCamera` がモデルを
+   ワールドの −Z へ向けるので、`ModelAnchor` を回しても読み込みのときに打ち消される。キャラクターは
+   `ModelAnchor` の位置で −Z を向いたまま、**頭がその正面に来るように Origin を置く**（`XrPlacement.Solve`。
+   不変条件は `XrPlacementTests`）
+3. **大きさは `ModelAnchor.localScale` で変える。XR Origin は拡縮しない。** Origin を拡縮したときに
+   眼間距離まで拡縮されるかはランタイム任せで、されなければ実機では「机の上の小人」ではなく
+   「遠くの等身大」に見える（エミュレータの画像では判別できない）。`MeasureBounds` はワールド座標で
+   測るので追従する。`FitCollider` は二重に拡縮されるが、当たり判定を使うのはデスクトップ（等倍）だけ。
+   spring bone は追従しないので、読み込み時に縮尺を焼き込む（→ 下）
+4. **配置は `settings.json` の `xr`（`scale` / `distance` / `azimuth` / `feetBelowEye`）で変える。**
+   既定は「机の上のミニチュアを、正面の画面を避けた右側に」。Android には設定 UI が無いので、
+   端末のファイルを書き換える（→ `SETUP.md`）。デスクトップのパネルには出さないが、往復で落とさない
+   （`connection` と同じ扱い）
+5. **視線と prompt の姿勢はコードを変えていない。** `gazeTarget` は `Main Camera` の子で、`VrmPoseAccent` の
+   基準の下向きは目とカメラのワールド座標の差から出すので、カメラ＝頭になれば「ユーザーの頭を見る」になる。
+   Android には `CursorProvider` が無いので漂いのまま
+6. **フレームレートはコードを変えていない。** XR ではランタイムがフレームペーシングを握り、
+   `Application.targetFrameRate` は効かない。XR が起動しなかったときは今までどおり `MascotRunner` の値
+7. **XR かどうかは `XRGeneralSettings.Instance.Manager.activeLoader` で判定する。** `Application.platform` は
+   XR でも `Android` のままなので使えない。起動していなければ `XrStage` は何もせず、#97 と同じ平面表示になる
+8. **シーンは変えていない。** XR Origin と `TrackedPoseDriver` は `XrStage` が XR の起動時だけ実行時に組む。
+   `ChatterMascot.Xr` は Editor と Android に限ったアセンブリで、`CursorGazeSource` と同じ「シーンに置かない注入」
+
+★ **UniUnlit への差し替え（#110）は XR でもそのまま効く**（`UnlitFallbackPolicy` は `Application.platform` で判定する）。
+
+### ★★ XR Origin のトラッキング原点が切り替わる前に、頭の姿勢を読まない
+
+`XROrigin` に `Device` を要求しても、切り替わるのは有効化の数フレーム後。その前はランタイム既定の原点
+（床基準）の値が返り、切り替わった瞬間に原点が頭へ移る。**切り替え前の値で置くと、キャラクターが
+頭の上へ外れて画面に何も映らない。エラーも警告も出ない。**
+
+実測（2026-09-17 / `XR_Glasses`）: 配置の瞬間は `CurrentTrackingOriginMode=Unknown`・頭 `(0, 1.60, 0)`、
+1秒後には `Device`・頭 `(0, 0, 0)`。`XrStage` は `CurrentTrackingOriginMode` が `Device` になってから
+1フレーム置いて読む。切り替えは期限なしで待ち、期限は切り替え後の頭の追跡待ちにだけかける
+（期限で切り替え前に置くと同じ外れ方をする）。
+
+### ★★ `SetParent(parent, false)` はローカル姿勢をゼロにしない
+
+`worldPositionStays: false` は「ワールドを保たない」だけで、ローカルの値はそのまま引き継ぐ。
+`Main Camera` を Camera Offset の下へ付け替えると、**シーンに置いたデスクトップ用の位置 `(0, 0, -4)` が
+ローカルに残る**。付け替えたら `SetLocalPositionAndRotation(zero, identity)` で明示的に消す。
+
+### ★ 頭の姿勢はカメラの transform ではなく、追跡状態を確かめたデバイスから読む
+
+`TrackedPoseDriver` がカメラへ書き込むのは Update / 描画直前。追跡状態になったフレームにカメラの
+transform を読むと、まだ書き込まれていない値を拾う。`XrStage` は `InputDevices.GetDeviceAtXRNode(CenterEye)`
+から、追跡状態と `centerEyePosition` / `centerEyeRotation` を同じデバイスで読む。
+
+### ★★ `ModelAnchor` を拡縮すると、髪が横に流れたまま固まる（spring bone は拡縮に追従しない）
+
+UniVRM の spring bone は、**コライダーの半径は毎フレーム `lossyScale` を掛けるのに、骨の当たり半径
+（`m_jointRadius`）・剛性・重力は掛けない。** 骨の長さは初期化時の `lossyScale` で測るが、読み込み時の
+初期化は `ModelAnchor` の下に入る前（等倍）に済んでいる。0.18 倍にすると、小さくなった頭のコライダーに
+等身大の太さの髪が押し出され、**左の後ろ上の髪が横に流れた形で固まった**（2026-09-17 / `XR_Glasses`）。
+
+`VrmStage.BakeSpringBoneScale` が、`ModelAnchor` が等倍でないときだけ、全ジョイントの当たり半径・剛性・
+重力に縮尺を掛けてから `ReconstructSpringBone()` で作り直す（骨の長さもここで測り直される）。
+剛性と重力を掛けるのは、骨が縮尺倍に短くなっても見た目の角速度を変えないため。
+
+★ **`BlittableModelLevel.SupportsScalingAtRuntime` は使わない。** 剛性と重力に拡縮を掛けるフラグだが、
+`SetModelLevel` で渡した値は結合バッファの作り直し（spring bone の登録や作り直しのたび）で既定に戻る。
+しかも骨の当たり半径には効かない。
+
+★ **拡縮は VRM の読み込みより前に済ませること。** `XrStage` は `AfterSceneLoad` で拡縮し、読み込みは
+`VrmStage.Start` から始まるので間に合う。
+
+### ★ XR Origin に `HideFlags.HideAndDontSave` を付けない
+
+`FindFirstObjectByType` から見えなくなる（→「`HideFlags.HideAndDontSave` のオブジェクトは
+`FindFirstObjectByType` から見えない」）。AR Foundation の各 Manager など、`XROrigin` を探しに来る側が
+見つけられなくなる。
+
+### ★★ グラスの表示視野は狭い — 描けているのに視野の縁で切れる
+
+`XR_Glasses` の画面は、グラスの表示視野の外が黒く切り落とされる。**起動時の正面から右 30° に置くと、
+キャラクターの右半分が視野の縁で切れ、ミニチュアだと頭の飾りしか見えなかった**（ログ上は正しく配置され、
+描画もされている）。既定の方位と足元の深さは、起動時の正面を向いたまま全身が視野に収まる範囲に留めてある。
+実機の視野角での調整は #100。
+
+### エミュレータでの実測（2026-09-17）
+
+★ **公式ドキュメントは「Android XR Emulator は Unity / OpenXR アプリに対応しない」と書いているが、
+システムイメージには OpenXR ランタイムが入っていて、Full Space で動く**
+（`/system/etc/openxr/1/active_runtime.json`、`libopenxr.google.so`）。
+
+| AVD（システムイメージ） | 結果 |
+|---|---|
+| `XR_Glasses`（Google Play XR Preview API v4） | `xrDesktopMode=full-space-unmanaged` で起動し、セッションは `FOCUSED` まで進む。空間固定・縮尺（0.18。髪は spring bone への焼き込みで XR 化前と同じ形）・待機モーション・発話 → ack まで通る |
+| `XR_Headset2`（Google Play XR API v1） | アプリは `READY` まで進むが、`com.android.systemui` が `Buffer processing hung up due to stuck fence. Indicates GPU hang` で ANR する。**使わない** |
+
+- スワップチェーンはテクスチャ配列が `XR_ERROR_FEATURE_UNSUPPORTED` で一度失敗し、配列なしに落ちて描ける
+- **背景は黒く、部屋は見えない。** 原因は切り分けていない（→ #119 / #100）。光学シースルーの実機では黒は透明
+- `adb exec-out screencap -p` で撮ると、グラスの表示視野の外は黒く切り落とされて写る
+- エミュレータのウィンドウでは、視野の中央でもキャラクターがやや縦につぶれて見える。`screencap` の画像（正方形）では比率は自然で、ディスプレイ（1920×1200）と片目の推奨描画サイズ（2560×2558）の縦横比が違う。実機での比率は #100
+- 新しい APK の初回起動は、Home Space のときと同じく 30 秒以上白い
+
+### ビルド設定（`AndroidPlayerSettings.FixAll`）
+
+| 項目 | 値 | なぜ |
+|---|---|---|
+| XR Plug-in Management | **Android にだけ** OpenXR ローダー。feature は Android XR Support だけ | Standalone に割り当てないので macOS ビルドは変わらない |
+| Graphics API（Android） | **Vulkan 単独** | URP で Android XR を使うときの必須設定 |
+| `Mobile_Renderer` の Post Processing | **無効**（`postProcessData` を外す） | Project Validation の error。`PC_Renderer` は触らない |
+
+★ **`Mobile_RPAsset` の `m_PrefilterXRKeywords` は、XR を有効にしたビルドで URP が `1 → 0` に書き換える。**
+戻さないこと（XR 用のシェーダーバリアントを削らせないための値）。
+
+★ **マニフェストの XR まわりはパッケージが注入する**（`XR_ACTIVITY_START_MODE_FULL_SPACE_UNMANAGED`、
+`android.software.xr.api.openxr` / `android.software.xr.api.spatial`、`android.hardware.vulkan.version`）。
+手で書かない。`AndroidManifestPostProcessor` の注入（`INTERNET` / `usesCleartextTraffic`）とは共存する。
+確かめるときは `aapt2 dump xmltree`（→「マニフェストは静的に置かず、Gradle 生成後に注入する」）。
+
+★ **Project Validation の残りは `FixAll` が `[Build]` で出す。** 公開 API が無いので
+`BuildValidator.GetCurrentValidationIssues` を reflection で呼んでいる。

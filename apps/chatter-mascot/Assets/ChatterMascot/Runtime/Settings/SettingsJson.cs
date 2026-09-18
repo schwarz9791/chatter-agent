@@ -70,6 +70,15 @@ namespace ChatterMascot.Settings
                     ["serverUrl"] = settings.ServerUrl ?? "",
                     ["token"] = settings.Token ?? "",
                 },
+                // ★ デスクトップの設定パネルは書かないが、往復で落とさないよう含めておく
+                //   （→ connection と同じ扱い）
+                ["xr"] = new JObject
+                {
+                    ["scale"] = settings.XrScale,
+                    ["distance"] = settings.XrDistance,
+                    ["azimuth"] = settings.XrAzimuth,
+                    ["feetBelowEye"] = settings.XrFeetBelowEye,
+                },
             };
             return root.ToString(Formatting.Indented) + "\n";
         }
@@ -115,7 +124,11 @@ namespace ChatterMascot.Settings
             var version = root["version"];
             if (version != null && version.Type == JTokenType.Integer)
             {
-                var value = version.Value<int>();
+                if (!TryValue<int>(version, out var value))
+                {
+                    error = $"version が {version} です（対応しているのは {CurrentVersion}）";
+                    return false;
+                }
                 if (value != CurrentVersion)
                 {
                     error = $"version が {value.ToString(CultureInfo.InvariantCulture)} です" +
@@ -151,6 +164,10 @@ namespace ChatterMascot.Settings
 
                     case "connection":
                         result = ReadConnection(property.Value, result, warn);
+                        break;
+
+                    case "xr":
+                        result = ReadXr(property.Value, result, warn);
                         break;
 
                     default:
@@ -333,6 +350,56 @@ namespace ChatterMascot.Settings
             return settings;
         }
 
+        /// <summary>
+        /// Android XR の空間固定パラメータ（→ <see cref="MascotSettings.XrScale"/> ほかの doc）。
+        /// <b>audio / ui / character / connection と同じ作法</b>：オブジェクトでなければ既定を使い、
+        /// 未知キーは警告して無視する。
+        /// </summary>
+        private static MascotSettings ReadXr(JToken raw, MascotSettings settings, Action<string> warn)
+        {
+            var xr = raw as JObject;
+            if (xr == null)
+            {
+                Warn(warn, $"xr がオブジェクトではありません（{Describe(raw)}）。既定を使います");
+                return settings;
+            }
+
+            foreach (var property in xr)
+            {
+                switch (property.Key)
+                {
+                    case "scale":
+                        settings = settings.WithXrScale(ReadXrNumber(
+                            property.Value, "xr.scale", settings.XrScale,
+                            SettingsMapping.XrScaleMin, SettingsMapping.XrScaleMax, warn));
+                        break;
+
+                    case "distance":
+                        settings = settings.WithXrDistance(ReadXrNumber(
+                            property.Value, "xr.distance", settings.XrDistance,
+                            SettingsMapping.XrDistanceMin, SettingsMapping.XrDistanceMax, warn));
+                        break;
+
+                    case "azimuth":
+                        settings = settings.WithXrAzimuth(ReadXrNumber(
+                            property.Value, "xr.azimuth", settings.XrAzimuth,
+                            SettingsMapping.XrAzimuthMin, SettingsMapping.XrAzimuthMax, warn));
+                        break;
+
+                    case "feetBelowEye":
+                        settings = settings.WithXrFeetBelowEye(ReadXrNumber(
+                            property.Value, "xr.feetBelowEye", settings.XrFeetBelowEye,
+                            SettingsMapping.XrFeetBelowEyeMin, SettingsMapping.XrFeetBelowEyeMax, warn));
+                        break;
+
+                    default:
+                        Warn(warn, $"知らないキー \"xr.{property.Key}\" は無視します");
+                        break;
+                }
+            }
+            return settings;
+        }
+
         /// <summary>空文字は「未指定」として通す。空でなければ <c>ws</c> / <c>wss</c> の絶対 URL であること。</summary>
         private static string ReadServerUrl(JToken value, string key, string fallback, Action<string> warn)
         {
@@ -390,6 +457,27 @@ namespace ChatterMascot.Settings
         }
 
         /// <summary>
+        /// 型が数値で、有限（NaN / Infinity ではない）であることを確かめて取り出す。
+        /// </summary>
+        private static bool TryReadFinite(JToken value, string key, Action<string> warn, out float raw)
+        {
+            raw = 0f;
+            if (value.Type != JTokenType.Float && value.Type != JTokenType.Integer)
+            {
+                Warn(warn, $"{key} が数値ではありません（{value}）。既定を使います");
+                return false;
+            }
+
+            if (!TryValue(value, out raw) || float.IsNaN(raw) || float.IsInfinity(raw))
+            {
+                Warn(warn, $"{key} が数値として扱えません（{value}）。既定を使います");
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
         /// 数値を読んで、<b>刻みに丸めて範囲へ収める</b>。
         ///
         /// ★ <b>範囲外を「不正」として既定に倒さないこと。</b> 範囲を狭めたときに、
@@ -399,18 +487,7 @@ namespace ChatterMascot.Settings
         private static float ReadNumber(
             JToken value, string key, float fallback, float min, float max, float step, Action<string> warn)
         {
-            if (value.Type != JTokenType.Float && value.Type != JTokenType.Integer)
-            {
-                Warn(warn, $"{key} が数値ではありません（{value}）。既定を使います");
-                return fallback;
-            }
-
-            var raw = value.Value<float>();
-            if (float.IsNaN(raw) || float.IsInfinity(raw))
-            {
-                Warn(warn, $"{key} が数値として扱えません（{value}）。既定を使います");
-                return fallback;
-            }
+            if (!TryReadFinite(value, key, warn, out var raw)) return fallback;
 
             var normalized = SettingsMapping.Normalize(raw, min, max, step);
             if (Math.Abs(normalized - raw) > step / 2f)
@@ -418,6 +495,28 @@ namespace ChatterMascot.Settings
                 Warn(warn, $"{key} を {SettingsMapping.Format(normalized)} に丸めました（元の値: {SettingsMapping.Format(raw)}）");
             }
             return normalized;
+        }
+
+        /// <summary>
+        /// XR の空間固定パラメータ用の数値読み取り。<b>クランプしないこと</b>
+        /// （→ <see cref="ReadFrameRate"/> と同じ判断）。
+        ///
+        /// ★ <b><see cref="ReadNumber"/>（音量。範囲外を刻みに丸めてクランプする）とは違う。</b>
+        ///   ここは UI のスライダーを持たないので「一番近い有効な値」に丸める意味が無い。
+        ///   型違い・非有限・範囲外はすべて警告して <paramref name="fallback"/> へ倒す。
+        /// </summary>
+        private static float ReadXrNumber(
+            JToken value, string key, float fallback, float min, float max, Action<string> warn)
+        {
+            if (!TryReadFinite(value, key, warn, out var raw)) return fallback;
+
+            if (raw < min || raw > max)
+            {
+                Warn(warn, $"{key} は {min}〜{max} の範囲である必要があります（{raw}）。既定を使います");
+                return fallback;
+            }
+
+            return raw;
         }
 
         /// <summary>
@@ -435,7 +534,13 @@ namespace ChatterMascot.Settings
                 return fallback;
             }
 
-            var raw = value.Value<int>();
+            // ★ 型検査を通っても int で取り出せるとは限らない（→ TryValue の doc）
+            if (!TryValue<int>(value, out var raw))
+            {
+                Warn(warn, $"{key} は 30 か 60 です（{value}）。既定の {SettingsMapping.DefaultFrameRate} を使います");
+                return fallback;
+            }
+
             var normalized = SettingsMapping.NormalizeFrameRate(raw);
             if (normalized != raw)
             {
@@ -498,6 +603,27 @@ namespace ChatterMascot.Settings
         private static string Describe(JToken raw)
         {
             return raw == null ? "無し" : raw.Type.ToString();
+        }
+
+        /// <summary>
+        /// <c>JToken.Value&lt;T&gt;()</c> を例外から守る。Newtonsoft は <c>long</c> を超える整数を
+        /// <c>BigInteger</c> で持つが <c>JTokenType</c> は <c>Integer</c> のままなので、型検査を
+        /// 通った値でも取り出しが例外を投げることがある
+        /// （→ <see cref="ChatterMascot.Protocol.SpeechFrameParser"/> の <c>TryAsInteger</c> と同じ罠。
+        /// 例外の型は決め打ちにしない）。
+        /// </summary>
+        private static bool TryValue<T>(JToken token, out T value)
+        {
+            try
+            {
+                value = token.Value<T>();
+                return true;
+            }
+            catch (Exception)
+            {
+                value = default;
+                return false;
+            }
         }
 
         private static void Warn(Action<string> warn, string message)

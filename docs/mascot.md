@@ -1788,6 +1788,11 @@ Inspector 上も正常に見える。**ビルドしたアプリのログを読�
 既存の `OnlyPositiveSafeIntegerSeq` の `9007199254740992` は **`long` に収まる**ので、
 このケースを踏めていなかった。
 
+`settings.json`（`SettingsJson`）の数値読み取りも同じ手当て（`TryValue<T>` が `Value<T>()` を
+try/catch で囲む）で、読めなければ警告してそのキーだけ既定へ倒す。`int` で読む項目
+（`display.frameRate`）は、`long` には収まる値でも `int` を超えると `OverflowException` になる。
+回帰テスト: `SettingsJsonTests.FallsBackPerKeyWhenNumbersExceedLong` ほか。
+
 ### ★ 購読者の例外を接続の外へ出さない
 
 `SpeechClient` は購読者が何をするか知らない。`MascotRunner` は `FrameReceived` /

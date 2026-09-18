@@ -614,5 +614,50 @@ namespace ChatterMascot.Tests
             Assert.That(parsed.XrScale, Is.EqualTo(SettingsMapping.XrDefaultScale));
             Assert.That(_warnings, Has.Count.EqualTo(1));
         }
+
+        // ── long を超える整数（Newtonsoft は BigInteger で持つ） ───────────────────
+
+        /// <summary>
+        /// ★ 型検査（Integer）は通ってしまう値。<c>SpeechFrameParser.TryAsInteger</c> と同じ罠で、
+        ///   例外を出さずそのキーだけ既定へ倒すこと。
+        /// </summary>
+        [Test]
+        public void FallsBackPerKeyWhenNumbersExceedLong()
+        {
+            var parsed = Parse(
+                "{\"audio\":{\"volume\":100000000000000000000}," +
+                "\"xr\":{\"scale\":100000000000000000000}}");
+
+            Assert.That(parsed.Volume, Is.EqualTo(MascotSettings.Defaults.Volume));
+            Assert.That(parsed.XrScale, Is.EqualTo(SettingsMapping.XrDefaultScale));
+            Assert.That(_warnings, Has.Count.EqualTo(2));
+        }
+
+        /// <summary>frameRate は <c>long</c> には収まる値（<c>int</c> 超え）でも既定へ倒す。</summary>
+        [Test]
+        public void FallsBackToTheDefaultFrameRateWhenTheValueExceedsInt()
+        {
+            var parsed = Parse("{\"display\":{\"frameRate\":3000000000}}");
+
+            Assert.That(parsed.FrameRate, Is.EqualTo(SettingsMapping.DefaultFrameRate));
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        /// <summary>frameRate が <c>long</c> も超える（<c>BigInteger</c>）ときも同じ経路で既定へ倒す。</summary>
+        [Test]
+        public void FallsBackToTheDefaultFrameRateWhenTheValueExceedsLong()
+        {
+            var parsed = Parse("{\"display\":{\"frameRate\":100000000000000000000}}");
+
+            Assert.That(parsed.FrameRate, Is.EqualTo(SettingsMapping.DefaultFrameRate));
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        /// <summary>version がここで <c>long</c> を超えても、既定へ倒さず読み込み全体を拒否する。</summary>
+        [Test]
+        public void RejectsAVersionExceedingLong()
+        {
+            Reject("{\"version\":100000000000000000000}");
+        }
     }
 }

@@ -124,7 +124,11 @@ namespace ChatterMascot.Settings
             var version = root["version"];
             if (version != null && version.Type == JTokenType.Integer)
             {
-                var value = version.Value<int>();
+                if (!TryValue<int>(version, out var value))
+                {
+                    error = $"version が {version} です（対応しているのは {CurrentVersion}）";
+                    return false;
+                }
                 if (value != CurrentVersion)
                 {
                     error = $"version が {value.ToString(CultureInfo.InvariantCulture)} です" +
@@ -453,6 +457,27 @@ namespace ChatterMascot.Settings
         }
 
         /// <summary>
+        /// 型が数値で、有限（NaN / Infinity ではない）であることを確かめて取り出す。
+        /// </summary>
+        private static bool TryReadFinite(JToken value, string key, Action<string> warn, out float raw)
+        {
+            raw = 0f;
+            if (value.Type != JTokenType.Float && value.Type != JTokenType.Integer)
+            {
+                Warn(warn, $"{key} が数値ではありません（{value}）。既定を使います");
+                return false;
+            }
+
+            if (!TryValue(value, out raw) || float.IsNaN(raw) || float.IsInfinity(raw))
+            {
+                Warn(warn, $"{key} が数値として扱えません（{value}）。既定を使います");
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
         /// 数値を読んで、<b>刻みに丸めて範囲へ収める</b>。
         ///
         /// ★ <b>範囲外を「不正」として既定に倒さないこと。</b> 範囲を狭めたときに、
@@ -462,18 +487,7 @@ namespace ChatterMascot.Settings
         private static float ReadNumber(
             JToken value, string key, float fallback, float min, float max, float step, Action<string> warn)
         {
-            if (value.Type != JTokenType.Float && value.Type != JTokenType.Integer)
-            {
-                Warn(warn, $"{key} が数値ではありません（{value}）。既定を使います");
-                return fallback;
-            }
-
-            var raw = value.Value<float>();
-            if (float.IsNaN(raw) || float.IsInfinity(raw))
-            {
-                Warn(warn, $"{key} が数値として扱えません（{value}）。既定を使います");
-                return fallback;
-            }
+            if (!TryReadFinite(value, key, warn, out var raw)) return fallback;
 
             var normalized = SettingsMapping.Normalize(raw, min, max, step);
             if (Math.Abs(normalized - raw) > step / 2f)
@@ -494,18 +508,7 @@ namespace ChatterMascot.Settings
         private static float ReadXrNumber(
             JToken value, string key, float fallback, float min, float max, Action<string> warn)
         {
-            if (value.Type != JTokenType.Float && value.Type != JTokenType.Integer)
-            {
-                Warn(warn, $"{key} が数値ではありません（{value}）。既定を使います");
-                return fallback;
-            }
-
-            var raw = value.Value<float>();
-            if (float.IsNaN(raw) || float.IsInfinity(raw))
-            {
-                Warn(warn, $"{key} が数値として扱えません（{value}）。既定を使います");
-                return fallback;
-            }
+            if (!TryReadFinite(value, key, warn, out var raw)) return fallback;
 
             if (raw < min || raw > max)
             {
@@ -531,7 +534,13 @@ namespace ChatterMascot.Settings
                 return fallback;
             }
 
-            var raw = value.Value<int>();
+            // ★ 型検査を通っても int で取り出せるとは限らない（→ TryValue の doc）
+            if (!TryValue<int>(value, out var raw))
+            {
+                Warn(warn, $"{key} は 30 か 60 です（{value}）。既定の {SettingsMapping.DefaultFrameRate} を使います");
+                return fallback;
+            }
+
             var normalized = SettingsMapping.NormalizeFrameRate(raw);
             if (normalized != raw)
             {
@@ -594,6 +603,27 @@ namespace ChatterMascot.Settings
         private static string Describe(JToken raw)
         {
             return raw == null ? "無し" : raw.Type.ToString();
+        }
+
+        /// <summary>
+        /// <c>JToken.Value&lt;T&gt;()</c> を例外から守る。Newtonsoft は <c>long</c> を超える整数を
+        /// <c>BigInteger</c> で持つが <c>JTokenType</c> は <c>Integer</c> のままなので、型検査を
+        /// 通った値でも取り出しが例外を投げることがある
+        /// （→ <see cref="ChatterMascot.Protocol.SpeechFrameParser"/> の <c>TryAsInteger</c> と同じ罠。
+        /// 例外の型は決め打ちにしない）。
+        /// </summary>
+        private static bool TryValue<T>(JToken token, out T value)
+        {
+            try
+            {
+                value = token.Value<T>();
+                return true;
+            }
+            catch (Exception)
+            {
+                value = default;
+                return false;
+            }
         }
 
         private static void Warn(Action<string> warn, string message)

@@ -15,7 +15,7 @@ namespace ChatterMascot.Xr
     /// ★ <b>AR Camera（パススルー）では代わりにならない。</b> あちらは ALPHA_BLEND を要求するが、
     ///   グラスのランタイムは OPAQUE / ADDITIVE しか持たず、既定で OPAQUE が選ばれる。
     ///   ADDITIVE を持たないランタイム（ヘッドセット）では、要求しても既定のまま。
-    /// ★ ランタイムが途中で戻しても、ここが呼ばれるので付け直す（<c>ARCameraFeature</c> と同じ形）。
+    /// ★ 呼ばれるのはセッションの準備時（<c>XrSetupConfigValues</c>）だけ（<c>ARCameraFeature</c> と同じ形）。
     /// </summary>
 #if UNITY_EDITOR
     [OpenXRFeature(UiName = "Chatter Mascot: Additive Blend",

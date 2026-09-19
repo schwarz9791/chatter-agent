@@ -166,6 +166,13 @@ namespace ChatterMascot.Vrm
             if (Model != null) Invoke(handler, Model);
         }
 
+        /// <summary>
+        /// 揺れもの（spring bone）を静止形に戻し速度を捨てる。
+        ///
+        /// ★ キャラを瞬間移動させた後に呼ぶと、移動を慣性として拾って揺れものが振り回されない。
+        /// </summary>
+        public void ResetSpringBones() => _instance?.Runtime?.SpringBone?.RestoreInitialTransform();
+
         private void Start()
         {
             // ★ 読み込みより前に見ること。読んでから気づくと
@@ -394,7 +401,7 @@ namespace ChatterMascot.Vrm
             {
                 _framePending = false;
                 // ★ 読み込み中に積もった deltaTime で髪が吹き飛ぶのを戻す
-                _instance?.Runtime?.SpringBone?.RestoreInitialTransform();
+                ResetSpringBones();
                 Remeasure();
                 _nextBoneRecheckAt = Time.realtimeSinceStartup + BoneRecheckIntervalSeconds;
                 return;

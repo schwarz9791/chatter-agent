@@ -185,6 +185,7 @@ namespace ChatterMascot.Vrm
         /// （<paramref name="toViewer"/>）の符号付き角 × <paramref name="fraction"/> を、
         /// 首の可動域 ±<paramref name="maxDegrees"/> で clamp する。
         /// <c>VrmPoseAccent</c> の「基準の下向き」（縦）と同じ形の、左右の基準。
+        /// 真後ろに近づくほど 0 へ寄せる（真後ろをまたいでも首が反対側へ跳ばないように）。
         /// </summary>
         public static float NeutralYawDegrees(Vector3 facing, Vector3 toViewer, float fraction, float maxDegrees)
         {
@@ -192,7 +193,10 @@ namespace ChatterMascot.Vrm
             var toViewerH = Vector3.ProjectOnPlane(toViewer, Vector3.up);
             if (facingH.sqrMagnitude < 1e-8f || toViewerH.sqrMagnitude < 1e-8f) return 0f;
 
-            var yaw = Vector3.SignedAngle(facingH, toViewerH, Vector3.up) * fraction;
+            var angle = Vector3.SignedAngle(facingH, toViewerH, Vector3.up);
+            if (Mathf.Abs(angle) > 90f) angle *= (180f - Mathf.Abs(angle)) / 90f;
+
+            var yaw = angle * fraction;
             return Mathf.Clamp(yaw, -maxDegrees, maxDegrees);
         }
 

@@ -4344,13 +4344,14 @@ Hand Interaction Profile（OpenXR の `XR_EXT_hand_interaction`）の aim レイ
 相当する操作**（`XrGrab.UpdateHeld`）。つまみはヒステリシス（`XrGrabRules.IsPinching`。入り 0.9 /
 抜け 0.6）。追跡を短く見失っても 0.2 秒は保持する。
 
-離すと、足元の xz・**掴んでいた点の高さ**から真下へ `ARPlaneManager.Raycast` し、`HorizontalUp` の
+離すと、足元の xz・**当たり判定の上端**から真下へ `ARPlaneManager.Raycast` し、`HorizontalUp` の
 最も近い面に足元を乗せる（無ければ離した位置のまま）。続けて `ModelAnchor` のヨーを頭の方へ向ける
 （`XrGrabRules.TryYawToFace`）。動かすのは常に `ModelAnchor`（起動時の配置と同じく、XR Origin には
-触らない —— Origin を動かすと部屋ごと動いて見える）。
+触らない —— Origin を動かすと部屋ごと動いて見える）。離した後は揺れもの（spring bone）を静止形に
+戻す（落下と向け直しは瞬間移動なので、慣性で髪などが振り回されないように。`VrmStage.ResetSpringBones`）。
 
-★ **足元ではなく、掴んでいた点の高さから探す。** 頭を持って下ろすと足元は天板より下に潜るので、
-足元の高さから探すと体の下の面ではなく床が先に見つかって落ちる。
+★ **足元ではなく、当たり判定の上端から探す。** 足元は下ろすと天板に潜り、掴んだ点も足元の近くだと
+天板より下になる。上端からならどこをつまんでも体の下の面が取れる。
 
 ★ **XR Hands（Hand Tracking Subsystem の feature・手の関節）は使わない。** エミュレータの手
 （Hand tracking モード）は体の前に固定でマウスへ aim を向けるだけなので「キャラの近くでつまむ」判定が
@@ -4391,7 +4392,7 @@ feature が有効なときにしかマニフェストへ書かない。
 
 **グラスでは environment blend mode を ADDITIVE にする。** 描かなかった所（カメラの背景はアルファ 0 の黒）から
 部屋が見える。自前の OpenXR feature（`XrAdditiveBlendFeature`）が `OnEnvironmentBlendModeChange` で ADDITIVE を
-要求し、ランタイムが戻しても付け直す。ADDITIVE を持たないランタイム（ヘッドセット）では要求しても既定のまま。
+要求する（呼ばれるのはセッションの準備時だけ）。ADDITIVE を持たないランタイム（ヘッドセット）では要求しても既定のまま。
 
 ★★ **グラスのランタイムは OPAQUE / ADDITIVE しか持たず、既定は OPAQUE。** `XR_Glasses` のログに
 `Available Environment Blend Modes: (2)` → `XR_ENVIRONMENT_BLEND_MODE_OPAQUE (Selected)` /

@@ -173,8 +173,9 @@ namespace ChatterMascot.Vrm
                 //   直そうとしている「頭が見る人を向いていない」を再び別の形で作ってしまう。
                 //   ★ 左右の基準（neutralYawDegrees）は、既存の回転より先に——いちばん右、
                 //   head.rotation の直前に——掛けること。縦の回転（pitch / tilt）はカメラの
-                //   right 軸まわりで、それが首の縦軸として機能するのは頭がカメラの方を
-                //   向いてからなので、先に縦を掛けると頭が傾く。左右の基準はワールド空間の
+                //   right 軸まわりなので、首の縦軸として働くのは頭がカメラの方を向いている
+                //   ぶんだけで、向ききらない残りの角度に応じて首かしげが混ざる。左右の基準を
+                //   先に掛けておけば、向けたぶんだけ首かしげが減る。左右の基準はワールド空間の
                 //   導出なので、この「カメラ空間の枠」の話の対象外。
                 head.rotation = Quaternion.AngleAxis(-_character.HeadYawDegrees, up)
                               * Quaternion.AngleAxis(_character.HeadPitchDegrees - neutralPitchDegrees, right)

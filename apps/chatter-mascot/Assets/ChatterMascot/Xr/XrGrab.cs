@@ -43,9 +43,6 @@ namespace ChatterMascot.Xr
         /// <summary>掴んだ瞬間の、レイ上の点から <c>ModelAnchor</c> へのオフセット。</summary>
         private Vector3 _grabOffset;
 
-        /// <summary>レイ上の現在の点（<c>ModelAnchor</c> ではなく、掴んでいる点そのもの）。離すときの吸着に使う。</summary>
-        private Vector3 _held;
-
         public void Begin(XROrigin origin, VrmStage stage)
         {
             _origin = origin;
@@ -119,6 +116,10 @@ namespace ChatterMascot.Xr
                 {
                     Release();
                 }
+
+                // ★ 追跡が外れている間のつまみは分からないので、戻ったときのつまみを入りとして
+                //   扱う。掴んでいる手は猶予の間だけ状態を保つ（抜けの閾値のまま戻れるように）。
+                if (_grabbedHand != hand) hand.Pinching = false;
                 return;
             }
 
@@ -145,25 +146,31 @@ namespace ChatterMascot.Xr
         {
             var ray = ReadAimRay(hand, offset);
 
-            // ★ 直前のフレームでキャラを動かしていると、Raycast がそれを見ない
-            //   （autoSyncTransforms はオフ）。
-            Physics.SyncTransforms();
-            var collider = _stage.Model.GetComponentInChildren<Collider>();
+            var collider = SyncedModelCollider();
             if (collider == null) return;
             if (!collider.Raycast(ray, out var hit, float.PositiveInfinity)) return;
 
             _grabbedHand = hand;
             _grabDistance = hit.distance;
             _grabOffset = _stage.ModelAnchor.position - hit.point;
-            _held = hit.point;
             Debug.Log($"[Mascot] XR grab: 掴みました hand={hand.Name}");
+        }
+
+        /// <summary>
+        /// キャラクターの当たり判定を取り直す。
+        ///
+        /// ★ 直前のフレームでキャラを動かしていると、Raycast / bounds がそれを見ない
+        ///   （autoSyncTransforms はオフ）。
+        /// </summary>
+        private Collider SyncedModelCollider()
+        {
+            Physics.SyncTransforms();
+            return _stage.Model.GetComponentInChildren<Collider>();
         }
 
         private void UpdateHeld(Hand hand, Transform offset)
         {
-            var ray = ReadAimRay(hand, offset);
-            _held = ray.GetPoint(_grabDistance);
-            _stage.ModelAnchor.position = _held + _grabOffset;
+            _stage.ModelAnchor.position = ReadAimRay(hand, offset).GetPoint(_grabDistance) + _grabOffset;
         }
 
         private static Ray ReadAimRay(Hand hand, Transform offset)
@@ -178,8 +185,10 @@ namespace ChatterMascot.Xr
             _grabbedHand = null;
 
             var anchor = _stage.ModelAnchor;
+            var collider = SyncedModelCollider();
             var landed = "none";
-            if (_planeManager != null && TryFindGroundHeight(anchor.position, _held.y, out var groundY))
+            if (_planeManager != null && collider != null &&
+                TryFindGroundHeight(anchor.position, collider.bounds.max.y, out var groundY))
             {
                 anchor.position = new Vector3(anchor.position.x, groundY, anchor.position.z);
                 landed = groundY.ToString("F2");
@@ -188,26 +197,28 @@ namespace ChatterMascot.Xr
             var faced = XrGrabRules.TryYawToFace(anchor.position, _origin.Camera.transform.position, out var yaw);
             if (faced) anchor.rotation = Quaternion.Euler(0f, yaw, 0f);
 
+            // ★ 平面への落下と向け直しは瞬間移動なので、揺れものが移動を慣性として拾わないよう戻す。
+            _stage.ResetSpringBones();
+
             Debug.Log($"[Mascot] XR grab: 離しました plane={landed} yaw={(faced ? yaw.ToString("F1") : "unchanged")}");
         }
 
         /// <summary>
-        /// <paramref name="feetWorld"/> の xz・<paramref name="heldHeightWorld"/> の高さから
+        /// <paramref name="feetWorld"/> の xz・<paramref name="searchFromYWorld"/> の高さから
         /// 真下へ探し、最も近い水平面の高さ（ワールド）を返す。無ければ false。
         ///
-        /// ★ <b>足元の高さから探さない。</b> 頭を持って下ろすと足元は天板より下に潜るので、
-        ///   足元から探すと体の下にある面ではなく床が先に見つかって落ちる。掴んでいた点は
-        ///   キャラの体の上にあるので、その高さから探せば体の下にある面が取れる。
+        /// ★ <b>足元の高さから探さない。</b> 足元は下ろすと天板に潜り、掴んだ点も足元の近くだと
+        ///   天板より下になる。当たり判定の上端から探せば、どこをつまんでいても体の下にある面が取れる。
         /// ★ <c>InverseTransformRay</c> は使わない。core-utils と ARFoundation の拡張が
         ///   衝突する（CS0121）ので、<c>InverseTransformPoint</c> / <c>InverseTransformDirection</c>
         ///   で組む。
         /// </summary>
-        private bool TryFindGroundHeight(Vector3 feetWorld, float heldHeightWorld, out float groundY)
+        private bool TryFindGroundHeight(Vector3 feetWorld, float searchFromYWorld, out float groundY)
         {
             groundY = 0f;
 
             var trackablesParent = _origin.TrackablesParent;
-            var worldOrigin = new Vector3(feetWorld.x, heldHeightWorld, feetWorld.z);
+            var worldOrigin = new Vector3(feetWorld.x, searchFromYWorld, feetWorld.z);
             var localRay = new Ray(
                 trackablesParent.InverseTransformPoint(worldOrigin),
                 trackablesParent.InverseTransformDirection(Vector3.down));

@@ -176,8 +176,32 @@ namespace ChatterMascot.Tests
         [Test]
         public void NeutralYawClampsToItsRange()
         {
-            var yaw = GazeAim.NeutralYawDegrees(Vector3.forward, Vector3.back, 1f, 30f);
+            var yaw = GazeAim.NeutralYawDegrees(Vector3.forward, Vector3.right, 1f, 30f);
             Assert.That(Mathf.Abs(yaw), Is.EqualTo(30f).Within(1e-4f));
+        }
+
+        /// <summary>
+        /// 真後ろをまたいでも首が反対側へ跳ばない。真後ろのわずか手前・わずか先の
+        /// <c>toViewer</c> は、どちらも 0 に近い小さな yaw になる（符号は反転しない）。
+        ///
+        /// ★ 期待値を <c>NeutralYawDegrees</c> と同じ式で組まないこと（このファイルの
+        ///   既存テストの方針。不変条件で検査する）。
+        /// </summary>
+        [Test]
+        public void NeutralYawDoesNotJumpAcrossDirectlyBehind()
+        {
+            var facing = Vector3.forward;
+            var justBeforeBehind = Quaternion.AngleAxis(179f, Vector3.up) * Vector3.forward;
+            var justPastBehind = Quaternion.AngleAxis(-179f, Vector3.up) * Vector3.forward;
+
+            var yawBefore = GazeAim.NeutralYawDegrees(facing, justBeforeBehind, 1f, 90f);
+            var yawPast = GazeAim.NeutralYawDegrees(facing, justPastBehind, 1f, 90f);
+
+            Assert.That(Mathf.Abs(yawBefore), Is.LessThan(3f));
+            Assert.That(Mathf.Abs(yawPast), Is.LessThan(3f));
+            Assert.That(Mathf.Abs(yawBefore - yawPast), Is.LessThan(5f));
+
+            Assert.That(GazeAim.NeutralYawDegrees(facing, Vector3.back, 1f, 90f), Is.EqualTo(0f).Within(1e-4f));
         }
 
         /// <summary><c>facing</c> / <c>toViewer</c> の水平成分がほぼ 0 なら 0（atan2 の破綻を避ける）。</summary>

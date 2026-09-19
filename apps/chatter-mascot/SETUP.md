@@ -426,7 +426,7 @@ logcat に出るはずの行:
 [Mascot] … から 19,259,304 バイト読みました: jar:file:///…/base.apk!/assets/vita.vrm   ← 同梱モデル。persistentDataPath の候補が「読めませんでした」（404）なのは正常
 [Mascot] XR: 空間固定 headLocalPosition=… → originPosition=… originYaw=…              ← XR が起動していなければ「XR: 起動していないので平面表示のまま」
 [Mascot] XR grab: 平面検知を開始しました                                              ← SCENE_UNDERSTANDING_COARSE が許可されていれば出る
-[Mascot] XR grab: 掴みました hand=right                                              ← つまんだ瞬間に1回
+[Mascot] XR grab: 掴みました hand=RightHand                                          ← つまんだ瞬間に1回
 [Mascot] XR grab: 離しました plane=… yaw=…                                           ← 離したとき。plane=none は面が見つからなかった場合
 [Mascot] 無音が続いたのでオーディオ出力を止めました                                  ← 発話が来れば「掴み直しました」が続く
 ```

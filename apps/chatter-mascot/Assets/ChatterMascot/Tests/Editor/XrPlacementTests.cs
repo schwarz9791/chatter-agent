@@ -63,6 +63,34 @@ namespace ChatterMascot.Tests
             }
         }
 
+        /// <summary>
+        /// Unity のオイラー角（X が下向き正のピッチ、Y が右回りのヨー、Z がロール）で作った頭の向きから、
+        /// ピッチとヨーをそのまま取り出せる。ロールは前方を変えないので結果に影響しない。
+        /// </summary>
+        [TestCase(0f, 0f, 0f)]
+        [TestCase(30f, 45f, 0f)]
+        [TestCase(-25f, -120f, 0f)]
+        [TestCase(60f, 170f, 20f)]
+        [TestCase(34f, 0f, -15f)]
+        public void HeadYawPitchRecoversTheEulerAngles(float pitch, float yaw, float roll)
+        {
+            XrPlacement.HeadYawPitch(Quaternion.Euler(pitch, yaw, roll), out var gotYaw, out var gotPitch);
+
+            Assert.That(NormalizeDegrees(gotYaw - yaw), Is.EqualTo(0f).Within(1e-3f));
+            Assert.That(gotPitch, Is.EqualTo(pitch).Within(1e-3f));
+        }
+
+        /// <summary>真下・真上を向いているときはヨーが決まらないので 0 にする。</summary>
+        [TestCase(90f)]
+        [TestCase(-90f)]
+        public void HeadYawPitchLookingStraightDownOrUpHasNoYaw(float pitch)
+        {
+            XrPlacement.HeadYawPitch(Quaternion.Euler(pitch, 37f, 0f), out var yaw, out var gotPitch);
+
+            Assert.That(yaw, Is.EqualTo(0f));
+            Assert.That(gotPitch, Is.EqualTo(pitch).Within(1e-3f));
+        }
+
         [Test]
         public void TiltingByZeroPitchKeepsTheOffset()
         {

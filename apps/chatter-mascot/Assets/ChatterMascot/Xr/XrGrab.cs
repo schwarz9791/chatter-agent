@@ -19,9 +19,6 @@ namespace ChatterMascot.Xr
     [DisallowMultipleComponent]
     public sealed class XrGrab : MonoBehaviour
     {
-        private const int HandCount = 2;
-        private const int LeftHand = 0;
-
         private const string HandTrackingPermission = "android.permission.HAND_TRACKING";
         private const string SceneUnderstandingCoarsePermission = "android.permission.SCENE_UNDERSTANDING_COARSE";
 
@@ -35,38 +32,10 @@ namespace ChatterMascot.Xr
 
         private ARPlaneManager _planeManager;
 
-        // ★ Hand Interaction Profile（OpenXR）のバインド。手の関節ではなく、aim レイと
-        //   pinchValue だけを読む —— 奥行きの操作は考えず、Mac のドラッグに相当する
-        //   操作にするため（つまんだレイの先に追従、離したら平面へ）。
-        private readonly InputAction[] _pointerPosition =
-        {
-            new InputAction(binding: "<HandInteraction>{LeftHand}/pointerPosition"),
-            new InputAction(binding: "<HandInteraction>{RightHand}/pointerPosition"),
-        };
+        private readonly Hand[] _hands = { new Hand("LeftHand"), new Hand("RightHand") };
 
-        private readonly InputAction[] _pointerRotation =
-        {
-            new InputAction(binding: "<HandInteraction>{LeftHand}/pointerRotation"),
-            new InputAction(binding: "<HandInteraction>{RightHand}/pointerRotation"),
-        };
-
-        private readonly InputAction[] _pinchValue =
-        {
-            new InputAction(binding: "<HandInteraction>{LeftHand}/pinchValue"),
-            new InputAction(binding: "<HandInteraction>{RightHand}/pinchValue"),
-        };
-
-        private readonly InputAction[] _isTracked =
-        {
-            new InputAction(binding: "<HandInteraction>{LeftHand}/isTracked"),
-            new InputAction(binding: "<HandInteraction>{RightHand}/isTracked"),
-        };
-
-        private readonly bool[] _pinching = new bool[HandCount];
-        private readonly float[] _lastTrackedAt = new float[HandCount];
-
-        /// <summary>掴んでいる手の index。掴んでいなければ null。</summary>
-        private int? _grabbedHand;
+        /// <summary>掴んでいる手。掴んでいなければ null。</summary>
+        private Hand _grabbedHand;
 
         /// <summary>掴んだ瞬間の、aim レイに沿ったヒット距離。</summary>
         private float _grabDistance;
@@ -81,24 +50,12 @@ namespace ChatterMascot.Xr
         {
             _origin = origin;
             _stage = stage;
-            for (var hand = 0; hand < HandCount; hand++)
-            {
-                _pointerPosition[hand].Enable();
-                _pointerRotation[hand].Enable();
-                _pinchValue[hand].Enable();
-                _isTracked[hand].Enable();
-            }
+            foreach (var hand in _hands) hand.Enable();
         }
 
         private void OnDestroy()
         {
-            for (var hand = 0; hand < HandCount; hand++)
-            {
-                _pointerPosition[hand].Dispose();
-                _pointerRotation[hand].Dispose();
-                _pinchValue[hand].Dispose();
-                _isTracked[hand].Dispose();
-            }
+            foreach (var hand in _hands) hand.Dispose();
         }
 
         private void Start()
@@ -140,10 +97,7 @@ namespace ChatterMascot.Xr
             if (_origin == null || _stage == null || _stage.Model == null) return;
 
             var offset = _origin.CameraFloorOffsetObject.transform;
-            for (var hand = 0; hand < HandCount; hand++)
-            {
-                UpdateHand(hand, offset);
-            }
+            foreach (var hand in _hands) UpdateHand(hand, offset);
         }
 
         private void EnsurePlaneManager()
@@ -157,41 +111,38 @@ namespace ChatterMascot.Xr
             Debug.Log("[Mascot] XR grab: 平面検知を開始しました");
         }
 
-        private void UpdateHand(int hand, Transform offset)
+        private void UpdateHand(Hand hand, Transform offset)
         {
-            if (_isTracked[hand].controls.Count == 0 || _isTracked[hand].ReadValue<float>() < 0.5f)
+            if (!hand.IsTracked.IsPressed())
             {
-                if (_grabbedHand == hand && Time.unscaledTime - _lastTrackedAt[hand] > TrackingGraceSeconds)
+                if (_grabbedHand == hand && Time.unscaledTime - hand.LastTrackedAt > TrackingGraceSeconds)
                 {
                     Release();
                 }
                 return;
             }
 
-            _lastTrackedAt[hand] = Time.unscaledTime;
+            hand.LastTrackedAt = Time.unscaledTime;
 
-            var wasPinching = _pinching[hand];
-            var pinchValue = _pinchValue[hand].controls.Count > 0 ? _pinchValue[hand].ReadValue<float>() : 0f;
-            _pinching[hand] = XrGrabRules.IsPinching(wasPinching, pinchValue);
+            var wasPinching = hand.Pinching;
+            hand.Pinching = XrGrabRules.IsPinching(wasPinching, hand.PinchValue.ReadValue<float>());
 
             if (_grabbedHand == null)
             {
                 // ★ つまみに「入った瞬間」だけを契機にする。つまんだままレイを動かして
                 //   キャラに当てても掴まない（意図しない掴みを防ぐ）。
-                if (!wasPinching && _pinching[hand]) TryGrab(hand, offset);
+                if (!wasPinching && hand.Pinching) TryGrab(hand, offset);
                 return;
             }
 
             if (_grabbedHand != hand) return;
 
-            if (_pinching[hand]) UpdateHeld(hand, offset);
+            if (hand.Pinching) UpdateHeld(hand, offset);
             else Release();
         }
 
-        private void TryGrab(int hand, Transform offset)
+        private void TryGrab(Hand hand, Transform offset)
         {
-            if (_pointerPosition[hand].controls.Count == 0) return;
-
             var ray = ReadAimRay(hand, offset);
 
             // ★ 直前のフレームでキャラを動かしていると、Raycast がそれを見ない
@@ -205,20 +156,20 @@ namespace ChatterMascot.Xr
             _grabDistance = hit.distance;
             _grabOffset = _stage.ModelAnchor.position - hit.point;
             _held = hit.point;
-            Debug.Log($"[Mascot] XR grab: 掴みました hand={(hand == LeftHand ? "left" : "right")}");
+            Debug.Log($"[Mascot] XR grab: 掴みました hand={hand.Name}");
         }
 
-        private void UpdateHeld(int hand, Transform offset)
+        private void UpdateHeld(Hand hand, Transform offset)
         {
             var ray = ReadAimRay(hand, offset);
             _held = ray.GetPoint(_grabDistance);
             _stage.ModelAnchor.position = _held + _grabOffset;
         }
 
-        private Ray ReadAimRay(int hand, Transform offset)
+        private static Ray ReadAimRay(Hand hand, Transform offset)
         {
-            var position = offset.TransformPoint(_pointerPosition[hand].ReadValue<Vector3>());
-            var rotation = _pointerRotation[hand].ReadValue<Quaternion>();
+            var position = offset.TransformPoint(hand.PointerPosition.ReadValue<Vector3>());
+            var rotation = hand.PointerRotation.ReadValue<Quaternion>();
             return new Ray(position, offset.TransformDirection(rotation * Vector3.forward));
         }
 
@@ -276,6 +227,57 @@ namespace ChatterMascot.Xr
             }
 
             return found;
+        }
+
+        /// <summary>
+        /// 片手ぶんの入力と、つまみの状態。
+        ///
+        /// ★ Hand Interaction Profile（OpenXR）のバインド。手の関節ではなく、aim レイと
+        ///   pinchValue だけを読む —— 奥行きの操作は考えず、Mac のドラッグに相当する
+        ///   操作にするため（つまんだレイの先に追従、離したら平面へ）。
+        /// ★ バインドが解決していない（手の入力が無い）ときは、どのアクションも既定値を返し
+        ///   <c>IsPressed()</c> は false になるので、追跡していない手として扱われる。
+        /// </summary>
+        private sealed class Hand
+        {
+            /// <summary>バインドの usage 名（<c>LeftHand</c> / <c>RightHand</c>）。</summary>
+            public readonly string Name;
+
+            public readonly InputAction PointerPosition;
+            public readonly InputAction PointerRotation;
+            public readonly InputAction PinchValue;
+            public readonly InputAction IsTracked;
+
+            public bool Pinching;
+            public float LastTrackedAt;
+
+            public Hand(string name)
+            {
+                Name = name;
+                PointerPosition = Bind("pointerPosition");
+                PointerRotation = Bind("pointerRotation");
+                PinchValue = Bind("pinchValue");
+                IsTracked = Bind("isTracked");
+            }
+
+            private InputAction Bind(string control) =>
+                new InputAction(binding: $"<HandInteraction>{{{Name}}}/{control}");
+
+            public void Enable()
+            {
+                PointerPosition.Enable();
+                PointerRotation.Enable();
+                PinchValue.Enable();
+                IsTracked.Enable();
+            }
+
+            public void Dispose()
+            {
+                PointerPosition.Dispose();
+                PointerRotation.Dispose();
+                PinchValue.Dispose();
+                IsTracked.Dispose();
+            }
         }
     }
 }

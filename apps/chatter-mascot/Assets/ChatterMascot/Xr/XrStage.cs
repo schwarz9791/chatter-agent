@@ -151,14 +151,12 @@ namespace ChatterMascot.Xr
         {
             private XROrigin _origin;
             private VrmStage _stage;
-            private Transform _modelAnchor;
             private MascotSettings _settings;
 
             public void Begin(XROrigin origin, VrmStage stage, MascotSettings settings)
             {
                 _origin = origin;
                 _stage = stage;
-                _modelAnchor = stage.ModelAnchor;
                 _settings = settings;
                 StartCoroutine(WaitThenPlace());
             }
@@ -226,18 +224,12 @@ namespace ChatterMascot.Xr
 
             private void Place(Vector3 headLocalPosition, Quaternion headLocalRotation)
             {
-                var forward = headLocalRotation * Vector3.forward;
-                var horizontal = new Vector3(forward.x, 0f, forward.z);
-                var headLocalYaw = horizontal.sqrMagnitude > 1e-6f
-                    ? Mathf.Atan2(forward.x, forward.z) * Mathf.Rad2Deg
-                    : 0f;
-                var headLocalPitch = Mathf.Atan2(-forward.y, horizontal.magnitude) * Mathf.Rad2Deg;
-
+                XrPlacement.HeadYawPitch(headLocalRotation, out var headLocalYaw, out var headLocalPitch);
                 XrPlacement.TiltByHeadPitch(
                     _settings.XrDistance, _settings.XrFeetBelowEye, headLocalPitch,
                     out var distance, out var feetBelowEye);
                 XrPlacement.Solve(
-                    headLocalPosition, headLocalYaw, _modelAnchor.position,
+                    headLocalPosition, headLocalYaw, _stage.ModelAnchor.position,
                     distance, _settings.XrAzimuth, feetBelowEye,
                     out var originPosition, out var originYawDegrees);
 

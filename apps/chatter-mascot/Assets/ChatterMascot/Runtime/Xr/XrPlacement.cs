@@ -20,6 +20,20 @@ namespace ChatterMascot.Xr
         public const float MinHorizontalDistance = 0.2f;
 
         /// <summary>
+        /// 頭の向きから、前方を水平面に投影したヨーと、上下の傾き（度）を出す。
+        /// 真上・真下を向いていて前方が水平面に投影できないときのヨーは 0。
+        /// </summary>
+        /// <param name="yawDegrees">+Z から右回りが正</param>
+        /// <param name="pitchDegrees">下向きが正（<see cref="TiltByHeadPitch"/> と同じ向き）</param>
+        public static void HeadYawPitch(Quaternion headRotation, out float yawDegrees, out float pitchDegrees)
+        {
+            var forward = headRotation * Vector3.forward;
+            var horizontal = new Vector3(forward.x, 0f, forward.z);
+            yawDegrees = horizontal.sqrMagnitude > 1e-6f ? Mathf.Atan2(forward.x, forward.z) * Mathf.Rad2Deg : 0f;
+            pitchDegrees = Mathf.Atan2(-forward.y, horizontal.magnitude) * Mathf.Rad2Deg;
+        }
+
+        /// <summary>
         /// 目から足元へのずれ（水平 <paramref name="distance"/>・下へ <paramref name="feetBelowEye"/>）を、
         /// 頭の上下の傾きぶん回す。見下ろして起動しても、視界の同じ位置にキャラが出るようにするため。
         /// 回すのはずれの向きだけで、キャラ自身は傾けない（Origin はヨーしか回さない）。

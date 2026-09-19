@@ -18,7 +18,7 @@ Android XR グラス（XREAL Aura）の両方をここからビルドする。
 | VRM | [UniVRM](https://github.com/vrm-c/UniVRM) |
 | ウィンドウ制御（macOS） | [UniWindowController](https://github.com/kirurobo/UniWindowController) `com.kirurobo.uniwinc`（MIT） |
 | JSON | `com.unity.nuget.newtonsoft-json` |
-| XR（Android のみ） | `com.unity.xr.androidxr-openxr`（Android XR Extensions for Unity は入れていない → [#119](https://github.com/schwarz9791/chatter-agent/issues/119)） |
+| XR（Android のみ） | `com.unity.xr.androidxr-openxr`（Android XR Extensions for Unity は入れない → [#119](https://github.com/schwarz9791/chatter-agent/issues/119)） |
 | グラフィックス API | Metal（macOS）/ Android は **Vulkan 単独**（URP で Android XR を使うときの必須設定。[#99](https://github.com/schwarz9791/chatter-agent/issues/99)） |
 | 常駐（macOS のみ） | **自作の Objective-C プラグイン** `Assets/Plugins/macOS~/ChatterMascotNative/`（→ [#75](https://github.com/schwarz9791/chatter-agent/issues/75)） |
 
@@ -435,7 +435,8 @@ logcat に出るはずの行:
 （アプリは落ちず、#99 の配置のまま動く）。
 
 置き直しを確かめるには: 初回起動で出る権限ダイアログで **Allow**。エミュレータはツールバーの入力モードを
-**Hand tracking** にし、キャラクターの上でドラッグする。権限を試し直すときは
+**Hand tracking** にし、キャラクターの上でドラッグする。部屋（シミュレートされた室内）を見るには、
+目のアイコンのスライダー（Environment Visibility）で濃さを下げる。権限を試し直すときは
 `adb shell pm grant|revoke tech.sukima.chattermascot android.permission.HAND_TRACKING`
 （`SCENE_UNDERSTANDING_COARSE` も同様）。
 

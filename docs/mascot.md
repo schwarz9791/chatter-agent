@@ -4291,8 +4291,8 @@ Android のログは `adb logcat -s Unity`。★★ **Android では 401 と「�
 Android ビルドは OpenXR（`com.unity.xr.androidxr-openxr`）で Full Space に入り、キャラクターを空間に固定して立たせる
 （[#99](https://github.com/schwarz9791/chatter-agent/issues/99)）。起動後は手でつまんで置き直せる
 （[#121](https://github.com/schwarz9791/chatter-agent/issues/121)。→ 下「キャラを手で置き直す」）。
-Android XR Extensions for Unity（`com.google.xr.extensions`）は入れていない
-（→ [#119](https://github.com/schwarz9791/chatter-agent/issues/119)）。
+背景は environment blend mode を ADDITIVE にして部屋を透かす（→ 下「背景に部屋を透かす」）。
+Android XR Extensions for Unity（`com.google.xr.extensions`）は入れない（[#119](https://github.com/schwarz9791/chatter-agent/issues/119)。理由も同じ節）。
 実機（XREAL Aura）での見え方・視野・距離感は [#100](https://github.com/schwarz9791/chatter-agent/issues/100)。
 
 ### 空間配置の決めごと
@@ -4385,6 +4385,31 @@ feature が有効なときにしかマニフェストへ書かない。
 置いた位置は残らない（再起動で #99 の配置に戻る。永続化は
 [#122](https://github.com/schwarz9791/chatter-agent/issues/122)）。
 
+### 背景に部屋を透かす（environment blend mode。[#119](https://github.com/schwarz9791/chatter-agent/issues/119)）
+
+**グラスでは environment blend mode を ADDITIVE にする。** 描かなかった所（カメラの背景はアルファ 0 の黒）から
+部屋が見える。自前の OpenXR feature（`XrAdditiveBlendFeature`）が `OnEnvironmentBlendModeChange` で ADDITIVE を
+要求し、ランタイムが戻しても付け直す。ADDITIVE を持たないランタイム（ヘッドセット）では要求しても既定のまま。
+
+★★ **グラスのランタイムは OPAQUE / ADDITIVE しか持たず、既定は OPAQUE。** `XR_Glasses` のログに
+`Available Environment Blend Modes: (2)` → `XR_ENVIRONMENT_BLEND_MODE_OPAQUE (Selected)` /
+`XR_ENVIRONMENT_BLEND_MODE_ADDITIVE` と出る。OPAQUE のままだと背景は黒く、エミュレータの減光
+（Environment Visibility）のスライダーも動かせない。
+
+★ **AR Camera（`ARCameraFeature` + `ARCameraManager`。パッケージの「パススルー」）では代わりにならない。**
+あちらは ALPHA_BLEND を要求するが、グラスには無いので OPAQUE に戻される。
+
+★ **Extensions は要らない。** Extensions の Environment Blend Mode 機能は 1.3.0 で削除され、「Unity OpenXR
+Android XR の AR Camera を使え」とある。Extensions の Passthrough は「メッシュ形の穴」で、背景全体ではない。
+さらに 1.3.1 はマニフェストに大文字の `android.software.xr.api.SPATIAL`（`required="true"`）を混ぜる
+（`androidxr-openxr` 1.4.1 が直したのと同じバグ。1.3.2 で修正）。
+
+★ 加算合成なので、キャラクターは暗い所ほど透けて見える。光学シースルーのグラスの見え方そのもの
+（実機での見え方は #100）。
+
+★ **自前の OpenXR feature は、設定アセットに登録されるまで `GetFeature<T>()` で見つからない。** batchmode の
+`FixAll` は Editor の UI を開かないので、先に `FeatureHelpers.RefreshFeatures(BuildTargetGroup.Android)` を呼ぶ。
+
 ### ★★ XR Origin のトラッキング原点が切り替わる前に、頭の姿勢を読まない
 
 `XROrigin` に `Device` を要求しても、切り替わるのは有効化の数フレーム後。その前はランタイム既定の原点
@@ -4451,7 +4476,7 @@ UniVRM の spring bone は、**コライダーの半径は毎フレーム `lossy
 | `XR_Headset2`（Google Play XR API v1） | アプリは `READY` まで進むが、`com.android.systemui` が `Buffer processing hung up due to stuck fence. Indicates GPU hang` で ANR する。**使わない** |
 
 - スワップチェーンはテクスチャ配列が `XR_ERROR_FEATURE_UNSUPPORTED` で一度失敗し、配列なしに落ちて描ける
-- **背景は黒く、部屋は見えない。** 原因は切り分けていない（→ #119 / #100）。光学シースルーの実機では黒は透明
+- 背景は黒く、部屋は見えなかった。原因は environment blend mode が OPAQUE のままだったこと（→「背景に部屋を透かす」。2026-09-19 に ADDITIVE にして見えるようになった）
 - `adb exec-out screencap -p` で撮ると、グラスの表示視野の外は黒く切り落とされて写る
 - エミュレータのウィンドウでは、視野の中央でもキャラクターがやや縦につぶれて見える。`screencap` の画像（正方形）では比率は自然で、ディスプレイ（1920×1200）と片目の推奨描画サイズ（2560×2558）の縦横比が違う。実機での比率は #100
 - 新しい APK の初回起動は、Home Space のときと同じく 30 秒以上白い
@@ -4465,7 +4490,9 @@ UniVRM の spring bone は、**コライダーの半径は毎フレーム `lossy
 - 平面はエミュレータでも来る（`HorizontalUp` が4枚）。いちばん低い面（床）は目の高さからかなり下にあり、
   そこへ落とすとグラスの視野の外に出る（下を向けば見える）
 - Hand tracking モードでは、aim がマウスを追い、クリック／ドラッグで `pinchValue` が 0 → 1。右手のみ
-- 掴んで動かせる／何も無いところでは掴まない／離すと平面（床）に乗ってこちらを向く／見下ろすと顔が
+- ADDITIVE にすると部屋（シミュレートされた室内）が見え、目のアイコンのスライダー（Environment Visibility）で
+  濃さを変えられる。離したキャラが机（`plane=-0.39`）と床（`plane=-0.87`）のどちらにも乗ることを目視で確かめた
+- 掴んで動かせる／何も無いところでは掴まない／離すと平面に乗ってこちらを向く／見下ろすと顔が
   上を向いてこちらを見る／横へドラッグすると（体は離すまで向きを変えない）首がこちらへ回る、を確認した
 - 権限を拒否（今後表示しない）しても落ちず、#99 の配置のまま。権限エラーは出続けない
 
@@ -4473,7 +4500,7 @@ UniVRM の spring bone は、**コライダーの半径は毎フレーム `lossy
 
 | 項目 | 値 | なぜ |
 |---|---|---|
-| XR Plug-in Management | **Android にだけ** OpenXR ローダー。feature は Android XR Support / Hand Interaction Profile / Android XR: Session / Android XR: Planes の4つ | Standalone に割り当てないので macOS ビルドは変わらない。Session は Planes の Project Validation が要求するので有効化する（有効にすると、パッケージが `OpenXRLifeCycleFeature` も連動して有効にする） |
+| XR Plug-in Management | **Android にだけ** OpenXR ローダー。feature は Android XR Support / Hand Interaction Profile / Android XR: Session / Android XR: Planes と、自前の Chatter Mascot: Additive Blend の5つ | Standalone に割り当てないので macOS ビルドは変わらない。Session は Planes の Project Validation が要求するので有効化する（有効にすると、パッケージが `OpenXRLifeCycleFeature` も連動して有効にする） |
 | Graphics API（Android） | **Vulkan 単独** | URP で Android XR を使うときの必須設定 |
 | `Mobile_Renderer` の Post Processing | **無効**（`postProcessData` を外す） | Project Validation の error。`PC_Renderer` は触らない |
 

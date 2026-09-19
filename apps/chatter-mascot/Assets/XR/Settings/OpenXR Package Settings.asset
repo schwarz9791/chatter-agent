@@ -411,6 +411,7 @@ MonoBehaviour:
   - {fileID: 5939187315012853699}
   - {fileID: -6887170230800326880}
   - {fileID: -6486611718508666667}
+  - {fileID: -199219415761312256}
   customLoaderName: 
   m_renderMode: 1
   m_latencyOptimization: 0
@@ -891,6 +892,28 @@ MonoBehaviour:
   featureIdInternal: com.unity.openxr.feature.input.handinteractionposes
   openxrExtensionStrings: XR_EXT_hand_interaction
   company: Unity
+  priority: 0
+  targetOpenXRApiVersion: 
+  required: 0
+  customRuntimeLoaderName: 
+--- !u!114 &-199219415761312256
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8edbae34f7bf4433082c506fb4703a9c, type: 3}
+  m_Name: XrAdditiveBlendFeature Android
+  m_EditorClassIdentifier: ChatterMascot.Xr::ChatterMascot.Xr.XrAdditiveBlendFeature
+  m_enabled: 1
+  nameUi: 'Chatter Mascot: Additive Blend'
+  version: 0.1.0
+  featureIdInternal: tech.sukima.chattermascot.additive-blend
+  openxrExtensionStrings: 
+  company: sukima.tech
   priority: 0
   targetOpenXRApiVersion: 
   required: 0

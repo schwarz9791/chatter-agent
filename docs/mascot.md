@@ -4298,6 +4298,8 @@ Android XR Extensions for Unity（`com.google.xr.extensions`）は入れない�
 ### 空間配置の決めごと
 
 1. **空間固定。起動時に1回だけ、頭の姿勢を基準に置く。以後 XR Origin は動かさない。**
+   頭の上下の傾きも使う —— 目から足元へのずれをその傾きぶん回すので、見下ろして起動しても視界の同じ位置に
+   出る（`XrPlacement.TiltByHeadPitch`。足元が頭の真下に来るとキャラが頭の方を向けないので、水平距離に下限がある）。
    キャラクターの置き直し（[#121](https://github.com/schwarz9791/chatter-agent/issues/121)。→ 下）は
    手でつまんで行う操作で、頭には追従させない。頭に追従させると、
    [#71](https://github.com/schwarz9791/chatter-agent/issues/71) で歩かせたときに相対位置が二重に動く

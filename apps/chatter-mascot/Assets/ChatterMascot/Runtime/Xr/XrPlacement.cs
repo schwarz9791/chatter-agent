@@ -13,6 +13,30 @@ namespace ChatterMascot.Xr
     /// </summary>
     public static class XrPlacement
     {
+        /// <summary>
+        /// 目からキャラまでの水平距離の下限（メートル）。キャラが頭の方を向くには、頭がキャラから
+        /// 水平に離れている必要がある（真下や真上では向きが決まらない）。
+        /// </summary>
+        public const float MinHorizontalDistance = 0.2f;
+
+        /// <summary>
+        /// 目から足元へのずれ（水平 <paramref name="distance"/>・下へ <paramref name="feetBelowEye"/>）を、
+        /// 頭の上下の傾きぶん回す。見下ろして起動しても、視界の同じ位置にキャラが出るようにするため。
+        /// 回すのはずれの向きだけで、キャラ自身は傾けない（Origin はヨーしか回さない）。
+        /// </summary>
+        /// <param name="pitchDegrees">頭の上下の傾き（度）。下向きが正</param>
+        public static void TiltByHeadPitch(
+            float distance, float feetBelowEye, float pitchDegrees,
+            out float tiltedDistance, out float tiltedFeetBelowEye)
+        {
+            var pitch = pitchDegrees * Mathf.Deg2Rad;
+            var cos = Mathf.Cos(pitch);
+            var sin = Mathf.Sin(pitch);
+
+            tiltedDistance = Mathf.Max(distance * cos - feetBelowEye * sin, MinHorizontalDistance);
+            tiltedFeetBelowEye = feetBelowEye * cos + distance * sin;
+        }
+
         /// <param name="headLocalPosition">XR Origin 空間での頭の位置</param>
         /// <param name="headLocalYawDegrees">同じ空間で、頭の前方を水平面に投影したヨー（度）</param>
         /// <param name="characterFeet">キャラクター（<c>ModelAnchor</c>）のワールド位置</param>

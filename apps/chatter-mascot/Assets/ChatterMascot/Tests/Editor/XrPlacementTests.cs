@@ -63,6 +63,46 @@ namespace ChatterMascot.Tests
             }
         }
 
+        [Test]
+        public void TiltingByZeroPitchKeepsTheOffset()
+        {
+            XrPlacement.TiltByHeadPitch(0.6f, 0.2f, 0f, out var distance, out var feetBelowEye);
+
+            Assert.That(distance, Is.EqualTo(0.6f).Within(Tolerance));
+            Assert.That(feetBelowEye, Is.EqualTo(0.2f).Within(Tolerance));
+        }
+
+        /// <summary>
+        /// 下限に掛からない範囲では、目から足元までの長さを保ったまま、見下ろす角度が
+        /// ちょうど pitch だけ増える（見上げれば減る）。
+        /// </summary>
+        [TestCase(0.6f, 0.2f, 30f)]
+        [TestCase(0.6f, 0.2f, -25f)]
+        [TestCase(2.0f, 1.2f, 10f)]
+        [TestCase(2.0f, 1.2f, -40f)]
+        public void TiltingRotatesTheOffsetByThePitch(float distance, float feetBelowEye, float pitch)
+        {
+            XrPlacement.TiltByHeadPitch(distance, feetBelowEye, pitch, out var tiltedDistance, out var tiltedFeetBelowEye);
+
+            // ★ 期待値を TiltByHeadPitch と同じ式で組まないこと。長さと角度（atan2）で検査する
+            Assert.That(new Vector2(tiltedDistance, tiltedFeetBelowEye).magnitude,
+                Is.EqualTo(new Vector2(distance, feetBelowEye).magnitude).Within(Tolerance));
+
+            var depression = Mathf.Atan2(feetBelowEye, distance) * Mathf.Rad2Deg;
+            var tiltedDepression = Mathf.Atan2(tiltedFeetBelowEye, tiltedDistance) * Mathf.Rad2Deg;
+            Assert.That(tiltedDepression - depression, Is.EqualTo(pitch).Within(1e-3f));
+        }
+
+        /// <summary>真下を見て起動しても、キャラが頭の方を向けるだけの水平距離は残す。</summary>
+        [TestCase(80f)]
+        [TestCase(90f)]
+        public void TiltingNeverPutsTheFeetDirectlyBelowTheHead(float pitch)
+        {
+            XrPlacement.TiltByHeadPitch(0.6f, 0.2f, pitch, out var distance, out _);
+
+            Assert.That(distance, Is.EqualTo(XrPlacement.MinHorizontalDistance).Within(Tolerance));
+        }
+
         private static float NormalizeDegrees(float degrees)
         {
             var wrapped = degrees % 360f;

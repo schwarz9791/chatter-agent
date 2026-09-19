@@ -227,22 +227,25 @@ namespace ChatterMascot.Xr
             private void Place(Vector3 headLocalPosition, Quaternion headLocalRotation)
             {
                 var forward = headLocalRotation * Vector3.forward;
-                forward.y = 0f;
-                var headLocalYaw = forward.sqrMagnitude > 1e-6f
+                var horizontal = new Vector3(forward.x, 0f, forward.z);
+                var headLocalYaw = horizontal.sqrMagnitude > 1e-6f
                     ? Mathf.Atan2(forward.x, forward.z) * Mathf.Rad2Deg
                     : 0f;
+                var headLocalPitch = Mathf.Atan2(-forward.y, horizontal.magnitude) * Mathf.Rad2Deg;
 
+                XrPlacement.TiltByHeadPitch(
+                    _settings.XrDistance, _settings.XrFeetBelowEye, headLocalPitch,
+                    out var distance, out var feetBelowEye);
                 XrPlacement.Solve(
                     headLocalPosition, headLocalYaw, _modelAnchor.position,
-                    _settings.XrDistance, _settings.XrAzimuth, _settings.XrFeetBelowEye,
+                    distance, _settings.XrAzimuth, feetBelowEye,
                     out var originPosition, out var originYawDegrees);
 
                 _origin.transform.SetPositionAndRotation(originPosition, Quaternion.Euler(0f, originYawDegrees, 0f));
 
                 Debug.Log("[Mascot] XR: 空間固定 " +
-                          $"headLocalPosition={headLocalPosition} headLocalYaw={headLocalYaw:F1} " +
-                          $"distance={_settings.XrDistance:F2} azimuth={_settings.XrAzimuth:F1} " +
-                          $"feetBelowEye={_settings.XrFeetBelowEye:F2} → " +
+                          $"headLocalPosition={headLocalPosition} headLocalYaw={headLocalYaw:F1} headLocalPitch={headLocalPitch:F1} " +
+                          $"distance={distance:F2} azimuth={_settings.XrAzimuth:F1} feetBelowEye={feetBelowEye:F2} → " +
                           $"originPosition={originPosition} originYaw={originYawDegrees:F1}");
 
                 // ★ 配置の後にすること。配置前につまむと、XrPlacement.Solve が動く前の

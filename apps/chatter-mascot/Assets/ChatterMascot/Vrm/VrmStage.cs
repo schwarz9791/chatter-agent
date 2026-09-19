@@ -166,6 +166,13 @@ namespace ChatterMascot.Vrm
             if (Model != null) Invoke(handler, Model);
         }
 
+        /// <summary>
+        /// 揺れもの（spring bone）を静止形に戻し速度を捨てる。
+        ///
+        /// ★ キャラを瞬間移動させた後に呼ぶと、移動を慣性として拾って揺れものが振り回されない。
+        /// </summary>
+        public void ResetSpringBones() => _instance?.Runtime?.SpringBone?.RestoreInitialTransform();
+
         private void Start()
         {
             // ★ 読み込みより前に見ること。読んでから気づくと
@@ -394,7 +401,7 @@ namespace ChatterMascot.Vrm
             {
                 _framePending = false;
                 // ★ 読み込み中に積もった deltaTime で髪が吹き飛ぶのを戻す
-                _instance?.Runtime?.SpringBone?.RestoreInitialTransform();
+                ResetSpringBones();
                 Remeasure();
                 _nextBoneRecheckAt = Time.realtimeSinceStartup + BoneRecheckIntervalSeconds;
                 return;
@@ -601,17 +608,18 @@ namespace ChatterMascot.Vrm
         ///
         /// ★ <b><c>center</c> はローカル、<c>bounds</c> はワールド</b>なので
         ///   <c>InverseTransformPoint</c> を通す。<b><c>height</c> / <c>radius</c> は
-        ///   <c>lossyScale</c> で実行時にさらに掛けられる</b>ので、<c>ModelAnchor</c> に
-        ///   等倍以外のスケールを入れると当たり判定だけ二重に拡縮される
-        ///   （当たり判定を使うのは等倍のデスクトップだけなので表面化しない）。
+        ///   <c>lossyScale</c> で実行時にさらに掛けられる</b>ので、<c>UniformedLossyScale()</c> で
+        ///   あらかじめ割っておく（XR で <c>ModelAnchor</c> を拡縮しても、ワールド寸法のまま
+        ///   当たり判定を保つため。等倍のデスクトップでは割っても値は変わらない）。
         /// </summary>
         private static void FitCollider(CapsuleCollider collider, Bounds bounds)
         {
             if (collider == null) return;
 
+            var scale = collider.transform.UniformedLossyScale();
             collider.center = collider.transform.InverseTransformPoint(bounds.center);
-            collider.height = Mathf.Max(bounds.size.y, 0.01f);
-            collider.radius = Mathf.Max(bounds.extents.z, 0.01f);
+            collider.height = Mathf.Max(bounds.size.y, 0.01f) / scale;
+            collider.radius = Mathf.Max(bounds.extents.z, 0.01f) / scale;
         }
 
         /// <summary>

@@ -18,7 +18,7 @@ Android XR グラス（XREAL Aura）の両方をここからビルドする。
 | VRM | [UniVRM](https://github.com/vrm-c/UniVRM) |
 | ウィンドウ制御（macOS） | [UniWindowController](https://github.com/kirurobo/UniWindowController) `com.kirurobo.uniwinc`（MIT） |
 | JSON | `com.unity.nuget.newtonsoft-json` |
-| XR（Android のみ） | `com.unity.xr.androidxr-openxr`（Android XR Extensions for Unity は入れていない → [#119](https://github.com/schwarz9791/chatter-agent/issues/119)） |
+| XR（Android のみ） | `com.unity.xr.androidxr-openxr`（Android XR Extensions for Unity は入れない → [#119](https://github.com/schwarz9791/chatter-agent/issues/119)） |
 | グラフィックス API | Metal（macOS）/ Android は **Vulkan 単独**（URP で Android XR を使うときの必須設定。[#99](https://github.com/schwarz9791/chatter-agent/issues/99)） |
 | 常駐（macOS のみ） | **自作の Objective-C プラグイン** `Assets/Plugins/macOS~/ChatterMascotNative/`（→ [#75](https://github.com/schwarz9791/chatter-agent/issues/75)） |
 
@@ -230,6 +230,7 @@ Assets/ChatterMascot/
     Vrm/        AssetPath.cs        ★ .vrm / .vrma の探索順（純粋。下の表）
                 VrmFraming.cs       ★ 画面に収まるカメラ距離（純粋）
     Xr/         XrPlacement.cs      ★ 起動時の頭の姿勢 → XR Origin の配置（純粋。#99）
+                XrGrabRules.cs      ★ つまみのヒステリシスと、離したときの向き（純粋。#121）
     CommandLine.cs                  起動引数（-serverUrl / -vrm / -buildScene が共有）
     FrameRateBudget.cs              フレームレート上限の「戻す先」と「一時的に借りる」
     MascotRunner.cs                 ドライバ。コマンドを実行して結果をイベントで戻す
@@ -240,6 +241,7 @@ Assets/ChatterMascot/
     AssetEnvFactory.cs              Application を触る唯一の場所
   Xr/                               ChatterMascot.Xr — Editor + Android のみ（#99）
     XrStage.cs                      ★ XR が起動したときだけ XR Origin を組んで空間固定する（シーンに置かない）
+    XrGrab.cs                       ★ 手でつまんで置き直す。配置の直後に生やす（シーンに置かない。#121）
   Desktop/                          ChatterMascot.Desktop — Editor + macOS/Windows のみ
     DragHandles.cs                  「Collider を持つものに UniWindowMoveHandle」
     VrmDragHandleBinder.cs          ★ MonoBehaviour にしない（下記）
@@ -423,11 +425,25 @@ logcat に出るはずの行:
 [Mascot] server: ws://127.0.0.1:8570 / audio: http://127.0.0.1:8570/audio/
 [Mascot] … から 19,259,304 バイト読みました: jar:file:///…/base.apk!/assets/vita.vrm   ← 同梱モデル。persistentDataPath の候補が「読めませんでした」（404）なのは正常
 [Mascot] XR: 空間固定 headLocalPosition=… → originPosition=… originYaw=…              ← XR が起動していなければ「XR: 起動していないので平面表示のまま」
+[Mascot] XR grab: 平面検知を開始しました                                              ← SCENE_UNDERSTANDING_COARSE が許可されていれば出る
+[Mascot] XR grab: 掴みました hand=RightHand                                          ← つまんだ瞬間に1回
+[Mascot] XR grab: 離しました plane=… yaw=…                                           ← 離したとき。plane=none は面が見つからなかった場合
 [Mascot] 無音が続いたのでオーディオ出力を止めました                                  ← 発話が来れば「掴み直しました」が続く
 ```
 
+権限が拒否されると `[Mascot] XR grab: android.permission.HAND_TRACKING が拒否されました` の警告が出る
+（アプリは落ちず、#99 の配置のまま動く）。
+
+置き直しを確かめるには: 初回起動で出る権限ダイアログで **Allow**。エミュレータはツールバーの入力モードを
+**Hand tracking** にし、キャラクターの上でドラッグする。部屋（シミュレートされた室内）を見るには、
+目のアイコンのスライダー（Environment Visibility）で濃さを下げる。権限を試し直すときは
+`adb shell pm grant|revoke tech.sukima.chattermascot android.permission.HAND_TRACKING`
+（`SCENE_UNDERSTANDING_COARSE` も同様）。
+
 ★ **キャラクターの大きさと置き場所は端末の `settings.json` の `xr` で変える**（Android に設定 UI は無い）。
-既定は机の上のミニチュア。等身大で床に立たせるなら、たとえば:
+これは**起動時の置き場所**で、既定は机の上のミニチュア。起動後は手でつまんで置き直せるが
+（→ 上）、**その位置は再起動で戻る**（永続化は [#122](https://github.com/schwarz9791/chatter-agent/issues/122)）。
+等身大で床に立たせるなら、たとえば:
 
 ```bash
 ADB=~/Library/Android/sdk/platform-tools/adb
@@ -440,6 +456,10 @@ $ADB shell am force-stop tech.sukima.chattermascot   # 起動時に1回だけ読
 
 `scale` は身長の倍率（0.05〜1.0）、`distance` は目からの水平距離（m）、`azimuth` は起動時の正面から
 右回りの角度（度）、`feetBelowEye` は足元が目より何 m 下か。範囲外は警告して既定に戻る。
+`distance` / `feetBelowEye` は頭を水平にして起動したときの値で、上下を向いて起動すると、目から足元への
+ずれをその傾きぶん回した位置に出る（見下ろして起動しても視界の同じ位置に出る。キャラ自身は傾かない）。
+そのぶん `feetBelowEye` は床の高さを表さなくなる。**上の等身大の例で床に立たせるなら、頭を水平にして起動すること**
+（見下ろすと床に沈み、見上げると浮く）。
 ★ **グラスの表示視野は狭い。** 方位や下への深さを大きくすると、描けていても視野の縁で切れて見えない
 
 ★★ **macOS のマスコットと同じサーバーへ同時に繋がないこと。** ack は累積で、速い方の ack が

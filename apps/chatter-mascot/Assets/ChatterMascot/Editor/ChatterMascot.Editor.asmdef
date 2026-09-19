@@ -5,6 +5,7 @@
         "ChatterMascot.Runtime",
         "ChatterMascot.Vrm",
         "ChatterMascot.Desktop",
+        "ChatterMascot.Xr",
         "VRM10",
         "UniGLTF",
         "UniGLTF.Utils",
@@ -13,6 +14,7 @@
         "Unity.XR.Management",
         "Unity.XR.Management.Editor",
         "Unity.XR.OpenXR",
+        "Unity.XR.OpenXR.Editor",
         "Unity.XR.AndroidOpenXR",
         "Unity.XR.CoreUtils.Editor"
     ],

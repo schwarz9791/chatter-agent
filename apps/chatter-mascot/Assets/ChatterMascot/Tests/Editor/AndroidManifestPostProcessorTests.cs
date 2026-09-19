@@ -43,6 +43,19 @@ namespace ChatterMascot.Tests
         }
 
         [Test]
+        public void AddsHandTrackingToABareManifest()
+        {
+            var document = BuildManifest();
+
+            AndroidManifestPostProcessor.Apply(document);
+
+            Assert.That(
+                document.Root.Elements("uses-permission")
+                    .Any(e => e.Attribute(AndroidNs + "name")?.Value == "android.permission.HAND_TRACKING"),
+                Is.True);
+        }
+
+        [Test]
         public void SecondApplyIsANoOp()
         {
             var document = BuildManifest();
@@ -66,16 +79,18 @@ namespace ChatterMascot.Tests
         }
 
         [Test]
-        public void DoesNotDuplicateAnExistingInternetPermission()
+        public void DoesNotDuplicateExistingPermissions()
         {
             var document = BuildManifest(cleartext: "true");
             document.Root.Add(new XElement(
                 "uses-permission", new XAttribute(AndroidNs + "name", "android.permission.INTERNET")));
+            document.Root.Add(new XElement(
+                "uses-permission", new XAttribute(AndroidNs + "name", "android.permission.HAND_TRACKING")));
 
             var changed = AndroidManifestPostProcessor.Apply(document);
 
             Assert.That(changed, Is.False);
-            Assert.That(document.Root.Elements("uses-permission").Count(), Is.EqualTo(1));
+            Assert.That(document.Root.Elements("uses-permission").Count(), Is.EqualTo(2));
         }
 
         [Test]

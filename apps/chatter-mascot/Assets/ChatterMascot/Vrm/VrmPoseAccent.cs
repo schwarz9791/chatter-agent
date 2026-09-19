@@ -77,6 +77,15 @@ namespace ChatterMascot.Vrm
         private float _weight;
 
         /// <summary>
+        /// モデルの正面（VRM ルートのローカル方向）。
+        ///
+        /// ★ <b>ルートの <c>forward</c> を正面として使わないこと。</b> モデルの向きは規約どおりとは
+        ///   限らない（→ <c>VrmStage.FaceCamera</c>）。<see cref="Bind"/> の時点では FaceCamera が
+        ///   正面をワールド −Z へ向け終えているので、そのときのルートから見た −Z を覚えておく。
+        /// </summary>
+        private Vector3 _faceLocal = Vector3.back;
+
+        /// <summary>
         /// <paramref name="character"/> が <c>Start</c> で1回だけ引いた <see cref="Camera"/>
         /// （<see cref="VrmCharacter.Camera"/>）を受け取る。
         ///
@@ -91,6 +100,7 @@ namespace ChatterMascot.Vrm
             _instance = instance;
             _character = character;
             _camera = character.Camera != null ? character.Camera.transform : null;
+            _faceLocal = Quaternion.Inverse(instance.transform.rotation) * Vector3.back;
         }
 
         private void LateUpdate()
@@ -123,6 +133,7 @@ namespace ChatterMascot.Vrm
             //   測った「前フレームのアクセント込み」の位置とは別の点になる。だから
             //   VrmCharacter が1フレームに1回だけ測ってキャッシュした値を読む。
             var neutralPitchDegrees = 0f;
+            var neutralYawDegrees = 0f;
             if (_character.TryGetCachedGazeOrigin(out var eyeWorld))
             {
                 var toEye = eyeWorld - _camera.position;
@@ -132,6 +143,14 @@ namespace ChatterMascot.Vrm
                 {
                     neutralPitchDegrees = Mathf.Atan2(toEye.y, horizontalDistance) * Mathf.Rad2Deg * _character.NeutralAimFraction;
                 }
+
+                // ★ 「基準の下向き」（縦）と同じ形の、左右の基準。XR ではカメラ＝ユーザーの頭なので、
+                //   ユーザーが横へ回り込んでも首が追う（目は LookAt が既に追っている）。
+                //   こちらはワールド空間で出す —— 下の pitch / tilt のようなカメラ空間の枠の対象ではない。
+                var toViewer = _camera.position - eyeWorld;
+                neutralYawDegrees = GazeAim.NeutralYawDegrees(
+                    _instance.transform.rotation * _faceLocal, toViewer,
+                    _character.NeutralAimFraction, _character.HeadYawRangeDegrees);
             }
 
             // ★ 下の符号は実機のスクリーンショットで決めたもの。導出で書き換えないこと。
@@ -152,9 +171,16 @@ namespace ChatterMascot.Vrm
                 //   ★ 合計に別途上限は置いていない。NeutralAimFraction 自体が実機で調整できる
                 //   逃げ道であり、根拠のない安全マージンをここで固定値として足すと、この修正が
                 //   直そうとしている「頭が見る人を向いていない」を再び別の形で作ってしまう。
+                //   ★ 左右の基準（neutralYawDegrees）は、既存の回転より先に——いちばん右、
+                //   head.rotation の直前に——掛けること。縦の回転（pitch / tilt）はカメラの
+                //   right 軸まわりなので、首の縦軸として働くのは頭がカメラの方を向いている
+                //   ぶんだけで、向ききらない残りの角度に応じて首かしげが混ざる。左右の基準を
+                //   先に掛けておけば、向けたぶんだけ首かしげが減る。左右の基準はワールド空間の
+                //   導出なので、この「カメラ空間の枠」の話の対象外。
                 head.rotation = Quaternion.AngleAxis(-_character.HeadYawDegrees, up)
                               * Quaternion.AngleAxis(_character.HeadPitchDegrees - neutralPitchDegrees, right)
                               * Quaternion.AngleAxis(-headTiltDegrees * _weight, right)
+                              * Quaternion.AngleAxis(neutralYawDegrees, Vector3.up)
                               * head.rotation;
             }
 

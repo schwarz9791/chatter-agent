@@ -4289,30 +4289,41 @@ Android のログは `adb logcat -s Unity`。★★ **Android では 401 と「�
 ## XR（Full Space）
 
 Android ビルドは OpenXR（`com.unity.xr.androidxr-openxr`）で Full Space に入り、キャラクターを空間に固定して立たせる
-（[#99](https://github.com/schwarz9791/chatter-agent/issues/99)）。Android XR Extensions for Unity
-（`com.google.xr.extensions`）は入れていない（→ [#119](https://github.com/schwarz9791/chatter-agent/issues/119)）。
+（[#99](https://github.com/schwarz9791/chatter-agent/issues/99)）。起動後は手でつまんで置き直せる
+（[#121](https://github.com/schwarz9791/chatter-agent/issues/121)。→ 下「キャラを手で置き直す」）。
+Android XR Extensions for Unity（`com.google.xr.extensions`）は入れていない
+（→ [#119](https://github.com/schwarz9791/chatter-agent/issues/119)）。
 実機（XREAL Aura）での見え方・視野・距離感は [#100](https://github.com/schwarz9791/chatter-agent/issues/100)。
 
 ### 空間配置の決めごと
 
-1. **空間固定。起動時に1回だけ、頭の姿勢を基準に置き、以後は動かさない。** 頭に追従させると、
+1. **空間固定。起動時に1回だけ、頭の姿勢を基準に置く。以後 XR Origin は動かさない。**
+   キャラクターの置き直し（[#121](https://github.com/schwarz9791/chatter-agent/issues/121)。→ 下）は
+   手でつまんで行う操作で、頭には追従させない。頭に追従させると、
    [#71](https://github.com/schwarz9791/chatter-agent/issues/71) で歩かせたときに相対位置が二重に動く
-2. **動かすのはキャラクターではなく XR Origin（位置とヨーだけ）。** `VrmStage.FaceCamera` がモデルを
-   ワールドの −Z へ向けるので、`ModelAnchor` を回しても読み込みのときに打ち消される。キャラクターは
-   `ModelAnchor` の位置で −Z を向いたまま、**頭がその正面に来るように Origin を置く**（`XrPlacement.Solve`。
-   不変条件は `XrPlacementTests`）
+2. **起動時の配置が動かすのは XR Origin（位置とヨーだけ）、置き直しが動かすのは `ModelAnchor`。**
+   `VrmStage.FaceCamera` がモデルをワールドの −Z へ向ける処理は**読み込み時の1回だけ**なので、
+   起動時の配置でそのタイミングに `ModelAnchor` を回すと打ち消されるが、読み込みが終わった後に
+   `XrGrab` がつまんで動かす分は打ち消されない。起動時はキャラクターは `ModelAnchor` の位置で −Z を
+   向いたまま、**頭がその正面に来るように Origin を置く**（`XrPlacement.Solve`。不変条件は
+   `XrPlacementTests`）
 3. **大きさは `ModelAnchor.localScale` で変える。XR Origin は拡縮しない。** Origin を拡縮したときに
    眼間距離まで拡縮されるかはランタイム任せで、されなければ実機では「机の上の小人」ではなく
    「遠くの等身大」に見える（エミュレータの画像では判別できない）。`MeasureBounds` はワールド座標で
-   測るので追従する。`FitCollider` は二重に拡縮されるが、当たり判定を使うのはデスクトップ（等倍）だけ。
+   測るので追従する。`FitCollider` は `UniformedLossyScale()` で割ってワールド寸法のまま当たり判定を
+   保つ（つまむ判定がこの Collider を読むため。等倍のデスクトップでは割っても値は変わらない）。
    spring bone は追従しないので、読み込み時に縮尺を焼き込む（→ 下）
 4. **配置は `settings.json` の `xr`（`scale` / `distance` / `azimuth` / `feetBelowEye`）で変える。**
-   既定は「机の上のミニチュアを、正面の画面を避けた右側に」。Android には設定 UI が無いので、
-   端末のファイルを書き換える（→ `SETUP.md`）。デスクトップのパネルには出さないが、往復で落とさない
-   （`connection` と同じ扱い）
-5. **視線と prompt の姿勢はコードを変えていない。** `gazeTarget` は `Main Camera` の子で、`VrmPoseAccent` の
-   基準の下向きは目とカメラのワールド座標の差から出すので、カメラ＝頭になれば「ユーザーの頭を見る」になる。
-   Android には `CursorProvider` が無いので漂いのまま
+   これが効くのは**起動時の配置だけ**。既定は「机の上のミニチュアを、正面の画面を避けた右側に」。
+   Android には設定 UI が無いので、端末のファイルを書き換える（→ `SETUP.md`）。デスクトップの
+   パネルには出さないが、往復で落とさない（`connection` と同じ扱い）。**手で置き直した位置は
+   再起動で戻る**（永続化は [#122](https://github.com/schwarz9791/chatter-agent/issues/122)）
+5. **視線と首はカメラ＝頭を見る。** `gazeTarget` は `Main Camera` の子で、`VrmPoseAccent` の
+   基準の下向き（縦）と左右の基準（`GazeAim.NeutralYawDegrees`。
+   [#121](https://github.com/schwarz9791/chatter-agent/issues/121)）は目とカメラのワールド座標の差から
+   出すので、カメラ＝頭になれば「ユーザーの頭を見る」になり、横へ回り込んでも首が追う。左右の基準は
+   モデルの正面（VRM ルートの forward ではなく、`FaceCamera` が −Z へ向けた時点の向き）から測る。
+   デスクトップはカメラが正面にあるのでほぼ 0。Android には `CursorProvider` が無いので目は漂いのまま
 6. **フレームレートはコードを変えていない。** XR ではランタイムがフレームペーシングを握り、
    `Application.targetFrameRate` は効かない。XR が起動しなかったときは今までどおり `MascotRunner` の値
 7. **XR かどうかは `XRGeneralSettings.Instance.Manager.activeLoader` で判定する。** `Application.platform` は
@@ -4321,6 +4332,58 @@ Android ビルドは OpenXR（`com.unity.xr.androidxr-openxr`）で Full Space �
    `ChatterMascot.Xr` は Editor と Android に限ったアセンブリで、`CursorGazeSource` と同じ「シーンに置かない注入」
 
 ★ **UniUnlit への差し替え（#110）は XR でもそのまま効く**（`UnlitFallbackPolicy` は `Application.platform` で判定する）。
+
+### キャラを手で置き直す（[#121](https://github.com/schwarz9791/chatter-agent/issues/121)）
+
+Hand Interaction Profile（OpenXR の `XR_EXT_hand_interaction`）の aim レイ（`pointerPosition` /
+`pointerRotation`）と `pinchValue` を左右とも読む。aim レイがキャラクター（VRM の `CapsuleCollider`）に
+当たった状態で**つまみに入った瞬間**だけ掴む（つまんだままレイを動かしてキャラに当てても掴まない）。
+掴んだときのレイ上の距離を保ってレイの先に追従させる —— **奥行きは変えない。Mac のドラッグ移動に
+相当する操作**（`XrGrab.UpdateHeld`）。つまみはヒステリシス（`XrGrabRules.IsPinching`。入り 0.9 /
+抜け 0.6）。追跡を短く見失っても 0.2 秒は保持する。
+
+離すと、足元の xz・**掴んでいた点の高さ**から真下へ `ARPlaneManager.Raycast` し、`HorizontalUp` の
+最も近い面に足元を乗せる（無ければ離した位置のまま）。続けて `ModelAnchor` のヨーを頭の方へ向ける
+（`XrGrabRules.TryYawToFace`）。動かすのは常に `ModelAnchor`（起動時の配置と同じく、XR Origin には
+触らない —— Origin を動かすと部屋ごと動いて見える）。
+
+★ **足元ではなく、掴んでいた点の高さから探す。** 頭を持って下ろすと足元は天板より下に潜るので、
+足元の高さから探すと体の下の面ではなく床が先に見つかって落ちる。
+
+★ **XR Hands（Hand Tracking Subsystem の feature・手の関節）は使わない。** エミュレータの手
+（Hand tracking モード）は体の前に固定でマウスへ aim を向けるだけなので「キャラの近くでつまむ」判定が
+成立しない。関節の親指–人差し指の距離も、つまんでも入りの閾値ちょうどの値で判定が揺れる。
+`pinchValue` はランタイムが出すつまみの値をそのまま使う。将来 XR Hands の subsystem を使うなら:
+権限が無い間はランタイムが毎フレームエラーを出し、
+`Stop()` では止まらない（OpenXR のローダーがセッションの READY のたびに Start し直す）。
+`SubsystemRegistration` で `HandTracking.automaticallyInitializeSubsystem = false` を立て、
+許可後に `EnsureSubsystemInitialized()` する。
+
+**権限は `HAND_TRACKING` と `SCENE_UNDERSTANDING_COARSE`。** `XrGrab` が起動時に**未許可のものだけ**
+まとめて要求する（許可済みまで含めて要求すると、権限 Activity が一瞬起動して pause/resume する）。
+`SCENE_UNDERSTANDING_COARSE` が許可されたら XR Origin の GameObject に `ARPlaneManager`（Horizontal）を
+`AddComponent` する（`RequireComponent(XROrigin)`。別の GameObject に付けると XROrigin が勝手に生える）。
+拒否されたら何もしない（#99 の配置のまま。権限エラーは出続けない）。
+
+★ **`HAND_TRACKING` のマニフェスト宣言は自前で足す**（`AndroidManifestPostProcessor`）。Hand Interaction
+Profile も同じ権限を要る（Android XR パッケージの doc）が、パッケージ側は Hand Tracking Subsystem の
+feature が有効なときにしかマニフェストへ書かない。
+
+★ `android.hardware.xr.input.hand_tracking` の `uses-feature` が **`required="true"`** で入る
+（`XR_EXT_hand_interaction` からパッケージが注入。任意にする口は internal）。影響は Play ストアの
+端末フィルタだけで、`adb install` は通る。
+
+★ `SCENE_UNDERSTANDING_FINE` は入らない（`ARRaycastManager` は使わず `ARPlaneManager.Raycast` で
+足りる。Raycast feature を有効にすると FINE が入る）。
+
+★ `InverseTransformRay` は core-utils と ARFoundation の拡張が衝突する（CS0121）。
+`InverseTransformPoint` / `InverseTransformDirection` で組む。
+
+★ `Physics.autoSyncTransforms` はオフなので、掴む判定の `Collider.Raycast` の前に
+`Physics.SyncTransforms()` を呼ぶ（直前のフレームでキャラを動かしていると見ない）。
+
+置いた位置は残らない（再起動で #99 の配置に戻る。永続化は
+[#122](https://github.com/schwarz9791/chatter-agent/issues/122)）。
 
 ### ★★ XR Origin のトラッキング原点が切り替わる前に、頭の姿勢を読まない
 
@@ -4393,11 +4456,24 @@ UniVRM の spring bone は、**コライダーの半径は毎フレーム `lossy
 - エミュレータのウィンドウでは、視野の中央でもキャラクターがやや縦につぶれて見える。`screencap` の画像（正方形）では比率は自然で、ディスプレイ（1920×1200）と片目の推奨描画サイズ（2560×2558）の縦横比が違う。実機での比率は #100
 - 新しい APK の初回起動は、Home Space のときと同じく 30 秒以上白い
 
+つまんで置き直す確認（2026-09-19 / `XR_Glasses` /
+[#121](https://github.com/schwarz9791/chatter-agent/issues/121)）:
+
+- 権限ダイアログは Full Space でも出る。`HAND_TRACKING` と `SCENE_UNDERSTANDING_COARSE` は
+  1つのダイアログ（「目・顔・体の追跡とエリアのスキャン」）にまとまり、1回の Allow で両方許可される。
+  2回目の表示では「Don't allow」が「今後表示しない」になる
+- 平面はエミュレータでも来る（`HorizontalUp` が4枚）。いちばん低い面（床）は目の高さからかなり下にあり、
+  そこへ落とすとグラスの視野の外に出る（下を向けば見える）
+- Hand tracking モードでは、aim がマウスを追い、クリック／ドラッグで `pinchValue` が 0 → 1。右手のみ
+- 掴んで動かせる／何も無いところでは掴まない／離すと平面（床）に乗ってこちらを向く／見下ろすと顔が
+  上を向いてこちらを見る／横へドラッグすると（体は離すまで向きを変えない）首がこちらへ回る、を確認した
+- 権限を拒否（今後表示しない）しても落ちず、#99 の配置のまま。権限エラーは出続けない
+
 ### ビルド設定（`AndroidPlayerSettings.FixAll`）
 
 | 項目 | 値 | なぜ |
 |---|---|---|
-| XR Plug-in Management | **Android にだけ** OpenXR ローダー。feature は Android XR Support だけ | Standalone に割り当てないので macOS ビルドは変わらない |
+| XR Plug-in Management | **Android にだけ** OpenXR ローダー。feature は Android XR Support / Hand Interaction Profile / Android XR: Session / Android XR: Planes の4つ | Standalone に割り当てないので macOS ビルドは変わらない。Session は Planes の Project Validation が要求するので有効化する（有効にすると、パッケージが `OpenXRLifeCycleFeature` も連動して有効にする） |
 | Graphics API（Android） | **Vulkan 単独** | URP で Android XR を使うときの必須設定 |
 | `Mobile_Renderer` の Post Processing | **無効**（`postProcessData` を外す） | Project Validation の error。`PC_Renderer` は触らない |
 
@@ -4405,9 +4481,12 @@ UniVRM の spring bone は、**コライダーの半径は毎フレーム `lossy
 戻さないこと（XR 用のシェーダーバリアントを削らせないための値）。
 
 ★ **マニフェストの XR まわりはパッケージが注入する**（`XR_ACTIVITY_START_MODE_FULL_SPACE_UNMANAGED`、
-`android.software.xr.api.openxr` / `android.software.xr.api.spatial`、`android.hardware.vulkan.version`）。
-手で書かない。`AndroidManifestPostProcessor` の注入（`INTERNET` / `usesCleartextTraffic`）とは共存する。
-確かめるときは `aapt2 dump xmltree`（→「マニフェストは静的に置かず、Gradle 生成後に注入する」）。
+`android.software.xr.api.openxr` / `android.software.xr.api.spatial`、`android.hardware.vulkan.version`、
+Hand Interaction Profile からの `android.hardware.xr.input.hand_tracking` の `uses-feature`
+[`required="true"`]）。手で書かない。`AndroidManifestPostProcessor` は **`HAND_TRACKING` 権限だけは
+自前で足す**（パッケージが書くのは Hand Tracking Subsystem の feature を有効にしたときだけ。→
+「キャラを手で置き直す」）。`INTERNET` / `usesCleartextTraffic` とは共存する。確かめるときは
+`aapt2 dump xmltree`（→「マニフェストは静的に置かず、Gradle 生成後に注入する」）。
 
 ★ **Project Validation の残りは `FixAll` が `[Build]` で出す。** 公開 API が無いので
 `BuildValidator.GetCurrentValidationIssues` を reflection で呼んでいる。

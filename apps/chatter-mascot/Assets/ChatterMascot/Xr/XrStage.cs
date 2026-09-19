@@ -21,12 +21,14 @@ namespace ChatterMascot.Xr
     ///   プラットフォームでは<b>アセンブリごと存在しない</b>ので属性の走査対象にすらならず、
     ///   <c>#if</c> もプラットフォーム分岐も要らない。
     ///
-    /// ★ <b>動かすのはキャラクターではなく XR Origin。</b> <c>VrmStage.FaceCamera</c> が
-    ///   モデルをワールド−Zへ向ける処理をするので、<c>ModelAnchor</c> を回すと
-    ///   読み込みのたびに打ち消される（→ <see cref="XrPlacement"/> の doc）。
+    /// ★ <b>起動時の配置が動かすのはキャラクターではなく XR Origin。</b> <c>VrmStage.FaceCamera</c> が
+    ///   読み込み時にモデルをワールド−Zへ向けるので、そのタイミングで <c>ModelAnchor</c> を
+    ///   回すと打ち消される（→ <see cref="XrPlacement"/> の doc）。
     ///
-    /// ★ <b>空間固定は起動時に1回きり。</b> 頭が追跡状態になるのを待って
-    ///   <see cref="XrPlacement"/> で Origin の位置とヨーを決めたら、以後は触らない。
+    /// ★ <b>起動時の空間固定は1回きり。</b> 頭が追跡状態になるのを待って
+    ///   <see cref="XrPlacement"/> で Origin の位置とヨーを決めたら、以後 Origin は触らない。
+    ///   以後のキャラの置き直しは <see cref="XrGrab"/> が <c>ModelAnchor</c> を動かして行う
+    ///   —— 読み込み後の操作なので FaceCamera には打ち消されない。
     /// </summary>
     public static class XrStage
     {
@@ -69,7 +71,7 @@ namespace ChatterMascot.Xr
             // 頭が追跡状態になるまで待ってから配置する。static からの非同期待ちなので、
             // ここだけ動的に生やす内部 MonoBehaviour でコルーチンを回す
             var runner = origin.gameObject.AddComponent<TrackingWaiter>();
-            runner.Begin(origin, stage.ModelAnchor, settings);
+            runner.Begin(origin, stage, settings);
         }
 
         /// <summary>
@@ -148,13 +150,15 @@ namespace ChatterMascot.Xr
         private sealed class TrackingWaiter : MonoBehaviour
         {
             private XROrigin _origin;
+            private VrmStage _stage;
             private Transform _modelAnchor;
             private MascotSettings _settings;
 
-            public void Begin(XROrigin origin, Transform modelAnchor, MascotSettings settings)
+            public void Begin(XROrigin origin, VrmStage stage, MascotSettings settings)
             {
                 _origin = origin;
-                _modelAnchor = modelAnchor;
+                _stage = stage;
+                _modelAnchor = stage.ModelAnchor;
                 _settings = settings;
                 StartCoroutine(WaitThenPlace());
             }
@@ -240,6 +244,10 @@ namespace ChatterMascot.Xr
                           $"distance={_settings.XrDistance:F2} azimuth={_settings.XrAzimuth:F1} " +
                           $"feetBelowEye={_settings.XrFeetBelowEye:F2} → " +
                           $"originPosition={originPosition} originYaw={originYawDegrees:F1}");
+
+                // ★ 配置の後にすること。配置前につまむと、XrPlacement.Solve が動く前の
+                //   （まだ正しくない）アンカーを掴ませてしまう
+                _origin.gameObject.AddComponent<XrGrab>().Begin(_origin, _stage);
             }
         }
     }

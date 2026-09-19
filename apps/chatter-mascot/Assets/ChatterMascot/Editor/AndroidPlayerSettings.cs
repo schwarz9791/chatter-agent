@@ -9,7 +9,9 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.XR.Management;
 using UnityEngine.XR.OpenXR;
+using UnityEngine.XR.OpenXR.Features;
 using UnityEngine.XR.OpenXR.Features.Android;
+using UnityEngine.XR.OpenXR.Features.Interactions;
 
 namespace ChatterMascot.EditorTools
 {
@@ -190,8 +192,11 @@ namespace ChatterMascot.EditorTools
         }
 
         /// <summary>
-        /// OpenXR の Android XR Support feature（Android XR を動かす必須 feature）だけを有効化する。
-        /// Display Utilities など任意の feature には触れない。
+        /// Android XR を動かす必須の Android XR Support と、キャラを手で置き直すのに要る
+        /// Hand Interaction Profile / AR Session / AR Plane だけを有効化する。それ以外の
+        /// feature には触れない。
+        ///
+        /// ★ <c>GetFeature&lt;T&gt;()</c> で引くこと。feature ID の文字列では引かないこと。
         /// </summary>
         private static bool FixOpenXrFeature()
         {
@@ -202,17 +207,27 @@ namespace ChatterMascot.EditorTools
                 return false;
             }
 
-            var feature = settings.GetFeature<AndroidXRSupportFeature>();
+            var changed = false;
+            changed |= EnableFeature<AndroidXRSupportFeature>(settings, "Android XR Support");
+            changed |= EnableFeature<ARSessionFeature>(settings, "Android XR: Session");
+            changed |= EnableFeature<ARPlaneFeature>(settings, "Android XR: Planes");
+            changed |= EnableFeature<HandInteractionProfile>(settings, "Hand Interaction Profile");
+            return changed;
+        }
+
+        private static bool EnableFeature<T>(OpenXRSettings settings, string label) where T : OpenXRFeature
+        {
+            var feature = settings.GetFeature<T>();
             if (feature == null)
             {
-                Debug.LogWarning("[Build] Android XR Support feature が見つかりません");
+                Debug.LogWarning($"[Build] {label} feature が見つかりません");
                 return false;
             }
 
             if (feature.enabled) return false;
 
             feature.enabled = true;
-            Debug.Log("[Build] OpenXR の Android XR Support feature を有効化しました");
+            Debug.Log($"[Build] OpenXR の {label} feature を有効化しました");
             return true;
         }
 

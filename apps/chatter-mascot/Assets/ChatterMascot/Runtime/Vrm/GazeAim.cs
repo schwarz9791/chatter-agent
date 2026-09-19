@@ -181,6 +181,22 @@ namespace ChatterMascot.Vrm
         }
 
         /// <summary>
+        /// キャラの正面（<paramref name="facing"/>）と、見る人へ向かう水平方向
+        /// （<paramref name="toViewer"/>）の符号付き角 × <paramref name="fraction"/> を、
+        /// 首の可動域 ±<paramref name="maxDegrees"/> で clamp する。
+        /// <c>VrmPoseAccent</c> の「基準の下向き」（縦）と同じ形の、左右の基準。
+        /// </summary>
+        public static float NeutralYawDegrees(Vector3 facing, Vector3 toViewer, float fraction, float maxDegrees)
+        {
+            var facingH = Vector3.ProjectOnPlane(facing, Vector3.up);
+            var toViewerH = Vector3.ProjectOnPlane(toViewer, Vector3.up);
+            if (facingH.sqrMagnitude < 1e-8f || toViewerH.sqrMagnitude < 1e-8f) return 0f;
+
+            var yaw = Vector3.SignedAngle(facingH, toViewerH, Vector3.up) * fraction;
+            return Mathf.Clamp(yaw, -maxDegrees, maxDegrees);
+        }
+
+        /// <summary>
         /// フレームレート非依存の指数緩和。<c>tau</c>（時定数、秒）で書く。
         ///
         /// ★ cc-mascot の <c>LERP_FACTOR = 0.08</c> は<b>毎フレーム適用</b>するので、

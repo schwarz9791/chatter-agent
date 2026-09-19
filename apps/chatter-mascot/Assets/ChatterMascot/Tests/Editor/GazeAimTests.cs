@@ -128,6 +128,66 @@ namespace ChatterMascot.Tests
             Assert.That(s.HeadPitchDegrees, Is.EqualTo(p.HeadSensitivity * p.HeadPitchRangeDegrees).Within(1e-4f));
         }
 
+        /// <summary>正面（<c>facing == toViewer</c>）では左右の基準は 0。</summary>
+        [Test]
+        public void NeutralYawIsZeroWhenAlreadyFacingTheViewer()
+        {
+            Assert.That(GazeAim.NeutralYawDegrees(Vector3.forward, Vector3.forward, 1f, 90f),
+                Is.EqualTo(0f).Within(1e-4f));
+        }
+
+        /// <summary>
+        /// 横へ回り込むと、返ったヨーぶん <paramref name="facing"/> を回すと
+        /// <paramref name="toViewer"/> に近づく（角度が縮む）。
+        ///
+        /// ★ 期待値を <c>NeutralYawDegrees</c> と同じ式で組まないこと（<c>XrPlacementTests</c> と
+        ///   同じ方針）。「回した後の残差角が、回す前より小さい」という不変条件で検査する。
+        /// </summary>
+        [TestCase(1f, 0f, 1f)]    // 右へ回り込む
+        [TestCase(-1f, 0f, 1f)]   // 左へ回り込む
+        [TestCase(1f, 0f, -1f)]   // 右後方へ回り込む
+        public void NeutralYawTurnsTheHeadTowardTheViewer(float vx, float vy, float vz)
+        {
+            var facing = Vector3.forward;
+            var toViewer = new Vector3(vx, vy, vz);
+
+            var yaw = GazeAim.NeutralYawDegrees(facing, toViewer, 1f, 90f);
+            Assert.That(yaw, Is.Not.EqualTo(0f));
+
+            var beforeAngle = Vector3.Angle(facing, toViewer);
+            var afterAngle = Vector3.Angle(Quaternion.AngleAxis(yaw, Vector3.up) * facing, toViewer);
+            Assert.That(afterAngle, Is.LessThan(beforeAngle));
+        }
+
+        /// <summary><c>fraction</c> は倍率として素直に効く。</summary>
+        [Test]
+        public void NeutralYawScalesWithFraction()
+        {
+            var facing = Vector3.forward;
+            var toViewer = new Vector3(1f, 0f, 1f);
+
+            var half = GazeAim.NeutralYawDegrees(facing, toViewer, 0.5f, 90f);
+            var full = GazeAim.NeutralYawDegrees(facing, toViewer, 1f, 90f);
+
+            Assert.That(half, Is.EqualTo(full / 2f).Within(1e-3f));
+        }
+
+        /// <summary>±<c>maxDegrees</c> を超えない。</summary>
+        [Test]
+        public void NeutralYawClampsToItsRange()
+        {
+            var yaw = GazeAim.NeutralYawDegrees(Vector3.forward, Vector3.back, 1f, 30f);
+            Assert.That(Mathf.Abs(yaw), Is.EqualTo(30f).Within(1e-4f));
+        }
+
+        /// <summary><c>facing</c> / <c>toViewer</c> の水平成分がほぼ 0 なら 0（atan2 の破綻を避ける）。</summary>
+        [Test]
+        public void NeutralYawIsZeroWhenEitherVectorHasNoHorizontalComponent()
+        {
+            Assert.That(GazeAim.NeutralYawDegrees(Vector3.up, new Vector3(1f, 0f, 1f), 1f, 90f), Is.EqualTo(0f));
+            Assert.That(GazeAim.NeutralYawDegrees(Vector3.forward, Vector3.down, 1f, 90f), Is.EqualTo(0f));
+        }
+
         /// <summary>微小な dt では漂いが不連続に跳ばない。</summary>
         [Test]
         public void IsContinuousOverASmallTimeStep()

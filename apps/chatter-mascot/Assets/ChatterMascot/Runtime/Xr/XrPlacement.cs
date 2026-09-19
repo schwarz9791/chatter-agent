@@ -6,9 +6,10 @@ namespace ChatterMascot.Xr
     /// 起動時の頭の姿勢1回から、XR Origin の配置（空間固定）を求める。<b>純粋関数。</b>
     ///
     /// ★ <b>動かすのは Origin であって、キャラクター（<c>ModelAnchor</c>）ではない。</b>
-    ///   <c>VrmStage.FaceCamera</c> がモデルをワールド−Zへ向ける処理をするので、
-    ///   キャラ側を回すと読み込みのたびに打ち消される。見かけの配置は
-    ///   「キャラは固定、頭の乗る Origin の方を位置とヨーだけ動かす」で作る。
+    ///   <c>VrmStage.FaceCamera</c> が読み込み時にモデルをワールド−Zへ向ける処理をするので、
+    ///   この起動時の配置でキャラ側を回すと打ち消される。見かけの配置は
+    ///   「キャラは固定、頭の乗る Origin の方を位置とヨーだけ動かす」で作る
+    ///   （読み込み後にキャラを動かす置き直しは <c>XrGrab</c> が別に行う）。
     /// </summary>
     public static class XrPlacement
     {

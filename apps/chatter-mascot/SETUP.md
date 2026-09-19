@@ -230,6 +230,7 @@ Assets/ChatterMascot/
     Vrm/        AssetPath.cs        ★ .vrm / .vrma の探索順（純粋。下の表）
                 VrmFraming.cs       ★ 画面に収まるカメラ距離（純粋）
     Xr/         XrPlacement.cs      ★ 起動時の頭の姿勢 → XR Origin の配置（純粋。#99）
+                XrGrabRules.cs      ★ つまみのヒステリシスと、離したときの向き（純粋。#121）
     CommandLine.cs                  起動引数（-serverUrl / -vrm / -buildScene が共有）
     FrameRateBudget.cs              フレームレート上限の「戻す先」と「一時的に借りる」
     MascotRunner.cs                 ドライバ。コマンドを実行して結果をイベントで戻す
@@ -240,6 +241,7 @@ Assets/ChatterMascot/
     AssetEnvFactory.cs              Application を触る唯一の場所
   Xr/                               ChatterMascot.Xr — Editor + Android のみ（#99）
     XrStage.cs                      ★ XR が起動したときだけ XR Origin を組んで空間固定する（シーンに置かない）
+    XrGrab.cs                       ★ 手でつまんで置き直す。配置の直後に生やす（シーンに置かない。#121）
   Desktop/                          ChatterMascot.Desktop — Editor + macOS/Windows のみ
     DragHandles.cs                  「Collider を持つものに UniWindowMoveHandle」
     VrmDragHandleBinder.cs          ★ MonoBehaviour にしない（下記）
@@ -423,11 +425,24 @@ logcat に出るはずの行:
 [Mascot] server: ws://127.0.0.1:8570 / audio: http://127.0.0.1:8570/audio/
 [Mascot] … から 19,259,304 バイト読みました: jar:file:///…/base.apk!/assets/vita.vrm   ← 同梱モデル。persistentDataPath の候補が「読めませんでした」（404）なのは正常
 [Mascot] XR: 空間固定 headLocalPosition=… → originPosition=… originYaw=…              ← XR が起動していなければ「XR: 起動していないので平面表示のまま」
+[Mascot] XR grab: 平面検知を開始しました                                              ← SCENE_UNDERSTANDING_COARSE が許可されていれば出る
+[Mascot] XR grab: 掴みました hand=right                                              ← つまんだ瞬間に1回
+[Mascot] XR grab: 離しました plane=… yaw=…                                           ← 離したとき。plane=none は面が見つからなかった場合
 [Mascot] 無音が続いたのでオーディオ出力を止めました                                  ← 発話が来れば「掴み直しました」が続く
 ```
 
+権限が拒否されると `[Mascot] XR grab: android.permission.HAND_TRACKING が拒否されました` の警告が出る
+（アプリは落ちず、#99 の配置のまま動く）。
+
+置き直しを確かめるには: 初回起動で出る権限ダイアログで **Allow**。エミュレータはツールバーの入力モードを
+**Hand tracking** にし、キャラクターの上でドラッグする。権限を試し直すときは
+`adb shell pm grant|revoke tech.sukima.chattermascot android.permission.HAND_TRACKING`
+（`SCENE_UNDERSTANDING_COARSE` も同様）。
+
 ★ **キャラクターの大きさと置き場所は端末の `settings.json` の `xr` で変える**（Android に設定 UI は無い）。
-既定は机の上のミニチュア。等身大で床に立たせるなら、たとえば:
+これは**起動時の置き場所**で、既定は机の上のミニチュア。起動後は手でつまんで置き直せるが
+（→ 上）、**その位置は再起動で戻る**（永続化は [#122](https://github.com/schwarz9791/chatter-agent/issues/122)）。
+等身大で床に立たせるなら、たとえば:
 
 ```bash
 ADB=~/Library/Android/sdk/platform-tools/adb

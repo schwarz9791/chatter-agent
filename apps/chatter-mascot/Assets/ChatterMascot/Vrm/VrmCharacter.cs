@@ -272,6 +272,13 @@ namespace ChatterMascot.Vrm
         public float NeutralAimFraction => neutralAimFraction;
 
         /// <summary>
+        /// <c>VrmPoseAccent</c> が首の左右の基準（<see cref="GazeAim.NeutralYawDegrees"/>）を
+        /// clamp する可動域（度）。<see cref="GazeParamsFromInspector"/> と同じ出荷値を読むだけで、
+        /// Inspector からの調整口は無い（cursor 追従の可動域と兼用のため）。
+        /// </summary>
+        public float HeadYawRangeDegrees => GazeParams.Default.HeadYawRangeDegrees;
+
+        /// <summary>
         /// 視線の原点の<b>ビューポート Y</b>（0..1、下が 0）。取れなければ 0.5。
         ///
         /// ★ <see cref="ChatterMascot.Desktop.CursorGazeSource"/> が縦の基準に使う。

@@ -6,7 +6,9 @@
         "ChatterMascot.Vrm",
         "Unity.XR.Management",
         "Unity.XR.CoreUtils",
-        "Unity.InputSystem"
+        "Unity.InputSystem",
+        "Unity.XR.ARFoundation",
+        "Unity.XR.ARSubsystems"
     ],
     "includePlatforms": ["Editor", "Android"],
     "excludePlatforms": [],

@@ -9,7 +9,12 @@ namespace ChatterMascot.EditorTools
 {
     /// <summary>
     /// Gradle プロジェクト生成の直後に <c>AndroidManifest.xml</c> へ
-    /// <c>INTERNET</c> 権限と <c>usesCleartextTraffic</c> を足す（#97 / #98）。
+    /// <c>INTERNET</c> 権限と <c>usesCleartextTraffic</c>、<c>HAND_TRACKING</c> 権限を足す
+    /// （#97 / #98 / #121）。
+    ///
+    /// ★ <b><c>HAND_TRACKING</c> はここで足す。</b> Hand Interaction Profile（<c>XR_EXT_hand_interaction</c>）
+    ///   も同じ権限を要る（Android XR パッケージの doc）が、パッケージ側は
+    ///   Hand Tracking Subsystem の feature が有効なときにしかマニフェストへ書かない。
     ///
     /// ★ <b>なぜ <c>Assets/Plugins/Android/AndroidManifest.xml</c> を静的に置かないか。</b>
     ///   XR 向けパッケージも、同じマニフェストへ同じフック
@@ -32,6 +37,7 @@ namespace ChatterMascot.EditorTools
     {
         private static readonly XNamespace AndroidNs = "http://schemas.android.com/apk/res/android";
         private const string InternetPermission = "android.permission.INTERNET";
+        private const string HandTrackingPermission = "android.permission.HAND_TRACKING";
 
         public int callbackOrder => 0;
 
@@ -66,8 +72,8 @@ namespace ChatterMascot.EditorTools
         }
 
         /// <summary>
-        /// <paramref name="document"/> へ INTERNET 権限と <c>usesCleartextTraffic</c> を足す。
-        /// 変更したら true、既に両方満たしていれば false。<c>manifest</c> / <c>application</c>
+        /// <paramref name="document"/> へ INTERNET / HAND_TRACKING 権限と <c>usesCleartextTraffic</c> を足す。
+        /// 変更したら true、既に満たしていれば false。<c>manifest</c> / <c>application</c>
         /// 要素が読めなければ <see cref="BuildFailedException"/>。
         /// テストから呼ぶために <c>public</c>。
         /// </summary>
@@ -85,23 +91,25 @@ namespace ChatterMascot.EditorTools
                 throw new BuildFailedException("[Build] AndroidManifest.xml に application 要素がありません");
             }
 
-            var addedInternet = EnsureInternetPermission(manifest);
+            var addedInternet = EnsurePermission(manifest, InternetPermission);
+            var addedHandTracking = EnsurePermission(manifest, HandTrackingPermission);
             var addedCleartext = EnsureCleartextTraffic(application);
             if (addedInternet) Debug.Log("[Build] AndroidManifest.xml: INTERNET を追加");
+            if (addedHandTracking) Debug.Log("[Build] AndroidManifest.xml: HAND_TRACKING を追加");
             if (addedCleartext) Debug.Log("[Build] AndroidManifest.xml: usesCleartextTraffic を追加");
-            return addedInternet || addedCleartext;
+            return addedInternet || addedHandTracking || addedCleartext;
         }
 
         /// <summary>足したら true。</summary>
-        private static bool EnsureInternetPermission(XElement manifest)
+        private static bool EnsurePermission(XElement manifest, string permission)
         {
             foreach (var element in manifest.Elements("uses-permission"))
             {
                 var name = element.Attribute(AndroidNs + "name");
-                if (name != null && name.Value == InternetPermission) return false;
+                if (name != null && name.Value == permission) return false;
             }
 
-            manifest.Add(new XElement("uses-permission", new XAttribute(AndroidNs + "name", InternetPermission)));
+            manifest.Add(new XElement("uses-permission", new XAttribute(AndroidNs + "name", permission)));
             return true;
         }
 

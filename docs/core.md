@@ -406,7 +406,7 @@ server / player はこのファイルを読みも書きもしない（読むの�
   読み替えて組み立てる。音声の取得元もこの URL の authority から導く（サーバーは自分の
   到達アドレスを知らない → `core/audioPath.ts`）
 
-★ `audioFetchTimeoutMs` の経緯は [`knowledge/core.md`](./knowledge/core.md)「感情判定は…」配下。
+★ `audioFetchTimeoutMs` の経緯は [`knowledge/core.md`](./knowledge/core.md)「設定キーと環境変数の経緯」。
 
 ### AI要約（`aiSummary*`。`chatter-agent-speak` が読む）
 
@@ -425,7 +425,7 @@ server / player はこのファイルを読みも書きもしない（読むの�
   （→ `CLAUDE.md`「絶対に守ること」1）
 - `aiSummaryMaxPerDrain` は「1回のドレインで要約してよい回数」の上限（既定3、上限8）
 
-★ 実測とばらつきの詳細は [`knowledge/core.md`](./knowledge/core.md)「感情判定は…」配下。
+★ 実測とばらつきの詳細は [`knowledge/core.md`](./knowledge/core.md)「設定キーと環境変数の経緯」。
 
 ## 感情判定は「文が感情的か」ではなく「作業で何が起きているか」で決める
 

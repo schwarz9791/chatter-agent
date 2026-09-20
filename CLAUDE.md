@@ -36,7 +36,7 @@ plugin/scripts/*.sh          bash。payload を spool/<message_id>.<index>.json 
 chatter-agent-speak (CLI)    ロックを取れた1プロセスだけが spool を順に処理
   │                          final:true を待つ（非 final では何もせず終わる）
   │                          delta 結合 → Markdown除去 → 文分割 → 要約（既定OFF） → 感情判定 → epoch/seq 採番
-  ├──▶ speech.jsonl          記録。1文1行で残す。誰も読まない
+  ├──▶ speech.jsonl          記録。1文1行で残す。配信は読まない
   ▼
 speech/<seq>.json            配信キュー。1文1ファイル
   ▼
@@ -155,8 +155,9 @@ spool を見る（走査直後に到着した分の取りこぼし防止）。
 確定事項だけを、なぜやっているのか / 最終的にどうなるかの抽象で残す（具体的な処理はコードを追えば分かる）。
 
 **実測値を仕様として扱わない。** 秒数・CPU 使用率・テスト件数はマシンとネットワークで変わる。
-文書に固定の数字を書くのは `docs/knowledge/` の中だけにする。テストの実数が要るときは
-`./scripts/test.sh` の `total=` を見る。
+**実測した数字を書くのは `docs/knowledge/` の中だけにする**（測定条件を添えて）。
+**既定値・定数・契約上の閾値は実測値ではない**ので、これに当たらない（`docs/` の設定表はそのまま）。
+テストの実数が要るときは `./scripts/test.sh` の `total=` を見る。
 
 **ライセンスヘッダ** —— cc-mascot 由来のファイルを改変したら `Modified for chatter-agent.` を入れる。
 **「cc-mascot のツリーにあった」＝「cc-mascot の著作物」ではない**（`prompt/` と `summarizer/` は

@@ -107,8 +107,12 @@ socket に error ハンドラを必ず付ける / `boundAddress` を保持する
 - `SPECS` は1キー1パーサの表なので、配列の中身の検証だけが非対称になる
 - 読み手が CLI だけなので、`SPECS` に載せると server / player が起動のたびに未知キー警告を吐く（下の「server（音声合成）だけが読むキー」と同じ理由）
 
-server（音声合成）だけが読むキー一覧・既定値・意味は [`../core.md`](../core.md)「設定と環境変数」の
-「音声合成エンジン」にある。ここに残すのは経緯と実装の細部だけ。
+## 設定キーと環境変数の経緯
+
+キーの一覧・既定値・意味は [`../core.md`](../core.md)「設定と環境変数」が正。ここに残すのは
+経緯と実装の細部だけ。
+
+server（音声合成）だけが読むキーは「音声合成エンジン」の節にある。
 
 ★ **#29 で読み手が player → server に移ったが、キー名も意味も変えていない。** 改名すると、
 既存の `config.json` に残った旧キーが**全バイナリで**未知キー警告を出す（[#8](https://github.com/schwarz9791/chatter-agent/issues/8) で
@@ -226,7 +230,7 @@ player だけが読むキーの一覧・既定値・意味は [`../core.md`](../
   `SUMMARIZER_SESSION_LIMIT`（64）は「64 ÷ 8 = 8ドレイン分の要約セッションIDを覚えられる」計算になっている
   ため、上限だけを単独で動かさないこと
 
-**`speechLogGenerations`（記録の退避世代数）は [#8](https://github.com/schwarz9791/chatter-agent/issues/8) で廃止した。** 誰も `speech.jsonl` を tail しなくなったので、
+**`speechLogGenerations`（記録の退避世代数）は [#8](https://github.com/schwarz9791/chatter-agent/issues/8) で廃止した。** 誰も過去世代まで遡らなくなったので、
 複数世代を繰り下げる必要がなくなり、`speechLogMaxBytes` を超えたら `speech.1.jsonl` に退避する1世代だけになった。
 既存の `~/.config/chatter-agent/config.json` に `speechLogGenerations` が残っていると、`config.ts` の未知キー警告
 （`[Config] ... の未知のキー "speechLogGenerations" は無視されます`）が CLI 起動のたびに出る。手で消すこと。

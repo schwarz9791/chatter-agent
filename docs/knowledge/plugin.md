@@ -326,6 +326,7 @@ export CHATTER_AGENT_CLI=<repo>/plugin/bin/chatter-agent-speak.mjs
 | **サブエージェントの発言で発火するか** | **発火しない。** 3段落の回答を返す Explore を1本走らせて、`agent_id` / `agent_type` を持つ payload が 0 件。サブの発言は `speech.jsonl` にも混ざらない。hook 側の `agent_id` 除外は**保険として残す**（発火する版が来ても事故らない） |
 | `MessageDisplay` が UI をブロックするか | 体感なし。hook は数 ms で返り、delta 到着から `speech.jsonl` まで **約 50ms** |
 | bash で `message_id` を安定して抜けるか | 抜ける。ただし `sed` の貪欲マッチは不可（上記） |
+| stdin を読み切らずに exit したときの EPIPE | 300KB の payload で確定的に起きる。小さい payload でも書き込みに遅延があると 30回中16回（→ [`../plugin.md`](../plugin.md)「hook script がやることは4つだけ」） |
 
 ## `final:true` の遅延 — 2.1.233 でも起きる
 

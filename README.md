@@ -6,7 +6,7 @@
 
 It takes the message text straight from Claude Code's `MessageDisplay` hook; the server formats it and synthesizes speech. The display-side apps (a macOS desktop resident app / Android XR glasses) receive it, play it, and reflect it in the VRM character's facial expressions, motion, and lip sync.
 
-**Claude Code only.** Other coding agents have no hooks, so they are not supported.
+**Claude Code only, for now.** Speech is captured through Claude Code's `MessageDisplay` hook, so a tool without an equivalent hook gives it nothing to capture. Widening this is on the roadmap.
 
 ## How it works
 

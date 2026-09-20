@@ -16,14 +16,14 @@ spool より先（記録・配信キュー・WebSocket）は [`protocol.md`](./p
 > ★ **1 と 2 の順序を逆にしないこと。** `CHATTER_AGENT_DISABLE=1` は無効化中も常に成立するので、
 > 判定を stdin 読み切りより先に置くと、無効化されている間**ずっと** stdin を読み切らずに
 > 終了することになる。Claude Code 側は書き込みが最後まで届かないと EPIPE になる
-> （実測: 300KB の payload で確定的に、小さい payload でも書き込みに遅延があると 30回中16回）。
+> （実測は [`knowledge/plugin.md`](./knowledge/plugin.md)「潰れたもの」）。
 > `ExitPlanMode` / `AskUserQuestion` の payload は `tool_input` に計画全文を含むので、
 > 64KB のパイプバッファを普通に超える。プラグインをミュートしたユーザーが、沈黙ではなく
 > delta ごとにエラーを受け取る状態になる。
 
 ### Node を起動しない
 
-Node の起動コスト（~50ms〜）を毎 delta 払うと、`MessageDisplay` の10秒タイムアウトと UI ブロックのリスクの両方に近づく。**重い処理は CLI 側でやる。**
+Node の起動コストを毎 delta 払うと、`MessageDisplay` の10秒タイムアウトと UI ブロックのリスクの両方に近づく。**重い処理は CLI 側でやる。**
 
 判定も抽出も**bash のパラメータ展開だけ**で書いてある（`scripts/_lib.sh`）。CLI を起こす直前まで fork が無い。
 
@@ -62,7 +62,7 @@ matcher が効かない＝**全セッションに影響する**ので、無効�
 [#30](https://github.com/schwarz9791/chatter-agent/issues/30) で `final` を待つようになった分、
 ここを落としたときの被害は「最後の1文が出ない」から「（救済が発火しない限り）メッセージ全損」に変わっている。
 
-実測（Claude Code 2.1.233）では、非 final の delta は**すべて改行で終わって**いて、到着間隔は 0.7〜5.7 秒だった。
+実測（Claude Code 2.1.233）では、非 final の delta は**すべて改行で終わって**いた。
 **thinking では発火しない**（thinking を挟んだ delta が1件も観測されなかった）。
 
 **逆に、メッセージの最終行は改行で終わらないので final flush でしか来ない。** これが遅延の下限を決める（下記）。

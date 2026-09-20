@@ -78,3 +78,8 @@ mono_crash.*.blob
 # VRoid Studio 由来の .anim を Assets/ 配下に置いても絶対にコミットしない（保険。抽出は private の vroid-motion-exporter で行う）
 /[Aa]ssets/**/*.anim
 /[Aa]ssets/**/*.anim.meta
+
+# XR Simulation がビルド中に設定を退避する場所。成果物ではない。
+# ★ .meta も一緒に無視する。上の !*.meta より後に書くので、こちらが勝つ。
+/[Aa]ssets/XR/[Tt]emp/
+/[Aa]ssets/XR/[Tt]emp.meta

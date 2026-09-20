@@ -336,7 +336,7 @@ if [ -f "$RESULTS" ]; then
   見る**」と案内している。つまり**このリポジトリが公式に案内している確認方法が、
   コンパイル失敗を成功として表示する**
 
-直し方は `run_unity` を呼ぶ前に古い XML を消す（`rm -f "$RESULTS"`）。
+直し方は Unity を呼ぶ前に古い XML を消す（`rm -f "$RESULTS"`）。
 消せば集計側の `if [ -f "$RESULTS" ]` が偽になり、
 「XML が書かれなかった＝走る前に落ちた」が正しく表現される。
 
@@ -504,14 +504,15 @@ PNG は静止画なので OS 側では吸収されない。差し替えたら
 curl -fsSL https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh | UNITY_CLI_CHANNEL=beta bash
 ```
 
-`scripts/test.sh` / `scripts/build.sh` / `scripts/run.sh` は Unity.app の直叩きから Unity CLI へ
-寄せた。呼び出し口（`./scripts/test.sh` など）は変わらない。`unity.sh` は薄い共通部分として
-残っている。
+`scripts/test.sh` / `scripts/build.sh` / `scripts/run.sh` / `scripts/build-android.sh` は
+Unity.app の直叩きから Unity CLI へ寄せた。呼び出し口（`./scripts/test.sh` など）は変わらない。
+`unity.sh` は薄い共通部分として残っている。
 
 | やること | 呼び出し口 | 内部で実行する Unity CLI |
 |---|---|---|
 | EditMode テスト | `./scripts/test.sh` | `unity test --mode EditMode --output Logs/test-results.xml` |
 | macOS ビルド | `./scripts/build.sh` | `unity build --execute-method ChatterMascot.EditorTools.BuildScript.BuildMacOS --output-path <絶対パス>` |
+| Android ビルド | `./scripts/build-android.sh` | `unity build --target Android --execute-method ChatterMascot.EditorTools.BuildScript.BuildAndroid --output-path <絶対パス>` |
 | 任意の Editor メソッド実行 | `./scripts/run.sh <Method>` | `unity run -- -executeMethod <Method> -logFile -`（**`-quit` は渡さない**。**`--command` ではない** — そちらは事前登録が要る `unity pipeline install` 前提の別機能） |
 | Editor の一覧 / インストール | 手動（Unity Hub） | `unity editors` / `unity install` / `unity install-modules` |
 | 環境の診断 | 無し（`Player.log` を読むだけ） | `unity doctor` |
@@ -530,14 +531,17 @@ Unity 本体の作り（「`-runTests` に `-quit` を付けない」「`-execut
    `AudioManager.asset` の復元** → **残した。** `unity build` は `--execute-method` で
    `BuildScript.BuildMacOS` を呼ぶだけで肩代わりしないので、3段構えは変わらない
 3. **`PIPESTATUS` で終了コードを捨てないこと** → `test.sh` はパイプを挟まなくなったので
-   不要になった。`build.sh` / `run.sh` は grep を挟むので引き続き必要
+   不要になった。`build.sh` / `build-android.sh` / `run.sh` は3本とも grep を挟むので
+   引き続き必要（`build.sh` と `build-android.sh` の grep は `unity.sh` の
+   `unity_build_player` に共通化した）
 4. **NUnit XML を python3 で集計して `total= passed= failed=` を出すこと** → **残した。**
    `unity test` はコンソールに集計を出さず、stdout に流れるのは素の Editor ログだけ
 5. **`unity.sh` の `pgrep -f "Unity.app/Contents/MacOS/Unity.*${PROJECT_PATH}"` による
    二重起動検出** → **残した。** `unity` CLI 経由でも
    `Unity.app/Contents/MacOS/Unity ... -projectPath <PROJECT_PATH>` の形で起動するので検出は効く
    （CLI 自身が同等の検出を持つかは確かめていない）
-6. **grep フィルタに掛からないログ** → `build.sh` は `Logs/build-macos.log`、`run.sh` は
+6. **grep フィルタに掛からないログ** → `build.sh` は `Logs/build-macos.log`、
+   `build-android.sh` は `Logs/build-android.log`、`run.sh` は
    `Logs/run.log` に全文が残るようにした。`unity build` は `--log-file` へ全文を書きつつ
    stdout にも流すが、`unity run` に `--log-file` は無いので `-logFile -` を渡して `tee` で落とす
 
@@ -546,8 +550,10 @@ Unity 本体の作り（「`-runTests` に `-quit` を付けない」「`-execut
 - `unity test` の終了コードは **0=全部通った / 8=テストが失敗した / 6=走り切らなかった**
   （コンパイルエラー・ライセンス不可・クラッシュ・`--timeout`）。この分割があるので、CI は
   「インフラの失敗だけ再試行する」を終了コードだけで書ける
-- **`unity run` は Editor の終了コードをそのまま返さず、失敗を `6` に畳む。** 非0であることは
-  保たれるので `run.sh` の判定は変わらないが、`EditorApplication.Exit(n)` の `n` は届かない
+- **`unity run` / `unity build` は Editor の終了コードをそのまま返さず、失敗を `6` に畳む。**
+  非0であることは保たれるので `run.sh` / `build.sh` / `build-android.sh` の判定は変わらないが、
+  `EditorApplication.Exit(n)` の `n` は届かない。Editor が起動する前に CLI が弾いた失敗も `6` なので、
+  **終了コードでこの2つを見分けられない**（見分けるのは `--log-file` が空かどうか）
 - `--` の後の `-nographics` / `-logFile` / `-buildTarget` / `-executeMethod` はそのまま
   Unity へ転送される
 - **`unity build` は `-batchmode -nographics -quit` を自分で付ける。** `unity test` と
@@ -560,6 +566,16 @@ Unity 本体の作り（「`-runTests` に `-quit` を付けない」「`-execut
   中身は1回分だったので Unity 側が開くときに切り詰めている可能性が高いが、確かめていない）
 - `unity` は `ProjectSettings/ProjectVersion.txt` から Editor を解決し、Hub に登録された実体
   （`/Applications/Unity/Hub/Editor/<版>-arm64/Unity.app`）を選ぶ
+- **`UNITY_VERSION` に `-arm64` を付けた形（Hub のディレクトリ名）は通らない。** `--editor-version` が
+  受けるのは Editor の版（例: `6000.3.14f1`）だけ。アーキテクチャは別の `-a`/`--architecture`
+- **`unity build` は `--` 渡しを受け付けない。** `unity run` / `unity test` と違い、
+  `unity build <proj> … -- -buildScene X` は起動前に
+  `too many arguments for 'build'` で弾かれる。Unity への追加引数は `--args` だけ
+- **`--args` はシェル分割されるが、引用符を解釈する本物のパーサ。** 単一引用符で括れば
+  空白を含む値も空文字も1つの argv 要素として渡る。**括らないと空白のところで切れる**
+  （`-buildScene Assets/Scenes/No Such.unity` は3要素になり、呼ばれた側には
+  `Assets/Scenes/No` しか届かない）。値が空になりうる経路では、名前だけが末尾に残って
+  `CommandLine.Argument` が「値なし」と見て `null` を返すことにも注意（呼ばれた側は既定値へ落ちる）
 - **`unity build` の未コミット変更ガードは既定（`--versioning-strategy none`）では走らない**
   ので `--allow-dirty-build` は要らない
 - **`unity build` の `--output-path` は `--execute-method` と併用すると CLI 自身は解決しない**
@@ -575,14 +591,18 @@ Unity 本体の作り（「`-runTests` に `-quit` を付けない」「`-execut
 - ★ `unity editors` が `6000.3.14f1` に対して `6000.3.24f1` へのアップグレードを示唆してくるが、
   **プロジェクトは `6000.3.14f1` 固定**（`ProjectSettings/ProjectVersion.txt` が唯一の版の書き場所。
   [#97](https://github.com/schwarz9791/chatter-agent/issues/97) で `6000.5.8f1` から切り替えた）。
-  `UNITY_VERSION` 環境変数の効き方はスクリプトで違う —— `test.sh` / `build.sh` / `run.sh` では
-  Unity CLI の `--editor-version` として渡り、渡さなければ CLI が `ProjectVersion.txt` の版で走る。
-  `build-android.sh` だけは Unity.app を直に叩くので、`UNITY_VERSION` は Hub のパス探索
-  （`/Applications/Unity/Hub/Editor/<版>/`）をその場で選ぶのに使う
+  `UNITY_VERSION` 環境変数は `test.sh` / `build.sh` / `run.sh` / `build-android.sh` の4本すべてで
+  Unity CLI の `--editor-version` として渡る。渡さなければ CLI が `ProjectVersion.txt` の版で走る
 
-**Android 側（`build-android.sh` / `run-android.sh` / `configure-android.sh` / `build-native.sh`）は
-Unity CLI へ寄せていない。** [#127](https://github.com/schwarz9791/chatter-agent/issues/127) で追う。
-`run_unity` と Unity.app のパス探索は `build-android.sh` の中に置いてある。Unity CLI へ寄せたら丸ごと消える。
+★ **`unity build` の Android 専用フラグ（`--android-export-type` / `--android-keystore-*` /
+`--android-target-sdk-version` / `--android-symbol-type` / `--android-version-code`）は使わない。**
+`--execute-method` と併用すると CLI は `BuildPlayerOptions` を握らないので、これらが honor される
+保証が無い。出力形式の書き手を2つに持つと、honor されなかったときに黙って壊れた成果物ができる。
+targetSdk / symbol / versionCode は `ProjectSettings` が持ち、署名は値が argv に出るのでここでは
+行わない。
+
+`build-native.sh` / `configure-android.sh` / `run-android.sh` は Unity を起動しないので、
+Unity CLI へ寄せる対象ではない。
 
 ## Unity の版を切り替えたときに踏んだこと（#97: 6000.5.8f1 → 6000.3.14f1）
 

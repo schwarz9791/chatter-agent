@@ -277,6 +277,7 @@ cd apps/chatter-mascot
 
 ★ **クローン直後に `test.sh` / `run.sh` から始めないこと。** ネイティブプラグインの
 バンドルが無い状態で Unity を回すと `.bundle.meta` が壊れる（→ 上の「Xcode コマンドラインツール」）。
+
 シーンの `MascotRunner` に接続先（既定 `ws://127.0.0.1:8570`）を入れて Play。クライアント側に
 合成エンジンは要らない——音声は同じ authority から HTTP で取る。
 

@@ -49,7 +49,7 @@ Claude Code
 |---|---|
 | `plugin/` | Claude Code プラグイン。bash の hook が payload を置くだけ |
 | `core/` | サーバーと CLI（TypeScript / Node）。`src/server/` `src/cli/` `src/player/` |
-| `apps/chatter-mascot/` | 表示側アプリ（Unity + UniVRM）。macOS と Android XR を1プロジェクトから |
+| `chatter-mascot/` | 表示側アプリ（Unity + UniVRM）。macOS と Android XR を1プロジェクトから |
 | `docs/` | 基本設計・ファイル構成・コマンド。実装で踏んだことは `docs/knowledge/` |
 
 ## 現在の状態
@@ -89,7 +89,7 @@ npm run build
 ### macOS クライアント
 
 ```bash
-cd apps/chatter-mascot
+cd chatter-mascot
 ./scripts/build.sh           # → Build/ChatterMascot.app
 ```
 
@@ -99,7 +99,7 @@ Unity を開く前に [`docs/mascot.md`](./docs/mascot.md) のセットアップ
 ### Android XR クライアント
 
 ```bash
-cd apps/chatter-mascot
+cd chatter-mascot
 ./scripts/build-android.sh   # → Build/ChatterMascot.apk
 ```
 
@@ -143,12 +143,12 @@ cd core && npm run start:player
 
 ```bash
 # macOS
-open apps/chatter-mascot/Build/ChatterMascot.app
+open chatter-mascot/Build/ChatterMascot.app
 ```
 
 ```bash
 # Android XR（端末に接続先を書いてから入れる）
-cd apps/chatter-mascot
+cd chatter-mascot
 ./scripts/configure-android.sh          # LAN の IP を自動で組み立てます
 ./scripts/run-android.sh                # install して起動、logcat を流します
 ```
@@ -179,6 +179,12 @@ cd apps/chatter-mascot
 
 モデルの差し替えは設定パネルからできますが、**モーションに UI はありません。** ディレクトリを掘って `.vrma` を置くと、次の起動で拾います。`neutral` に対応するディレクトリはありません（感情モーションを出さない、が既定の振る舞いです）。
 
+**Android XR もディレクトリは同じです**（端末の `Android/data/tech.sukima.chattermascot/files/` の下）。
+ただし**直下の2本は固定名で、`models/mascot.vrm` と `animations/idle.vrma` しか読みません** ——
+上の表の任意名（`animations/*.vrma`）は効かず、置いても黙って同梱のものに戻ります。
+**カテゴリ別（`animations/happy/` など）は任意名のままで効きます。** 設定 UI が無いので `adb push`
+で入れます（手順は [`docs/mascot.md`](./docs/mascot.md)）。
+
 ## 開発
 
 ```bash
@@ -197,7 +203,7 @@ npm run verify:player    # WebSocket → 音声取得 → 再生 → ack
 `verify:tts` と `verify:player` は合成エンジンと再生コマンドをスタブに差し替えるので、AivisSpeech もオーディオデバイスも要りません。
 
 ```bash
-cd apps/chatter-mascot
+cd chatter-mascot
 ./scripts/test.sh        # EditMode テスト
 ```
 

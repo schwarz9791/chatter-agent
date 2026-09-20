@@ -49,14 +49,32 @@ namespace ChatterMascot.Tests
         public void BundledModelIsAlwaysTheLastResort()
         {
             Assert.That(Paths(Env(), AssetKind.Vrm),
-                Is.EqualTo(new[] { "/persist/model.vrm", "/streaming/vita.vrm" }));
+                Is.EqualTo(new[] { "/persist/models/mascot.vrm", "/streaming/vita.vrm" }));
         }
 
         [Test]
         public void VrmaUsesItsOwnNames()
         {
             Assert.That(Paths(Env(), AssetKind.Vrma),
-                Is.EqualTo(new[] { "/persist/idle.vrma", "/streaming/idle_loop.vrma" }));
+                Is.EqualTo(new[] { "/persist/animations/idle.vrma", "/streaming/idle_loop.vrma" }));
+        }
+
+        /// <summary>
+        /// ★★ <b>直下の1本（待機ループ）と、カテゴリ別モーションの走査ルートを
+        ///   同じディレクトリに保つこと。</b> <see cref="AssetPath.AnimationsDirectory"/> を
+        ///   どちらか片方だけリテラルに戻すと、<b>待機ループは動いたまま感情モーションだけが
+        ///   黙って見つからなくなる</b> —— エラーもログも出ない。
+        ///   <see cref="AssetPath.Enumerate"/> と <see cref="AssetPath.AnimationRoots"/> は
+        ///   別の関数なので、名前を共有していることを固定するのはここだけ。
+        /// </summary>
+        [Test]
+        public void PersistentIdleSitsUnderTheAnimationRoot()
+        {
+            var env = Env();
+            var root = AssetPath.AnimationRoots(env)[0];
+
+            Assert.That(root, Is.EqualTo("/persist/" + AssetPath.AnimationsDirectory));
+            Assert.That(Paths(env, AssetKind.Vrma)[0], Does.StartWith(root + "/"));
         }
 
         [Test]
@@ -74,7 +92,7 @@ namespace ChatterMascot.Tests
         public void ArgumentAtTheEndHasNoValue()
         {
             var env = Env(commandLine: new[] { "app", "-vrm" });
-            Assert.That(Paths(env, AssetKind.Vrm), Is.EqualTo(new[] { "/persist/model.vrm", "/streaming/vita.vrm" }));
+            Assert.That(Paths(env, AssetKind.Vrm), Is.EqualTo(new[] { "/persist/models/mascot.vrm", "/streaming/vita.vrm" }));
         }
 
         /// <summary>
@@ -123,7 +141,7 @@ namespace ChatterMascot.Tests
 
             Assert.That(Paths(env, AssetKind.Vrm), Is.EqualTo(new[]
             {
-                "/persist/model.vrm",
+                "/persist/models/mascot.vrm",
                 dir + "/A.vrm",   // Ordinal では大文字が先
                 dir + "/a.vrm",
                 dir + "/b.vrm",
@@ -139,7 +157,7 @@ namespace ChatterMascot.Tests
             var env = Env(desktop: false, listFiles: (_, __) => new[] { dir + "/a.vrm" });
 
             Assert.That(Paths(env, AssetKind.Vrm),
-                Is.EqualTo(new[] { "/persist/model.vrm", "/streaming/vita.vrm" }));
+                Is.EqualTo(new[] { "/persist/models/mascot.vrm", "/streaming/vita.vrm" }));
         }
 
         [Test]
@@ -179,14 +197,15 @@ namespace ChatterMascot.Tests
         {
             var env = Env(listFiles: (_, __) => null);
             Assert.That(Paths(env, AssetKind.Vrm),
-                Is.EqualTo(new[] { "/persist/model.vrm", "/streaming/vita.vrm" }));
+                Is.EqualTo(new[] { "/persist/models/mascot.vrm", "/streaming/vita.vrm" }));
         }
 
         /// <summary>
         /// ★ <c>persistentDataPath</c> が空のとき、以前の <c>Join</c> は左辺の空を
-        ///   右辺の返却で吸ってしまい、相対パス <c>"model.vrm"</c> がそのまま候補になっていた。
+        ///   右辺の返却で吸ってしまい、相対パス <c>"models/mascot.vrm"</c> がそのまま候補に
+        ///   なっていた。
         ///   <c>File.Exists</c> はカレントディレクトリ（Unity ではプロジェクトルート）基準で
-        ///   評価されるので、プロジェクトルートに <c>model.vrm</c> を置くだけで
+        ///   評価されるので、プロジェクトルートに <c>models/mascot.vrm</c> を置くだけで
         ///   <b>同梱より上位で誤って一致する</b>（PR #69 の再レビューで判明）。
         ///   ここでは <see cref="AssetCandidate.Source"/> で「<c>PersistentData</c> の候補が
         ///   そもそも積まれないこと」を固定する。
@@ -295,19 +314,22 @@ namespace ChatterMascot.Tests
         /// <summary>
         /// ★ <b>引き上げたぶんを走査側に二重で出さないこと。</b> 同じファイルが2回並ぶと、
         ///   ログの「どれを採ってどれを無視したか」が読めなくなる。
+        ///
+        /// ★ <b>ファイル名で数えないこと。</b> <c>persistentDataPath</c> 側の候補も
+        ///   <c>models/mascot.vrm</c>（同じ固定名）になったので、名前の一致で数えると
+        ///   <b>別のルートにある別のファイルまで数えて必ず2になる</b>。見るのは<b>同じパスが
+        ///   2回出ないこと</b>と、<b>出どころが走査側ではなく設定の段であること</b>。
         /// </summary>
         [Test]
         public void DoesNotListTheChosenModelTwice()
         {
-            var env = Env(listFiles: (dir, pattern) => new[]
-            {
-                "/home/u/.config/chatter-agent/models/" + AssetPath.SelectedVrmFile,
-            });
+            var chosen = "/home/u/.config/chatter-agent/models/" + AssetPath.SelectedVrmFile;
+            var env = Env(listFiles: (dir, pattern) => new[] { chosen });
 
-            var paths = AssetPath.Enumerate(env, AssetKind.Vrm).ToList()
-                .FindAll(c => c.Path.EndsWith(AssetPath.SelectedVrmFile, System.StringComparison.Ordinal));
+            var all = AssetPath.Enumerate(env, AssetKind.Vrm).ToList();
 
-            Assert.That(paths.Count, Is.EqualTo(1));
+            Assert.That(all.FindAll(c => c.Path == chosen).Count, Is.EqualTo(1));
+            Assert.That(all.Find(c => c.Path == chosen).Source, Is.EqualTo(AssetSource.Settings));
         }
 
         /// <summary>

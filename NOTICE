@@ -42,7 +42,7 @@ Changes from cc-mascot beyond the above:
 
 ## Third-party libraries included in build artifacts
 
-`apps/chatter-mascot/` fetches the following libraries through the Unity
+`chatter-mascot/` fetches the following libraries through the Unity
 Package Manager. **They are not part of the repository, but they are part of
 the built `.app` / `.apk`.**
 
@@ -139,7 +139,7 @@ Framework and so on) are governed by the Unity Software License.
 
 ## Third-party assets included in the repository
 
-Placed under `apps/chatter-mascot/Assets/StreamingAssets/`, and included in
+Placed under `chatter-mascot/Assets/StreamingAssets/`, and included in
 the `.app` / `.apk` as well.
 
   - vita.vrm — AvatarSample_F ("Vita", a legacy sample model on VRoid Hub)
@@ -157,7 +157,7 @@ the `.app` / `.apk` as well.
             commercialUsage: personalNonProfit -> corporation
             modification:    allowModification -> allowModificationRedistribution
         The rewrite was done with
-        `apps/chatter-mascot/scripts/patch-vrm-meta.py`. Only those two
+        `chatter-mascot/scripts/patch-vrm-meta.py`. Only those two
         fields of the glTF JSON chunk are replaced; **the geometry and the
         textures (the BIN chunk) are byte-for-byte as they were.**
 
@@ -176,7 +176,7 @@ the `.app` / `.apk` as well.
 
 ---
 
-**All of the C# under `apps/chatter-mascot/` was written from scratch for
+**All of the C# under `chatter-mascot/` was written from scratch for
 chatter-agent and contains no code derived from cc-mascot** (the
 `idle_loop.vrma` above is not code)**.** The state machine of the speech queue
 (`Assets/ChatterMascot/Runtime/Playback/PlaybackQueue.cs`) is a port of

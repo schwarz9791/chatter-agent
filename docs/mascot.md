@@ -142,7 +142,7 @@ Assets/ChatterMascot/
 | 1 | 起動引数 | `-vrm <path>` | `-vrma <path>` | 全 |
 | 2 | 環境変数 | `CHATTER_MASCOT_VRM` | `CHATTER_MASCOT_VRMA` | 全 |
 | 3 | 設定パネルで選んだモデル | `models/mascot.vrm`（固定名） | —— | デスクトップのみ |
-| 4 | `Application.persistentDataPath/` | `model.vrm` | `idle.vrma` | 全 |
+| 4 | `Application.persistentDataPath/` | `models/mascot.vrm` | `animations/idle.vrma` | 全 |
 | 5 | `${XDG_CONFIG_HOME:-~/.config}/chatter-agent/` | `models/*.vrm` | `animations/*.vrma`（直下のみ） | デスクトップのみ |
 | 6 | 同梱（`StreamingAssets/`） | `vita.vrm` | `idle_loop.vrma` | 全 |
 
@@ -266,7 +266,7 @@ private の `vroid-motion-exporter` に切り出してある。
 ```bash
 cd core && npm run start:server            # 合成エンジンはサーバーが起こす
 
-cd apps/chatter-mascot
+cd chatter-mascot
 ./scripts/test.sh                          # EditMode テスト
 ./scripts/build.sh                         # 本番シーン → Build/ChatterMascot.app
 ./scripts/build.sh Assets/Scenes/TransparencyProbe.unity Build/TransparencyProbe.app
@@ -338,7 +338,7 @@ $EDITOR ~/.config/chatter-agent/mascot/settings.json   # 直すか、消して�
 動く。前提は **Android Build Support**（OpenJDK / SDK & NDK 込み）だけ。
 
 ```bash
-cd apps/chatter-mascot
+cd chatter-mascot
 ./scripts/build-android.sh                     # → Build/ChatterMascot.apk（.gitignore 済み）
 
 ~/Library/Android/sdk/emulator/emulator -avd XR_Glasses &   # 実機なら USB で繋ぐ
@@ -367,6 +367,27 @@ logcat に出るはずの行:
 ```bash
 adb shell pm grant|revoke tech.sukima.chattermascot android.permission.HAND_TRACKING
 ```
+
+### モデルとモーションを入れる
+
+Android に設定 UI は無いので、端末の `files/` 配下へ直接置く。**ディレクトリはデスクトップの
+`~/.config/chatter-agent/` と同じ**（`models/` と `animations/`）。ただし**直下の2本は固定名**で、
+デスクトップのような任意名の走査は効かない（端末に共有のファイルシステムが無いので、その段ごと落ちる）。
+
+```bash
+ADB=~/Library/Android/sdk/platform-tools/adb
+D=/sdcard/Android/data/tech.sukima.chattermascot/files
+$ADB push mascot.vrm  $D/models/mascot.vrm        # 固定名。これ以外は読まない
+$ADB push idle.vrma   $D/animations/idle.vrma     # 固定名。待機ループの差し替え
+$ADB shell am force-stop tech.sukima.chattermascot
+```
+
+感情モーションは `animations/<カテゴリ>/*.vrma`（`idle` / `happy` / `angry` / `sad` / `relaxed` /
+`surprised`）。**こちらは任意名のままで効く** —— カテゴリの走査は `persistentDataPath` を無条件に
+積むので、固定名に縛られるのは直下の1本だけ。
+
+★ **`files/` の直下に置く旧レイアウト（`model.vrm` / `idle.vrma`）はもう読まない。** 残っていても
+警告は出ず、同梱のモデルとモーションで起動する。
 
 ### キャラクターの大きさと置き場所（`xr`）
 
@@ -420,7 +441,7 @@ CHATTER_AGENT_HOST=0.0.0.0 npm run start:server
 cd core
 XDG_CONFIG_HOME=/tmp/cm-android CHATTER_AGENT_PORT=8571 \
   CHATTER_AGENT_TTS_URL=http://127.0.0.1:10101 npm run start:server
-cd ../apps/chatter-mascot
+cd ../chatter-mascot
 CHATTER_AGENT_PORT=8571 ./scripts/run-android.sh
 ```
 

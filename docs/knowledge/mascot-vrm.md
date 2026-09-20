@@ -296,7 +296,7 @@ probe :  frame bounds size (0.35, 1.66, 0.31)  center (0.00, 0.80, -0.02)
 `~/.config/chatter-agent/models/` に置いたモデルはこれまでどおりアプリが読む。
 probe だけを同梱モデルに固定したいのであって、差し替えの仕組みを塞ぎたいわけではない。
 
-★ **環境変数（探索順2）も潰すこと。同じ穴が2つ空いていた。** `AssetEnvFactory.Current()` は
+★ **環境変数の段も潰すこと。同じ穴が2つ空いていた。** `AssetEnvFactory.Current()` は
 `Variables = ReadEnvironment()` を入れるので、`HasUserConfigDirectory` を落としただけでは
 `CHATTER_MASCOT_VRM` が生きたままになる。`scripts/run.sh` は開発者のシェルから Unity を
 起動するので、**`export` しっぱなしの値をそのまま継承する**。
@@ -307,26 +307,27 @@ probe だけを同梱モデルに固定したいのであって、差し替え�
 「**`.app` を Finder から起動すると環境変数は空**（シェルを継承しない）」と書いている ——
 **アプリでは効かないが probe では効く**という、いちばん見つけにくい向きの非対称。
 
-★ **起動引数（探索順1）は残す。** `-vrm <path>` は**その実行に対して明示的に渡すもの**で、
-probe を別モデルで回すための意図的な口。周囲の状態に左右されない点が 2〜4 と決定的に違う。
+★ **起動引数は残す。** `-vrm <path>` は**その実行に対して明示的に渡すもの**で、
+probe を別モデルで回すための意図的な口。周囲の状態に左右されない点が、ほかの段と決定的に違う。
 
 ```console
-# 環境変数は無視される（＝ 探索順2 を潰した）
+# 環境変数は無視される（＝ 環境変数の段を潰した）
 $ CHATTER_MASCOT_VRM=/tmp/decoy.vrm ./scripts/run.sh ChatterMascot.EditorTools.VrmProbe.Report
 [VrmProbe] 読みます: .../Assets/StreamingAssets/vita.vrm
 
-# 起動引数は効く（＝ 探索順1 は残す）
+# 起動引数は効く（＝ 起動引数の段は残す）
 $ ./scripts/run.sh ChatterMascot.EditorTools.VrmProbe.Report -vrm /tmp/decoy.vrm
 [VrmProbe] 読みます: /tmp/decoy.vrm
 ```
 
 ★ **根っこは「doc が主張していることをコードが実行していなかった」こと。** `ProbeEnv` の doc は
 最初から「ここは**同梱と起動引数だけ**見れば足りる」と書いていたのに、実際に潰していたのは
-`PersistentDataPath`（探索順3）だけだった。**その食い違いが、そのまま2回のバグになった**
-（探索順4 = #64、探索順2 = その直後）。`AssetPath` の探索順の表に段を足したら、
-`ProbeEnv` も見直すこと。
+`PersistentDataPath` だけだった。**その食い違いが、そのまま2回のバグになった**
+（ユーザー設定の走査 = #64、環境変数 = その直後）。`AssetPath` の探索順の表に段を足したら、
+`ProbeEnv` も見直すこと。★ **段を番号で指さないこと** —— 表に段を挿すと全部ずれる。
+設定パネルの段が入った #76 で実際にずれ、気づかないまま残っていた。
 
-★ **探索順3 も、実は「消えていなかった」（PR #69 の再レビューで判明）。** `env.PersistentDataPath = "";`
+★ **`persistentDataPath` の段も、実は「消えていなかった」（PR #69 の再レビューで判明）。** `env.PersistentDataPath = "";`
 は「この段を消す」つもりの1行だったが、`AssetPath.Join` は
 
 ```csharp
@@ -337,20 +338,20 @@ private static string Join(string left, string right)
 }
 ```
 
-だったので、`Join("", "model.vrm")` は **`"model.vrm"`（相対パス）をそのまま返す**。`Add` は
-空文字しか弾かないので、この相対パスは探索順3の候補としてそのまま積まれる。`File.Exists("model.vrm")`
-は Unity のカレントディレクトリ（プロジェクトルート）基準で評価されるので、**同梱（探索順5）より
-上位で当たる**。つまり `PersistentDataPath = ""` は「探索順3を消す」のではなく、
-**「探索順3の基準ディレクトリをプロジェクトルートに変える」だけ**になっていた。
+だったので、`Join("", "models/mascot.vrm")` は **相対パスをそのまま返す**。`Add` は
+空文字しか弾かないので、この相対パスは `persistentDataPath` の段の候補としてそのまま積まれる。
+`File.Exists` は Unity のカレントディレクトリ（プロジェクトルート）基準で評価されるので、
+**同梱より上位で当たる**。つまり `PersistentDataPath = ""` は「その段を消す」のではなく、
+**「その段の基準ディレクトリをプロジェクトルートに変える」だけ**になっていた。
 
-同じ穴は `Enumerate` 探索順3・5（`PersistentDataPath` / `StreamingAssetsPath` が空）、
-`RuntimeDirectory`（探索順4の基準）、`Add` の `~/` 展開（`HomeDirectory` が空）の4箇所に
+同じ穴は `Enumerate` の `PersistentDataPath` と `StreamingAssetsPath` の段（基準が空）、
+`RuntimeDirectory`（ユーザー設定の段の基準）、`Add` の `~/` 展開（`HomeDirectory` が空）の4箇所に
 空いていた。**`Join` が空の基準から候補を作らないよう直した**（左辺が空なら `null` を返す。
 詳細は `AssetPath.cs` の `Join` の doc）。★ **ここを戻すと相対パスの候補が積まれる。**
 
 ★ **アプリ側の穴も同時に閉じた。** `AssetEnvFactory.Home()` は例外時に `""` を返す実装なので、
 `HomeDirectory` が空になる経路は probe に限らず実在する。`Join` を直したことで、
-`RuntimeDirectory`（探索順4）と `~/` 展開（起動引数・環境変数）は、アプリ側でも
+`RuntimeDirectory`（ユーザー設定の段）と `~/` 展開（起動引数・環境変数）は、アプリ側でも
 相対パスに化けなくなった。
 
 ## ★ 同じ `TryGetBoneTransform` が、同一フレーム内で実行順によって別の値を返す

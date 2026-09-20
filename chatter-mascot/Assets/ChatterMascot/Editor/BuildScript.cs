@@ -19,7 +19,7 @@ namespace ChatterMascot.EditorTools
     /// <code>
     /// /Applications/Unity/Hub/Editor/6000.3.14f1-arm64/Unity.app/Contents/MacOS/Unity \
     ///   -batchmode -quit -nographics \
-    ///   -projectPath apps/chatter-mascot \
+    ///   -projectPath chatter-mascot \
     ///   -executeMethod ChatterMascot.EditorTools.BuildScript.BuildMacOS \
     ///   -logFile - \
     ///   -buildScene Assets/Scenes/TransparencyProbe.unity \

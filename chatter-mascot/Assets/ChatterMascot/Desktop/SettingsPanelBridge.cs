@@ -949,7 +949,7 @@ namespace ChatterMascot.Desktop
                 var root = AssetPath.RuntimeDirectory(AssetEnvFactory.Current());
                 if (string.IsNullOrEmpty(root)) return 0;
 
-                var models = Path.Combine(root, "models");
+                var models = Path.Combine(root, AssetPath.ModelsDirectory);
                 if (!Directory.Exists(models)) return 0;
 
                 foreach (var file in Directory.GetFiles(models, "*.vrm"))
@@ -1065,7 +1065,7 @@ namespace ChatterMascot.Desktop
                     return false;
                 }
 
-                var models = Path.Combine(root, "models");
+                var models = Path.Combine(root, AssetPath.ModelsDirectory);
                 Directory.CreateDirectory(models);
 
                 var fileName = Path.GetFileName(source);

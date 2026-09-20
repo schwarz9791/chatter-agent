@@ -225,29 +225,32 @@ namespace ChatterMascot.EditorTools
         ///   <c>Application.streamingAssetsPath</c> は Editor でも
         ///   <c>&lt;project&gt;/Assets/StreamingAssets</c> を返すので使えるが、
         ///   <c>persistentDataPath</c> は Editor 固有の場所を指す。
-        ///   ここは<b>同梱（探索順5）と起動引数（探索順1）だけ</b>見れば足りる。
+        ///   ここは<b>同梱と起動引数だけ</b>見れば足りる。
         ///
-        /// ★ <b>「足りる」と書いたら、残り（2 / 3 / 4）を実際に全部潰すこと。</b>
-        ///   この doc は最初からこう書いてあったのに、コードが潰していたのは 3 だけだった。
-        ///   4 を <a href="https://github.com/schwarz9791/chatter-agent/issues/64">#64</a> で、
-        ///   2 をその直後に踏んだ —— <b>doc の主張とコードのズレが、そのまま2回のバグになった</b>。
-        ///   探索順（<see cref="AssetPath"/> の表）に段を足したら、ここも見直すこと。
+        /// ★ <b>「足りる」と書いたら、残りの段を実際に全部潰すこと</b> —— 環境変数・
+        ///   <c>persistentDataPath</c>・ユーザー設定の走査（設定パネルのモデルは走査から引き上げる段なので、
+        ///   走査を止めれば一緒に消える）。この doc は最初からこう書いてあったのに、実際に潰していたのは
+        ///   <c>persistentDataPath</c> だけだった。ユーザー設定の走査を
+        ///   <a href="https://github.com/schwarz9791/chatter-agent/issues/64">#64</a> で、環境変数を
+        ///   その直後に踏んだ —— <b>doc の主張とコードのズレが、そのまま2回のバグになった</b>。
+        ///   <see cref="AssetPath"/> の表に段を足したら、ここも見直すこと。
+        ///   ★ <b>段を番号で指さないこと。</b> 表に段を挿すと全部ずれる（実際に2度ずれた）。
         ///
         /// ★ <b>起動引数（1）は残すこと。</b> <c>-vrm &lt;path&gt;</c> は
         ///   <b>その実行に対して明示的に渡すもの</b>で、probe を別モデルで回すための
-        ///   意図的な口。周囲の状態に左右されない点が 2〜4 と決定的に違う。
+        ///   意図的な口。周囲の状態に左右されない点が、ほかの段と決定的に違う。
         /// </summary>
         private static AssetEnv ProbeEnv()
         {
             var env = AssetEnvFactory.Current();
             // ★ **この行は長らく「消す」つもりで「基準ディレクトリを変える」だけになっていた。**
             //   `AssetPath.Join` は左辺（基準）が空だと、以前は右辺をそのまま返していたので、
-            //   `Join("", "model.vrm")` は `"model.vrm"`（相対パス）になり、探索順3の候補として
-            //   積まれ続けていた。`File.Exists` はプロジェクトルート基準で評価されるので、
-            //   プロジェクトルートに `model.vrm` を置くと**同梱（探索順5）より上位で当たる**
+            //   `Join("", "models/mascot.vrm")` は `"models/mascot.vrm"`（相対パス）になり、
+            //   `persistentDataPath` の段の候補として積まれ続けていた。`File.Exists` は
+            //   プロジェクトルート基準で評価されるので、そこに置くと**同梱より上位で当たる**
             //   （PR #69 の再レビューで判明。再現手順:
-            //   `cp Assets/StreamingAssets/vita.vrm ./model.vrm` → probe を回すと
-            //   `[VrmProbe] 読みます: model.vrm` と出て同梱を読まない）。
+            //   `mkdir -p models && cp Assets/StreamingAssets/vita.vrm models/mascot.vrm` →
+            //   probe を回すと `[VrmProbe] 読みます: models/mascot.vrm` と出て同梱を読まない）。
             //   `Join` を「空の基準からは候補を作らない（null を返す）」に直したことで、
             //   この行は宣言どおり「この段を消す」という意味になった。
             env.PersistentDataPath = "";
@@ -262,7 +265,7 @@ namespace ChatterMascot.EditorTools
             //   そのままなので、~/.config/chatter-agent/models/ に置いたモデルは
             //   これまでどおりアプリが読む。
             env.HasUserConfigDirectory = false;
-            // ★ **環境変数（探索順2）も潰すこと。** #64 と同じ穴がここにも空いていた。
+            // ★ **環境変数の段も潰すこと。** #64 と同じ穴がここにも空いていた。
             //   AssetEnvFactory.Current() は Variables = ReadEnvironment() を入れるので、
             //   CHATTER_MASCOT_VRM が生きたままになる。scripts/run.sh は開発者のシェルから
             //   Unity を起動するので **export しっぱなしの値をそのまま継承する**。

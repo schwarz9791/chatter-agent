@@ -20,7 +20,7 @@ Android XR）が鳴らして VRM に反映する。
 | `core/src/player/` | `chatter-agent-player`。発話 CLI。**プロトコルの参照実装。捨てない** |
 | `core/src/core/` | 契約と基盤（型・パス・設定・ロック・キュー） |
 | `core/src/text/` `emotion/` `prompt/` `summarizer/` `tts/` | 整形・感情判定・応答待ち通知・AI要約（既定OFF）・合成クライアント |
-| `apps/chatter-mascot/` | 表示側アプリ（Unity + UniVRM）。macOS と Android XR を1プロジェクトから |
+| `chatter-mascot/` | 表示側アプリ（Unity + UniVRM）。macOS と Android XR を1プロジェクトから |
 | `docs/` | 基本設計・ファイル構成・コマンド |
 | `docs/knowledge/` | 実装で踏んだこと・なぜそうしたか・実測値 |
 
@@ -186,7 +186,7 @@ npm run verify:player    # WebSocket → 音声取得 → 再生 → ack（エ�
 ```
 
 ```bash
-cd apps/chatter-mascot
+cd chatter-mascot
 ./scripts/test.sh        # EditMode テスト
 ```
 
@@ -205,7 +205,7 @@ cd apps/chatter-mascot
 | [`docs/protocol.md`](./docs/protocol.md) | **発話の契約。** `SpeechRecord`、配信キュー、WebSocket と ack、制御 API。クライアントを書くときはここだけで足りる |
 | [`docs/core.md`](./docs/core.md) | `core/` を触るとき。区画の分け方、tsconfig の制約、バンドル方針、ランタイムのファイル配置 |
 | [`docs/plugin.md`](./docs/plugin.md) | `plugin/` を触るとき。bash hook の制約、spool 命名、`hooks.json` の3種 |
-| [`docs/mascot.md`](./docs/mascot.md) | `apps/chatter-mascot/` を触るとき。セットアップ、構成、探索順、ビルドと実行 |
+| [`docs/mascot.md`](./docs/mascot.md) | `chatter-mascot/` を触るとき。セットアップ、構成、探索順、ビルドと実行 |
 | [`docs/origin.md`](./docs/origin.md) | cc-mascot 由来のコードを触るとき。移植の対応表、フォーク点、ライセンス義務 |
 | [`docs/knowledge/`](./docs/knowledge) | **踏んだこと・なぜそうしたか・実測値。** 同じ罠に2度目で刺されないため |
 | `_workspace/chatter-agent-design.md` | 着手前の検討記録（git 管理外）。**基本設計の正は `docs/` 側** |

@@ -13,7 +13,7 @@ namespace ChatterMascot.Tests
     ///   ズレたらここが落ちるようにしてある。
     ///
     /// ★ 落ちたら <b>リポジトリの <c>NOTICE</c> に合わせてコピーを更新する</b>（逆ではない）:
-    ///   <c>cp NOTICE apps/chatter-mascot/Assets/StreamingAssets/NOTICE.txt</c>
+    ///   <c>cp NOTICE chatter-mascot/Assets/StreamingAssets/NOTICE.txt</c>
     ///
     /// ★ <b>コピーで揃えるのではなく、一致を確かめて落とす。</b> ビルド後処理は失敗しても
     ///   ビルドを落とさない方針（→ <c>MacPostBuild</c>）なので、そこにコピーを置くと
@@ -32,8 +32,8 @@ namespace ChatterMascot.Tests
         [Test]
         public void StreamingAssetsCopyMatchesTheRepositoryNotice()
         {
-            // Assets/ → apps/chatter-mascot/ → apps/ → リポジトリのルート
-            var root = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "..", ".."));
+            // Assets/ → chatter-mascot/ → リポジトリのルート
+            var root = Path.GetFullPath(Path.Combine(Application.dataPath, "..", ".."));
             var source = Path.Combine(root, "NOTICE");
             var copy = Path.Combine(Application.dataPath, "StreamingAssets", "NOTICE.txt");
 
@@ -45,7 +45,7 @@ namespace ChatterMascot.Tests
             Assert.That(
                 File.ReadAllText(copy), Is.EqualTo(File.ReadAllText(source)),
                 "同梱の NOTICE.txt がリポジトリの NOTICE と違います。" +
-                "cp NOTICE apps/chatter-mascot/Assets/StreamingAssets/NOTICE.txt で合わせること");
+                "cp NOTICE chatter-mascot/Assets/StreamingAssets/NOTICE.txt で合わせること");
         }
     }
 }

@@ -386,14 +386,8 @@ $ADB shell am force-stop tech.sukima.chattermascot
 `surprised`）。**こちらは任意名のままで効く** —— カテゴリの走査は `persistentDataPath` を無条件に
 積むので、固定名に縛られるのは直下の1本だけ。
 
-★ **以前の版を入れた端末は置き場所が変わっている。** `files/model.vrm` と `files/idle.vrma` は
-もう読まないので、`models/mascot.vrm` と `animations/idle.vrma` へ移すこと。
-
-```bash
-$ADB shell mkdir -p $D/models $D/animations         # 設定 UI が無いので、作られる経路が無い
-$ADB shell mv $D/model.vrm $D/models/mascot.vrm     # 置いていなければ飛ばす
-$ADB shell mv $D/idle.vrma $D/animations/idle.vrma  # 同上
-```
+★ **`files/` の直下に置く旧レイアウト（`model.vrm` / `idle.vrma`）はもう読まない。** 残っていても
+警告は出ず、同梱のモデルとモーションで起動する。
 
 ### キャラクターの大きさと置き場所（`xr`）
 

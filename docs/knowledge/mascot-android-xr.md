@@ -120,7 +120,9 @@ Transform しか持たない空オブジェクトで、初版は「空だから�
 
 `BuildAndroid` は `Disable Unity Audio` を切り替えない。コミットされている `m_DisableAudio: 0` が
 Android の出荷値そのもの（→ [`mascot-speech.md`](./mascot-speech.md)「無音時にオーディオ出力デバイスを掴まない」）。
-`scripts/build-android.sh` には `build-native.sh` の呼び出しも `AudioManager.asset` の trap も無い。
+`scripts/build-android.sh` に `build-native.sh` の呼び出しも `AudioManager.asset` の trap も無いのは
+変わらないが、ネイティブプラグインのバンドルの実体は `unity.sh` が Unity の手前で用意する
+（Android には積まないが、実体が無いと `.bundle.meta` が孤児として捨てられるため）。
 IL2CPP の作業ディレクトリ `.utmp/` は `.gitignore` 済み。
 
 ### 検証時の接続

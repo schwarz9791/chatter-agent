@@ -4,9 +4,11 @@
 #   ./scripts/build-android.sh
 #   ./scripts/build-android.sh Assets/Scenes/Mascot.unity Build/ChatterMascot.apk
 #
-# ★ build-native.sh は呼ばないこと。ネイティブプラグイン（ChatterMascotNative.bundle）は
+# ★ ここから build-native.sh は呼ばないこと。ネイティブプラグイン（ChatterMascotNative.bundle）は
 #   macOS 専用の常駐機能（メニューバー・グローバルショートカット）のためのもので、
 #   Android には積まない（NativePluginSettings が macOS だけに絞っている）。
+#   バンドルの実体は unity.sh が用意する。Android ビルドでも Unity を起動する以上、
+#   実体が無いと .bundle.meta が孤児として捨てられるため。
 #
 # ★ AudioManager.asset の trap も無い。 build.sh の trap は BuildScript.BuildMacOS が
 #   ビルド中だけ Disable Unity Audio を ON にすることの後始末だが、BuildAndroid は

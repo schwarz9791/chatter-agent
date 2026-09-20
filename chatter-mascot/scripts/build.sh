@@ -36,6 +36,9 @@ trap restore_audio_manager EXIT INT TERM
 # ★ **失敗してもビルドを止めないこと。** 止めると「マスコットが出ない」に化ける。
 #   バンドルが無くても起動はして、常駐機能（メニューバー・ショートカット）だけが落ちる
 #   （→ Desktop/Native/ChatterMascotNative.cs）。set -e があるので明示的に受ける。
+#
+# ★ unity.sh にも build-native.sh を呼ぶ手当てがあるが、ここは残すこと。あちらは
+#   .meta を守るための存在チェックで、ソースの変更は拾わない。
 if ! "$(dirname "${BASH_SOURCE[0]}")/build-native.sh"; then
   echo "[Native] ネイティブプラグインを作れませんでした。メニューバー常駐は動きません" >&2
 fi

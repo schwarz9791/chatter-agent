@@ -370,3 +370,32 @@ jobs:
           if failed:
               sys.exit(1)
           PY
+
+  unity-native-plugin-meta:
+    name: ネイティブプラグインの .meta が出荷値
+    runs-on: ubuntu-latest
+
+    # .bundle は git に入れていないので、クリーンなツリーには .meta しか無い。この状態で Unity を
+    # 起動すると孤児として .meta が捨てられ、あとからバンドルを作ると別の GUID で再インポートされる
+    # （参照している側が壊れ、プラットフォームの絞りも消えて macOS のバンドルが Android ビルドに混ざる）。
+    # scripts/unity.sh が Unity の手前でバンドルを用意するが、Unity Hub から手で開く経路はそこを
+    # 通らない。ビルドも EditMode テストも通ってしまうので、ここが最後の砦。
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: GUID とプラットフォームの絞りが出荷値であること
+        working-directory: .
+        run: |
+          meta=chatter-mascot/Assets/Plugins/macOS/ChatterMascotNative.bundle.meta
+          fail() {
+            echo "::error file=$meta::$1 バンドルがある状態で git checkout -- $meta のあと ./scripts/run.sh ChatterMascot.EditorTools.NativePluginSettings.FixAll で直してください"
+            cat -n "$meta"
+            exit 1
+          }
+          grep -qx "guid: a692ce6a5257a459fb5b8910fa38355f" "$meta" \
+            || fail "GUID が変わっています（参照している側が壊れます）。"
+          grep -qx "PluginImporter:" "$meta" \
+            || fail "PluginImporter のブロックがありません（プラットフォームの絞りが失われています）。"
+          grep -A1 -x "    Any:" "$meta" | grep -qx "      enabled: 0" \
+            || fail "Any プラットフォームが有効です（macOS のバンドルが Android ビルドに混ざります）。"

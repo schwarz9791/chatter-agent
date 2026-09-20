@@ -582,7 +582,7 @@ Unity 本体の作り（「`-runTests` に `-quit` を付けない」「`-execut
 
 **Android 側（`build-android.sh` / `run-android.sh` / `configure-android.sh` / `build-native.sh`）は
 Unity CLI へ寄せていない。** [#127](https://github.com/schwarz9791/chatter-agent/issues/127) で追う。
-`unity.sh` の `run_unity` と Unity.app のパス探索は `build-android.sh` が使っているので残してある。
+`run_unity` と Unity.app のパス探索は `build-android.sh` の中に置いてある。Unity CLI へ寄せたら丸ごと消える。
 
 ## Unity の版を切り替えたときに踏んだこと（#97: 6000.5.8f1 → 6000.3.14f1）
 

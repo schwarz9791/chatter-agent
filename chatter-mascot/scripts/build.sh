@@ -33,7 +33,7 @@ assert_notice_in_sync
 AUDIO_MANAGER="$PROJECT_PATH/ProjectSettings/AudioManager.asset"
 restore_audio_manager() {
   if [ -f "$AUDIO_MANAGER" ] && grep -qx "  m_DisableAudio: 1" "$AUDIO_MANAGER"; then
-    # macOS 専用スクリプト（unity.sh が /Applications/Unity/… を見ている）なので BSD sed
+    # macOS 専用スクリプト（--target StandaloneOSX をビルドする）なので BSD sed
     sed -i '' 's/^  m_DisableAudio: 1$/  m_DisableAudio: 0/' "$AUDIO_MANAGER"
     echo "中断を検出したので Disable Unity Audio を出荷値に戻しました" >&2
   fi

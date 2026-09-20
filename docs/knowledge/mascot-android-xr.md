@@ -19,7 +19,9 @@ XR 自体は [#99](https://github.com/schwarz9791/chatter-agent/issues/99)、接
 ★★ **`-buildTarget Android` はアクティブなビルドターゲットを Library に残す。** その後
 `test.sh` / `build.sh` を明示無しで開くと Android のまま動き、EditMode テストが Android の
 `#if` でコンパイルされたり、`build.sh` が `BuildPlayer` の中で切り替えと再インポートを待ったりする。
-両スクリプトとも `-buildTarget OSXUniversal` を明示して踏まないようにしている。
+`test.sh` は `--` 以降で `-buildTarget OSXUniversal` を Unity へ転送して踏まないようにしている。
+`build.sh` は `unity build --target StandaloneOSX`（**`unity build` は `OSXUniversal` を
+ビルドターゲットとして受け付けない**——渡すと `Invalid build target "OSXUniversal"` で弾かれる）。
 
 ### Android では MToon10 を UniUnlit に差し替える
 

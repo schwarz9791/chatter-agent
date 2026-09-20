@@ -71,6 +71,7 @@ Claude Code
 
 - **Node 24.11 以上**（`mise.toml` で 24.19.0 に固定しています）
 - **Unity 6000.3.14f1** —— macOS / Android のビルドサポートモジュールが必要です
+- **Unity CLI**（`unity` コマンド） —— `chatter-mascot/scripts/*.sh` がこれ経由で Editor を動かします
 - **Xcode コマンドラインツール** —— macOS 常駐用のネイティブプラグインをビルドするのに使います（`xcode-select --install`）
 - **Android SDK の platform-tools**（`adb`）—— Android 版を端末へ入れるとき
 

@@ -7,6 +7,8 @@
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/unity.sh"
 
+require_unity_cli
+
 RESULTS="$PROJECT_PATH/Logs/test-results.xml"
 mkdir -p "$PROJECT_PATH/Logs"
 # ★ 前回の結果を消してから走らせること。残したままだと、コンパイルが通らなかったときに
@@ -14,14 +16,16 @@ mkdir -p "$PROJECT_PATH/Logs"
 #   終了コードは正しく非0になるが、人が読む1行は緑に見える。
 rm -f "$RESULTS"
 
-# ★ -runTests は -quit を付けない（Test Runner が自分で終了する）。
-#   付けるとテストが走り切る前に落ちる
+# ★ unity test は -quit を渡さない（Test Runner が自分で終了する）。
+#   -- 以降にも -quit を足さないこと（走り切る前に落ちる）。
 # ★ -buildTarget OSXUniversal を明示する。build-android.sh の後はアクティブな
 #   ビルドターゲットが Android のまま Library に残り、指定しなければ EditMode テストが
 #   Android の #if でコンパイルされる。
+# ★ 終了コードは unity test 由来。8 はテストの失敗、6 は走り切らなかったことを表す。
 set +e
-run_unity -buildTarget OSXUniversal -runTests -testPlatform EditMode -testResults "$RESULTS" 2>&1 | grep -vE "^\s*$"
-STATUS=${PIPESTATUS[0]}
+unity test "$PROJECT_PATH" --mode EditMode --output "$RESULTS" "${UNITY_CLI_ARGS[@]}" \
+  -- -nographics -buildTarget OSXUniversal
+STATUS=$?
 set -e
 
 if [ -f "$RESULTS" ]; then

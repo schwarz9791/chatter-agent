@@ -263,6 +263,9 @@ private の `vroid-motion-exporter` に切り出してある。
 
 ## 動かす
 
+**Unity CLI（`unity` コマンド）が要る。** `scripts/test.sh` / `build.sh` / `run.sh` はどれも
+内部で `unity` を呼ぶ（→ [`knowledge/mascot-unity.md`](./knowledge/mascot-unity.md)「★ Unity CLI」）。
+
 ```bash
 cd core && npm run start:server            # 合成エンジンはサーバーが起こす
 
@@ -274,6 +277,7 @@ cd chatter-mascot
 ```
 
 どのスクリプトも Editor を閉じてから実行する（Unity はプロジェクトを排他ロックする）。
+環境の診断には `unity doctor` が使える。
 
 ★ **クローン直後に `test.sh` / `run.sh` から始めないこと。** ネイティブプラグインの
 バンドルが無い状態で Unity を回すと `.bundle.meta` が壊れる（→ 上の「Xcode コマンドラインツール」）。

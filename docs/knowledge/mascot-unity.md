@@ -54,26 +54,17 @@
 
 冒頭の「Cube 1個で無制限なら CPU 261%」と対比できる値。**VRM 表示 + VRMA（待機モーション）+
 spring bone + 毎フレームの手続き計算（呼吸・重心移動・視線）を全部載せた状態**で、
-`targetFrameRate = 30` のとき **CPU 14.3%**（実測 n=6、9秒間隔、ウィンドウ 300x480）。
+`targetFrameRate = 30` のとき **CPU 13.2%**（実測 n=5、9秒間隔、ウィンドウ 300x480、
+視線の中立とフレーミングを直した後）。
 
 ★ **この値は「フレームレート上限が効いている」前提の値。** 上限を外したときにどこまで
 増えるかは測っていない。
 
-視線の中立とフレーミングを直した後に測り直すと **CPU 13.2%**（実測 n=5、9秒間隔、
-ウィンドウ 300x480、`targetFrameRate = 30`）。上の 14.3% は視線の中立とフレーミングを
-直す**前**の値なので、条件が違う2つの数字として並べて読むこと。
+窓の既定サイズの変遷（#70 の VRoid モーション対応を含む）は
+[`mascot-desktop.md`](./mascot-desktop.md)「ウィンドウの大きさは3箇所で決まる」を参照。
+`docs/knowledge/` の他の節にある旧サイズの実測値はそのまま残してある。
 
-ウィンドウの既定サイズは #59 で **250x400 → 300x480** に変更した（縦横比 5:8 は維持）。
-`docs/knowledge/` の他の節にある「250x400」の実測値は、変更前に取った記録としてそのまま残してある。
-
-さらに #88 で **300x480 → 540x540**（1:1）に変えた。#70 の VRoid モーションは腕を
-広げる・上げる動きを持ち、5:8 の窓では横に逃げ場がなく腕が窓からはみ出していたため
-（詳細は [`mascot-desktop.md`](./mascot-desktop.md)「ウィンドウの大きさは3箇所で決まる」と
-[`mascot-vrm.md`](./mascot-vrm.md)「T ポーズの腕をフレーミングの箱に入れない」）。`docs/knowledge/` の他の節にある「250x400」「300x480」の実測値は、それぞれの
-変更前に取った記録としてそのまま残してある。
-
-EditMode テストは #59 で件数が増えた（**具体的な件数はここには書かない**——
-件数は変わっていくので `./scripts/test.sh` の `total=` を都度確認すること）。
+EditMode テストの件数は書かない（→「★ テストの件数を文書に書かない」）。
 
 ## #88 時点の実測: 窓の拡大・アンチエイリアス・60fps の CPU コスト
 
@@ -581,25 +572,19 @@ curl -fsSL https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh | UNITY_
 **`scripts/run.sh` は何も出さずに exit 1 した**（grep にこの文言が無かった。
 →「`scripts/run.sh` の grep を通らないログは存在しないのと同じ」）。`run.sh` / `build.sh` の grep に
 `Project has invalid dependencies|An error occurred while resolving packages` を足してある。
-**Editor のマイナー版をまたぐときは、移行先の版で動いているプロジェクトと `manifest.json` を diff して、
-そこに無いモジュールを外すこと。**
+**メジャー / マイナー版を跨ぐときは、移行先の版で動いているプロジェクトと `manifest.json` を diff して、
+そこに無いモジュールを外すこと。** ビルトインパッケージ（URP / ugui / test-framework、推移的に
+collections / burst / mathematics / shadergraph / render-pipelines.core も）は Editor に付いて
+動くので個別の版数を追う必要はない —— 現在の `Packages/manifest.json` に `physicscore2d` は無く、
+この移行は完了済み。
 
-- ビルトインパッケージの版は Editor に付いて動く: URP 17.5.0 → 17.3.0 / ugui 2.5.0 → 2.0.0 /
-  test-framework 1.7.0 → 1.6.0（推移的に collections / burst / mathematics / shadergraph /
-  render-pipelines.core も）
 - `ProjectSettings.asset` の `serializedVersion` 29 → 28。ほかの差分はスキーマだけ。
   `AudioManager.asset` は不変（→ [`mascot-speech.md`](./mascot-speech.md)「プロジェクト設定まわりで踏んだこと」）
 - macOS の透過は切り替え後にビルドして目視で再確認した
   （→ [`mascot-desktop.md`](./mascot-desktop.md)「Unity 6 の URP で透過しないのは `Supports HDR` のせい」）
 
-★★ **新規ワークツリーでは `./scripts/build-native.sh` より先に Unity を起動しないこと。**
-`.bundle` は git に無いので、無い状態で Unity（`./scripts/run.sh …FixAll` など）が走ると
-`.bundle.meta` が孤児として捨てられ、あとから `.bundle` を作ると**別の GUID・`PluginImporter` の
-プラットフォーム設定無しの最小 `.meta`** で再インポートされる（#93 で踏んだものを #97 でまた踏んだ。
-→「`.bundle` が無い状態で Unity を起動すると `.bundle.meta` が壊れる」）。直し方は
-`git checkout -- Assets/Plugins/macOS/ChatterMascotNative.bundle.meta`（要れば
-`NativePluginSettings.FixAll`）。新規クローンでは `./scripts/build-native.sh`
-（または、それを呼ぶ `./scripts/build.sh`）を**最初に**走らせる。
+★★ **`.bundle.meta` が壊れる罠は #93 で踏んだものを #97 でまた踏んだ**
+（→ 上の「`.bundle` が無い状態で Unity を起動すると `.bundle.meta` が壊れる」）。
 
 ★★ **シェーダーのコンパイル中に Unity を殺すと `Library/ShaderCache` が壊れる。** 症状は
 ビルドエラーではなく、次のビルドで **MToon10 の本体パスだけが描かれず、アウトラインの

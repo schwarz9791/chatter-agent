@@ -177,22 +177,15 @@ defaults delete tech.sukima.chatter-mascot   # 焼き付きを消してから測
 
 ## 実測（2026-08-26 / macOS 26.6.2 / 4K 外部ディスプレイ）
 
-`Player.log` に**大きさが決まる瞬間が2回**出る:
-
-```
-Metal RecreateSurface: surface size 250x200     ← 起動直後（= defaultScreen* のまま）
-[Mascot] server: ws://127.0.0.1:9 / ...         ← MascotRunner.Start()
-Metal RecreateSurface: surface size 250x232     ← ★ +32。UniWindowController が枠なし化した直後
-```
-
-**+32 はタイトルバーぶん**が枠なし化でコンテンツ領域へ編入されたもの。高さにだけ乗る
-（横に枠が無いので幅は入れた値のまま）。
-
-★ **上のログは #56 当時のもので、いまは当てはまらない。** 起動時の大きさは
-`Desktop/WindowGeometry.cs` が**ポイントで持った既定と自前の永続化**から決めるので、
-枠なし化で増えたぶんは残らない（→「ウィンドウは起動のたびに縦へ 32 伸びる」）。
-`Default Screen Width/Height` が効くのは窓を掴むまでの数フレームだけ。
-「368 と入れて 400 になる」という回避策も**もう当てはまらない**。
+★ **#56 当時の記録（いまは当てはまらない）。** `Player.log` に起動直後
+`Metal RecreateSurface: surface size 250x200`（`defaultScreen*` のまま）→
+`MascotRunner.Start()` の `[Mascot] server: ...` ログを挟み →
+`UniWindowController` が枠なし化した直後 `250x232` で **+32**
+（タイトルバーぶんがコンテンツ領域へ編入。高さにだけ乗る）。いまは
+`Desktop/WindowGeometry.cs` がポイントで持った既定と自前の永続化から大きさを決めるので
+この伸びは残らず（→「ウィンドウは起動のたびに縦へ 32 伸びる」）、`Default Screen Width/Height`
+が効くのは窓を掴むまでの数フレームだけで、「368 と入れて 400 になる」という回避策も
+当てはまらない。
 
 ★ **当初これを「Retina で2倍されている」と読んで `200` を入れ、232 になって外した。**
 **推測で式を組まずに測ること。** ——ただし「2倍にならない」という結論も
@@ -613,20 +606,16 @@ osascript -e 'tell application "System Events" to click at {3196, 15}'
 
 ## #75 の実機確認（macOS 26.6.2 / `.app`）
 
+Dock 非表示（`lsappinfo` が `type="UIElement"`。旧ビルドは `type="Foreground"`）・
+二重起動の見分け（pid をツールチップに表示）・メニュー内容と状態反映・
+⌥M（他アプリにフォーカスがある状態でも効き、アクセシビリティ権限のダイアログは出ない）・
+ミュート中のアイコン表示と発話停止/解除・メニューの「終了」が `LogError` なく1回で終わること・
+設定を開く（`TextEdit` が開く。#76 までの繋ぎ）・バンドルを消した `.app` でのフォールバック起動を
+実機確認、全項目パス。
+
 | 確認したこと | 結果 |
 |---|---|
-| Dock に出ない | `lsappinfo` が **`type="UIElement"`**（同じアプリの旧ビルドは `type="Foreground"`） |
 | メニューバーのアイコン | 出る。テンプレート画像として振る舞う（★ **白/黒の反転についてはこの記述を #93 で訂正した**。下の「#93 の実機確認」） |
-| **二重起動** | ★ **アイコンが並ぶ。** 3つ動かしたら3つ並んだ —— pid をツールチップに入れた狙いどおり、目で分かる |
-| メニューの中身 | ミュート（⌥M）/ キャラクターを隠す / 設定を開く… / ── / Chatter Mascot 0.1.0（**灰色**）/ 終了 |
-| 状態の反映 | ミュートに ✓ が付き、ラベルが「キャラクターを**表示する**」に変わる |
-| **⌥M（他アプリにフォーカスがある状態）** | ★ 効く。**アクセシビリティ権限のダイアログは出ない**（Carbon を選んだ理由） |
-| ミュート中のアイコン | **薄くなる**（`appearsDisabled`） |
-| 設定を開く | TextEdit が開く（#76 までの繋ぎ） |
-| **メニューの「終了」** | ★ **1回で終わる。** `試行 2` も `LogError` も出ない（#68 の手当てが `LSUIElement` でも効いている） |
-| **ミュート中の発話** | ★ `afplay` は**起動せず**、サーバー側は `seq<=1 を 1 件消しました`（**ack は出ている**）。キューは空のまま |
-| 解除後の発話 | `afplay の実時間 1454ms / WAV の長さ 1140ms`（鳴る） |
-| **バンドルを消した `.app`** | ★ 起動する。`[Native] ChatterMascotNative.bundle が見つかりません…` の**警告1本**だけで、VRM も読み込まれ、マスコットは動く |
 
 ★ **`.app` の中の `.bundle` を手で差し替えないこと。** コード署名が壊れて
 `open` から起動できなくなる（`Player.log` が空のまま終了する）。
@@ -737,13 +726,14 @@ osascript -e 'tell application "System Events" to tell process "Chatter Mascot" 
 
 ## #93 の実機確認（macOS 26.6.2 / `.app`）
 
+アプリアイコン（Finder に出る。他アプリと並べて浮かない）・`PlayerIcon.icns` の生成
+（`Contents/Resources/` に 16〜512 / 512@2x）・`LSApplicationCategoryType`
+（`public.app-category.utilities`。`LSUIElement` は健在で `MacPostBuild` を壊していない）・
+Game Mode のロケット消滅（カテゴリを変えるだけで消え、`LSSupportsGameMode` /
+`GCSupportsGameMode` は足していない）・メニューバー素材の自前化を実機確認、全項目パス。
+
 | 確認したこと | 結果 |
 |---|---|
-| アプリアイコン | Finder に出る。他のアプリと並べて浮いていない |
-| `PlayerIcon.icns` | `Contents/Resources/` に生成された。中身は 16 / 32 / 48 / 128 / 256 / 512 / 512@2x |
-| `LSApplicationCategoryType` | `public.app-category.utilities`。**`LSUIElement = true` も残っている**（`MacPostBuild` を壊していない） |
-| **Game Mode のロケット** | **カテゴリを変えるだけで消えた。** `LSSupportsGameMode` / `GCSupportsGameMode` は**足していない** |
-| メニューバーのアイコン | 自前の素材に変わった。ミュート（`⌃⌥M`）で薄くなる（`appearsDisabled`） |
 | ★ ライト/ダークでの白黒の反転 | **観測できなかった** —— 下記 |
 
 ★★ **テンプレート画像は「ライトモードにすると黒くなる」わけではない（#75 の記述を訂正）。**

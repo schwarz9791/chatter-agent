@@ -236,14 +236,9 @@ VRMA が適用されて腕が下りるまでのあいだだけ広い箱のまま
 ★ **probe はシーンを経由しない**ので `[SerializeField]` の値は取れない。シーンで
 `boneBoundsMarginMeters` を既定から変えたら、probe の出力は実行時の箱と食い違う。
 
-`vita.vrm` の実測（2種類とも出す）:
-
-```
-  bounds size: (1.39, 1.73, 0.55)          ← Renderer.bounds の合成。ランタイムは使わない
-  bounds W/H: 0.803
-  frame bounds size: (0.35, 1.66, 0.31)    ← VrmStage.MeasureBounds。テストに貼るのはこちら
-  frame bounds W/H: 0.214
-```
+`vita.vrm` の実測（2種類とも出す）: `bounds size: (1.39, 1.73, 0.55)`（`bounds W/H: 0.803`。
+Renderer.bounds の合成でランタイムは使わない）に対し、`frame bounds size: (0.35, 1.66, 0.31)`
+（`frame bounds W/H: 0.214`。`VrmStage.MeasureBounds` によるものでテストに貼るのはこちら）。
 
 W/H が 0.214 なので、ウィンドウのアスペクト（300/480 = 0.625）より細い。
 **支配軸は垂直で、ウィンドウの幅を変えてもカメラ距離は動かない**。
@@ -271,13 +266,9 @@ W/H が 0.214 なので、ウィンドウのアスペクト（300/480 = 0.625）
 にして適用したヨーを返すようにし、`VrmProbe.Report` が `Describe` の直前に
 これを呼んで同じ staging を通してから測るようにした。
 
-`vita.vrm` の実測（staging を揃えた後の出力）:
-
-```
-  faceCamera yaw: 180 度
-  frame bounds size: (0.35, 1.66, 0.31)     ← size は不変（180° 回転のため）
-  frame bounds center: (0.00, 0.80, -0.02)  ← center.z の符号だけ反転した
-```
+`vita.vrm` の実測（staging を揃えた後の出力）: `faceCamera yaw: 180 度`、`frame bounds size:
+(0.35, 1.66, 0.31)`（size は不変。180° 回転のため）、`frame bounds center: (0.00, 0.80, -0.02)`
+（center.z の符号だけ反転した）。
 
 予測どおり `size` は変わらず、`center` の z の符号だけが変わった
 （`Vita()` は `center` を `(0f, 0.80f, 0.02f)` から `(0f, 0.80f, -0.02f)` に貼り直した）。
@@ -352,25 +343,10 @@ private static string Join(string left, string right)
 上位で当たる**。つまり `PersistentDataPath = ""` は「探索順3を消す」のではなく、
 **「探索順3の基準ディレクトリをプロジェクトルートに変える」だけ**になっていた。
 
-再現（プロジェクトルートに `model.vrm` を置くだけで再現する）:
-
-```console
-$ cp Assets/StreamingAssets/vita.vrm ./model.vrm
-$ ./scripts/run.sh ChatterMascot.EditorTools.VrmProbe.Report
-[VrmProbe] 読みます: model.vrm      ← 同梱ではなくこちらを読む
-```
-
-★ **同じ穴は、`Join` の左辺が空になりうる箇所すべてに空いていた。**
-
-| 箇所 | 左辺が空になる条件 | 直す前の結果 |
-|---|---|---|
-| `Enumerate` 探索順3 | `PersistentDataPath = ""`（`ProbeEnv` が意図的にやる） | 相対 `model.vrm` |
-| `Enumerate` 探索順5 | `StreamingAssetsPath` が空 | 相対 `vita.vrm` |
-| `RuntimeDirectory`（探索順4の基準） | `HomeDirectory` が空かつ `XDG_CONFIG_HOME` 未設定 | 相対 `.config/chatter-agent` |
-| `Add` の `~/` 展開 | `HomeDirectory` が空 | `~/x.vrm` が相対 `x.vrm` になる |
-
-だから `ProbeEnv` 側で段ごとに空文字を弾く小細工を足すのではなく、**`Join` そのものに
-「空の基準からは候補を作らない（左辺が空なら `null` を返す）」を1つ入れて**、4箇所を一括で閉じた。
+同じ穴は `Enumerate` 探索順3・5（`PersistentDataPath` / `StreamingAssetsPath` が空）、
+`RuntimeDirectory`（探索順4の基準）、`Add` の `~/` 展開（`HomeDirectory` が空）の4箇所に
+空いていた。**`Join` が空の基準から候補を作らないよう直した**（左辺が空なら `null` を返す。
+詳細は `AssetPath.cs` の `Join` の doc）。★ **ここを戻すと相対パスの候補が積まれる。**
 
 ★ **アプリ側の穴も同時に閉じた。** `AssetEnvFactory.Home()` は例外時に `""` を返す実装なので、
 `HomeDirectory` が空になる経路は probe に限らず実在する。`Join` を直したことで、
@@ -423,10 +399,8 @@ Deferred のままだと未検証の経路に入る。UniVRM 公式の URP サ�
 組み直すため（`ScreenSpaceAmbientOcclusion*Resources` が実行時リストから落ちる）。
 **手で書いた差分ではない。**
 
-★ **`MToonOutlineRenderFeature` の追加は Editor の GUI で行うこと。**
-`m_RendererFeatureMap` のハッシュをコードで組むのは脆い。`SceneFixups` は
-**検査して `LogError` するだけ**（`AssertRendererFeatures`）。
-無いとアウトラインだけ出ず、**エラーも出ない**。
+★ **`MToonOutlineRenderFeature` を足し忘れるとどうなるかは → 下の
+「`MToon Outline Render Feature` を追加し忘れると、エラー無しでアウトラインだけ出ない」。**
 
 ★ **`MToonOutlineRenderFeature` は `#if MTOON_URP` で囲まれている。** 定義しているのは
 `VRM10.MToon10.Runtime.asmdef` の `versionDefines`（`com.unity.render-pipelines.universal`）なので、
@@ -930,25 +904,11 @@ cc-mascot も `performBlink` の入口で `return` している。出力を無�
 `XDG_CONFIG_HOME` を一時ディレクトリに向けたサーバー（`CHATTER_AGENT_PORT=8571`）へ
 `-serverUrl ws://127.0.0.1:8571 -faceLog 1` で繋ぎ、**サーバー起動後に**キューへ手で置いた。
 
-読み込み時（1回だけ出る）:
-
-```
-[Mascot] expression: aa, angry, blink, blinkLeft, blinkRight, ee, happy, ih, lookDown, lookLeft,
-         lookRight, lookUp, neutral, oh, ou, relaxed, sad, surprised（18 件）
-[Mascot] 使う preset: happy=○ angry=○ sad=○ relaxed=○ surprised=○ neutral=○ blink=○ aa=○
-[Mascot] VRMA の ExpressionMap: 0 件
-```
-
-6つの emotion を順に流したときの `目標`（0 のチャンネルは省いた）:
-
-```
-emotion=Happy      happy=0.98 → happy=1.00
-emotion=Angry      happy=0.09 angry=0.91 → angry=1.00
-emotion=Sad        angry=0.64 sad=0.36   → sad=1.00
-emotion=Relaxed    sad=0.03 relaxed=0.97 → relaxed=1.00
-emotion=Surprised  relaxed=0.16 surprised=0.84 → surprised=1.00
-emotion=Neutral    surprised=0.01 → （全部 0）
-```
+読み込み時に `aa, angry, blink, blinkLeft, blinkRight, ee, happy, ih, lookDown, lookLeft, lookRight,
+lookUp, neutral, oh, ou, relaxed, sad, surprised`（18 件）の expression が揃い、使う preset も
+すべて○、VRMA の `ExpressionMap` は 0 件だった。`Emotion.Happy → Angry → Sad → Relaxed →
+Surprised → Neutral` の6つを順に流すと、遷移それぞれで前の expression の重みが残ったまま
+次が立ち上がった。
 
 ★ **クロスフェードの中間値がそのまま観測できる。** 前の emotion が残ったまま次が立ち上がっていて、
 どこにも段差が無い。**「パタパタしない」はこの中間値の存在で確かめられる**（目で見るより確実）。
@@ -956,12 +916,7 @@ emotion=Neutral    surprised=0.01 → （全部 0）
 ★ **`ExpressionMap: 0 件` の VRMA が回っている状態で emotion が効いた** ——
 #59 から引き継いだ宿題（表情が VRMA に奪われていないこと）はこれで閉じた。
 
-`kind: "prompt"` の瞬き（`Request()` のエッジで1回）:
-
-```
-kind=Prompt emotion=Surprised surprised=0.67 blink=1.00   ← prompt へ移り始めた直後
-kind=Prompt emotion=Surprised surprised=1.00 blink=0.84
-```
+`kind: "prompt"` の瞬き（`Request()` のエッジで1回）は `kind=Prompt emotion=Surprised` の遷移中に観測した。
 
 ★ **`surprised` が 0.67 ＝ 遷移が始まって 0.17 秒ほどの時点で blink が 1.00 に達している。**
 自然な瞬き（2〜6秒間隔）がその一瞬に偶然重なる確率は低いので、これは `Request()` 由来と読める。
@@ -1132,7 +1087,9 @@ asmdef からは `ChatterMascot.Runtime` しか見えないため、値のテー
 Renderer（PC / Mobile とも）に `MToonOutlineRenderFeature` を足し忘れても、読み込みも描画も
 成功する。**アウトラインだけが出ず、ログにもコンソールにも何も出ない。** 追加は Unity Editor
 の GUI から（→「アウトラインは『出ているのに見えない』ことがある」は、足したうえで幅が細すぎて
-見えないケースで、これとは別の失敗モード）。
+見えないケースで、これとは別の失敗モード）。`m_RendererFeatureMap` のハッシュをコードで組むのは
+脆いので手で足さないこと。`SceneFixups` の `AssertRendererFeatures` は**検査して `LogError`
+するだけ**で、無いものを足しはしない。
 
 ## Screen Space Ambient Occlusion を切る理由
 
@@ -1266,8 +1223,7 @@ VRoid Studio 由来なので**再配布できない** —— `.vrma` は同梱�
 - 目・顎は書き出しから外してある。**視線は #59 の `LookAt` が持つ**ので、VRMA に目を書くと奪い合う。
   素材を別の道具で作るときも同じ除外にすること（除外の一覧は exporter 側と
   `FingerFallbackPoseProvider` の両方にあり、片側だけ直すとズレる）
-- importer 側は `clip.wrapMode = WrapMode.Loop` 固定（`AnimationImporterUtil.cs`）。`-vrma` で1本再生すると
-  ワンショットもループする。目視確認ではそれでよく、ワンショット再生（上の「ワンショット再生とクロスフェードの仕組み」）では `ClampForever` に上書きする
+- importer の `wrapMode` 固定と `ClampForever` への上書き → 上の「ワンショット再生とクロスフェードで踏んだ罠」の表
 - 同名のクリップは `__<pathID>` 付きで出てくる（`Hub_Idle01〜04` は 2 組ある）。設定パネルの
   「モーションを確認」で見比べて、残す方だけカテゴリに置く
 

@@ -23,7 +23,7 @@ Unity 側は `ws://127.0.0.1:9`（listen していないポート）を焼いた
 
 | 手段 | なぜ使えないか |
 |---|---|
-| `AudioSettings.Mobile.StopAudioOutput()` | **iOS / Android 専用。** macOS でもコンパイルは通り例外も出ないが、実行すると Unity が `"implemented for iOS and Android only"` とログに出して**何もしない**（実測: 呼んだ後も 40秒間 `proc=1` のまま）。★ **Android では効くので #97 では使える** |
+| `AudioSettings.Mobile.StopAudioOutput()` | **macOS では無効**（実行すると Unity が `"implemented for iOS and Android only"` と出して何もしない。実測: 40秒間 `proc=1` のまま）。→ プラットフォーム別の手放し方は下の「★ 無音時にオーディオ出力デバイスを掴まない」 |
 | `Enable Output Suspension` | **Editor 専用**（公式マニュアル明記）。スタンドアロンには効かない |
 | `Disable Unity Audio` | 静的なプロジェクト設定。ランタイムに切り替えられない |
 | `AudioSettings.Reset()` | 「再初期化」であって解放ではない |
@@ -442,18 +442,13 @@ Unity 内蔵オーディオが有効なままだと Unity 側がデバイスを�
 `BuildScript` が `m_DisableAudio` を書き換えるとき `AssetDatabase.SaveAssets()` が走り、
 Unity がアセット全体を再シリアライズしてテンプレートに無かったフィールドを既定値で書き出したもの。
 [#97](https://github.com/schwarz9791/chatter-agent/issues/97) で Unity 6000.3.14f1 に切り替え、
-FixAll・EditMode テスト・ビルドの一連を通しても4キーとも値は変わらなかった
-（Unity 6000.5.8f1 固有ではなく、6000.3.14f1 でも同じスキーマ・同じ既定値）。
-
-- **値はすべて Unity 6000.5.8f1 の既定値**。Editor バイナリの `-enhancedAudioFoundation` の
-  ヘルプが `Default: 48000` / `Stereo (default)` と明記している
-- **環境固有の値ではない**。この Mac の既定出力デバイスは 44100（`system_profiler`）で、
-  48000 とは一致しない
-- ★ **`m_AudioFoundation: 0`（Classic）なので、`m_OutputSamplingRate` と
-  `m_OutputChannelLayout` は無視される**（"If it is disabled, sampling rate and channel layout
-  parameters will be ignored."）。Android で AivisSpeech の 24kHz が余計にリサンプルされる、
-  ということは起きない
-- 従来設定の `m_SampleRate: 0`（システム既定に従う）は**別のキーで、変更されていない**
+`FixAll`・EditMode テスト・ビルドの一連を通しても4キーとも値は変わらず、**6000.5.8f1 固有ではなく
+Unity 6 世代の既定値のままでバージョンに依存しない**と決着した（Editor バイナリの
+`-enhancedAudioFoundation` のヘルプが `Default: 48000` / `Stereo (default)` と明記、この Mac の
+既定出力デバイスは 44100 `system_profiler` なので環境固有の値でもない）。
+`m_AudioFoundation: 0`（Classic。disabled）なので `m_OutputSamplingRate` / `m_OutputChannelLayout`
+（sampling rate and channel layout parameters）は無視され（Android で AivisSpeech の 24kHz が
+余計にリサンプルされることはない）、従来の `m_SampleRate: 0` は別キーのままで変更されていない。
 
 ★ **`mixerSuspend` 系の API は `mixerResume` と同じスレッドから呼ぶ必要がある。**
 `Update()` も `Execute()` も `PlayAsync` の継続も Unity のメインスレッドなので自然に
@@ -586,29 +581,15 @@ release が効くのは**発話中の音素の谷**だけ。
 **既定 0（＝変えない）**。
 
 **実測**（2026-08-29 / macOS 26.6.2 / ウィンドウ 300x480 / `AvatarSample_A.vrm` +
-同梱 `idle_loop.vrma` / 1〜30 の数え上げを連続再生 / `ps -o %cpu` を6秒間隔で n=6）:
-
-| | 発話中の CPU |
-|---|---|
-| **30fps**（`speakingFrameRate: 0`） | 13.9 / 17.5 / 17.9 / 14.2 / 18.8 / 18.0 → **中央値 17.7%** |
-| 60fps（`speakingFrameRate: 60`） | 34.3 / 36.0 / 37.5 / 37.8 / 37.8 / 38.5 → **中央値 37.7%** |
-
-**60fps はおよそ 2.1 倍。** 常駐アプリの電力設計（#55）に対してこの差は大きい。
-#59 時点の**無音時**の実測（同条件で 13.2%）と並べると、30fps では発話が乗っても +4.5 ポイントで済む。
+同梱 `idle_loop.vrma` / 1〜30 の数え上げを連続再生）: 発話中の CPU は 30fps
+（`speakingFrameRate: 0`）で**中央値 17.7%**、60fps（`speakingFrameRate: 60`）で
+**中央値 37.7%** —— **約 2.1 倍**。常駐アプリの電力設計（#55）に対してこの差は大きい。
 
 ★ **口の応答は 30fps でも落ちていない。** 20ms 刻みのエンベロープを 33.3ms 間隔で読むと
 4割のフレームを読み飛ばすが、`SpeakingSet.Mouth` が**区間の最大**を取るので拾い切る。
-実測（`-faceLog 1 -faceLogMs 100`、発話中の `目標 aa` を 86 行）:
-
-```
-min=0.00 p25=0.00 p50=0.40 p75=0.73 max=1.00 平均=0.40
-飽和(1.00) 10.5% / ゼロ(0.00) 30.2%
-```
-
-同じ WAV をオフラインで 20ms ごとに RMS へ落として `gain = 4` を掛けた予測は
-「飽和 9.6% / 平均開度 0.35」なので、**実機の分布が予測とほぼ一致している**
-（＝区間最大が読み飛ばしを埋めている）。★ **`gain = 4`（cc-mascot の `rms * 4`）はそのまま使えた。**
-AivisSpeech の出力は 44100Hz mono で、エンベロープの中央値 0.063 / p90 0.240 / 最大 0.392。
+実測（`-faceLog 1 -faceLogMs 100`）は**中央値 0.40 / 最大 1.00** で、オフライン予測
+（20ms ごとの RMS に `gain = 4` を掛けた値）とほぼ一致した —— **`gain = 4`（cc-mascot の
+`rms * 4`）はそのまま使えた。**
 
 ★ **`speakingFrameRate` を「念のため」常時 60 にしないこと。** 上の 2.1 倍がそのまま乗る。
 
@@ -616,28 +597,22 @@ AivisSpeech の出力は 44100Hz mono で、エンベロープの中央値 0.063
 
 上の実測はすべて `Player.log` からの機械判定で、**「口が階段状に見えないか」「音と口が
 ずれて見えないか」「笑顔で口がはみ出ないか」は目で見ないと決まらない**。実機の
-macOS ビルドで確認し、いずれも問題なしと判断した。
+macOS ビルドで確認し、いずれも問題なしと判断した（`lipSyncOffsetMs: 120` でずれない /
+`speakingFrameRate: 0` のまま階段状に見えない / `mouthScaleHappy: 0.2` ・
+`mouthScaleSad: 0.5` でメッシュからはみ出ない）。
 
-- **音と口のタイミング**（`lipSyncOffsetMs: 120`）— ずれて見えない
-- **30fps で階段状に見えない**（`speakingFrameRate: 0` のまま）
-- **`happy` / `sad` で口がメッシュからはみ出ない**（`mouthScaleHappy: 0.2` / `mouthScaleSad: 0.5`）
-
-★ **確認はウィンドウを一時的に 2 倍（600x960）にして行った。** 既定の 300x480 では
-**キャラクターが小さくて口の粗が判別できない**。大きさは起動引数だけで変えられる:
-
-```bash
-open Build/ChatterMascot.app --args -screen-width 600 -screen-height 960
-```
-
-★ **確認のあと `~/Library/Preferences/tech.sukima.chatter-mascot.plist` を戻すこと。**
-Unity は終了時にそのときの大きさを焼き付けるので（→ [`mascot-desktop.md`](./mascot-desktop.md)「ウィンドウの大きさは3箇所で
-決まる」の 1）、放っておくと**次回から 600x960 で開く**。しかもバンドル ID は
-チェックアウトを跨いで共通なので、**別 worktree のマスコットまで大きくなる**。
+★ **確認はウィンドウを一時的に 2 倍（600x960）にして行った**（既定の 300x480 では小さくて
+粗が判別できない。`open Build/ChatterMascot.app --args -screen-width 600 -screen-height 960`）。
+**確認後は戻すこと** —— Unity は終了時にその大きさを焼き付けるので（→ [`mascot-desktop.md`](./mascot-desktop.md)
+「ウィンドウの大きさは3箇所で決まる」の 1）、放っておくと次回から 600x960 で開き、バンドル ID は
+チェックアウトを跨いで共通なので**別 worktree のマスコットまで大きくなる**:
 
 ```bash
 defaults write tech.sukima.chatter-mascot "Screenmanager Resolution Width" -int 300
 defaults write tech.sukima.chatter-mascot "Screenmanager Resolution Height" -int 480
 ```
+
+（または `~/Library/Preferences/tech.sukima.chatter-mascot.plist` を削除する）
 
 ## ★ `afplay` の起動ラグは 116ms。較正ログの「差」をそのまま入れない
 

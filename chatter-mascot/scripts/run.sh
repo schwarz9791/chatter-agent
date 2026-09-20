@@ -5,6 +5,8 @@
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/unity.sh"
 
+require_unity_cli
+
 METHOD="${1:?メソッド名を指定してください}"
 shift || true
 
@@ -27,7 +29,7 @@ mkdir -p "$PROJECT_PATH/Logs"
 #   PIPESTATUS で受ける（build.sh と同じ形）
 # ★ -quit は渡さない。unity run が自分で予約フラグとして付けるため、渡すと起動前に弾かれる。
 set +e
-unity run "$PROJECT_PATH" --no-banner \
+unity run "$PROJECT_PATH" "${UNITY_CLI_ARGS[@]}" \
   -- -nographics -logFile - -executeMethod "$METHOD" "$@" 2>&1 \
   | tee "$RUN_LOG" \
   | grep -E "^\[Fixups\]|^\[Build\]|^\[Native\]|^\[VrmProbe\]|^\[Icon\]|error CS|Aborting batchmode|Unhandled exception|Failed to resolve|Cannot perform upm operation|Project has invalid dependencies|An error occurred while resolving packages"

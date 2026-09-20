@@ -7,6 +7,8 @@
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/unity.sh"
 
+require_unity_cli
+
 RESULTS="$PROJECT_PATH/Logs/test-results.xml"
 mkdir -p "$PROJECT_PATH/Logs"
 # ★ 前回の結果を消してから走らせること。残したままだと、コンパイルが通らなかったときに
@@ -21,7 +23,7 @@ rm -f "$RESULTS"
 #   Android の #if でコンパイルされる。
 # ★ 終了コードは unity test 由来。8 はテストの失敗、6 は走り切らなかったことを表す。
 set +e
-unity test "$PROJECT_PATH" --mode EditMode --output "$RESULTS" --no-banner \
+unity test "$PROJECT_PATH" --mode EditMode --output "$RESULTS" "${UNITY_CLI_ARGS[@]}" \
   -- -nographics -buildTarget OSXUniversal
 STATUS=$?
 set -e

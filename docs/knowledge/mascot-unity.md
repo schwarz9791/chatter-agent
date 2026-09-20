@@ -550,13 +550,22 @@ Unity 本体の作り（「`-runTests` に `-quit` を付けない」「`-execut
   保たれるので `run.sh` の判定は変わらないが、`EditorApplication.Exit(n)` の `n` は届かない
 - `--` の後の `-nographics` / `-logFile` / `-buildTarget` / `-executeMethod` はそのまま
   Unity へ転送される
-- **`unity build` は `--log-file` に追記し、そのログを画面へも流す。** 走らせる前に空にしないと
-  前回のビルドの行が今回の出力に混ざる（`build.sh` がやっている）
+- **`unity build` は `-batchmode -nographics -quit` を自分で付ける。** `unity test` と
+  `unity run` は `-nographics` を付けないので、必要なら `--` の後で明示する
+- **Editor が起動する前に CLI が弾いた失敗**（target 不正・Editor が未インストール・認証切れ）は
+  `Error: …` として stderr に出るだけで、`--log-file` のログには入らない。grep で絞るなら
+  `^Error:` を拾わないと、終了コードだけが残って理由が画面から消える
+- **`unity build` は `--log-file` のログを画面へも流す。** 走らせる前に空にしないと
+  前回のビルドの行が今回の出力より先に流れる（`build.sh` がやっている。最終的なファイルの
+  中身は1回分だったので Unity 側が開くときに切り詰めている可能性が高いが、確かめていない）
 - `unity` は `ProjectSettings/ProjectVersion.txt` から Editor を解決し、Hub に登録された実体
   （`/Applications/Unity/Hub/Editor/<版>-arm64/Unity.app`）を選ぶ
 - **`unity build` の未コミット変更ガードは既定（`--versioning-strategy none`）では走らない**
   ので `--allow-dirty-build` は要らない
-- **`unity build` の `--output-path` はカレントディレクトリ基準で解決する。** 絶対パスを渡す
+- **`unity build` の `--output-path` は `--execute-method` と併用すると CLI 自身は解決しない**
+  （`-buildOutput` としてそのまま転送され、相対パスを解くかどうかは呼び出し先のメソッド次第。
+  `BuildScript.cs` はプロジェクトルート基準で解く）。解決がどこで行われるかに寄りかからないよう、
+  呼び出し側で絶対パスにしておく
 - ★ **`unity pipeline install` は入れない。** `test` / `build` / `run` はいずれも pipeline 不要で
   動く。`unity command` / `unity status` はこれが要るが、`Packages/manifest.json` に beta の
   依存を1本増やすのに見合う用途が今は無い
@@ -564,9 +573,12 @@ Unity 本体の作り（「`-runTests` に `-quit` を付けない」「`-execut
   固定する先が存在しない。CLI は beta なので、壊れたら `unity --version` を見て対応表を
   確かめ直す運用にする
 - ★ `unity editors` が `6000.3.14f1` に対して `6000.3.24f1` へのアップグレードを示唆してくるが、
-  **プロジェクトは `6000.3.14f1` 固定**（`ProjectSettings/ProjectVersion.txt` が唯一の版の書き場所で、
-  `scripts/unity.sh` はここから読む。`UNITY_VERSION` 環境変数を渡したときだけ上書きされる。
-  [#97](https://github.com/schwarz9791/chatter-agent/issues/97) で `6000.5.8f1` から切り替えた）
+  **プロジェクトは `6000.3.14f1` 固定**（`ProjectSettings/ProjectVersion.txt` が唯一の版の書き場所。
+  [#97](https://github.com/schwarz9791/chatter-agent/issues/97) で `6000.5.8f1` から切り替えた）。
+  `UNITY_VERSION` 環境変数の効き方はスクリプトで違う —— `test.sh` / `build.sh` / `run.sh` では
+  Unity CLI の `--editor-version` として渡り、渡さなければ CLI が `ProjectVersion.txt` の版で走る。
+  `build-android.sh` だけは Unity.app を直に叩くので、`UNITY_VERSION` は Hub のパス探索
+  （`/Applications/Unity/Hub/Editor/<版>/`）をその場で選ぶのに使う
 
 **Android 側（`build-android.sh` / `run-android.sh` / `configure-android.sh` / `build-native.sh`）は
 Unity CLI へ寄せていない。** [#127](https://github.com/schwarz9791/chatter-agent/issues/127) で追う。

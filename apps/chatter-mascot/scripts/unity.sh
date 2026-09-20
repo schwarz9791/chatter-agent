@@ -50,3 +50,18 @@ fi
 run_unity() {
   "$UNITY_BIN" -batchmode -nographics -projectPath "$PROJECT_PATH" -logFile - "$@"
 }
+
+# ★ 出荷物に古いライセンス表記を入れないための関門。ビルドするスクリプトが Unity を呼ぶ前に呼ぶ。
+#   同梱コピーは消せない（`.app` からリポジトリの NOTICE は見えず、設定パネルは Editor からも読む）ので、
+#   **コピーするのではなく一致を確かめる** —— ビルドが追跡ファイルを書き換える形にすると、
+#   中断やクラッシュで食い違ったまま残る経路ができる（→ ProjectSettings/AudioManager.asset の3段構え）。
+assert_notice_in_sync() {
+  local source="$PROJECT_PATH/../../NOTICE"
+  local copy="$PROJECT_PATH/Assets/StreamingAssets/NOTICE.txt"
+  if ! diff -q "$source" "$copy" >/dev/null; then
+    echo "同梱の NOTICE.txt がリポジトリの NOTICE とズレています。次で合わせてから出し直してください:" >&2
+    echo "  cp NOTICE apps/chatter-mascot/Assets/StreamingAssets/NOTICE.txt" >&2
+    diff -u "$source" "$copy" >&2 || true
+    exit 1
+  fi
+}

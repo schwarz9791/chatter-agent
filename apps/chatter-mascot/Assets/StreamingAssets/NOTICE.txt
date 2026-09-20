@@ -148,7 +148,7 @@ the `.app` / `.apk` as well.
       has waived copyright.
       https://vroid.pixiv.help/hc/ja/sections/360002889853
       https://hub.vroid.com/characters/4593660874193246717/models/7942721847119018516
-      ★ **The samples from 1.0 onward (VRoidPreset_A–Z) are not CC0.** Do not
+      ★ **The samples from 1.0 onward (VRoidPreset_A-Z) are not CC0.** Do not
         confuse the two.
 
       ★ **Two fields of the VRM metadata were rewritten before bundling it.**

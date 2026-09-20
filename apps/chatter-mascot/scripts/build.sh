@@ -9,6 +9,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/unity.sh"
 SCENE="${1:-Assets/Scenes/Mascot.unity}"
 OUTPUT="${2:-Build/ChatterMascot.app}"
 
+assert_notice_in_sync
+
 # ★ ビルド中、BuildScript は ProjectSettings/AudioManager.asset の m_DisableAudio を ON にする
 #   （macOS では Unity 内蔵オーディオが有効なままだと、AudioSource を1つも鳴らさなくても
 #   出力デバイスを掴み続けるため）。BuildScript の finally で戻しているが、

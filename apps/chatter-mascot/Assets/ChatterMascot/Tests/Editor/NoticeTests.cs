@@ -15,10 +15,16 @@ namespace ChatterMascot.Tests
     /// ★ 落ちたら <b>リポジトリの <c>NOTICE</c> に合わせてコピーを更新する</b>（逆ではない）:
     ///   <c>cp NOTICE apps/chatter-mascot/Assets/StreamingAssets/NOTICE.txt</c>
     ///
-    /// ★ ビルド時のコピーにしていない理由: ビルド後処理は失敗しても
-    ///   ビルドを落とさない方針（→ <c>MacPostBuild</c>）なので、
-    ///   <b>黙って古いライセンスが同梱される</b>経路ができてしまう。
-    ///   コミット済みのファイル + テストなら、CI でも手元でも同じところで気づける。
+    /// ★ <b>コピーで揃えるのではなく、一致を確かめて落とす。</b> ビルド後処理は失敗しても
+    ///   ビルドを落とさない方針（→ <c>MacPostBuild</c>）なので、そこにコピーを置くと
+    ///   <b>黙って古いライセンスが同梱される</b>経路ができる。ビルドが追跡ファイルを
+    ///   書き換える形も、中断やクラッシュで食い違ったまま残る
+    ///   （→ <c>ProjectSettings/AudioManager.asset</c>）。
+    ///
+    /// ★ <b>このテストだけが関門ではない。</b> 出荷の入口は <c>scripts/unity.sh</c> の
+    ///   <c>assert_notice_in_sync</c>、マージの前は <c>validate.yml</c> が見る。
+    ///   <b>このワークフローに Unity ジョブは無い</b>ので、ここが唯一だとマージまで誰も気づけない。
+    ///   ここが受け持つのは、Editor から読む経路（設定パネルの「このアプリについて」）の分。
     /// </summary>
     [TestFixture]
     public sealed class NoticeTests

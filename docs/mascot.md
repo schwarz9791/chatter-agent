@@ -35,6 +35,19 @@ xcode-select --install   # 既に Xcode があれば不要
 
 `./scripts/build.sh` が Unity より先に自動でこれを呼ぶので、普段は意識しなくてよい。
 
+★ **新規クローンでは、Unity を開く前にここまで済ませること。** `.bundle` は git に無いので
+クローン直後は `.meta` しか無く、Unity が既定でインポートし直すと**プラットフォームの絞りが
+「すべて」に化ける**。バンドルを作ったあとに一度だけ:
+
+```bash
+./scripts/run.sh ChatterMascot.EditorTools.NativePluginSettings.FixAll
+```
+
+★ **順序を逆にしないこと。** バンドルが無い状態で `test.sh` / `run.sh` を先に走らせると
+**`.bundle.meta` の GUID ごと設定が飛ぶ**（`build.sh` は先に `build-native.sh` を呼ぶので踏まない）。
+**ビルドもテストも通ってしまうので、気づけるのは `git diff` だけ**
+（→ [`knowledge/mascot-unity.md`](./knowledge/mascot-unity.md)）。
+
 ### パッケージの導入
 
 `Packages/manifest.json` に入れてある（Package Manager の GUI でも同じ）。
@@ -153,6 +166,7 @@ UniWindowController の Inspector にある「Player Settings を直す」ボタ
 | `Default Is Native Resolution` | オフ |
 | `Default Screen Width` | 540 |
 | `Default Screen Height` | 540 |
+| `Mac Retina Support` | オン。★ **切らないこと** —— 表示がぼやけるうえ、`UniWindowMoveHandle` の Retina 座標系の手当てが前提にしている |
 | `Run In Background` | オン |
 | `Use Mac App Store Validation` | オフ |
 | `Mac App Sandbox` | オフ |
@@ -260,6 +274,9 @@ cd apps/chatter-mascot
 ```
 
 どのスクリプトも Editor を閉じてから実行する（Unity はプロジェクトを排他ロックする）。
+
+★ **クローン直後に `test.sh` / `run.sh` から始めないこと。** ネイティブプラグインの
+バンドルが無い状態で Unity を回すと `.bundle.meta` が壊れる（→ 上の「Xcode コマンドラインツール」）。
 シーンの `MascotRunner` に接続先（既定 `ws://127.0.0.1:8570`）を入れて Play。クライアント側に
 合成エンジンは要らない——音声は同じ authority から HTTP で取る。
 

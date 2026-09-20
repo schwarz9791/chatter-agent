@@ -65,6 +65,8 @@ There are four deliverables.
 
 ## Building
 
+**Run every command from the repository root.**
+
 ### Prerequisites
 
 - **Node 24.11 or later** (pinned to 24.19.0 in `mise.toml`)
@@ -103,10 +105,13 @@ cd apps/chatter-mascot
 
 ## Running
 
+**Run every command from the repository root.**
+
 ### Prerequisites
 
 - **Claude Code**
-- **[AivisSpeech](https://aivis-project.com/)** — **just having it installed is enough.** If the synthesis engine isn't running, the server wakes it up, and stopping the server takes it down too. You only need to wake it by hand when connecting to an engine on a different host
+- **[AivisSpeech](https://aivis-project.com/)** — **just having it installed is enough.** If the synthesis engine isn't running, the server wakes it up, and stopping the server takes it down too. You only need to start it by hand to connect to an engine on a different host, or **to add a speaker** (adding a voice model needs the GUI). To turn the auto-start off entirely, set `CHATTER_AGENT_TTS_SPAWN=0`
+- **macOS** — the display apps target macOS and Android XR, the playback command defaults to `afplay`, and the engine is auto-discovered only at macOS paths. On Linux / Windows, point the CLI player at a playback command with `CHATTER_AGENT_PLAYER_COMMAND`
 
 ### Installing the Claude Code plugin
 
@@ -134,10 +139,14 @@ cd core && npm run start:server
 ```bash
 # CLI player (audio only. Sound plays without waiting on Unity)
 cd core && npm run start:player
+```
 
+```bash
 # macOS
 open apps/chatter-mascot/Build/ChatterMascot.app
+```
 
+```bash
 # Android XR (write the connection target onto the device first, then install)
 cd apps/chatter-mascot
 ./scripts/configure-android.sh          # assembles the LAN IP automatically

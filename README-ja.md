@@ -16,24 +16,24 @@ server / client 構成です。**音声の合成はサーバー側で行い、�
 Claude Code
   │ hook（MessageDisplay / PreToolUse / Notification）
   ▼
-┌─────────────── server ───────────────┐
+┌──────────────── server ────────────────┐
 │ plugin              payload を置くだけ │
-│   ▼                                  │
-│ chatter-agent-speak  整形・文分割・     │
-│   ▼                  感情判定・採番     │
+│   ▼                                    │
+│ chatter-agent-speak  整形・文分割・    │
+│   ▼                  感情判定・採番    │
 │ 配信キュー                             │
-│   ▼                                  │
-│ chatter-agent-server                 │
-│   ├─ WebSocket   発話テキストを配信      │
-│   ├─ GET /audio/ 取りに来られたら合成    │
-│   └─ /v1/*       設定の読み書き         │
-└───────────────────────────────────────┘
+│   ▼                                    │
+│ chatter-agent-server                   │
+│   ├─ WebSocket   発話テキストを配信    │
+│   ├─ GET /audio/ 取りに来られたら合成  │
+│   └─ /v1/*       設定の読み書き        │
+└────────────────────────────────────────┘
   ▲ ack           │ テキスト / 音声
   │               ▼
-┌─────────────── client ───────────────┐
+┌──────────────── client ────────────────┐
 │ chatter-agent-player  CLI。音を鳴らす  │
-│ chatter-mascot        Unity。VRM 表示 │
-└──────────────────────────────────────┘
+│ chatter-mascot        Unity。VRM 表示  │
+└────────────────────────────────────────┘
 ```
 
 | | 担当 |
@@ -64,6 +64,8 @@ Claude Code
 | **Android XR クライアント**（同じ Unity プロジェクト。XREAL Aura 想定） | エミュレータまで。OpenXR の Full Space で空間に立ち、LAN 越しにサーバーへ繋がります。**実機は未確認** |
 
 ## ビルド
+
+**コマンドはリポジトリのルートから実行します。**
 
 ### 前提
 
@@ -103,10 +105,13 @@ cd apps/chatter-mascot
 
 ## 実行
 
+**コマンドはリポジトリのルートから実行します。**
+
 ### 前提
 
 - **Claude Code**
-- **[AivisSpeech](https://aivis-project.com/)** —— **インストールだけしておけば十分です。** 合成エンジンが動いていなければサーバーが起こし、サーバーを止めれば一緒に落ちます。手で起こす必要があるのは、別ホストのエンジンに繋ぐときだけです
+- **[AivisSpeech](https://aivis-project.com/)** —— **インストールだけしておけば十分です。** 合成エンジンが動いていなければサーバーが起こし、サーバーを止めれば一緒に落ちます。手で起こすのは、別ホストのエンジンに繋ぐときと、**話者を増やすとき**（音声モデルの追加には GUI が要ります）。自動起動そのものを止めるなら `CHATTER_AGENT_TTS_SPAWN=0`
+- **macOS** —— 表示側アプリは macOS と Android XR 向けで、再生コマンドの既定は `afplay`、合成エンジンの自動探索も macOS のパスしか見ません。Linux / Windows では、CLI プレーヤーに `CHATTER_AGENT_PLAYER_COMMAND` で再生コマンドを指定してください
 
 ### Claude Code プラグインの導入
 
@@ -134,10 +139,14 @@ cd core && npm run start:server
 ```bash
 # CLI プレーヤー（耳で聞くだけ。Unity を待たずに音が出ます）
 cd core && npm run start:player
+```
 
+```bash
 # macOS
 open apps/chatter-mascot/Build/ChatterMascot.app
+```
 
+```bash
 # Android XR（端末に接続先を書いてから入れる）
 cd apps/chatter-mascot
 ./scripts/configure-android.sh          # LAN の IP を自動で組み立てます

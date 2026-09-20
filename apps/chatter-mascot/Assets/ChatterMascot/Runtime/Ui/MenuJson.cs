@@ -95,7 +95,7 @@ namespace ChatterMascot.Ui
     ///
     /// ★ <b>ここは <c>ChatterMascot.Runtime</c> に置く。</b> <c>ChatterMascot.Desktop</c> は
     ///   Newtonsoft を参照していない（asmdef の参照は推移しない ——
-    ///   <c>docs/mascot.md</c>「4回踏んだ」）し、こちらなら EditMode で固定できる。
+    ///   <c>docs/knowledge/mascot-unity.md</c>「4回踏んだ」）し、こちらなら EditMode で固定できる。
     ///   <c>Desktop</c> 側は出来上がった文字列を渡すだけにする。
     ///
     /// ★ <b>読めないイベントで throw しないこと。</b> この経路は

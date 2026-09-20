@@ -23,7 +23,7 @@ namespace ChatterMascot.Desktop
     /// ★ <b><c>MonoBehaviour</c> をシーンに置かない。</b> <c>ChatterMascot.Desktop</c> は
     ///   Android を含まないアセンブリなので、シーンに置くと Android で
     ///   「referenced script is missing」になる。<c>WindowGeometry</c> / <c>DragStateGuard</c> と
-    ///   同じく自分で生やす（→ <c>docs/mascot.md</c>）。
+    ///   同じく自分で生やす（→ <c>docs/knowledge/mascot-unity.md</c>）。
     /// </summary>
     public static class StatusItemBridge
     {
@@ -237,7 +237,7 @@ namespace ChatterMascot.Desktop
                 _panel = new SettingsPanelBridge(this, ResolveServerUrl(), ResolveServerToken(), ResolveRunner);
                 _instance = this;
 
-                // ★ 検証用の入口。メニューバーも右クリックも自動化はできる（→ docs/mascot.md）が、
+                // ★ 検証用の入口。メニューバーも右クリックも自動化はできる（→ docs/knowledge/mascot-desktop.md）が、
                 //   どちらもアクセシビリティ権限や合成イベントに依存する。**開いた後**を
                 //   確かめたいときに、その手前を全部飛ばせる経路を1つ持っておく
                 //   （`-quitProbe` と同じ流儀）

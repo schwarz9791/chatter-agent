@@ -18,6 +18,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/unity.sh"
 SCENE="${1:-Assets/Scenes/Mascot.unity}"
 OUTPUT="${2:-Build/ChatterMascot.apk}"
 
+assert_notice_in_sync
+
 case "$OUTPUT" in
   /*) BUILT="$OUTPUT" ;;
   *)  BUILT="$PROJECT_PATH/$OUTPUT" ;;

@@ -82,7 +82,7 @@ namespace ChatterMascot.Settings
         ///
         /// ★ <b>基準の大きさは引数で受ける。</b> 出荷値を持っているのは
         ///   <c>Desktop/WindowGeometry.cs</c> で、ここに書き写すと
-        ///   「ウィンドウの大きさが決まる場所」がまた1つ増える（→ <c>docs/mascot.md</c>）。
+        ///   「ウィンドウの大きさが決まる場所」がまた1つ増える（→ <c>docs/knowledge/mascot-desktop.md</c>）。
         ///
         /// ★ 縦横を同じ倍率で掛ける（アスペクト比を保つ）。
         /// </summary>

@@ -92,7 +92,7 @@ namespace ChatterMascot.Window
     ///
     /// ★ <b>これが要るのは、引き戻しを OS に任せられないから。</b> 実測では
     ///   <c>SetPosition</c> で画面外へ出しても macOS は引き戻さない
-    ///   （<c>isFreePositioningEnabled</c> が false でも。→ <c>docs/mascot.md</c>）。
+    ///   （<c>isFreePositioningEnabled</c> が false でも。→ <c>docs/knowledge/mascot-desktop.md</c>）。
     ///   <b>つまり「画面外に置いたまま終了できる」</b>ので、次の起動で拾い直すのは
     ///   こちらの責任になる。これが無いと<b>窓が行方不明になる</b>。
     /// </summary>

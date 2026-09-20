@@ -51,7 +51,7 @@ export interface ChatterAgentConfig {
   //
   // ★ #29 で読み手が player → server に移った。**キー名も意味も変えていない**
   //   （改名すると、既存の config.json に残った旧キーが全バイナリで未知キー警告を出す。
-  //   #11 で `speechLogGenerations` を廃止したときに実際に踏んだ）。
+  //   キーを1つ廃止したときに実際に踏んだ）。
 
   /**
    * 音声を合成してクライアントへ配るか。

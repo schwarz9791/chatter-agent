@@ -12,7 +12,7 @@
 # ★ 転送先のポートは CHATTER_AGENT_PORT で選ぶ（既定 8570）。端末側の 8570 は
 #   MascotRunner の既定 serverUrl（ws://127.0.0.1:8570）が決め打ちなので変えない。
 #   常用サーバーと分けて検証するときは、検証用サーバーに渡したのと同じ値をここにも
-#   渡す（1 ランタイムルートに繋ぐクライアントは1台。→ docs/mascot.md「検証時の接続」）。
+#   渡す（1 ランタイムルートに繋ぐクライアントは1台。→ docs/knowledge/mascot-android-xr.md「検証時の接続」）。
 set -euo pipefail
 
 ADB="${ADB:-$HOME/Library/Android/sdk/platform-tools/adb}"

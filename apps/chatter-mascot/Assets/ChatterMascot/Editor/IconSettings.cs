@@ -73,7 +73,7 @@ namespace ChatterMascot.EditorTools
             var sizes = PlayerSettings.GetIconSizes(NamedBuildTarget.Standalone, IconKind.Application);
 
             // ★ 何サイズ要求されたかは Unity のバージョンで変わるので、実測として毎回残す
-            //   （docs/mascot.md）。1行に収めること —— scripts の grep は2行目以降を落とす
+            //   （docs/knowledge/mascot-unity.md）。1行に収めること —— scripts の grep は2行目以降を落とす
             Debug.Log($"[Icon] GetIconSizes(Standalone, Application) = [{string.Join(", ", sizes)}]");
 
             if (sizes.Length == 0)

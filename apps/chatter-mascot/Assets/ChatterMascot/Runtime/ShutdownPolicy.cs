@@ -13,7 +13,7 @@ namespace ChatterMascot
     /// ★ <b>保留そのものをやめないこと。</b> <c>OnDestroy</c> から
     /// <c>_ = client.CloseAsync()</c> を投げても await の継続が走る前にプロセスが消え、
     /// 喋り終えた ack が落ちて<b>次回起動でその文がもう一度鳴る</b>
-    /// （<c>docs/mascot.md</c> に実測付き）。ここで変えるのは
+    /// （<c>docs/knowledge/mascot-speech.md</c> に実測付き）。ここで変えるのは
     /// 「<b>いつも</b>保留する」を「<b>投げるものがあるときだけ</b>保留する」にすることだけ。
     /// </summary>
     public static class ShutdownPolicy

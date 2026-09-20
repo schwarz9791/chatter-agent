@@ -13,7 +13,7 @@ namespace ChatterMascot.Desktop
     ///
     /// ★ <b>Unity の永続化には乗れない。</b> <c>Screenmanager Resolution/Window Position</c> は
     ///   <b>バッキング px</b> なので、Retina で終了して 1x のディスプレイで開くと窓が倍になる
-    ///   （実測済み。→ <c>docs/mascot.md</c>）。<c>UniWindowController</c> の
+    ///   （実測済み。→ <c>docs/knowledge/mascot-desktop.md</c>）。<c>UniWindowController</c> の
     ///   <c>windowPosition</c> / <c>windowSize</c> / <c>GetMonitorRect</c> は
     ///   <b>すべて NSWindow のポイント</b>なので、そこで閉じれば換算そのものが要らなくなる。
     ///
@@ -35,7 +35,7 @@ namespace ChatterMascot.Desktop
         /// 初回起動の大きさ（ポイント）。
         ///
         /// ★ <b>ランタイムからは復元できない。</b> ウィンドウを掴み取った時点で、
-        ///   枠なし化で増えたぶんは<b>もう乗っている</b>（→ <c>docs/mascot.md</c> の実測）。
+        ///   枠なし化で増えたぶんは<b>もう乗っている</b>（→ <c>docs/knowledge/mascot-desktop.md</c> の実測）。
         ///   だから<b>定数で持つ</b>。<c>ProjectSettings</c> の
         ///   <c>defaultScreenWidth/Height</c> は、ここが効くまでの一瞬しか効かない。
         /// ★ <b>食い違ったら <c>SceneFixups</c> が警告する。</b>

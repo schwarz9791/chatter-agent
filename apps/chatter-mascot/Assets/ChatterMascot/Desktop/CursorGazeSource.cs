@@ -59,7 +59,7 @@ namespace ChatterMascot.Desktop
     /// ★ <b><c>FindFirstObjectByType</c> は <c>Bind</c> で1回だけ呼ぶこと。</b> <see cref="TryRead"/> は
     ///   <c>VrmCharacter.LateUpdate</c> から毎フレーム（常駐アプリで 30回/秒）呼ばれるので、
     ///   シーン全体を走査する <c>FindFirstObjectByType</c> をここに置くと電力予算に直接効く
-    ///   （<c>docs/mascot.md</c> 冒頭の「Cube 1個のシーンで CPU 261%」と同種の罠）。
+    ///   （<c>docs/knowledge/mascot-unity.md</c> 冒頭の「Cube 1個のシーンで CPU 261%」と同種の罠）。
     ///   <c>VrmDragHandleBinder</c> / <c>WindowSizeKeeper</c> と同じく、参照は起動時に1回だけ引いて
     ///   static に持つ。
     /// </summary>

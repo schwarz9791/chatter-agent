@@ -583,7 +583,7 @@ namespace ChatterMascot.Vrm
             //   純粋な観測を本体の道連れにしない。
             // ★ ここ（_instance が入った後）で出すこと自体は変えない。LateUpdate はフレーム1から
             //   走るが読み込みは実測で約1.6秒かかるので、起動直後に判定するとラッチが消費されて
-            //   永久に本当の値が出ない（docs/mascot.md「起動直後にだけ成立しない状態を
+            //   永久に本当の値が出ない（docs/knowledge/mascot-vrm.md「起動直後にだけ成立しない状態を
             //   『異常』として警告しない」）。
             // ★ なお「Runtime の遅延生成がここで走って Head 欠落で throw する」ことは無い ——
             //   VrmStage.Adopt が handler を呼ぶ前に `_ = instance.Runtime;` を済ませている
@@ -1144,7 +1144,7 @@ namespace ChatterMascot.Vrm
         ///   全クリップを見ると、<c>ih</c> / <c>ou</c> / <c>ee</c> / <c>oh</c>（使わない口の preset）や
         ///   カスタムクリップに <c>overrideBlink</c> が付いているだけで
         ///   <b>成立しえない条件の警告を毎起動・永久に出す</b>ことになる。
-        ///   「読み飛ばす癖がつくぶん有害」（docs/mascot.md）そのもの。
+        ///   「読み飛ばす癖がつくぶん有害」（docs/knowledge/mascot-vrm.md）そのもの。
         /// ★ <b>絞る対象はキーの集合であって、見る項目ではない。</b>
         ///   <c>OverrideLookAt</c> を見る判断（#59 のカーソル追従が殺されるケース）は維持する。
         /// </summary>
@@ -1249,7 +1249,7 @@ namespace ChatterMascot.Vrm
             // ★ #88 と同じ理由（VRMA 版は FingerFallbackPoseProvider）だが、こちらは VRMA が
             //   無いときの経路。手続き的アイドルは腕までしか書かないので、指を書かなければ
             //   ControlRig の identity＝T ポーズの伸びた指のまま残る
-            //   （docs/mascot.md「手続き的アイドルは腕を書かないと T ポーズのまま残る」と同じ形の穴）。
+            //   （docs/knowledge/mascot-vrm.md「手続き的アイドルは腕を書かないと T ポーズのまま残る」と同じ形の穴）。
             //   このメソッドは _idle.IsPlaying == false のときしか呼ばれない（LateUpdate の早期
             //   return を参照）ので、VRMA 側の FingerFallbackPoseProvider と書き合いにはならない。
             // ★ #88 の後続。now を渡して揺らす（FingerPose.RelaxedCurl(bone, now)）。sample（体の

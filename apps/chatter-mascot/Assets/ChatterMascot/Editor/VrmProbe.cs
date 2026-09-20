@@ -124,7 +124,7 @@ namespace ChatterMascot.EditorTools
                 var bounds = VrmBounds.Of(gltf.Renderers);
                 text.Append("\n  bounds size: ").Append(bounds.size);
                 text.Append("\n  bounds center: ").Append(bounds.center);
-                // ★ ウィンドウのアスペクトを決める材料（→ SETUP.md のウィンドウの大きさ）
+                // ★ ウィンドウのアスペクトを決める材料（→ docs/knowledge/mascot-desktop.md「ウィンドウの大きさは3箇所で決まる」）
                 text.Append("\n  bounds W/H: ").Append((bounds.size.x / Mathf.Max(bounds.size.y, 1e-6f)).ToString("F3"));
 
                 // ★ ここが出す数値は VrmStage が実行時に使うのと**同じ関数**の出力。
@@ -268,7 +268,7 @@ namespace ChatterMascot.EditorTools
             //   Unity を起動するので **export しっぱなしの値をそのまま継承する**。
             //   ★ HasUserConfigDirectory との違いは「置いたファイル」ではなく
             //   「シェルに残った状態」だという点で、**気づきにくさはこちらが上**。
-            //   SETUP.md は「.app を Finder から起動すると環境変数は空（シェルを継承しない）」
+            //   docs/knowledge/mascot-desktop.md は「.app を Finder から起動すると環境変数は空（シェルを継承しない）」
             //   と書いているが、**probe は Editor をシェルから起動するので効く** ——
             //   「アプリでは効かないが probe では効く」といういちばん見つけにくい向き。
             //   ★ Variable() は env.Variables == null で早期 return するので、これで

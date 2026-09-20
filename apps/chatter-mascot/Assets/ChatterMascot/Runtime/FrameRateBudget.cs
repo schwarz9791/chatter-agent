@@ -17,7 +17,7 @@ namespace ChatterMascot
     ///   ところでそれを復元して<b>上限が恒久的に消える</b>。今は <c>Start()</c> から
     ///   蹴っているので成立しているが、誰かが <c>Awake()</c> に移せば壊れる。
     ///   これは「Cube 1個のシーンで CPU 261% / GPU 93.5%」（実測）の再来で、
-    ///   常駐アプリなので気づくまでが長い（→ <c>docs/mascot.md</c>）。
+    ///   常駐アプリなので気づくまでが長い（→ <c>docs/knowledge/mascot-unity.md</c>）。
     ///
     /// ★ <b><see cref="MascotRunner"/> のシリアライズ値に戻す設計にもしないこと。</b>
     ///   あれは「希望値」であって「今効いている値」ではない。#99 で Android XR が

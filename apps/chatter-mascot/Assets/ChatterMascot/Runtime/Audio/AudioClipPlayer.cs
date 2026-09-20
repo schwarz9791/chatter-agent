@@ -360,7 +360,7 @@ namespace ChatterMascot.Audio
         /// ★ <b>写し漏れは見つけにくい形で出る。</b> #17 でミキサーや 3D 配置を入れたときに
         ///   落とすと、症状は「<b>孤児だけ音量が違う</b>」「たまに定位がおかしい」のような、
         ///   再現条件が採番のやり直しに縛られたものになる。
-        ///   ここを増やしたら <c>docs/mascot.md</c> にも書くこと。
+        ///   ここを増やしたら <c>docs/knowledge/mascot-speech.md</c> にも書くこと。
         /// </summary>
         private static void CopySettings(AudioSource from, AudioSource to)
         {

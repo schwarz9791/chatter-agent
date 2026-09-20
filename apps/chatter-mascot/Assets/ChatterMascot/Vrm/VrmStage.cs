@@ -67,7 +67,7 @@ namespace ChatterMascot.Vrm
         ///   フレーミングの箱から除外してあるので、腕を上げる・広げるモーション（#70）の
         ///   はみ出しはこの垂直方向の余白で吸収する。<c>boneBoundsMarginMeters</c> を
         ///   増やさないこと —— あちらは Z も一緒に膨らみ、クリック透過の当たり判定の
-        ///   半径まで広がる（→ <c>docs/mascot.md</c>「T ポーズの腕をフレーミングの箱に入れない」）。
+        ///   半径まで広がる（→ <c>docs/knowledge/mascot-vrm.md</c>「T ポーズの腕をフレーミングの箱に入れない」）。
         /// </summary>
         [Tooltip("自動フレーミングの余白。1.0 でぴったり")]
         [SerializeField] private float headroom = 1.25f;

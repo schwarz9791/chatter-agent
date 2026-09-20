@@ -140,6 +140,18 @@ jobs:
             fi
           done
 
+      # 同梱コピーは消せない（.app からリポジトリの NOTICE は見えず、設定パネルは Editor からも読む）。
+      # 一致は EditMode テスト（NoticeTests）も見ているが、このワークフローに Unity ジョブが無いので
+      # ズレたままマージできてしまう。**古いライセンス表記が出荷される**ので、ここでも落とす
+      - name: Verify bundled NOTICE matches the repository NOTICE
+        run: |
+          copy=../apps/chatter-mascot/Assets/StreamingAssets/NOTICE.txt
+          if ! diff -q ../NOTICE "$copy"; then
+            echo "::error::同梱の NOTICE.txt がリポジトリの NOTICE とズレています。cp NOTICE apps/chatter-mascot/Assets/StreamingAssets/NOTICE.txt で合わせてください。"
+            diff -u ../NOTICE "$copy" || true
+            exit 1
+          fi
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -267,7 +279,7 @@ jobs:
           fi
 
       # ★ *.png は Git LFS 追跡。 lfs: true にすると vita.vrm まで毎回落ちるので、
-      # 検査に要る2枚だけを取る（→ docs/mascot.md「トレイ画像を差し替えるとき」）
+      # 検査に要る2枚だけを取る（→ docs/knowledge/mascot-desktop.md「トレイ画像を差し替えるとき」）
       - name: トレイ PNG だけ LFS から取得
         working-directory: .
         run: git lfs pull --include="apps/chatter-mascot/Assets/StreamingAssets/trayTemplate*.png"
@@ -344,14 +356,14 @@ jobs:
                   want, got = EXPECTED[name], size
                   print(
                       f"::error file={path}::寸法が {want[0]}x{want[1]} ではありません（実際は {got}）。"
-                      "@1x と @2x は 2 枚セットです（docs/mascot.md「トレイ画像を差し替えるとき」）"
+                      "@1x と @2x は 2 枚セットです（docs/knowledge/mascot-desktop.md「トレイ画像を差し替えるとき」）"
                   )
                   failed = True
 
               if unexpected:
                   print(
                       f"::error file={path}::許可していない PNG チャンクがあります: {', '.join(unexpected)}。"
-                      "編集ツールのメタデータの疑い（docs/mascot.md「トレイ画像を差し替えるとき」）"
+                      "編集ツールのメタデータの疑い（docs/knowledge/mascot-desktop.md「トレイ画像を差し替えるとき」）"
                   )
                   failed = True
 

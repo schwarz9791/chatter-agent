@@ -327,7 +327,7 @@ namespace ChatterMascot.Net
         ///   文字列を渡すこと。ここで見るのはその文字列だけ。
         ///
         /// ★ <b>ステータスがどこにも出ない環境もある</b>（Android では 401 でも定型文だけになる）。
-        ///   そのときはこのヒントは付かないので、切り分けは <c>docs/mascot.md</c> の表で行う。
+        ///   そのときはこのヒントは付かないので、切り分けは <c>docs/knowledge/mascot-android-xr.md</c> の表で行う。
         /// </summary>
         public static bool LooksUnauthorized(string message)
         {

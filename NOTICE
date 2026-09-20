@@ -10,48 +10,55 @@ Portions of this product are derived from that work:
   - core/src/text/textFilter.ts
   - core/src/emotion/ruleBasedEmotionClassifier.ts
   - core/src/emotion/defaultEmotionKeywords.ts
-      cc-mascot の electron/ 配下（filters/textFilter.ts /
-      services/ruleBasedEmotionClassifier.ts）を初回に一度だけコピーしたもの。
-      以後は chatter-agent 独自に改変している。対応する *.test.ts も同じ扱い。
-      defaultEmotionKeywords.ts は ruleBasedEmotionClassifier.ts のキーワード
-      辞書部分を分離したもの。
-      移植元のコミット・対応表・改変の扱いは docs/origin.md に記録している。
+      Copied once, initially, from cc-mascot's electron/ tree
+      (filters/textFilter.ts / services/ruleBasedEmotionClassifier.ts).
+      Modified independently by chatter-agent ever since. The corresponding
+      *.test.ts files are treated the same way. defaultEmotionKeywords.ts
+      splits out the keyword-dictionary portion of
+      ruleBasedEmotionClassifier.ts.
+      The source commit, the mapping table, and how the modifications are
+      handled are recorded in docs/origin.md.
 
-      同じディレクトリにある core/src/text/unstableTail.ts は cc-mascot 由来では
-      なく、chatter-agent で新規に書いたもの。
+      core/src/text/unstableTail.ts, in the same directory, is not derived
+      from cc-mascot; it was written from scratch for chatter-agent.
 
-上記以外の cc-mascot 由来の改変点:
+Changes from cc-mascot beyond the above:
 
-  - 発言の取得方式を jsonl ログ監視から Claude Code の MessageDisplay hook に
-    置き換えた。これに伴い logMonitor / fileTail / adapters / parsers /
-    activeSessionMonitor は移植していない。
-  - Electron のメインプロセス／レンダラープロセス構成を廃し、Mac 側を
-    Node.js 単体の CLI + WebSocket サーバーとして再構成した。
-  - 発話メッセージの配送を Electron IPC から、記録（speech.jsonl）と配信キュー
-    （speech/<seq>.json）+ WebSocket に置き換えた。
-  - 設定の永続化を electron-store から JSON ファイルに置き換えた。
-  - VRM の描画・音声合成・リップシンクを担うレンダラー側は移植していない。
-    表示側のクライアントアプリを Unity + UniVRM で作り直し、macOS
-    デスクトップと Android XR の両方をそこから作る。
+  - Replaced the way speech is captured: watching jsonl logs gave way to
+    Claude Code's MessageDisplay hook. Accordingly, logMonitor / fileTail /
+    adapters / parsers / activeSessionMonitor were not ported.
+  - Dropped the Electron main-process / renderer-process structure and
+    rebuilt the Mac side as a plain Node.js CLI + WebSocket server.
+  - Replaced the delivery of speech messages: Electron IPC gave way to a
+    record (speech.jsonl) plus a delivery queue (speech/<seq>.json) +
+    WebSocket.
+  - Replaced the persistence of settings, from electron-store to JSON files.
+  - Did not port the renderer side that handled VRM rendering, speech
+    synthesis and lip sync. The display-side client app was rebuilt with
+    Unity + UniVRM, and both the macOS desktop app and the Android XR app
+    are built from it.
 
 ---
 
-## ビルド成果物に含まれる第三者ライブラリ
+## Third-party libraries included in build artifacts
 
-`apps/chatter-mascot/` は次のライブラリを Unity Package Manager 経由で取得する。
-**リポジトリには含まれないが、ビルドした `.app` / `.apk` には含まれる。**
+`apps/chatter-mascot/` fetches the following libraries through the Unity
+Package Manager. **They are not part of the repository, but they are part of
+the built `.app` / `.apk`.**
 
   - UniWindowController (https://github.com/kirurobo/UniWindowController)
       Copyright (c) 2020 Kirurobo, licensed under the MIT License.
-      macOS / Windows のウィンドウ透過・最前面・クリック透過、ネイティブの
-      ファイル選択ダイアログ（FilePanel）を担う。
-      ★ **配布するときは MIT の著作権表示とライセンス条文を同梱する義務がある。**
-        以前ここには「パッケージ内の LICENSE.md がそれ」と書いてあったが、**誤り** ——
-        `.app` にはパッケージの LICENSE.md は入らない（Packages/ はビルド成果物に
-        コピーされない）。UniVRM で採ったのと同じ形に揃え、**下の全文がその義務を果たす**
-        （→ issue #76）。
+      Handles window transparency, always-on-top and click-through on
+      macOS / Windows, and the native file selection dialog (FilePanel).
+      ★ **Distributing it carries the obligation to include the MIT
+        copyright notice and license text.**
+        This used to say that the LICENSE.md inside the package was that
+        notice, which was **wrong** — the package's LICENSE.md does not end
+        up in the `.app` (Packages/ is not copied into build artifacts).
+        This is now aligned with what was done for UniVRM: **the full text
+        below fulfills that obligation** (→ issue #76).
 
-      --- UniWindowController の MIT ライセンス全文 ---
+      --- Full text of the UniWindowController MIT license ---
 
       MIT License
 
@@ -75,23 +82,26 @@ Portions of this product are derived from that work:
       OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
       SOFTWARE.
 
-      --- ここまで ---
+      --- end ---
 
   - UniVRM / UniGLTF / MToon (https://github.com/vrm-c/UniVRM)
       Copyright (c) 2020 VRM Consortium
       Copyright (c) 2018 Masataka SUMI for MToon
       Copyright (c) 2018 ousttrue
       licensed under the MIT License.
-      VRM の読み込み・MToon シェーダ・spring bone・expression を担う
-      （com.vrmc.gltf / com.vrmc.vrm）。
-      ★ **著作権者が3名いる。** 配布するときは3つとも表示を落とさないこと。
-      ★ **ライセンス本文が同梱されるのは com.vrmc.gltf だけ**（パッケージ内の
-        LICENSE.md。ousttrue 名義）。**com.vrmc.vrm には LICENSE ファイルが1つも入っていない** ——
-        Packages/manifest.json が `?path=/Packages/VRM10` で取得するので、
-        UniVRM リポジトリのルートにある LICENSE.txt（VRM Consortium と Masataka SUMI）が
-        降ってこないため。**下の全文が、その分の通知保持義務を果たす唯一の受け皿になる。**
+      Handles VRM loading, the MToon shader, spring bone and expression
+      (com.vrmc.gltf / com.vrmc.vrm).
+      ★ **There are three copyright holders.** Do not drop any of the three
+        notices when distributing.
+      ★ **The license text ships only with com.vrmc.gltf** (the LICENSE.md
+        inside the package, under ousttrue's name). **com.vrmc.vrm contains
+        no LICENSE file at all** — Packages/manifest.json fetches it with
+        `?path=/Packages/VRM10`, so the LICENSE.txt at the root of the UniVRM
+        repository (VRM Consortium and Masataka SUMI) never comes down with
+        it. **The full text below is the only thing that carries that
+        notice-retention obligation.**
 
-      --- UniVRM (VRM10 / MToon10) の MIT ライセンス全文 ---
+      --- Full text of the UniVRM (VRM10 / MToon10) MIT license ---
 
       MIT License
 
@@ -116,52 +126,59 @@ Portions of this product are derived from that work:
       OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
       SOFTWARE.
 
-      --- ここまで ---
+      --- end ---
 
   - Newtonsoft.Json (com.unity.nuget.newtonsoft-json)
       Copyright (c) James Newton-King, licensed under the MIT License.
-      Unity が再配布しているものをそのまま使っている。
+      Used as redistributed by Unity, unmodified.
 
-Unity 本体および Unity が提供するパッケージ（URP / Input System / Test Framework など）は
-Unity Software License に従う。
+Unity itself and the packages Unity provides (URP / Input System / Test
+Framework and so on) are governed by the Unity Software License.
 
 ---
 
-## リポジトリに含まれる第三者アセット
+## Third-party assets included in the repository
 
-`apps/chatter-mascot/Assets/StreamingAssets/` に置いてあり、`.app` / `.apk` にも入る。
+Placed under `apps/chatter-mascot/Assets/StreamingAssets/`, and included in
+the `.app` / `.apk` as well.
 
-  - vita.vrm — AvatarSample_F（VRoid Hub の「歴代サンプルモデル Vita」）
-      作者 Coatie（Koh-Tee）。**CC0**（パブリックドメイン）。
-      **旧ベータ版 VRoid Studio のサンプルモデル**で、pixiv が著作権を放棄している。
+  - vita.vrm — AvatarSample_F ("Vita", a legacy sample model on VRoid Hub)
+      Author: Coatie (Koh-Tee). **CC0** (public domain).
+      **A sample model from the old beta of VRoid Studio**, for which pixiv
+      has waived copyright.
       https://vroid.pixiv.help/hc/ja/sections/360002889853
       https://hub.vroid.com/characters/4593660874193246717/models/7942721847119018516
-      ★ **正式版1.0以降のサンプル（VRoidPreset_A〜Z）は CC0 ではない。** 混同しないこと。
+      ★ **The samples from 1.0 onward (VRoidPreset_A-Z) are not CC0.** Do not
+        confuse the two.
 
-      ★ **VRM のメタデータを2箇所書き換えて同梱している。** VRoid Studio の VRM1.0
-        エクスポートに CC0 プリセットが無く、変換時の既定値が素材のライセンスと
-        食い違っていたため:
+      ★ **Two fields of the VRM metadata were rewritten before bundling it.**
+        VRoid Studio's VRM1.0 export has no CC0 preset, and the defaults it
+        converted to conflicted with the asset's license:
             commercialUsage: personalNonProfit -> corporation
             modification:    allowModification -> allowModificationRedistribution
-        書き換えは `apps/chatter-mascot/scripts/patch-vrm-meta.py` で行った。
-        glTF の JSON チャンクの当該2フィールドだけを差し替えており、
-        **ジオメトリとテクスチャ（BIN チャンク）はバイト単位で元のまま**。
+        The rewrite was done with
+        `apps/chatter-mascot/scripts/patch-vrm-meta.py`. Only those two
+        fields of the glTF JSON chunk are replaced; **the geometry and the
+        textures (the BIN chunk) are byte-for-byte as they were.**
 
-  - idle_loop.vrma — kazakago/cc-mascot の public/animations/idle_loop.vrma
+  - idle_loop.vrma — public/animations/idle_loop.vrma from kazakago/cc-mascot
       Copyright 2026 kazakago, licensed under the Apache License, Version 2.0.
       https://github.com/kazakago/cc-mascot
-      **改変していない。** 待機モーション（→ issue #59）。
+      **Unmodified.** The idle motion (→ issue #59).
 
-  - NOTICE.txt — **このファイル自身のコピー**（→ issue #76）。
-      設定パネルの「このアプリについて」がここから読む。
-      ★ **C# の文字列リテラルに埋め込まないこと。** リポジトリの NOTICE と別々に
-        更新されて静かにズレる。**一致は EditMode テスト（NoticeTests）が固定する。**
-      ★ `StreamingAssets` はビルド後 `.app` の中のコピーが読まれる。
+  - NOTICE.txt — **a copy of this very file** (→ issue #76).
+      "About this app" in the settings panel reads it from there.
+      ★ **Do not embed it in a C# string literal.** It would be updated
+        separately from the repository's NOTICE and drift out of sync in
+        silence. **An EditMode test (NoticeTests) pins the two together.**
+      ★ After a build, it is the `StreamingAssets` copy inside the `.app`
+        that is read.
 
 ---
 
-**`apps/chatter-mascot/` の C# は、すべて chatter-agent で新規に書いたもので、
-cc-mascot 由来のコードは含まない**（上の `idle_loop.vrma` はコードではない）**。** 発話キューの状態機械
-（`Assets/ChatterMascot/Runtime/Playback/PlaybackQueue.cs`）は
-`core/src/player/playbackQueue.ts` の移植だが、その TypeScript 自体が
-本リポジトリの著作物である（issue #11 で新規に書いた）。
+**All of the C# under `apps/chatter-mascot/` was written from scratch for
+chatter-agent and contains no code derived from cc-mascot** (the
+`idle_loop.vrma` above is not code)**.** The state machine of the speech queue
+(`Assets/ChatterMascot/Runtime/Playback/PlaybackQueue.cs`) is a port of
+`core/src/player/playbackQueue.ts`, but that TypeScript is itself a work of
+this repository (written from scratch in issue #11).

@@ -25,7 +25,7 @@ case "$OUTPUT" in
   *)  BUILT="$PROJECT_PATH/$OUTPUT" ;;
 esac
 
-# ★ **終了コードを捨てないこと。** build.sh / test.sh と同じ PIPESTATUS の形に揃える。
+# ★ **終了コードを捨てないこと。** build.sh / run.sh と同じ PIPESTATUS の形に揃える。
 set +e
 run_unity -quit -buildTarget Android \
   -executeMethod ChatterMascot.EditorTools.BuildScript.BuildAndroid \

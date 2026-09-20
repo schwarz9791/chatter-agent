@@ -71,6 +71,7 @@ There are four deliverables.
 
 - **Node 24.11 or later** (pinned to 24.19.0 in `mise.toml`)
 - **Unity 6000.3.14f1** — requires the macOS / Android build support modules
+- **Unity CLI** (`unity` command) — `chatter-mascot/scripts/*.sh` run the Editor through it
 - **Xcode command line tools** — used to build the native plugin for the macOS resident app (`xcode-select --install`)
 - **Android SDK platform-tools** (`adb`) — when installing the Android version onto a device
 

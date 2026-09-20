@@ -9,6 +9,14 @@ set -euo pipefail
 
 PROJECT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# ★ test / build / run は Unity CLI 経由で Editor を起こす。どの Editor を使うかは
+#   CLI が ProjectSettings/ProjectVersion.txt から自分で解決する。
+if ! command -v unity >/dev/null 2>&1; then
+  echo "unity コマンドが見つかりません。次でインストールしてください:" >&2
+  echo "  curl -fsSL https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh | UNITY_CLI_CHANNEL=beta bash" >&2
+  exit 1
+fi
+
 if [ -n "${UNITY_VERSION:-}" ]; then
   # ★ 明示指定はそれだけを見る。サフィックス違いへのフォールバックはしない。
   CANDIDATES=("$UNITY_VERSION")
@@ -47,6 +55,9 @@ if pgrep -f "Unity.app/Contents/MacOS/Unity.*${PROJECT_PATH}" >/dev/null 2>&1; t
   exit 1
 fi
 
+# ★ Unity.app の直叩きが残っているのは Android のビルドだけ。
+#   Android を Unity CLI へ寄せたらこの関数と上の探索ごと消える
+#   （→ docs/knowledge/mascot-unity.md「★ Unity CLI」）。
 run_unity() {
   "$UNITY_BIN" -batchmode -nographics -projectPath "$PROJECT_PATH" -logFile - "$@"
 }

@@ -504,61 +504,73 @@ PNG は静止画なので OS 側では吸収されない。差し替えたら
 curl -fsSL https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh | UNITY_CLI_CHANNEL=beta bash
 ```
 
-`test` / `build` / `run` の各サブコマンドが `scripts/*.sh` と役割が重なる:
+`scripts/test.sh` / `scripts/build.sh` / `scripts/run.sh` は Unity.app の直叩きから Unity CLI へ
+寄せた。呼び出し口（`./scripts/test.sh` など）は変わらない。`unity.sh` は薄い共通部分として
+残っている。
 
-| やること | いまの `scripts/` | Unity CLI |
+| やること | 呼び出し口 | 内部で実行する Unity CLI |
 |---|---|---|
 | EditMode テスト | `./scripts/test.sh` | `unity test --mode EditMode --output Logs/test-results.xml` |
-| macOS ビルド | `./scripts/build.sh` | `unity build --execute-method ChatterMascot.EditorTools.BuildScript.BuildMacOS -o Build/ChatterMascot.app` |
-| 任意の Editor メソッド実行 | `./scripts/run.sh <Method>` | `unity run -- -quit -executeMethod <Method>`（**`--command` ではない** — そちらは事前登録が要る `unity pipeline install` 前提の別機能） |
+| macOS ビルド | `./scripts/build.sh` | `unity build --execute-method ChatterMascot.EditorTools.BuildScript.BuildMacOS --output-path <絶対パス>` |
+| 任意の Editor メソッド実行 | `./scripts/run.sh <Method>` | `unity run -- -executeMethod <Method> -logFile -`（**`-quit` は渡さない**。**`--command` ではない** — そちらは事前登録が要る `unity pipeline install` 前提の別機能） |
 | Editor の一覧 / インストール | 手動（Unity Hub） | `unity editors` / `unity install` / `unity install-modules` |
 | 環境の診断 | 無し（`Player.log` を読むだけ） | `unity doctor` |
 
-★ **`-quit` の要否は `-runTests` と `-executeMethod` で逆になる。** `-runTests` に `-quit` を
-付けるとテストが走り切る前に落ちる（→ 下の1点目）が、`-executeMethod` は逆に **`-quit` を
-付けないと Editor が終了しない**（`run.sh` の実装どおり）。ここを取り違えるのが移行で
-いちばん間違えやすいところ。
+★ **`-quit` は `unity run` が自分で付ける予約フラグ。** `--` の後に `-quit` / `-batchmode` /
+`-projectPath` を渡すと、Unity を起動する前に
+`Forwarded argument '-quit' conflicts with a reserved Unity flag managed by this command.`
+で弾かれる。`unity test` は逆に `-quit` を渡さない（`-runTests` は Test Runner が自分で終了するため）。
+Unity 本体の作り（「`-runTests` に `-quit` を付けない」「`-executeMethod` には `-quit` が要る」）を
+取り違える余地は、**CLI 側が引き受けて無くした。**
 
-★ **右列は `--help` の記載から組み立てたもので、まだ実行して確かめていない。** `unity test` /
-`unity build` の実行は別 Issue（下記）に切り出してあり、ここでは対応関係だけを記録する。
+寄せるにあたって失ってはいけなかった6点は、それぞれこう決着した:
 
-**いまは `scripts/*.sh` を置き換えない。** 中身には #12 / #56 で実機を踏んで積んだ知見が入っていて、
-機能追加のついでに差し替えると回帰リスクが乗る。置き換えるときに**失ってはいけない6点**:
-
-1. **`-runTests` に `-quit` を付けない**（`test.sh` のコメント参照）。付けるとテストが走り切る前に落ちる
+1. **`-quit` の要否** → CLI が引き受けた（上の説明のとおり）
 2. **`build.sh` の `trap restore_audio_manager EXIT INT TERM` による
-   `ProjectSettings/AudioManager.asset` の `m_DisableAudio` 復元。**
-   macOS で afplay 方式（1発話 = 1プロセス）が成立するための前提条件で、これが OFF だと
-   外部プロセスで鳴らしても Unity 本体がデバイスを掴み続ける
-   （→ [`mascot-speech.md`](./mascot-speech.md)「無音時にオーディオ出力デバイスを掴まない」）。コミットされた値は Android 側の要求
-   （オフ）に合わせてあるので、**ビルド時だけ切り替えて戻す**必要がある
-3. **`PIPESTATUS` で終了コードを捨てないこと。** `test.sh` / `build.sh` はどちらも `| grep ...` を
-   挟むので、素の `$?` は grep の終了コードになる
-4. **NUnit XML を python3 で集計して `total= passed= failed=` を出すこと**（`test.sh`）
+   `AudioManager.asset` の復元** → **残した。** `unity build` は `--execute-method` で
+   `BuildScript.BuildMacOS` を呼ぶだけで肩代わりしないので、3段構えは変わらない
+3. **`PIPESTATUS` で終了コードを捨てないこと** → `test.sh` はパイプを挟まなくなったので
+   不要になった。`build.sh` / `run.sh` は grep を挟むので引き続き必要
+4. **NUnit XML を python3 で集計して `total= passed= failed=` を出すこと** → **残した。**
+   `unity test` はコンソールに集計を出さず、stdout に流れるのは素の Editor ログだけ
 5. **`unity.sh` の `pgrep -f "Unity.app/Contents/MacOS/Unity.*${PROJECT_PATH}"` による
-   「Editor が同プロジェクトを開いていたら中断」**
-6. **`run.sh` の grep フィルタ（`^\[Fixups\]|^\[Build\]|^\[VrmProbe\]|error CS|...`）に
-   無いプレフィックスのログは、`LogError` であっても画面に出ない**（`run.sh` のコメント
-   参照）。この弱点自体を引き継ぐ必要はないが、`unity run` の出力がフィルタ無しで
-   全ログを流すのか、移行時に確認すること
+   二重起動検出** → **残した。** `unity` CLI 経由でも
+   `Unity.app/Contents/MacOS/Unity ... -projectPath <PROJECT_PATH>` の形で起動するので検出は効く
+   （CLI 自身が同等の検出を持つかは確かめていない）
+6. **grep フィルタに掛からないログ** → `build.sh` は `Logs/build-macos.log`、`run.sh` は
+   `Logs/run.log` に全文が残るようにした。`unity build` は `--log-file` へ全文を書きつつ
+   stdout にも流すが、`unity run` に `--log-file` は無いので `-logFile -` を渡して `tee` で落とす
 
 注意点:
 
-- ★ **`unity test` が内部で `-runTests` をどう組み立てるかは確かめていない。** `--quit` 相当の
-  オプションが表に出ていないので CLI 側が引き受けている可能性はあるが、**内部で付けていない
-  保証は無い**。上の1点目は移行時に**実際に走り切ることを確かめる**まで未解決として扱う
-- ★ **`unity build` は `Disable Unity Audio` の切り替えをやってくれない。** `--execute-method`
-  を通しても `BuildScript.BuildMacOS` を呼ぶだけなので、上の2点目の trap は
-  **`BuildScript.BuildMacOS` の責務のまま**残る
-- ★ **`unity command` / `unity status` は `unity pipeline install` が要る** —
-  `Packages/manifest.json` に依存が1本増える。**今は入れていない**
+- `unity test` の終了コードは **0=全部通った / 8=テストが失敗した / 6=走り切らなかった**
+  （コンパイルエラー・ライセンス不可・クラッシュ・`--timeout`）。この分割があるので、CI は
+  「インフラの失敗だけ再試行する」を終了コードだけで書ける
+- **`unity run` は Editor の終了コードをそのまま返さず、失敗を `6` に畳む。** 非0であることは
+  保たれるので `run.sh` の判定は変わらないが、`EditorApplication.Exit(n)` の `n` は届かない
+- `--` の後の `-nographics` / `-logFile` / `-buildTarget` / `-executeMethod` はそのまま
+  Unity へ転送される
+- **`unity build` は `--log-file` に追記し、そのログを画面へも流す。** 走らせる前に空にしないと
+  前回のビルドの行が今回の出力に混ざる（`build.sh` がやっている）
+- `unity` は `ProjectSettings/ProjectVersion.txt` から Editor を解決し、Hub に登録された実体
+  （`/Applications/Unity/Hub/Editor/<版>-arm64/Unity.app`）を選ぶ
+- **`unity build` の未コミット変更ガードは既定（`--versioning-strategy none`）では走らない**
+  ので `--allow-dirty-build` は要らない
+- **`unity build` の `--output-path` はカレントディレクトリ基準で解決する。** 絶対パスを渡す
+- ★ **`unity pipeline install` は入れない。** `test` / `build` / `run` はいずれも pipeline 不要で
+  動く。`unity command` / `unity status` はこれが要るが、`Packages/manifest.json` に beta の
+  依存を1本増やすのに見合う用途が今は無い
+- ★ **CLI のバージョンは固定しない。** CI に Unity を起動するジョブがまだ無く（#54 が未着手）、
+  固定する先が存在しない。CLI は beta なので、壊れたら `unity --version` を見て対応表を
+  確かめ直す運用にする
 - ★ `unity editors` が `6000.3.14f1` に対して `6000.3.24f1` へのアップグレードを示唆してくるが、
   **プロジェクトは `6000.3.14f1` 固定**（`ProjectSettings/ProjectVersion.txt` が唯一の版の書き場所で、
   `scripts/unity.sh` はここから読む。`UNITY_VERSION` 環境変数を渡したときだけ上書きされる。
   [#97](https://github.com/schwarz9791/chatter-agent/issues/97) で `6000.5.8f1` から切り替えた）
 
-`scripts/*.sh` を Unity CLI に寄せる移行そのものは
-[#67](https://github.com/schwarz9791/chatter-agent/issues/67) で追う。
+**Android 側（`build-android.sh` / `run-android.sh` / `configure-android.sh` / `build-native.sh`）は
+Unity CLI へ寄せていない。** [#127](https://github.com/schwarz9791/chatter-agent/issues/127) で追う。
+`unity.sh` の `run_unity` と Unity.app のパス探索は `build-android.sh` が使っているので残してある。
 
 ## Unity の版を切り替えたときに踏んだこと（#97: 6000.5.8f1 → 6000.3.14f1）
 

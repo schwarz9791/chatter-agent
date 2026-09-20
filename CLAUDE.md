@@ -1,112 +1,30 @@
-# chatter-agent — 技術ドキュメント
+# chatter-agent — 開発の規約
 
-## プロジェクト概要
+**Claude Code の発言を、VRM キャラクターがリアルタイムで読み上げるシステム。** Claude Code の
+`MessageDisplay` hook から発言を受け取り、サーバーが整形・合成し、表示側アプリ（macOS 常駐 /
+Android XR）が鳴らして VRM に反映する。
 
-**Claude Code の発言を、VRM キャラクターがリアルタイムで読み上げるシステム。**
+**対象は Claude Code のみ。** hook を持たない Codex / Gemini CLI / Antigravity は対象外なので、
+**`AGENTS.md` は置かない。**
 
-読み上げるのは**表示側アプリ `chatter-mascot`**。**Unity + UniVRM で1つ作り**、macOS デスクトップ（透過ウィンドウで常駐）と Android XR グラス（XREAL Aura）の両方を同じプロジェクトからビルドする。**macOS から着手した**（→ [#12](https://github.com/schwarz9791/chatter-agent/issues/12)）。Unity 6 で透過とクリック透過が成立するかが1プロジェクト化の成立条件で、そこを最初に測った。
+使い方・ビルド・実行は [`README.md`](./README.md)。
 
-[CC Mascot](https://github.com/kazakago/cc-mascot)（Mac / Electron）と目的は同じだが、**発言の取得方式が根本的に違う**。CC Mascot は Claude Code が書く jsonl ログを監視するが、本プロジェクトは **Claude Code の `MessageDisplay` hook から直接テキストを受け取る**。
+## ディレクトリ構成
 
-- **対象は Claude Code のみ。** Codex / Gemini CLI / Antigravity は hook を持たないため対象外
-- **`AGENTS.md` は置かない。** hook 依存で Claude Code 専用のため
+| ディレクトリ | 内容 |
+|---|---|
+| `plugin/` | Claude Code プラグイン。bash hook が payload を spool に置いて即 `exit 0` する |
+| `plugin/bin/` | `chatter-agent-speak` のバンドル。**git にコミットする成果物**（`core/` からビルドされる） |
+| `core/src/cli/` | `chatter-agent-speak`。spool を読む単一ワーカー |
+| `core/src/server/` | `chatter-agent-server`。WebSocket 配信 + 音声の HTTP 配布 + 制御 API |
+| `core/src/player/` | `chatter-agent-player`。発話 CLI。**プロトコルの参照実装。捨てない** |
+| `core/src/core/` | 契約と基盤（型・パス・設定・ロック・キュー） |
+| `core/src/text/` `emotion/` `prompt/` `summarizer/` `tts/` | 整形・感情判定・応答待ち通知・AI要約（既定OFF）・合成クライアント |
+| `apps/chatter-mascot/` | 表示側アプリ（Unity + UniVRM）。macOS と Android XR を1プロジェクトから |
+| `docs/` | 基本設計・ファイル構成・コマンド |
+| `docs/knowledge/` | 実装で踏んだこと・なぜそうしたか・実測値 |
 
-## 一次情報の所在
-
-**設計・根拠・実測データはすべて `_workspace/chatter-agent-design.md` にある。設計判断に迷ったらまずこれを読むこと。**
-
-hook 方式を選んだ根拠、`MessageDisplay` の実測ペイロード（公式ドキュメントに記載が無い）、`final:true` の遅延実測、未検証事項の一覧まで、この1文書で実装を開始できるように書いてある。
-
-> ★ **発話の契約だけは例外。** [#8](https://github.com/schwarz9791/chatter-agent/issues/8) で配信の形が変わり、設計書の §3 の図 / §4-4 / §5 / §6 は旧仕様（`speech.jsonl` の tail + ローテート追従 + `?since=`）のまま残っている。**契約は [`docs/protocol.md`](./docs/protocol.md) が正。** 設計書側にも註記を入れてある。
-
-> `_workspace/` は `.gitignore` 済み。**ローカル専用の作業メモ**でリポジトリには含まれない。
-
-## 現在の状態
-
-**Phase A は実機で確定した。配管は player（発話 CLI）まで通っている。次は Phase C（表示側アプリ）。**
-
-| ディレクトリ | 内容 | 状態 |
-|---|---|---|
-| `plugin/` | Claude Code プラグイン（bash hook） | **実装済み。** 実機で動作確認している |
-| `core/` | `chatter-agent-core`（CLI + WebSocket/HTTP サーバー + 発話 CLI） | **実装済み。** `summarizer/`（AI要約、既定OFF）・**サーバー合成**（[#29](https://github.com/schwarz9791/chatter-agent/issues/29)）・**エンジンの spawn**（[#51](https://github.com/schwarz9791/chatter-agent/issues/51)）・**設定パネルの制御 API**（[#76](https://github.com/schwarz9791/chatter-agent/issues/76)。`/v1/*`。**書き込み口はループバック限定**）・**LAN 公開のオプトインとトークン認証**（[#98](https://github.com/schwarz9791/chatter-agent/issues/98)。既定 bind は `127.0.0.1`、非ループバックには `server.token` が要る）も含めて完了 |
-| `core/src/player/` | `chatter-agent-player`（WebSocket → 音声を GET → 再生 → ack） | **実装済み**（[#11](https://github.com/schwarz9791/chatter-agent/issues/11)）。**プロトコルの参照実装。捨てない** |
-| `apps/chatter-mascot/` | 表示側アプリ（**Unity + UniVRM**。macOS 常駐 + Android XR を1プロジェクトで） | **土台と発話**（[#12](https://github.com/schwarz9791/chatter-agent/issues/12)）に加え、**VRM の表示も実装済み**（[#56](https://github.com/schwarz9791/chatter-agent/issues/56)）。WebSocket → 音声取得 → 再生 → ack の全経路を EditMode テストで固定してある（件数は `./scripts/test.sh` の `total=` を見る）。**macOS ビルドで透過も成立**。**無音時にオーディオデバイスを手放す**（macOS は `afplay` を1発話1プロセス + ビルド時だけ `Disable Unity Audio`、Android は `AudioSettings.Mobile.StopAudioOutput()`）。**アイドルモーション・視線・`kind: "prompt"` の区別も実装済み**（[#59](https://github.com/schwarz9791/chatter-agent/issues/59)。同梱 VRMA の待機モーション、カーソル追従の視線、`prompt` を視線と姿勢で区別）。**表情と瞬きも実装済み**（[#57](https://github.com/schwarz9791/chatter-agent/issues/57)。`emotion` を VRM の expression へ、自動まばたき、`prompt` の到着で1回瞬く）。**リップシンクも実装済み**（[#58](https://github.com/schwarz9791/chatter-agent/issues/58)。`Prepare` の時点で WAV から振幅エンベロープを作ってハンドルに載せ、区間の最大で 30fps でも立ち上がりを落とさない）。**これで [#17](https://github.com/schwarz9791/chatter-agent/issues/17) は閉じた**。**ウィンドウの位置と大きさも自分で覚える**（[#16](https://github.com/schwarz9791/chatter-agent/issues/16)。`~/.config/chatter-agent/mascot/window.json` に**ポイントで**永続化。画面外からの復帰、ディスプレイ構成の変化への追従、ドラッグ終了の取りこぼしからの復帰、[#68](https://github.com/schwarz9791/chatter-agent/issues/68)（終了に2回要る）の修正を含む。[#66](https://github.com/schwarz9791/chatter-agent/issues/66) もここで閉じた）。**設定 UI も実装済み**（[#76](https://github.com/schwarz9791/chatter-agent/issues/76)。**キャラクターの右クリック**（開閉トグル）とメニューバーから開く**ネイティブの `NSPanel`**。項目の並びを持つのは C# の `SettingsSchema` だけで、**ObjC 側には設定のキーもラベルも1つも書かれていない**（ボタンの文字まで JSON で渡す）。ショートカットは**実際にキーを押して記録する**（`NSEvent` のローカルモニタ。アクセシビリティ権限は要らない。ネイティブが返すのは keyCode と修飾マスクの**数値だけ**で、`ctrl+opt+m` への変換は `HotKeySpec` が行う）。値の行き先は3つ——Unity の `settings.json`（音量・モーション・ミュート・ショートカット・VRM）/ core の `config.json`（**`PATCH /v1/config` 経由**。音声スタイル・話す速さ・要約）/ 読むだけ（版・ライセンス・話者一覧）。**「大きさ」だけはどちらでもなく `window.json`**——ウィンドウそのものを変え、スライダーは**現在の高さ ÷ 540**（既定の高さは #88 で 480 → 540 に変わった）の写しでしかない（権威を2つ持たない）。**サーバーに繋がらなくても項目を消さない**（無効化して理由を出す）。**「すべての設定をリセット」は `models/*.vrm` まで消す**ので `NSAlert` で確認を取る。ファイル選択は**自前の `NSOpenPanel`**（`.vrm` はシステムに UTI が無く、`allowedContentTypes` では絞れない）。**選んだモデルは `models/mascot.vrm` に固定名で上書き**する（元の名前でコピーすると選び直すたびに積み上がる。元の名前は表示のためだけに覚え、探索には使わない）。**右クリックの検出は `IPointerClickHandler` ではない**——非アクティブのアプリでは Input System のカーソル座標が固まるので、**押下はイベント・当たり判定はクリック透過の状態**で取る。実機で全項目を確認済み）。**デスクトップ常駐も実装済み**（[#75](https://github.com/schwarz9791/chatter-agent/issues/75)。**Objective-C のネイティブプラグインを自作**して Dock 非表示（`LSUIElement`）・メニューバー常駐（`NSStatusItem`）・グローバルショートカット2本（`⌃⌥M` ミュート / `⌃⌥H` 表示切り替え。Carbon の `RegisterEventHotKey`。**アクセシビリティ権限が要らない**）・一時ミュート（**声だけ消す**。ack は通常経路のまま出す）を入れた。実機で全項目を確認済み）。**見栄えの調整も実装済み**（[#88](https://github.com/schwarz9791/chatter-agent/issues/88)。窓を 1:1・540×540 に、VRMA に無い指ボーンの丸め、`display.frameRate` の設定、URP の MSAA 4x。実測は `docs/mascot.md`）。**感情モーションと待機の小ネタも実装済み**（[#70](https://github.com/schwarz9791/chatter-agent/issues/70)。`~/.config/chatter-agent/animations/<category>/*.vrma` を起動時に全部読んで寝かせ、文の emotion で1本ワンショット再生 → 0.5秒クロスフェードで待機へ。文ごと・割り込み無し・クールダウンは2段（カテゴリ問わず1秒／同じカテゴリは15秒。同じ表情の連発だけを抑え、切り替わりは待たせない）。30〜60秒ごとの小ネタ。素材は VRoid Studio 由来で同梱しない。**設定パネルの「モーションを確認」**で 1 本選んで本番と同じ経路で再生できる。選択は保存しない）。**macOS アプリとしての身元も入れた**（[#93](https://github.com/schwarz9791/chatter-agent/issues/93)。アプリアイコン（Icon Composer の **macOS 書き出し**を `PlayerSettings.SetIcons` で登録。`./scripts/run.sh …IconSettings.FixAll` で 1 回走らせて `ProjectSettings.asset` にコミットする）／メニューバーのアイコンを**自前の素材**に／`macAppStoreCategory` を `utilities` にして**Game Mode のロケットを消した**（カテゴリ変更だけで消え、`LSSupportsGameMode` は足していない）。**これでリポジトリに残る cc-mascot 由来のバイナリは `idle_loop.vrma` 1 本だけになった**。実測は `docs/mascot.md`）。**Android（XR なし）のビルドも通った**（[#97](https://github.com/schwarz9791/chatter-agent/issues/97)。[#99](https://github.com/schwarz9791/chatter-agent/issues/99) の Android XR パッケージが要求するので Unity を **6000.3.14f1** に落とした。`./scripts/build-android.sh` / `run-android.sh`、`AndroidPlayerSettings.FixAll`（アプリ ID `tech.sukima.chattermascot` / minSdk 30 / http 許可）、マニフェストは静的に置かず `IPostGenerateGradleAndroidProject` で `INTERNET` と `usesCleartextTraffic` を注入、シーンに焼かれたデスクトップ限定コンポーネントは asmdef のプラットフォーム規則でビルド時に剥がす、UniWindowController 同梱プラグインはビルド時の delegate で外す。`XR_Glasses` エミュレータで接続 → 発話 → ack と VRM / 待機 / 瞬き / リップシンクを確認した。★ **Android では MToon10 を UniUnlit に差し替えて描く**（MToon10 のライティングが白飛びする。原因は [#110](https://github.com/schwarz9791/chatter-agent/issues/110)）。**LAN 越しに Mac の server へ繋がる**（[#98](https://github.com/schwarz9791/chatter-agent/issues/98)。`settings.json` の `connection.*` を `configure-android.sh` で書く。設定→シーンは `MascotSettingsHost` でデスクトップと共通）。**OpenXR / Full Space で空間に立つ**（[#99](https://github.com/schwarz9791/chatter-agent/issues/99)。`com.unity.xr.androidxr-openxr` を Android にだけ割り当て、Vulkan 単独。XR が起動したときだけ `XrStage` が実行時に XR Origin を組み、**起動時の頭の姿勢から1回だけ**空間に固定する（動かすのはキャラではなく Origin）。既定は机の上のミニチュアで、端末の `settings.json` の `xr.*` で等身大まで。**公式は非対応だが `XR_Glasses`（XR Preview API v4 イメージ）のエミュレータで Full Space に入って喋る**。Extensions は入れない（[#119](https://github.com/schwarz9791/chatter-agent/issues/119)。グラスの blend mode は OPAQUE / ADDITIVE しか無いので、自前の feature で ADDITIVE にして部屋を透かす）、実機は [#100](https://github.com/schwarz9791/chatter-agent/issues/100)）。**XR で手でつまんで置き直せる**（[#121](https://github.com/schwarz9791/chatter-agent/issues/121)。aim レイでつまんで掴み、離すと水平面に乗せてこちらを向く。首も左右に追う。位置は残さない → [#122](https://github.com/schwarz9791/chatter-agent/issues/122)） |
-| `docs/` | 作業規約 | protocol / core / plugin / origin の4本 |
-| `.github/workflows/` | CI（typecheck / lint / format / bundle / test / verify） | 稼働中 |
-
-実装フェーズは **A**（plugin + CLI で記録と配信キューが正しく育つ）→ **B**（WebSocket 配信）→ **C**（表示側アプリ）。
-**Phase C は Unity + UniVRM で1プロジェクト。** プラットフォーム別ではなく**レイヤーで分けてある**:
-[#11](https://github.com/schwarz9791/chatter-agent/issues/11)（Node の発話 CLI）→
-[#12](https://github.com/schwarz9791/chatter-agent/issues/12)（Unity の土台と発話）→
-[#17](https://github.com/schwarz9791/chatter-agent/issues/17)（UniVRM の表示。**[#56](https://github.com/schwarz9791/chatter-agent/issues/56) で表示、[#59](https://github.com/schwarz9791/chatter-agent/issues/59) でアイドル（待機モーション）、[#57](https://github.com/schwarz9791/chatter-agent/issues/57) で表情と瞬き、[#58](https://github.com/schwarz9791/chatter-agent/issues/58) でリップシンク、[#70](https://github.com/schwarz9791/chatter-agent/issues/70) で感情モーションと小ネタ。**完了**）→
-**デスクトップ固有**（[#16](https://github.com/schwarz9791/chatter-agent/issues/16) 窓の位置/サイズ・クリック透過・終了 → **[#75](https://github.com/schwarz9791/chatter-agent/issues/75) 常駐（Dock 非表示・メニューバー・ミュート）** → **[#76](https://github.com/schwarz9791/chatter-agent/issues/76) 設定 UI。すべて完了**）/ [#25](https://github.com/schwarz9791/chatter-agent/issues/25)（XR 固有）。
-**#11 は完了した**（`core/src/player/`）。Unity のビルドを待たずに音が出る。
-
-**Phase A は実機で動作確認した**（Claude Code 2.1.233 / macOS）。delta が hook に届いてから
-`speech.jsonl` に載るまでの配管は**約 50ms** で十分速い。**発話は `final:true` を待って
-メッセージ単位で出す**ので（[#30](https://github.com/schwarz9791/chatter-agent/issues/30)）、
-体感を決めるのは配管の速さではなく `final` の到着タイミングになる。実測では**複数文のメッセージ 179件のうち
-97.8%**（175件）で `final` はほぼ即座に届き（中央値・p90 とも 0秒）、数十秒待つのは `AskUserQuestion` の
-直前だけ（→ 下の「実測で潰れた前提」/「絶対に守ること」1）。
-
-実測で潰れた前提は [`docs/plugin.md`](./docs/plugin.md) に集約してある。要点だけ:
-
-- `/plugin install` はプラグインを**完全コピー**する。`bin/` も実行権限ごと入るので、バンドル同梱の前提は成立。
-  ただし**ローカルディレクトリを marketplace に登録している場合、hook が走るのはコピーではなく登録元**
-  （`known_marketplaces.json` の `installLocation`）。実機確認でバンドルを差し替えるときに刺さる（→ [`docs/plugin.md`](./docs/plugin.md)）
-- **thinking でもサブエージェントでも発火しない**（読み上げ事故は起きない）
-- **メッセージの最終行だけは final flush でしか来ない。** これが `final` を待つ設計の遅延の下限で、`AskUserQuestion` の直前では数十秒に達する
-
-**Phase B は完了している。** `npm run verify:phase-b` で実サーバーを起動した確認に加え、
-`npm run verify:player` が **hook → CLI → server → player** を通して音が鳴るところまで見ている。
-Unity 側（#12）は同じ契約を踏むので、player が「正しい挙動」の突き合わせ先になる。
-
-**音声合成はサーバー側に寄せた**（[#29](https://github.com/schwarz9791/chatter-agent/issues/29)）。
-クライアントは `GET /audio/<epoch>-<seq>.wav` を叩くだけで、エンジンを持たない。
-これで [#12](https://github.com/schwarz9791/chatter-agent/issues/12) の実装範囲から TTS と
-合成キューが落ち、[#25](https://github.com/schwarz9791/chatter-agent/issues/25) の
-実機確認項目6「音声経路の最終判断」も決まった。**#29 の実機確認（XR から、
-クライアント側にエンジンを置かずに音が出るか）は未実施。**
-
-**実機（AivisSpeech + afplay）でも音が出るところまで確認した。** 耳で聞いた限りの体感:
-
-- **1文目だけは合成待ちで少し間が空く**（先読みが効くのは2文目以降なので構造的にそうなる）
-- **ターンがそのまま終わるなら、メッセージは表示とほぼ同時に喋り出す。** `final` が即座に来るため。
-  遅れが問題になるのは手前でツールを呼んだときで、`AskUserQuestion` の直前が最悪（→「絶対に守ること」1）
-- **`**` などの記号は音にならない。** 合成エンジンが `audio_query` で読み仮名に変換する時点で落とすため。
-  [#2](https://github.com/schwarz9791/chatter-agent/issues/2) の実害は「記号が読まれる」ことではなく、
-  **文が変な所で割れて不自然な切れ目が入る**こと
-
-> ★ **上の体感は、粒度を変える前（文単位で流していた頃）に耳で確かめたもの。**
-> メッセージ単位（[#30](https://github.com/schwarz9791/chatter-agent/issues/30)）での実機確認は**未実施**。
-> 特に「`AskUserQuestion` の直前でどれだけ沈黙するか」は測って [`docs/plugin.md`](./docs/plugin.md) に記録すること。
-
-**AI要約（`summarizer/`）も実装済みになった**（[#31](https://github.com/schwarz9791/chatter-agent/issues/31)）。
-**既定 OFF。** 有効にすると、長いメッセージ1件ごとに `claude -p` が走る。要約は AI の生成そのものなので、
-所要時間には**ばらつきが大きい**（入力が長いから出力が遅い、とはなりづらい）。`final` の待ちが中央値0秒
-（→「絶対に守ること」1）なのに対し、要約 ON ではこの秒数が丸ごと発話の遅れとして乗る。
-**要約 ON での実機確認も行った**（Claude Code 2.1.233 / macOS、n=10。詳細は [`docs/plugin.md`](./docs/plugin.md)）。
-無限ループ防止の第1層は10件とも効いていた。**原文の長さと所要時間は相関しない**——217文字がタイムアウトし、
-745文字が11.0秒で完走する、という逆転が実測に出ている（タイムアウト率 3/10）。要約がいちばん効くはずの
-長い発言ほど要約が間に合わずタイムアウトし、原文がそのまま読み上げられるという逆転は起こりうるが、
-その原因は「長いから遅い」ではなく「いつタイムアウトするか事前に予測できない」こと。
-秒数はマシンとネットワークで変わるので**仕様として扱わないこと**。この実測を受けて
-`aiSummaryTimeoutMs` の既定を**30秒→60秒**に上げ、`summaryPipeline.ts` に要約の長さ上限も入れた。
-
-> ★ **耳での体感も確認できた。遅延は許容だった。** 理由は「ずっとターミナル側を見ているわけではない」——
-> **むしろターミナルから目を外しておきたい状態で、音声だけで状況を把握するために喋らせている**という、
-> この機能の用途そのものに関わる報告だった。#30 で受け入れた「表示と発話のズレがメッセージ全体に乗る」
-> という代償（→「絶対に守ること」1）は、この使い方を前提にすれば問題として立ち上がらない。
->
-> ★ **ただし、いつタイムアウトするか予測できないという前提だと、この代償の重さが変わる。** 目を離して
-> 聞いている状況では、要約待ちの末に**いちばん長い発言が要約されないまま全文**読み上げられるのが、
-> いちばん避けたい失敗の仕方になる——実機実測でも実際に踏んだ（`/code-review max` の3571文字の出力が
-> タイムアウトし、原文が全文読み上げられた）。`aiSummaryThreshold` を上げる対策は、相関が無い以上
-> 効かないと分かった。採った対策は `aiSummaryTimeoutMs` の60秒化と要約の長さ上限の導入。
-> タイムアウトの実挙動そのものも実機で確認できた（原文へのフォールバックが機能した）。
-> 詳細と残りの未検証事項は [`docs/plugin.md`](./docs/plugin.md)。
-
-## データフロー
+## アーキテクチャ
 
 ```
 Claude Code
@@ -116,7 +34,7 @@ plugin/scripts/*.sh          bash。payload を spool/<message_id>.<index>.json 
   │ 毎 delta で CLI をデタッチ起動
   ▼
 chatter-agent-speak (CLI)    ロックを取れた1プロセスだけが spool を順に処理
-  │                          **final:true を待つ**（非 final では何もせず終わる）
+  │                          final:true を待つ（非 final では何もせず終わる）
   │                          delta 結合 → Markdown除去 → 文分割 → 要約（既定OFF） → 感情判定 → epoch/seq 採番
   ├──▶ speech.jsonl          記録。1文1行で残す。誰も読まない
   ▼
@@ -124,240 +42,176 @@ speech/<seq>.json            配信キュー。1文1ファイル
   ▼
 chatter-agent-server         キューを読んで WebSocket 配信（テキスト。即座に seq 順）
   ▲  │                       ack を受けたぶんを消す
-  │  ├──▶ GET /audio/<epoch>-<seq>.wav    **同じポート。** 取りに来られた時点で AivisSpeech に合成させる
-  │  │                       （エンジンが居なければ起動時に起こす。待たない → #51）
-  │  └──▶ /v1/*              設定パネルの制御 API（#76）。**書き込み口はループバック限定**
-  │                          ★ 既定 bind は 127.0.0.1。LAN から繋ぐなら host を開き、Bearer トークン必須（#98）
+  │  ├──▶ GET /audio/<epoch>-<seq>.wav    同じポート。取りに来られた時点で合成する
+  │  │                       （エンジンが居なければ起動時に起こす。待たない）
+  │  └──▶ /v1/*              設定パネルの制御 API。**書き込み口はループバック限定**
+  │                          既定 bind は 127.0.0.1。LAN から繋ぐなら Bearer トークン必須
   │ ack
-  ├──▶ chatter-agent-player  発話 CLI。音声を GET → afplay。**プロトコルの参照実装**
+  ├──▶ chatter-agent-player  発話 CLI
   ▼
 chatter-mascot               表示側アプリ（Unity）。再生 → VRM描画 / 表情 / モーション / リップシンク
 ```
 
 設計の芯は3つ。
 
-**「捕捉」と「加工」の分離。** hook は追記するだけで重い処理を一切しない。`MessageDisplay` の10秒タイムアウトと、UI をブロックしうるリスクの両方を、構造で回避している。
+**「捕捉」と「加工」の分離。** hook は spool に置くだけで重い処理を一切しない。`MessageDisplay` の
+10秒タイムアウトと、UI をブロックしうるリスクの両方を構造で回避している。
 
-**「記録」と「配信」の分離。** 1つのファイルに兼ねさせると、ローテートを跨ぐ差分読み取りが要り、読み手だけが際限なく複雑になる。分ければ順序はファイル名で決まり、消費は削除で表せる。契約は [`docs/protocol.md`](./docs/protocol.md)。
+**「記録」と「配信」の分離。** 1つのファイルに兼ねさせると、ローテートを跨ぐ差分読み取りが要り、
+読み手だけが際限なく複雑になる。分ければ順序はファイル名で決まり、消費は削除で表せる。
 
-**「テキストの配信」と「音声の受け渡し」の分離**（[#29](https://github.com/schwarz9791/chatter-agent/issues/29)）。テキストは今までどおり WebSocket で即座に流れ、音声はクライアントが必要になったときに HTTP で取りに行く。合成をサーバーへ寄せたのは **XR グラス（Android）に AivisSpeech を置けない**ため。**押し出す（サーバーが合成してから配る）のではなく引かせる**ことで、「誰も繋いでいない間は合成しない」「同じ文の合成は1回だけ」がサーバー側の判定コードなしに成立し、**エンジンが落ちてもテキストの配信が止まらない**（音声だけが 503 になるので、無音の原因がクライアント側に届く）。
+**「テキストの配信」と「音声の受け渡し」の分離。** テキストは WebSocket で即座に流れ、音声は
+クライアントが必要になったときに HTTP で取りに行く。合成をサーバーへ寄せたのは **XR グラス
+（Android）に AivisSpeech を置けない**ため。
 
 ## 絶対に守ること
 
+根拠・経緯・実測は [`docs/knowledge/`](./docs/knowledge) にある。**ここにあるのは守るべきことだけ。**
+
 ### 1. `final:true` を待つ — 発話はメッセージ単位
 
-1つの `message_id` は `index` 0..N で分割送信され `final:true` が終端になる。
+1つの `message_id` は `index` 0..N で分割送信され `final:true` が終端になる。**`final` が来るまで
+1文も出さない。** 来たらメッセージ全文をまとめて1回で流す（`core/src/cli/worker.ts` の
+`processMessage`）。
 
-**`final` が来るまで1文も出さない。** 来たらメッセージ全文をまとめて1回で流す。
-→ [`docs/protocol.md`](./docs/protocol.md)（契約）/ `core/src/cli/worker.ts` の `processMessage`
+**`final` が来ないメッセージは救済する。** ESC 中断・クラッシュ・`index` 欠番でメッセージが
+閉じないことはある。**同一セッションの**後続イベントが到着したら打ち切って全文を出し spool を
+消す（`hasNewerInSameSession`）。セッションを限定しないと、Claude Code を2枚開いただけで
+**まだ伸びる途中のメッセージが分断される**。
 
-> ★ **これは [#30](https://github.com/schwarz9791/chatter-agent/issues/30) で反転した方針。**
-> 設計書 §2-4 と、それ以前のこの節は「`final:true` を待ってはいけない」と書いていた。
-> 反転の理由は3つ、いずれも実測に基づく:
->
-> 1. **AI要約（[#31](https://github.com/schwarz9791/chatter-agent/issues/31)）が原理的に成立しない。** 要約はメッセージ全体が揃って初めて意味を成すが、1文は平均 34.6 文字しかなく閾値に届かない
-> 2. **サーバー合成（[#29](https://github.com/schwarz9791/chatter-agent/issues/29)）の前提が粒度で決まる。** 合成リクエストの 60秒窓ピークが 37 → 5 req/min（7倍差）
-> 3. **代償が想定より小さい。** `final` の待ち時間は中央値 0秒 / p90 0秒。数十秒待つのは 179件中 4件（`AskUserQuestion` の直前）だけ
-
-**引き換えに失うもの**（受け入れ済み）:
-
-- 表示と発話のズレが**メッセージ全体**に乗る（以前は最終行の1文だけだった）
-- `index` に欠番があると「部分発話」ではなく**全損**になる（→ [#21](https://github.com/schwarz9791/chatter-agent/issues/21)）
-- `publish` が throw したときに組み直されるのが1文ではなく**メッセージ全文**になる（→ [#13](https://github.com/schwarz9791/chatter-agent/issues/13)）
-
-**`final` が来ないメッセージは救済する。** ESC 中断・クラッシュ・`index` 欠番でメッセージが閉じないことはある。
-**同一セッションの**後続イベントが到着したら、そこで打ち切って全文を出し spool を消す（`hasNewerInSameSession`）。
-セッションを限定しないと、Claude Code を2枚開いただけで**まだ伸びる途中のメッセージが分断される**。
-
-> ★ **後続イベントが来なければ、救済は発火しない。** その場合は発話されないまま、
-> `spoolMaxAgeHours`（既定6時間）を過ぎたところで孤児掃除（`cleanOrphans`）に破棄される。
-> ESC 中断・クラッシュは「その後そのセッションで何もしない」のが普通の展開なので、
-> **ここで名指ししている2ケースこそ、救済条件（同一セッションの後続イベント）が
-> 成立しないことが多い**。救済はメッセージの生存性を保証する仕組みではなく、
-> たまたま同じセッションで後続の活動があったときにだけ拾える偶然の検出だと理解すること。
-
-> 設計書 §2-4 の「最終チャンクだけが大きく遅れる」は **2.1.233 でも起きる**。`final` はメッセージが閉じる瞬間＝次のブロックが始まるときに届くので、遅延は**その手前でモデルが何をどれだけ生成したか**で決まる。ターン終了ならほぼ即座、ツール呼び出しなら数秒、**`AskUserQuestion` の直前だと数十秒**。**秒数を仕様として扱わないこと**（→ [`docs/plugin.md`](./docs/plugin.md)）。
+★ **`final` の到着までの秒数を仕様として扱わないこと。** ターン終了ならほぼ即座、ツール呼び出し
+なら数秒、`AskUserQuestion` の直前だと数十秒。マシンと生成内容で変わる。
 
 ### 2. jsonl ログ監視に戻らない
 
-jsonl の `timestamp` は**メッセージの生成時刻であって書き込み時刻ではない**。アシスタントのメッセージ行はツール結果と一緒に flush されるため、ツール呼び出しの手前に出したテキストは**ユーザーがそのツールに応答した後**にしかファイルに現れない。ログ監視である限り原理的に間に合わない。
+jsonl の `timestamp` は**メッセージの生成時刻であって書き込み時刻ではない。** アシスタントの
+メッセージ行はツール結果と一緒に flush されるため、ツール呼び出しの手前に出したテキストは
+**ユーザーがそのツールに応答した後**にしかファイルに現れない。ログ監視である限り原理的に
+間に合わない。
 
-**「hook をトリガーにして transcript を読む」ハイブリッドも同じ理由で不可。** cc-mascot / cc-mascot-xr が一度ずつ踏んだ罠なので、同じところに戻らないこと。
-→ 根拠は設計書 §2-1
+**「hook をトリガーにして transcript を読む」ハイブリッドも同じ理由で不可。**
 
 ### 3. hook script で重い処理をしない
 
-`MessageDisplay` のタイムアウトは**10秒**（他の hook は600秒）で、UI 表示経路に同期している可能性がある。hook は spool に1ファイル置いて CLI をデタッチ起動し、即 `exit 0` する。**Node を起動しない。**
+`MessageDisplay` のタイムアウトは**10秒**（他の hook は600秒）で、UI 表示経路に同期している
+可能性がある。hook は spool に1ファイル置いて CLI をデタッチ起動し、即 `exit 0` する。
 
-**追記はしない。** bash から任意長の追記を原子的にする移植可能な方法が無い（`printf` は stdio が 1024 バイト境界で write を分割する）ため、1イベント1ファイルを tmp + rename で置く。
-→ [`docs/plugin.md`](./docs/plugin.md)
+- **Node を起動しない。**
+- **追記はしない。** bash から任意長の追記を原子的にする移植可能な方法が無い。1イベント1ファイルを
+  tmp + rename で置く。
 
 ### 4. 発話の順序を壊さない
 
-`chatter-agent-speak` は hook から毎 delta 起動されるが、**ロックを取れた1プロセスだけが spool を処理する**。`seq` の採番もこのロック下で行う。並列に走らせたり、ロックを取らずに書いたりすると発話順が入れ替わる。
+`chatter-agent-speak` は hook から毎 delta 起動されるが、**ロックを取れた1プロセスだけが spool を
+処理する。** `seq` の採番もこのロック下で行う。ドレイン完了後、ロックを解放する前にもう一度
+spool を見る（走査直後に到着した分の取りこぼし防止）。
 
-ドレイン完了後、ロックを解放する前にもう一度 spool を見る（走査直後に到着した分の取りこぼし防止）。
-→ 設計書 §4-2
-
-**到着順（`birthtime`）だけでは発話順は決まらない。** `MessageDisplay` と `PreToolUse` は
-別プロセスとして同時に走るので、**prompt が本文を追い越して spool に着くことがある**
-（実機で `PreToolUse` − `final` = −316ms）。そのまま到着順に処理すると「質問を読み上げてから、
-その質問に至る説明を読み上げる」逆転になる（[#33](https://github.com/schwarz9791/chatter-agent/issues/33)）。
-`worker.ts` の手当ては**2段**:
+**到着順（`birthtime`）だけでは発話順は決まらない。** `MessageDisplay` と `PreToolUse` は別プロセスと
+して同時に走るので、**prompt が本文を追い越して spool に着くことがある。** `worker.ts` の手当ては2段:
 
 1. **引き上げ**（`hoistMessagesBeforePrompt`）— 同一セッション・同一 `prompt_id` の本文を prompt の前へ移す
 2. **本文待ち**（`PROMPT_BODY_WAIT_POLLS`）— 発話される prompt に本文が伴っていなければ、
-   **`processPrompt` の直前で**最大 **3秒**待ってパスをやり直す（予算はドレイン全体の残ポール数）
+   **`processPrompt` の直前で**最大 **3秒**待ってパスをやり直す
 
-★ **1 だけでは足りない。** 短い本文（1〜2文）は改行で終わらないので `final` flush まで
-spool にファイルが1つも置かれず（メッセージ全体が単一 delta で届く）、**引き上げる対象が
-存在しない**。実機で 2 を入れるまで逆転が残った（2026-08-23、276ms）。
-**待ちの秒数を縮めないこと。** 500ms では足りず（実測 550ms）逆転が再現した。
-`final` の到着時刻はばらつくので**秒数を仕様として扱わないこと**。
-→ [`docs/plugin.md`](./docs/plugin.md) / `npm run verify:phase-a` の ⑱⑲
+★ **1 だけでは足りない。** 短い本文は改行で終わらないので `final` flush まで spool にファイルが
+1つも置かれず、引き上げる対象が存在しない。**待ちの秒数を縮めないこと。**
 
 ### 5. 記録と配信を1つのファイルに兼ねさせない
 
-`speech.jsonl`（記録）と `speech/<seq>.json`（配信キュー）は別物。1つに兼ねさせると、ローテートを跨ぐ差分読み取りが要り、読み手だけが際限なく複雑になる。**取りこぼしと二重配信を実際に両方踏んだ。**
+`speech.jsonl`（記録）と `speech/<seq>.json`（配信キュー）は別物。1つに兼ねさせると、ローテートを
+跨ぐ差分読み取りが要り、読み手だけが際限なく複雑になる。**取りこぼしと二重配信を実際に両方踏んだ。**
 
-分ければ順序はファイル名で決まり、消費は削除で表せる。`?since=` も要らない（接続直後に未 ack 分が流れる）。
-→ 経緯は [#8](https://github.com/schwarz9791/chatter-agent/issues/8)、契約は [`docs/protocol.md`](./docs/protocol.md)
+契約は [`docs/protocol.md`](./docs/protocol.md)。
 
 ### 6. `seq` を単独のキーにしない — 世代は `epoch` が持つ
 
-ランタイムルート（または `speech.state.json` と `speech.jsonl` の両方）が消えると
-**CLI の採番は 1 に戻る**。`seq` だけを覚えている受信側は、そこで「もう喋った」と誤判定して
-**何百文でも一切喋らなくなる**（エラーも出ない）。
+ランタイムルートが消えると **CLI の採番は 1 に戻る。** `seq` だけを覚えている受信側は「もう喋った」と
+誤判定して**何百文でも一切喋らなくなる**（エラーも出ない）。`SpeechRecord.epoch` が採番のやり直しと
+一対一に対応する。
 
-`SpeechRecord.epoch` が**採番のやり直しと一対一**に対応する（[#29](https://github.com/schwarz9791/chatter-agent/issues/29)）。
-以前はこれをクライアント側の推論（「seq が戻ったのに ts は進んだ」）に任せていて、
-PR #28 のレビューが**クライアント側5件のバグの根本原因**と名指しした。
-
-- **採番のやり直しの後始末は、ロックを持っている書き手（CLI）が行う。** `epochIsNew` なら
-  最初の publish で、**`append` より前に**キューを空にする（`cli/publish.ts`）。
-  `append` の後ろに置くと、その隙間で kill されたときに state だけが新しい epoch で
-  永続化され、**以後どのプロセスも掃除しなくなる**
-- **サーバー側では「どちらの世代が新しいか」を決められない。** やり直し直後のキューは
-  `1(新) 2(新) … 400(旧)` になり、ファイル名の昇順では**新しい世代が先頭に来る**。
-  判定できるのは `ts` だけで、そこも時計の巻き戻しで逆転しうる。だから
-  **サーバーは配信しないだけで、世代違いの entry を削除しない**
-- ★ **配信済みの記憶は `seq` で持つ。** `clear()` の直後に同じ `seq` が別世代の内容で
-  書き直されると、ファイル名の集合からは何も変わって見えない。サーバーは毎 poll
-  **キューの先頭を1件だけ読んで**世代を確かめる（`server/dispatcher.ts`）
-- **ack にも `epoch` を載せる。** 旧世代の ack は `ackUpTo` の範囲削除で、まだ喋っていない
-  新しい entry を消す。**ただし `epoch: null` は「省略」と同じ扱いにすること** —
-  未設定の optional を `null` にするのは Unity / C# / Go / Python の既定
-- **アップグレードで epoch を変えない。** 採番が復旧できて epoch だけ読めないときは
-  `"legacy"` を採る。ここで生成すると、アップグレードした瞬間に in-flight のキューが消える
+- **採番のやり直しの後始末は、ロックを持っている書き手（CLI）が行う。** `epochIsNew` なら最初の
+  publish で、**`append` より前に**キューを空にする（`cli/publish.ts`）
+- **サーバーは配信しないだけで、世代違いの entry を削除しない**（どちらが新しいかを決められない）
+- **配信済みの記憶は `seq` で持つ。** サーバーは毎 poll **キューの先頭を1件だけ読んで**世代を確かめる
+- **ack にも `epoch` を載せる。** ただし **`epoch: null` は「省略」と同じ扱いにすること**
+- **アップグレードで epoch を変えない。** 読めないときは `"legacy"` を採る
 
 ### 7. 音声はサーバーが押し出さず、クライアントが取りに行く
 
-合成は `GET /audio/<epoch>-<seq>.wav` が来たときに走る（[#29](https://github.com/schwarz9791/chatter-agent/issues/29)）。
-**テキストの配信は音声と独立していて、エンジンが落ちていても止まらない。**
+合成は `GET /audio/<epoch>-<seq>.wav` が来たときに走る。**テキストの配信は音声と独立していて、
+エンジンが落ちていても止まらない。** 逆（合成が終わってからフレームを配る形）にしないこと。
 
-**逆にしないこと**（合成が終わってからフレームを配る形）。3つ同時に壊れる:
+- ★ **`503`（あとで取りに来い）を「失敗」に数えないこと。** 数えると、エンジンを起動し忘れている
+  だけで溜まっていた発話が全部 ack されて消える
+- ★ **合成のエラーを `404` に落とさないこと。** `404` は ack まで通って**キューの本文を物理削除する**。
+  **無音の原因は 404 ではなく診断で出す**（`server/index.ts` の `recheckEngine`）
+- ★ **応答の期限と合成の期限を混ぜないこと。** `GET` の**応答**は `synthesisTimeoutMs` で打ち切って
+  `503` を返すが、**合成は走らせたままにする**
+- ★ **`prompt` を配信順で追い越させないこと。** 配信順を変えると 4 の逆転が再発する
 
-1. **未配信のまま `trim` に食われる entry が出る。** head の合成が詰まっている間の発話が
-   一度も届かないまま、500件の上限で消える
-2. **無音の原因がクライアント側から診断できない。** エンジン停止＝フレームが1本も来ない、に
-   なり、「数十秒の無音は正常」（→ 1）と区別がつかない
-3. **テキストだけ使うクライアント**（字幕・表情）が、自分が使わない音声の完成を待たされる
+## 規約
 
-★ **`503`（あとで取りに来い）を「失敗」に数えないこと。** 数えると、エンジンを起動し忘れて
-いるだけで溜まっていた発話が数百 ms で全部 ack されて消える。
-→ [`docs/protocol.md`](./docs/protocol.md)「クライアント側の責務」8
+**コメント** —— コード修正による陳腐化を避ける。**経緯・実測値・チケットの要件を残さない。**
+確定事項だけを、なぜやっているのか / 最終的にどうなるかの抽象で残す（具体的な処理はコードを追えば分かる）。
 
-★ **合成のエラーを `404` に落とさないこと。** 「エンジンが 4xx を返したなら恒久的だから
-諦めさせる」は一見筋が通るが、`404` はクライアント側で ack まで通って**キューの本文を
-物理削除する**ので、設定を直しても復元できない（`503` のままなら直した瞬間に全部鳴る）。
-一番よくある恒久ミス（起動し忘れ / ポート違い / ホスト違い）はすべて transport なので
-1件も直らず、「恒久」の線引きも実質不可能（→ [PR #49](https://github.com/schwarz9791/chatter-agent/pull/49) のレビュー A-1）。
-**無音の原因は 404 ではなく診断で出す** — 合成が失敗するたびに話者一覧を取り直し、
-`ttsSpeakerId` の候補をログに並べる（`server/index.ts` の `recheckEngine`）。
+**実測値を仕様として扱わない。** 秒数・CPU 使用率・テスト件数はマシンとネットワークで変わる。
+文書に固定の数字を書くのは `docs/knowledge/` の中だけにする。テストの実数が要るときは
+`./scripts/test.sh` の `total=` を見る。
 
-★ **応答の期限と合成の期限を混ぜないこと。** サーバーは `GET` の**応答**を
-`synthesisTimeoutMs` で打ち切って `503` を返すが、**合成は走らせたままにする**。
-single-flight なので終わればキャッシュに入り、取り直しが即 `200` になる。合成そのものを
-短く切ると、モデルロード中の1文目が永久に完成しない。この期限があるおかげで
-「クライアントの取得タイムアウトはサーバーの合成タイムアウトより長く」という
-**設定間の暗黙の順序制約が要らない**。
+**ライセンスヘッダ** —— cc-mascot 由来のファイルを改変したら `Modified for chatter-agent.` を入れる。
+**「cc-mascot のツリーにあった」＝「cc-mascot の著作物」ではない**（`prompt/` と `summarizer/` は
+自分の著作物）。判定手順は [`docs/origin.md`](./docs/origin.md)。cc-mascot 由来のコードを増減させたら
+`NOTICE` が実態と合っているか確認する。
 
-★ **サーバーがエンジンを spawn するようになっても（[#51](https://github.com/schwarz9791/chatter-agent/issues/51)）、
-この節は変わらない。** spawn は「エンジンが居ないなら起こす」だけで、**起動を待たない** —— `Ready` は
-先に出るし、合成は今までどおり `GET /audio/…` が来たときに走り、間に合わなければ `503`。
-「押し出す形（合成が終わってからフレームを配る）に戻った」わけではない。
+**`plugin/bin/chatter-agent-speak.mjs` はコミットする成果物。** `core/src/` を直したら
+`npm run build` してコミットする（CI の `bundle` ジョブが一致を検証する）。
 
-★ **`prompt` を配信順で追い越させないこと。** #29 の Issue 本文にある
-「`prompt` は来た瞬間に単独で合成して割り込ませる」は**合成リクエストの優先度**の話で、
-Aivis Cloud のレート制限下でバッチングするとき（別 Issue）に効く要件。配信順を変えると
-[#33](https://github.com/schwarz9791/chatter-agent/issues/33) の逆転が再発する。
+**`ChatterMascot.Runtime` を「描画に依存しない層」のまま保つ。** 契約・状態機械・探索順・画角の計算が
+EditMode だけでテストできているのは、この層が描画に依存していないから。
+
+## lint とテスト
+
+**Node は 24.11 以上**（ルートの `mise.toml` で `24.19.0` に固定）。
+
+```bash
+cd core
+npm run typecheck && npm run lint && npm run format && npm run test:run
+npm run build            # CLI → plugin/bin/、server と player → dist/
+
+npm run verify:phase-a   # hook → 記録 + 配信キュー
+npm run verify:phase-b   # 配信キュー → WebSocket（実サーバーを起動する）
+npm run verify:tts       # 合成と GET /audio/（エンジン不要。CI で回る）
+npm run verify:player    # WebSocket → 音声取得 → 再生 → ack（エンジンも音も不要。CI で回る）
+```
+
+```bash
+cd apps/chatter-mascot
+./scripts/test.sh        # EditMode テスト
+```
+
+### タスク完了時のチェックリスト
+
+- [ ] **テスト追加の検討** —— 変更した箇所に関連するテストが必要か考える
+- [ ] **ライセンスヘッダの確認** —— cc-mascot 由来のファイルを改変したら `Modified for chatter-agent.`
+- [ ] **ドキュメント更新の検討** —— `docs/` / `docs/knowledge/` / `README.md` に追記するものがないか検討し、あればユーザーに提案する
+- [ ] `npm run typecheck` / `npm run lint` / `npm run format` / `npm run test:run` が通ること
+- [ ] `src/cli/` を触ったら `npm run build` してバンドルもコミットする
 
 ## ドキュメント索引
 
 | 文書 | 読むとき |
 |---|---|
-| `_workspace/chatter-agent-design.md` | **設計判断をするとき。全体の一次情報**（git 管理外） |
-| [`docs/protocol.md`](./docs/protocol.md) | **発話の契約。** `SpeechRecord`、配信キュー、WebSocket と ack。クライアントを書くときはここだけで足りる |
-| [`docs/core.md`](./docs/core.md) | `core/` を触るとき。tsconfig の制約、バンドル方針、前身からの流用対応表 |
-| [`docs/plugin.md`](./docs/plugin.md) | `plugin/` を触るとき。bash hook の制約、spool 命名、検証時の落とし穴 |
+| [`docs/protocol.md`](./docs/protocol.md) | **発話の契約。** `SpeechRecord`、配信キュー、WebSocket と ack、制御 API。クライアントを書くときはここだけで足りる |
+| [`docs/core.md`](./docs/core.md) | `core/` を触るとき。区画の分け方、tsconfig の制約、バンドル方針、ランタイムのファイル配置 |
+| [`docs/plugin.md`](./docs/plugin.md) | `plugin/` を触るとき。bash hook の制約、spool 命名、`hooks.json` の3種 |
+| [`docs/mascot.md`](./docs/mascot.md) | `apps/chatter-mascot/` を触るとき。セットアップ、構成、探索順、ビルドと実行 |
 | [`docs/origin.md`](./docs/origin.md) | cc-mascot 由来のコードを触るとき。移植の対応表、フォーク点、ライセンス義務 |
-| `docs/architecture.md` | **未作成。** 設計書が一次情報。実装で契約が動いたら分離を検討する |
-| [`docs/mascot.md`](./docs/mascot.md) | `apps/chatter-mascot/` を触るとき。**Unity 側で踏んだ罠**（フレームレートが既定で無制限 / MCP ビルドがダイアログで沈黙する / 透過に要る3設定 / Newtonsoft が `ts` を DateTime にする / `long` 超えを `BigInteger` で持つ / `SendAsync` を `_ = ` で投げると例外が `catch` を素通りする / `AudioSource` 1本では孤児の契約を守れない / **無音でも macOS の出力デバイスを掴み続ける**（Bluetooth の電力） / `EventSystem` だけではポインタイベントが配送されない / ping watchdog が作れない / ControlRig は Vrm10Instance の遅延生成順序に依存する / SkinnedMeshRenderer.bounds は姿勢を反映しない / cursorPosition は bottom-up で Mouse.current は使えない / 画面空間の回転をモデル軸で回すと鏡像になる / カーソル正規化はウィンドウ幅で割ると振り切れる / LookAt は目ボーンしか動かさないので視線の中立には頭を回す必要がある / T ポーズの腕をフレーミングの箱に入れると起動直後だけ小さく映る / 同じボーンでも実行順が違えば同一フレーム内で別の値が返る / シーンの YAML に無い `[SerializeField]` は 0 ではなく初期化子の値 / `StreamingAssets` はビルド後 `.app` 内のコピーを読む / **ウィンドウの座標系は bottom-up・左下基準でモニタ矩形は作業領域** / **`SetPosition` は画面外でも引き戻されない** / **`UniWindowMoveHandle` はドラッグ終了を取りこぼすとクリック透過を殺したまま残す** / **`wantsToQuit` の継続からその場で呼ぶ `Application.Quit()` は無視される** / **VRMA に無い指ボーンは identity（T ポーズ）になる** / **アンチエイリアスは URP アセットの `m_MSAA` が権威で、既定では何も効いていない** / **hips は cm と m が混在する（クロスフェードは差分を正規化して混ぜる）** / **VRoid 書き出しはアニメーション名が空** / **先読みで `Speaking` は文の切れ目に落ちない** / **VRMA の末尾の重複キーは、クリップ長を越えた評価で hips を NaN にする（提示中のクリップを終端の手前で止める）**（→ [#103](https://github.com/schwarz9791/chatter-agent/issues/103)） / **Unity の版を落とすときは 6000.5 だけのビルトインモジュールを manifest から外す（`run.sh` は解決失敗を黙って exit 1 する）** / **新規ワークツリーでは `build-native.sh` より先に Unity を起動すると `.bundle.meta` が消える** / **失敗したビルドは `Assets/Resources/` を残す（消すだけ。コミットしない）** / **git 参照パッケージの `PluginImporter` は書けないので Android ではビルド時の delegate で外す** / **シーンに焼かれたデスクトップ限定コンポーネントは asmdef の `includePlatforms` を見て剥がす（元から空の GameObject は触らない）** / **Unity は `INTERNET` は書くが `usesCleartextTraffic` は書かない** / **ビルドの後処理が `BuildFailedException` を投げても APK は書き出される（`build-android.sh` が消す）** / **`-buildTarget Android` はアクティブターゲットを Library に残す（macOS 側のスクリプトはターゲットを明示する）** / **`XR_Glasses` エミュレータでは黒が透明** / **Android では MToon10 が白飛びするので UniUnlit に差し替える（→ #110）** / **Android では close フレーム無しの切断後に `Abort` しないと LAN への再接続が止まる** / **XR Origin のトラッキング原点が切り替わる前に頭の姿勢を読まない（キャラが頭の上へ外れて何も映らない）** / **`SetParent(parent, false)` はローカル姿勢をゼロにしない** / **`ModelAnchor` を拡縮すると髪が横に流れて固まる（spring bone は当たり半径・剛性・重力が拡縮に追従しないので焼き込む）** / **グラスの表示視野は狭い（描けているのに縁で切れる）** / **公式は非対応でも Android XR エミュレータで OpenXR は動く（`XR_Headset2` の v1 イメージは GPU ハング）** / **グラスの blend mode は既定が OPAQUE で背景が黒い（AR Camera の ALPHA_BLEND は無いので、自前の feature で ADDITIVE にする）**）。セットアップ手順は [`apps/chatter-mascot/SETUP.md`](./apps/chatter-mascot/SETUP.md) |
-
-## 開発コマンド
-
-**Node は 24.11 以上**（tsdown の依存が要求する）。ルートの `mise.toml` で `24.19.0` に固定してある。
-
-```bash
-cd core
-npm install
-npm run typecheck
-npm run lint
-npm run format
-npm run test:run
-npm run build            # CLI → plugin/bin/、server と player → dist/
-
-npm run verify:phase-a   # spool → 記録 + 配信キュー（payload を実際の hook に食わせて確認）
-npm run verify:phase-b   # 配信キュー → WebSocket（実サーバーを起動して確認）
-npm run verify:tts       # server の合成と GET /audio/（エンジンは要らない。CI で回る）
-npm run verify:player    # WebSocket → 音声取得 → 再生 → ack（エンジンも音も要らない。CI で回る）
-npm run start:server     # エンジンが居なければサーバーが起こす（#51）
-npm run start:player     # 耳で確認する
-```
-
-**発話を耳で聞くのに AivisSpeech.app を起動しておく必要は無い**（[#51](https://github.com/schwarz9791/chatter-agent/issues/51)）。
-エンジンが居なければ `chatter-agent-server` が起こし、サーバーを止めれば一緒に落ちる
-（`SIGKILL` / 2回目の `Ctrl-C` / 終了処理の watchdog では残るが、次回起動時に再利用される）。
-**インストールだけしておけばよい**（既定の接続先は `http://127.0.0.1:10101`）。
-手で起こす必要があるのは、別ホストのエンジンに繋ぐときと `ttsSpawn: false` にしたときだけ。
-cc-mascot が `--port 8564` で spawn するエンジンとは別物なので、そちらに繋ぐなら
-`CHATTER_AGENT_TTS_URL=http://127.0.0.1:8564` を渡す（ループバックなので、居なければこちらも起こしに行く）。
-★ **話者を増やすときは GUI が要る**（エンジン単体だとモデル追加は API か `Models/` への手動配置になる）。
-★ **`tts*` を読むのは `chatter-agent-server` の方**（[#29](https://github.com/schwarz9791/chatter-agent/issues/29) で読み手が移った）。
-player 側には渡さなくてよい。
-
-**`plugin/bin/chatter-agent-speak.mjs` は git にコミットする成果物。** ソースを直したら
-`npm run build` してコミットすること（CI の `bundle` ジョブが一致を検証する）。
-→ バンドルの制約は [`docs/core.md`](./docs/core.md)
-
-## タスク完了時のチェックリスト
-
-- [ ] **テスト追加の検討** — 変更した箇所に関連するテストが必要か考える
-- [ ] **ライセンスヘッダの確認** — cc-mascot 由来のファイルを改変したら `Modified for chatter-agent.` があること（→ [`docs/origin.md`](./docs/origin.md)）
-- [ ] **ドキュメント更新の検討** — `CLAUDE.md` の状態表 / `docs/` 配下 / `README.md` に追記・編集するものがないか検討し、あればユーザーに提案する
-- [ ] `npm run typecheck` — 型エラーがないこと
-- [ ] `npm run lint` — エラーがないこと
-- [ ] `npm run format` — フォーマットが適用されていること
-- [ ] `npm run test:run` — 全てのテストが通ること
-
-いずれも `core/` で実行する。`src/cli/` を触ったら **`npm run build` してバンドルもコミットする**こと。
+| [`docs/knowledge/`](./docs/knowledge) | **踏んだこと・なぜそうしたか・実測値。** 同じ罠に2度目で刺されないため |
+| `_workspace/chatter-agent-design.md` | 着手前の検討記録（git 管理外）。**基本設計の正は `docs/` 側** |
 
 ## ライセンス
 
-Apache-2.0。cc-mascot（Apache-2.0, Copyright 2026 kazakago）の派生物。
-
-テキスト整形（`text/textFilter.ts`）と感情判定（`emotion/ruleBasedEmotionClassifier.ts`）は cc-mascot から**初回に一度だけ移植**し、以後はこのリポジトリのコードとして改変する。上流に追従する義務は負わないが、**帰属表示と改変の告知は Apache-2.0 の義務**として維持する。フォーク点・対象ファイル・ヘッダの書式は [`docs/origin.md`](./docs/origin.md)。
-
-**「cc-mascot のツリーにあった」＝「cc-mascot の著作物」ではない。** 応答待ち通知の整形（`prompt/`）と AI要約（`summarizer/`）は、cc-mascot の作業ブランチ上で書いた**自分の著作物**で、上流の `main` には存在しない。kazakago の帰属を付けないこと。判定手順は [`docs/origin.md`](./docs/origin.md)。
-
-cc-mascot 由来のコードを増減させたら `NOTICE` の記述が実態と合っているか確認すること。
+Apache-2.0。cc-mascot（Apache-2.0, Copyright 2026 kazakago）の派生物。テキスト整形
+（`text/textFilter.ts`）と感情判定（`emotion/ruleBasedEmotionClassifier.ts`）は cc-mascot から
+**初回に一度だけ移植**し、以後はこのリポジトリのコードとして改変する。**上流に追従する義務は
+負わないが、帰属表示と改変の告知は Apache-2.0 の義務**として維持する。

@@ -101,9 +101,13 @@ namespace ChatterMascot.Vrm
     /// | 1 | 起動引数 | <c>-vrm</c> | <c>-vrma</c> | 全 |
     /// | 2 | 環境変数 | <c>CHATTER_MASCOT_VRM</c> | <c>CHATTER_MASCOT_VRMA</c> | 全 |
     /// | 3 | <b>設定</b>（#76） | <c>models/&lt;選んだ名前&gt;</c> | —— | デスクトップのみ |
-    /// | 4 | <c>persistentDataPath/</c> | <c>model.vrm</c> | <c>idle.vrma</c> | 全 |
+    /// | 4 | <c>persistentDataPath/</c> | <c>models/mascot.vrm</c> | <c>animations/idle.vrma</c> | 全 |
     /// | 5 | <c>${XDG_CONFIG_HOME:-~/.config}/chatter-agent/</c> | <c>models/*.vrm</c> | <c>animations/*.vrma</c> | デスクトップのみ |
     /// | 6 | <c>streamingAssetsPath/</c>（同梱） | <c>vita.vrm</c> | <c>idle_loop.vrma</c> | 全 |
+    ///
+    /// ★ <b>4 と 5 は<u>同じ形</u>に揃えてある</b>（<c>models/</c> と <c>animations/</c>）。
+    ///   置き場所がプラットフォームごとに違うと、「どこに置けばいいか」の説明が2種類になる。
+    ///   <see cref="Spec.UserDirectory"/> を両方で共有しているので、片方だけ動かせない。
     ///
     /// ★ <b>設定は起動引数・環境変数より<u>下</u>。</b> <c>-vrm</c> は切り分けの逃げ道
     ///   （「設定が壊れていても、この引数を付ければ必ず出る」）なので、設定より優先を保つ。
@@ -143,7 +147,7 @@ namespace ChatterMascot.Vrm
         }
 
         private static Spec Of(AssetKind kind) => kind == AssetKind.Vrm
-            ? new Spec("-vrm", "CHATTER_MASCOT_VRM", "model.vrm", "models", "*.vrm", "vita.vrm")
+            ? new Spec("-vrm", "CHATTER_MASCOT_VRM", SelectedVrmFile, "models", "*.vrm", "vita.vrm")
             : new Spec("-vrma", "CHATTER_MASCOT_VRMA", "idle.vrma", "animations", "*.vrma", "idle_loop.vrma");
 
         /// <summary>
@@ -159,6 +163,9 @@ namespace ChatterMascot.Vrm
         /// ★ <b><c>.vrma</c> には対応する仕組みが無い。</b> モーションを選ばせる UI を
         ///   作っていないため（#70 が入るまで、選ばせる中身が同梱の1本しか無い）。
         ///   ここが <c>.vrm</c> 専用なのは意図的な非対称。
+        ///
+        /// ★ <b><c>persistentDataPath/models/</c> でもこの名前を使う。</b> 設定 UI の無い
+        ///   Android 側の置き場所を、デスクトップと同じ形に揃えるため。
         /// </summary>
         public const string SelectedVrmFile = "mascot.vrm";
 
@@ -220,7 +227,10 @@ namespace ChatterMascot.Vrm
                 }
             }
 
-            Add(result, AssetSource.PersistentData, env, Join(env.PersistentDataPath, spec.PersistentFile));
+            // ★ **spec.UserDirectory を挟むこと。** ユーザー設定側（下の段）と同じ形に
+            //   保つのが目的で、直下に置くと配置がプラットフォームごとに2種類になる
+            Add(result, AssetSource.PersistentData, env,
+                Join(Join(env.PersistentDataPath, spec.UserDirectory), spec.PersistentFile));
 
             foreach (var file in userFiles) Add(result, AssetSource.UserConfig, env, file);
 
@@ -293,7 +303,7 @@ namespace ChatterMascot.Vrm
         ///   <c>VrmProbe.ProbeEnv</c> が段を潰すために立てる
         ///   <c>PersistentDataPath = ""</c>（「この段を消す」つもりの1行）が、
         ///   <b>消すどころか基準を変えるだけ</b>になっていた（PR #69 の再レビューで判明。
-        ///   プロジェクトルートに <c>model.vrm</c> を置いて再現済み）。
+        ///   プロジェクトルートに <c>models/mascot.vrm</c> を置いて再現済み）。
         ///   <see cref="Add"/> の空文字チェックと同じ思想を、こちらの左辺にも当てる。
         ///
         /// ★ <c>internal</c>。<see cref="AnimationRoots"/> と <c>AnimationManifest.Build</c>（#70。

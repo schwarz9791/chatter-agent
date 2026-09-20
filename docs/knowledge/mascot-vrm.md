@@ -337,11 +337,11 @@ private static string Join(string left, string right)
 }
 ```
 
-だったので、`Join("", "model.vrm")` は **`"model.vrm"`（相対パス）をそのまま返す**。`Add` は
-空文字しか弾かないので、この相対パスは探索順3の候補としてそのまま積まれる。`File.Exists("model.vrm")`
-は Unity のカレントディレクトリ（プロジェクトルート）基準で評価されるので、**同梱（探索順5）より
-上位で当たる**。つまり `PersistentDataPath = ""` は「探索順3を消す」のではなく、
-**「探索順3の基準ディレクトリをプロジェクトルートに変える」だけ**になっていた。
+だったので、`Join("", "models/mascot.vrm")` は **相対パスをそのまま返す**。`Add` は
+空文字しか弾かないので、この相対パスは探索順4の候補としてそのまま積まれる。`File.Exists` は
+Unity のカレントディレクトリ（プロジェクトルート）基準で評価されるので、**同梱（探索順6）より
+上位で当たる**。つまり `PersistentDataPath = ""` は「その段を消す」のではなく、
+**「その段の基準ディレクトリをプロジェクトルートに変える」だけ**になっていた。
 
 同じ穴は `Enumerate` 探索順3・5（`PersistentDataPath` / `StreamingAssetsPath` が空）、
 `RuntimeDirectory`（探索順4の基準）、`Add` の `~/` 展開（`HomeDirectory` が空）の4箇所に

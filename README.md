@@ -49,7 +49,7 @@ The speech contract is in [`docs/protocol.md`](./docs/protocol.md). If you're wr
 |---|---|
 | `plugin/` | The Claude Code plugin. A bash hook just drops the payload |
 | `core/` | The server and CLIs (TypeScript / Node). `src/server/` `src/cli/` `src/player/` |
-| `apps/chatter-mascot/` | The display-side app (Unity + UniVRM). macOS and Android XR from a single project |
+| `chatter-mascot/` | The display-side app (Unity + UniVRM). macOS and Android XR from a single project |
 | `docs/` | The basic design, file layout, and commands. What was learned along the way is in `docs/knowledge/` |
 
 ## Current state
@@ -89,7 +89,7 @@ This produces `plugin/bin/chatter-agent-speak.mjs` (the CLI bundled with the plu
 ### macOS client
 
 ```bash
-cd apps/chatter-mascot
+cd chatter-mascot
 ./scripts/build.sh           # → Build/ChatterMascot.app
 ```
 
@@ -99,7 +99,7 @@ finish the setup in [`docs/mascot.md`](./docs/mascot.md) before opening Unity.**
 ### Android XR client
 
 ```bash
-cd apps/chatter-mascot
+cd chatter-mascot
 ./scripts/build-android.sh   # → Build/ChatterMascot.apk
 ```
 
@@ -143,12 +143,12 @@ cd core && npm run start:player
 
 ```bash
 # macOS
-open apps/chatter-mascot/Build/ChatterMascot.app
+open chatter-mascot/Build/ChatterMascot.app
 ```
 
 ```bash
 # Android XR (write the connection target onto the device first, then install)
-cd apps/chatter-mascot
+cd chatter-mascot
 ./scripts/configure-android.sh          # assembles the LAN IP automatically
 ./scripts/run-android.sh                # installs, launches, and streams logcat
 ```
@@ -179,6 +179,10 @@ Settings and assets live under `~/.config/chatter-agent/` (or under `XDG_CONFIG_
 
 The model can be swapped from the settings panel, but **there's no UI for motion.** Create the directory, drop a `.vrma` file in, and it's picked up on the next launch. There's no directory for `neutral` (the default behavior is not to play an emotion motion).
 
+**Android XR uses the same layout.** Put `models/mascot.vrm` and `animations/` under
+`Android/data/tech.sukima.chattermascot/files/` on the device (there is no settings UI there, so
+`adb push` it — see [`docs/mascot.md`](./docs/mascot.md)).
+
 ## Development
 
 ```bash
@@ -197,7 +201,7 @@ npm run verify:player    # WebSocket → fetch audio → play → ack
 `verify:tts` and `verify:player` swap in stubs for the synthesis engine and the playback command, so you need neither AivisSpeech nor an audio device.
 
 ```bash
-cd apps/chatter-mascot
+cd chatter-mascot
 ./scripts/test.sh        # EditMode tests
 ```
 

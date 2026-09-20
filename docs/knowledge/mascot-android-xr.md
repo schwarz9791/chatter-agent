@@ -138,7 +138,7 @@ IL2CPP の作業ディレクトリ `.utmp/` は `.gitignore` 済み。
 cd core
 XDG_CONFIG_HOME=/tmp/cm-android CHATTER_AGENT_PORT=8571 \
   CHATTER_AGENT_TTS_URL=http://127.0.0.1:10101 npm run start:server
-cd ../apps/chatter-mascot
+cd ../chatter-mascot
 CHATTER_AGENT_PORT=8571 ./scripts/run-android.sh
 ```
 
@@ -267,7 +267,7 @@ Android のログは `adb logcat -s Unity`。★★ **Android では 401 と「�
 |---|---|
 | 起動 | APK が入り `[Mascot] server: ws://127.0.0.1:8570` で接続する |
 | VRM | `jar:file:///…/base.apk!/assets/vita.vrm`（19,259,304 バイト）を `UnityWebRequest` で約 5.3 秒で読む。`VRM10/Universal Render Pipeline/MToon10` のマテリアル 15、expression 18。`idle_loop.vrma` も APK から。"referenced script … missing" も例外も無し |
-| 探索順 | `persistentDataPath` の候補（`/storage/emulated/0/Android/data/tech.sukima.chattermascot/files/model.vrm` / `idle.vrma`）は 404、ユーザー設定の候補は飛ばされる（想定どおり） |
+| 探索順 | `persistentDataPath` の候補（`/storage/emulated/0/Android/data/tech.sukima.chattermascot/files/` の `models/mascot.vrm` / `animations/idle.vrma`）は 404、ユーザー設定の候補は飛ばされる（想定どおり） |
 | 発話 | 接続時に未読 1 件 + 追加 2 件が届き、3 件とも ack（`seq<=3`）でキューが空になる。音は Mac のスピーカーからエミュレータ経由で聞こえる |
 | 無音時の解放 | `無音が続いたのでオーディオ出力を止めました` → `オーディオ出力を掴み直しました` → 再び停止。`AudioSettings.Mobile.StopAudioOutput/StartAudioOutput` の経路が動き、発話は落ちない |
 | fps / 音量 | 設定パネルが無いので既定（30 fps / 1.0） |

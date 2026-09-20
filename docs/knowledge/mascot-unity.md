@@ -104,7 +104,7 @@ EditMode テストの件数は書かない（→「★ テストの件数を文�
 - **`Logs/Editor.log` にビルドの行が1行も出ていない**（成功したビルドは必ず
   `Building Player` 以降を書く）
 
-**ビルドとテストは `-batchmode` で回す**（→ `apps/chatter-mascot/scripts/`）。
+**ビルドとテストは `-batchmode` で回す**（→ `chatter-mascot/scripts/`）。
 batchmode はダイアログを出さないので、この失敗の仕方をしない。
 
 ★ **Editor を開いたままだと batchmode は失敗する。** Unity はプロジェクトを排他ロックする
@@ -432,7 +432,7 @@ EditMode テストも全部通る。**気づけるのは `git diff` だけ** —
 直し方は 2 手（`.bundle` が**ある**状態で行うこと）:
 
 ```bash
-git checkout -- apps/chatter-mascot/Assets/Plugins/macOS/ChatterMascotNative.bundle.meta
+git checkout -- chatter-mascot/Assets/Plugins/macOS/ChatterMascotNative.bundle.meta
 ./scripts/run.sh ChatterMascot.EditorTools.NativePluginSettings.FixAll
 ```
 

@@ -145,9 +145,9 @@ jobs:
       # ズレたままマージできてしまう。**古いライセンス表記が出荷される**ので、ここでも落とす
       - name: Verify bundled NOTICE matches the repository NOTICE
         run: |
-          copy=../apps/chatter-mascot/Assets/StreamingAssets/NOTICE.txt
+          copy=../chatter-mascot/Assets/StreamingAssets/NOTICE.txt
           if ! diff -q ../NOTICE "$copy"; then
-            echo "::error::同梱の NOTICE.txt がリポジトリの NOTICE とズレています。cp NOTICE apps/chatter-mascot/Assets/StreamingAssets/NOTICE.txt で合わせてください。"
+            echo "::error::同梱の NOTICE.txt がリポジトリの NOTICE とズレています。cp NOTICE chatter-mascot/Assets/StreamingAssets/NOTICE.txt で合わせてください。"
             diff -u ../NOTICE "$copy" || true
             exit 1
           fi
@@ -233,7 +233,7 @@ jobs:
       - name: m_DisableAudio が出荷値（0）であること
         working-directory: .
         run: |
-          asset=apps/chatter-mascot/ProjectSettings/AudioManager.asset
+          asset=chatter-mascot/ProjectSettings/AudioManager.asset
           if ! grep -qx "  m_DisableAudio: 0" "$asset"; then
             echo "::error file=$asset::m_DisableAudio が出荷値（0）ではありません。macOS ビルドが中断して ON のまま残った可能性があります。0 に直してコミットしてください（Android ビルドが無音になります）"
             grep -n "m_DisableAudio" "$asset" || true
@@ -261,7 +261,7 @@ jobs:
       - name: macAppStoreCategory が出荷値であること
         working-directory: .
         run: |
-          asset=apps/chatter-mascot/ProjectSettings/ProjectSettings.asset
+          asset=chatter-mascot/ProjectSettings/ProjectSettings.asset
           if ! grep -qx "  macAppStoreCategory: public.app-category.utilities" "$asset"; then
             echo "::error file=$asset::macAppStoreCategory が出荷値ではありません。Inspector での操作や Player Settings のリセットで戻った可能性があります（Game Mode のロケットが復活します）"
             grep -n "macAppStoreCategory" "$asset" || true
@@ -271,7 +271,7 @@ jobs:
       - name: m_BuildTargetIcons が空でないこと
         working-directory: .
         run: |
-          asset=apps/chatter-mascot/ProjectSettings/ProjectSettings.asset
+          asset=chatter-mascot/ProjectSettings/ProjectSettings.asset
           if grep -qx "  m_BuildTargetIcons: \[\]" "$asset"; then
             echo "::error file=$asset::m_BuildTargetIcons が空です。./scripts/run.sh ChatterMascot.EditorTools.IconSettings.FixAll を実行し直してコミットしてください（アイコンの無い .app が出荷されます）"
             grep -n "m_BuildTargetIcons" "$asset" || true
@@ -282,7 +282,7 @@ jobs:
       # 検査に要る2枚だけを取る（→ docs/knowledge/mascot-desktop.md「トレイ画像を差し替えるとき」）
       - name: トレイ PNG だけ LFS から取得
         working-directory: .
-        run: git lfs pull --include="apps/chatter-mascot/Assets/StreamingAssets/trayTemplate*.png"
+        run: git lfs pull --include="chatter-mascot/Assets/StreamingAssets/trayTemplate*.png"
 
       # ★ 上の取得が黙って 0 件で終わっても「素通りで緑」にしないこと。
       # ポインタファイルのままなら PNG シグネチャで落ちる
@@ -295,7 +295,7 @@ jobs:
           import struct
           import sys
 
-          PATTERN = "apps/chatter-mascot/Assets/StreamingAssets/trayTemplate*.png"
+          PATTERN = "chatter-mascot/Assets/StreamingAssets/trayTemplate*.png"
           SIGNATURE = bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
 
           # ★ 弾きたいのは編集ツールが埋めるメタデータであって、画像形式ではない

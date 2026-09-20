@@ -242,12 +242,12 @@ namespace ChatterMascot.EditorTools
             var env = AssetEnvFactory.Current();
             // ★ **この行は長らく「消す」つもりで「基準ディレクトリを変える」だけになっていた。**
             //   `AssetPath.Join` は左辺（基準）が空だと、以前は右辺をそのまま返していたので、
-            //   `Join("", "model.vrm")` は `"model.vrm"`（相対パス）になり、探索順3の候補として
-            //   積まれ続けていた。`File.Exists` はプロジェクトルート基準で評価されるので、
-            //   プロジェクトルートに `model.vrm` を置くと**同梱（探索順5）より上位で当たる**
+            //   `Join("", "models/mascot.vrm")` は `"models/mascot.vrm"`（相対パス）になり、
+            //   探索順4の候補として積まれ続けていた。`File.Exists` はプロジェクトルート基準で
+            //   評価されるので、プロジェクトルートに置くと**同梱（探索順6）より上位で当たる**
             //   （PR #69 の再レビューで判明。再現手順:
-            //   `cp Assets/StreamingAssets/vita.vrm ./model.vrm` → probe を回すと
-            //   `[VrmProbe] 読みます: model.vrm` と出て同梱を読まない）。
+            //   `mkdir -p models && cp Assets/StreamingAssets/vita.vrm models/mascot.vrm` →
+            //   probe を回すと `[VrmProbe] 読みます: models/mascot.vrm` と出て同梱を読まない）。
             //   `Join` を「空の基準からは候補を作らない（null を返す）」に直したことで、
             //   この行は宣言どおり「この段を消す」という意味になった。
             env.PersistentDataPath = "";

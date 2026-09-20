@@ -118,7 +118,7 @@ hook 方式への転換で、`textFilter.ts` が**上流と要件で食い違う
 
 | 上流 | 移送先 | 大きさ | 改変 |
 |---|---|---|---|
-| `public/animations/idle_loop.vrma` | `apps/chatter-mascot/Assets/StreamingAssets/idle_loop.vrma` | 157,664 B | **無改変**（バイト単位で同一） |
+| `public/animations/idle_loop.vrma` | `chatter-mascot/Assets/StreamingAssets/idle_loop.vrma` | 157,664 B | **無改変**（バイト単位で同一） |
 
 | | |
 |---|---|
@@ -155,8 +155,8 @@ cc-mascot 側も再配布不可のモーションは**プライベート submodu
 | `prompt/promptEventFormatter.ts` + `.test.ts` | 自分が cc-mascot の作業ブランチ上で書いたものを持ち込んだ |
 | `summarizer/` 配下すべて | 自分が cc-mascot の作業ブランチ上で書いたものを持ち込んだ（`9b23434` で新規作成） |
 | `core/` `cli/` `server/` 配下すべて | chatter-agent 独自 |
-| `apps/chatter-mascot/Assets/Plugins/macOS~/ChatterMascotNative/` | chatter-agent で新規に書いた（#75 のネイティブプラグイン。**cc-mascot に相当する実装は無い** —— あちらは Electron の `Tray` / `app.dock.hide()` で済んでおり、ObjC のコードは1行も存在しない） |
-| `apps/chatter-mascot/Assets/ChatterMascot/Runtime/Ui/` `Runtime/Settings/` | chatter-agent で新規に書いた（#75。メニューの組み立て・ショートカットの解釈・設定の永続化） |
+| `chatter-mascot/Assets/Plugins/macOS~/ChatterMascotNative/` | chatter-agent で新規に書いた（#75 のネイティブプラグイン。**cc-mascot に相当する実装は無い** —— あちらは Electron の `Tray` / `app.dock.hide()` で済んでおり、ObjC のコードは1行も存在しない） |
+| `chatter-mascot/Assets/ChatterMascot/Runtime/Ui/` `Runtime/Settings/` | chatter-agent で新規に書いた（#75。メニューの組み立て・ショートカットの解釈・設定の永続化） |
 
 `prompt/promptEventFormatter.ts` は移送時に `SpeakMessage` の import 元を `../adapters/harnessAdapter`（kazakago の `adapters/` は移植しない）から `../core/types` に張り替えてある。
 

@@ -91,7 +91,7 @@ namespace ChatterMascot.Desktop
     ///   <c>m_Script</c> の GUID を asmdef の <c>includePlatforms</c> と無関係に
     ///   シリアライズするので、Android ではこのアセンブリが無く
     ///   「The referenced script on this Behaviour is missing!」が1本出るだけになる
-    ///   （→ <c>docs/mascot.md</c>）。
+    ///   （→ <c>docs/knowledge/mascot-unity.md</c>）。
     ///
     /// ★ <b>VRM の読み込みを待たない。</b> 判定はクリック透過の状態だけを見るので、
     ///   モデルが差し替わっても付け直しが要らない（以前はコライダー1つ1つに付けていた）。

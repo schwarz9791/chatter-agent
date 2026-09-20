@@ -69,7 +69,7 @@ mono_crash.*.blob
 # ★ 同梱するのは Assets/StreamingAssets/ の下だけ。それ以外は落とす。
 #   再配布禁止のモデル（AvatarSample_A など）を差し替え検証のあと
 #   うっかりコミットする導線を塞ぐため。差し替えは -vrm 起動引数か
-#   ~/.config/chatter-agent/models/ から読ませること（→ SETUP.md）。
+#   ~/.config/chatter-agent/models/ から読ませること（→ docs/mascot.md「モデルとアニメーションの探索順」）。
 *.vrm
 *.vrma
 !/[Aa]ssets/[Ss]treamingAssets/*.vrm

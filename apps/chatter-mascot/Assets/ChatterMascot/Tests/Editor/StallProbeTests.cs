@@ -62,7 +62,7 @@ namespace ChatterMascot.Tests
 
         /// <summary>
         /// ★ <c>gap</c> 単独でも立つ（<c>dt</c> はクランプ済みで正常値のまま）。
-        ///   <c>deltaTime</c> は <c>Maximum Allowed Timestep</c> で頭打ちになるので（→ docs/mascot.md）、
+        ///   <c>deltaTime</c> は <c>Maximum Allowed Timestep</c> で頭打ちになるので（→ docs/knowledge/mascot-vrm.md）、
         ///   真のストール長は <c>gap</c> でしか見えない。
         /// </summary>
         [Test]

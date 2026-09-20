@@ -41,7 +41,7 @@ namespace ChatterMascot.Vrm
     ///   ここに判定を置くとテストが当たる。
     ///
     /// ★ SpringBone（<c>FastSpringBoneService.LateUpdate</c>）は <c>deltaTime</c> をクランプ無しで
-    ///   積分する（→ docs/mascot.md）。髪が飛ぶ瞬間が本当にストール由来か
+    ///   積分する（→ docs/knowledge/mascot-vrm.md）。髪が飛ぶ瞬間が本当にストール由来か
     ///   （<see cref="StallDeltaSeconds"/>）、姿勢そのものが飛んでいるだけか
     ///   （<see cref="HipsJumpMeters"/>）を、同じフレームの <c>Player.log</c> だけで
     ///   切り分けられるようにするためのプローブ（#103）。

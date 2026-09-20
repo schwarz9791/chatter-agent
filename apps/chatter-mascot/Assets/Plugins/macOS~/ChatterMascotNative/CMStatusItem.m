@@ -182,7 +182,7 @@ bool CM_StatusItemShow(const char* menuJson)
              * ★ メニューバー管理ツール（Thaw / Bartender / Ice など）が隠すのは
              *   これでは防げない。あの種のツールはアイコンを画面外の負の座標へ
              *   移動させるので、frame.x が負なら「隠されている」と読む
-             *   （→ docs/mascot.md）。押し戻す API は無い。
+             *   （→ docs/knowledge/mascot-desktop.md）。押し戻す API は無い。
              */
             gStatusItem.autosaveName = @"ChatterMascotStatusItem";
             gStatusItem.visible = YES;

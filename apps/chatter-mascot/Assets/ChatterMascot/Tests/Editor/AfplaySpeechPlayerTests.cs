@@ -36,7 +36,7 @@ namespace ChatterMascot.Tests
         [Test]
         public void TimeoutIsProportionalToLength()
         {
-            // 実長 × 2 + 5秒（→ docs/mascot.md）
+            // 実長 × 2 + 5秒（→ docs/knowledge/mascot-speech.md）
             Assert.That(AfplaySpeechPlayer.TimeoutSecondsFor(1000), Is.EqualTo(7f).Within(0.01f));
             Assert.That(AfplaySpeechPlayer.TimeoutSecondsFor(20000), Is.EqualTo(45f).Within(0.01f));
         }

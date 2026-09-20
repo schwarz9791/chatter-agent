@@ -16,7 +16,7 @@ namespace ChatterMascot.Desktop
     ///   窓を動かし合うと何を測っているのか分からなくなるし、実測で飛ばした位置が
     ///   永続化されてしまう。
     ///
-    /// <b>ここで分かったこと</b>（値と生ログは <c>docs/mascot.md</c> の
+    /// <b>ここで分かったこと</b>（値と生ログは <c>docs/knowledge/mascot-desktop.md</c> の
     /// 「ウィンドウの座標系は bottom-up・左下基準」に、測った日付と構成つきで置いてある）:
     ///
     /// <list type="bullet">

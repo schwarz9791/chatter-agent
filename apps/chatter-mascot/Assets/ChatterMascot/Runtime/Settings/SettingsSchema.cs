@@ -188,7 +188,7 @@ namespace ChatterMascot.Settings
             items.Add(SettingSpec.Bool(SettingKeys.CursorGaze, "カーソルを目で追う", settings.CursorGaze));
             items.Add(SettingSpec.Bool(SettingKeys.Blink, "まばたき", settings.Blink));
             // ★ 倍率を UI 文言に持ち込まない。マシン・MSAA・電源状態で変わる数値で、
-            //   同じ PR の実測とすら食い違っていた。数字は docs/mascot.md 側で持つ。
+            //   同じ PR の実測とすら食い違っていた。数字は docs/knowledge/mascot-unity.md 側で持つ。
             items.Add(SettingSpec.Choice(
                 SettingKeys.FrameRate, "フレームレート",
                 settings.FrameRate.ToString(CultureInfo.InvariantCulture),

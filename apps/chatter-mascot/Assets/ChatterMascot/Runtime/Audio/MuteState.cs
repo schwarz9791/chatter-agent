@@ -7,7 +7,7 @@ namespace ChatterMascot.Audio
     ///
     /// ★ <b>音量では実装できない。</b> macOS の再生の実体は引数なしの <c>afplay</c> で
     ///   音量を渡す口が無く、<c>Disable Unity Audio</c> が ON なので
-    ///   <c>AudioListener.volume</c> も効かない（→ <c>docs/mascot.md</c>）。
+    ///   <c>AudioListener.volume</c> も効かない（→ <c>docs/knowledge/mascot-desktop.md</c>）。
     ///   <b>再生そのものを飛ばす</b>のが唯一の手段になる（→ <see cref="MutedSpeechPlayer"/>）。
     /// </summary>
     public sealed class MuteState

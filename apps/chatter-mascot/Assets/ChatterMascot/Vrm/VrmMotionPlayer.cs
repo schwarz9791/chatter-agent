@@ -418,7 +418,7 @@ namespace ChatterMascot.Vrm
             _kind = kind;
             SetState(PlayState.FadeIn);
             // ★ 1本1行。実機で「出た／出ない」を Player.log から判定する唯一の手がかり
-            //   （docs/mascot.md「顔が動かないのが正常と壊れて動かないはログでしか区別できない」と同じ理由）
+            //   （docs/knowledge/mascot-vrm.md「顔が動かないのが正常と壊れて動かないはログでしか区別できない」と同じ理由）
             // ★★ #70 レビュー #8。上で取った state をそのまま使うこと。loaded.State を
             //   もう一度引くと LoadedClip.State の doc どおり foreach を二重に走らせる無駄がある
             Debug.Log($"[Mascot] モーション開始: {kind} {clip.FileName}（{MotionCategories.DirectoryName(clip.Category)}、{(state != null ? state.length : 0f):F1}s）");

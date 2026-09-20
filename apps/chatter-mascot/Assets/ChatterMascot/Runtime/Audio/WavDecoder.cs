@@ -42,7 +42,7 @@ namespace ChatterMascot.Audio
     ///   消えた瞬間に途中で切れる。「先に全部受け取ってから鳴らす」が趣旨で、
     ///   <b>ファイルにするかメモリに置くかは実装の自由</b> —— macOS は
     ///   <c>afplay</c> に渡すため一時ファイルに落とし、Android / iOS は
-    ///   <see cref="AudioClip"/> をメモリに持つ（→ <c>docs/mascot.md</c>）。
+    ///   <see cref="AudioClip"/> をメモリに持つ（→ <c>docs/knowledge/mascot-speech.md</c>）。
     ///
     /// ★ <b>ヘッダの検証を再生エンジンに任せないこと。</b> FMOD の <c>createSound</c> も
     ///   OS のプレイヤーも、失敗したときに返すのは「読めなかった」だけで<b>理由が残らない</b>。

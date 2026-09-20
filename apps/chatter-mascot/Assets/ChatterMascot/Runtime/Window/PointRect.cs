@@ -10,10 +10,10 @@ namespace ChatterMascot.Window
     ///   使うと、<c>Screen.width</c>（バッキング px）と <c>UniWindowController.windowSize</c>
     ///   （NSWindow のポイント）が同じ型になり、混ぜても誰も気づかない。
     ///   <c>WindowSizeKeeper</c> はこれで<b>「打ち消し」を「倍化」に変えた</b>
-    ///   （Retina 2x で窓が起動ごとに倍へ育った。→ <c>docs/mascot.md</c>）。
+    ///   （Retina 2x で窓が起動ごとに倍へ育った。→ <c>docs/knowledge/mascot-desktop.md</c>）。
     ///
     /// ★ <b>Y は bottom-up。</b> 原点はメインディスプレイのフルフレームの左下。
-    ///   実測で確定している（→ <c>docs/mascot.md</c>「ウィンドウの座標系は bottom-up・左下基準」）。
+    ///   実測で確定している（→ <c>docs/knowledge/mascot-desktop.md</c>「ウィンドウの座標系は bottom-up・左下基準」）。
     /// </summary>
     public readonly struct PointRect : IEquatable<PointRect>
     {

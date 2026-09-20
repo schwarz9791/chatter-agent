@@ -44,13 +44,13 @@ namespace ChatterMascot.EditorTools
         /// ★ <b>これが無いと省電力にならない。</b> macOS では音を外部プロセス（<c>afplay</c>）で
         ///   鳴らすが、Unity 内蔵オーディオが有効なままだと、<c>AudioSource</c> を1つも
         ///   鳴らさなくても<b>Unity 側が出力デバイスを掴み続ける</b>（実測: 起動から終了までずっと。
-        ///   → <c>docs/mascot.md</c>）。ON にしたビルドでは CoreAudio がプロセスを認識すらしない。
+        ///   → <c>docs/knowledge/mascot-speech.md</c>）。ON にしたビルドでは CoreAudio がプロセスを認識すらしない。
         ///
         /// ★ <b>プロジェクト設定はプラットフォーム別に持てない</b>ので、コミットされた値は
         ///   Android 側の要求（<see cref="ShippedDisableAudio"/> = OFF）に合わせてある。
         ///
         /// ★ <b>Editor の GUI からビルドすると、この切り替えは走らない。</b>
-        ///   ビルドは <c>scripts/build.sh</c> から行うこと（→ <c>SETUP.md</c>）。
+        ///   ビルドは <c>scripts/build.sh</c> から行うこと（→ <c>docs/mascot.md</c>）。
         ///
         /// ★ <b>中断すると git 管理下のファイルに ON が残る。</b> ここは3段構えの2段目で、
         ///   1段目は <c>scripts/build.sh</c> の <c>trap</c>、3段目は CI の assert。

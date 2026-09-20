@@ -267,7 +267,7 @@ jobs:
           fi
 
       # ★ *.png は Git LFS 追跡。 lfs: true にすると vita.vrm まで毎回落ちるので、
-      # 検査に要る2枚だけを取る（→ docs/mascot.md「トレイ画像を差し替えるとき」）
+      # 検査に要る2枚だけを取る（→ docs/knowledge/mascot-desktop.md「トレイ画像を差し替えるとき」）
       - name: トレイ PNG だけ LFS から取得
         working-directory: .
         run: git lfs pull --include="apps/chatter-mascot/Assets/StreamingAssets/trayTemplate*.png"
@@ -344,14 +344,14 @@ jobs:
                   want, got = EXPECTED[name], size
                   print(
                       f"::error file={path}::寸法が {want[0]}x{want[1]} ではありません（実際は {got}）。"
-                      "@1x と @2x は 2 枚セットです（docs/mascot.md「トレイ画像を差し替えるとき」）"
+                      "@1x と @2x は 2 枚セットです（docs/knowledge/mascot-desktop.md「トレイ画像を差し替えるとき」）"
                   )
                   failed = True
 
               if unexpected:
                   print(
                       f"::error file={path}::許可していない PNG チャンクがあります: {', '.join(unexpected)}。"
-                      "編集ツールのメタデータの疑い（docs/mascot.md「トレイ画像を差し替えるとき」）"
+                      "編集ツールのメタデータの疑い（docs/knowledge/mascot-desktop.md「トレイ画像を差し替えるとき」）"
                   )
                   failed = True
 

@@ -98,7 +98,7 @@ namespace ChatterMascot.Audio
             //   参照実装の reset() と同じ
             //
             // ★ <b>ディレクトリ名にプロセス ID を混ぜること。</b> `forceSingleInstance` が防ぐのは
-            //   **同じ `.app` の二重起動だけ**で（→ docs/mascot.md）、**Editor の Play Mode と
+            //   **同じ `.app` の二重起動だけ**で（→ docs/knowledge/mascot-speech.md）、**Editor の Play Mode と
             //   ビルド済み `.app` の同時起動は防げない**。共通の名前にすると、後から起動した方の
             //   下の Delete が**先行インスタンスの再生中の WAV ごと消す**。
             //   他インスタンスの残骸は OS のキャッシュパージに任せる

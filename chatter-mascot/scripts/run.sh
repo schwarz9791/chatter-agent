@@ -5,8 +5,6 @@
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/unity.sh"
 
-require_unity_cli
-
 METHOD="${1:?メソッド名を指定してください}"
 shift || true
 

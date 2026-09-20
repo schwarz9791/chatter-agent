@@ -531,7 +531,9 @@ Unity 本体の作り（「`-runTests` に `-quit` を付けない」「`-execut
    `AudioManager.asset` の復元** → **残した。** `unity build` は `--execute-method` で
    `BuildScript.BuildMacOS` を呼ぶだけで肩代わりしないので、3段構えは変わらない
 3. **`PIPESTATUS` で終了コードを捨てないこと** → `test.sh` はパイプを挟まなくなったので
-   不要になった。`build.sh` / `run.sh` は grep を挟むので引き続き必要
+   不要になった。`build.sh` / `build-android.sh` / `run.sh` は3本とも grep を挟むので
+   引き続き必要（`build.sh` と `build-android.sh` の grep は `unity.sh` の
+   `unity_build_player` に共通化した）
 4. **NUnit XML を python3 で集計して `total= passed= failed=` を出すこと** → **残した。**
    `unity test` はコンソールに集計を出さず、stdout に流れるのは素の Editor ログだけ
 5. **`unity.sh` の `pgrep -f "Unity.app/Contents/MacOS/Unity.*${PROJECT_PATH}"` による
@@ -564,6 +566,16 @@ Unity 本体の作り（「`-runTests` に `-quit` を付けない」「`-execut
   中身は1回分だったので Unity 側が開くときに切り詰めている可能性が高いが、確かめていない）
 - `unity` は `ProjectSettings/ProjectVersion.txt` から Editor を解決し、Hub に登録された実体
   （`/Applications/Unity/Hub/Editor/<版>-arm64/Unity.app`）を選ぶ
+- **`UNITY_VERSION` に `-arm64` を付けた形（Hub のディレクトリ名）は通らない。** `--editor-version` が
+  受けるのは Editor の版（例: `6000.3.14f1`）だけ。アーキテクチャは別の `-a`/`--architecture`
+- **`unity build` は `--` 渡しを受け付けない。** `unity run` / `unity test` と違い、
+  `unity build <proj> … -- -buildScene X` は起動前に
+  `too many arguments for 'build'` で弾かれる。Unity への追加引数は `--args` だけ
+- **`--args` はシェル分割されるが、引用符を解釈する本物のパーサ。** 単一引用符で括れば
+  空白を含む値も空文字も1つの argv 要素として渡る。**括らないと空白のところで切れる**
+  （`-buildScene Assets/Scenes/No Such.unity` は3要素になり、呼ばれた側には
+  `Assets/Scenes/No` しか届かない）。値が空になりうる経路では、名前だけが末尾に残って
+  `CommandLine.Argument` が「値なし」と見て `null` を返すことにも注意（呼ばれた側は既定値へ落ちる）
 - **`unity build` の未コミット変更ガードは既定（`--versioning-strategy none`）では走らない**
   ので `--allow-dirty-build` は要らない
 - **`unity build` の `--output-path` は `--execute-method` と併用すると CLI 自身は解決しない**

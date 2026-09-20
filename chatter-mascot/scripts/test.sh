@@ -7,8 +7,6 @@
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/unity.sh"
 
-require_unity_cli
-
 RESULTS="$PROJECT_PATH/Logs/test-results.xml"
 mkdir -p "$PROJECT_PATH/Logs"
 # ★ 前回の結果を消してから走らせること。残したままだと、コンパイルが通らなかったときに

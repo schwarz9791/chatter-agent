@@ -19,8 +19,8 @@ namespace ChatterMascot.EditorTools
     /// <code>
     /// unity build chatter-mascot --target StandaloneOSX \
     ///   --execute-method ChatterMascot.EditorTools.BuildScript.BuildMacOS \
-    ///   -o Build/ChatterMascot.app \
-    ///   --args "-buildScene Assets/Scenes/Mascot.unity"
+    ///   -o "$PWD/chatter-mascot/Build/TransparencyProbe.app" \
+    ///   --args "-buildScene 'Assets/Scenes/TransparencyProbe.unity'"
     /// </code>
     ///
     /// ★ <b>Editor を開いたままだと失敗する。</b> Unity はプロジェクトを排他ロックする。

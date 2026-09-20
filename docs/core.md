@@ -125,6 +125,7 @@ tsdown 等でバンドルし、成果物を `plugin/bin/chatter-agent-speak.mjs`
 
 `/plugin install` するとプラグインは複製されるため、`${CLAUDE_PLUGIN_ROOT}` から `core/dist` が見える保証がない。そこで**バンドル済み CLI を `plugin/bin/chatter-agent-speak.mjs` としてコミットし、hook script はそれを直接呼ぶ**。解決順の分岐を作らない。
 
+- ★ **`plugin/bin/` の中身を手で編集しないこと。** `core/` で `npm run build` して生成する
 - ビルド成果物を git に入れるのは本意ではないが、`/plugin install` だけで完結する導入体験と引き換える
 - **CI で「コミット済みバンドルがソースと一致するか」を検証**して腐敗を防ぐ
 - 開発時にソースから直接動かせるよう、`CHATTER_AGENT_CLI` 環境変数による上書きだけ残す。**それ以外の解決経路を足さない**

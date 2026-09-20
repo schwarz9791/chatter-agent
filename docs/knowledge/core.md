@@ -4,9 +4,9 @@
 
 ## `tsx` で実行しない。バンドルする
 
-**ここが前身 cc-mascot-xr からの変更点。** cc-mascot-xr のブリッジは常駐プロセス1本だったので `tsx` で直接実行していたが、chatter-agent の CLI は **hook から毎 delta 呼ばれる**。`tsx` の起動コスト（~300ms）は乗せられない。
+理由は [`../core.md`](../core.md)「4. `tsx` で実行しない。バンドルする」（`tsdown` でバンドルする）。
 
-tsdown 等でバンドルし、成果物を `plugin/bin/chatter-agent-speak.mjs` に出す。
+★ 実測: `tsx` の起動コストは ~300ms。
 
 ## 常駐プロセス（server / player）から `execFileSync` を呼ばない
 
@@ -111,8 +111,8 @@ server（音声合成）だけが読むキー一覧・既定値・意味は [`..
 「音声合成エンジン」にある。ここに残すのは経緯と実装の細部だけ。
 
 ★ **#29 で読み手が player → server に移ったが、キー名も意味も変えていない。** 改名すると、
-既存の `config.json` に残った旧キーが**全バイナリで**未知キー警告を出す（#11 で
-`speechLogGenerations` を廃止したときに実際に踏んだ）。
+既存の `config.json` に残った旧キーが**全バイナリで**未知キー警告を出す（[#8](https://github.com/schwarz9791/chatter-agent/issues/8) で
+`speechLogGenerations` を廃止したときに実際に踏んだ。→ 下の「`speechLogGenerations`」）。
 
 - モジュール名は API ファミリ（`voicevoxClient`）、config キーはエンジン中立（`tts*`）で割り切ってある
 - ★ **`ttsSpeedScale` はこのファイルで小数を受ける最初のキー。** 既存の `toInt` は
@@ -214,13 +214,9 @@ player だけが読むキーの一覧・既定値・意味は [`../core.md`](../
 [`../core.md`](../core.md)「設定と環境変数」の「AI要約」にある。
 
 - `aiSummaryEnabled` を有効にしたときの**代償は遅延の方が大きい**。要約は AI の生成なので、
-  所要時間は**入力の長さから予測できない**（実機実測10件で相関が見られず、短い入力がタイムアウトし
-  長い入力が10秒台で返ることもあった。詳細は下記と [`plugin.md`](./plugin.md)「AI要約の実機実測」）。秒数は環境で
-  変わるので仕様として扱わないこと
-- `aiSummaryTimeoutMs` の既定は**60秒**。実機実測10件（`summarizer.log`）では入力の長さと所要時間が
-  相関せず、旧既定の30秒では10件中3件（30%）がタイムアウトしていた。**「実測値の N 倍」という決め方は
-  していない**——相関しないものに倍率を掛けても意味が無いため。60秒は「旧既定30秒ではタイムアウトが
-  3割起きた」という実測だけを根拠にした値で、秒数自体を仕様として扱わないことは変わらない
+  所要時間は**入力の長さから予測できない**。秒数は環境で変わるので仕様として扱わないこと
+- `aiSummaryTimeoutMs` の既定は**60秒**。根拠は実機実測（`summarizer.log`、[`plugin.md`](./plugin.md)「AI要約の実機実測」）。
+  **「実測値の N 倍」という決め方はしていない**——相関しないものに倍率を掛けても意味が無いため
 - `aiSummaryMaxPerDrain` は移植元の「滞留ガード」（同時実行数の待ち行列が閾値を超えたらスキップ）の読み替え。
   同期実行では待ち行列の概念が無いので、「1回のドレインで要約してよい回数の上限」に置き換えてある。
   1回のドレインは最悪 `aiSummaryMaxPerDrain × aiSummaryTimeoutMs` の間ロックを保持しうるため
@@ -340,8 +336,15 @@ delta 単位の早期確定を復活させるなら同じ回帰をもう一度�
 | | |
 |---|---|
 | [#2](https://github.com/schwarz9791/chatter-agent/issues/2) | テキスト整形規則の見直し（上記）。**実機で強調記号を踏んだ** — `**強調。**` が `**強調。` と `** 続き` に割れて読み上げられる |
-| [#5](https://github.com/schwarz9791/chatter-agent/issues/5) | Linux で `birthtimeNs` が当てにならない（spool の命名で解く）。**macOS だけを対象にしている間は実害なし** |
-| [#7](https://github.com/schwarz9791/chatter-agent/issues/7) | `cleanOrphans` の追加走査 |
+
+## 対応しないと決めたこと
+
+**どちらも CLOSED（not planned）。** ただし技術的な事実そのものは残る —— 前提が変わったときに拾い直せるように書いておく。
+
+| | |
+|---|---|
+| [#5](https://github.com/schwarz9791/chatter-agent/issues/5) | **Linux では `birthtimeNs` が当てにならない。** libuv は statx が無い環境で birthtime を ctime から埋めるため、書き込みのたびに進む値になりうる。対象が macOS だけの間は実害が無いので、spool の命名で解く案は採らない。**Linux を対象に入れるならここから** |
+| [#7](https://github.com/schwarz9791/chatter-agent/issues/7) | `cleanOrphans` が呼び出しごとにディレクトリを全走査する。spool は高々数百件なので誤差。**件数が桁で増えたらここから** |
 
 > [#6](https://github.com/schwarz9791/chatter-agent/issues/6)（`messageAssembler` の O(N²) 再パース）は
 > [#30](https://github.com/schwarz9791/chatter-agent/issues/30) で解消した。整形と文分割はメッセージあたり

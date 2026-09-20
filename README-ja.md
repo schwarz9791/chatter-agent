@@ -18,22 +18,22 @@ Claude Code
   ▼
 ┌─────────────── server ───────────────┐
 │ plugin              payload を置くだけ │
-│   ▼                                   │
-│ chatter-agent-speak  整形・文分割・    │
-│   ▼                  感情判定・採番    │
+│   ▼                                  │
+│ chatter-agent-speak  整形・文分割・     │
+│   ▼                  感情判定・採番     │
 │ 配信キュー                             │
-│   ▼                                   │
-│ chatter-agent-server                  │
-│   ├─ WebSocket   発話テキストを配信    │
-│   ├─ GET /audio/ 取りに来られたら合成  │
-│   └─ /v1/*       設定の読み書き        │
+│   ▼                                  │
+│ chatter-agent-server                 │
+│   ├─ WebSocket   発話テキストを配信      │
+│   ├─ GET /audio/ 取りに来られたら合成    │
+│   └─ /v1/*       設定の読み書き         │
 └───────────────────────────────────────┘
   ▲ ack           │ テキスト / 音声
   │               ▼
 ┌─────────────── client ───────────────┐
 │ chatter-agent-player  CLI。音を鳴らす  │
-│ chatter-mascot        Unity。VRM 表示  │
-└───────────────────────────────────────┘
+│ chatter-mascot        Unity。VRM 表示 │
+└──────────────────────────────────────┘
 ```
 
 | | 担当 |

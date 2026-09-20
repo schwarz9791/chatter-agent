@@ -59,6 +59,24 @@ namespace ChatterMascot.Tests
                 Is.EqualTo(new[] { "/persist/animations/idle.vrma", "/streaming/idle_loop.vrma" }));
         }
 
+        /// <summary>
+        /// ★★ <b>直下の1本（待機ループ）と、カテゴリ別モーションの走査ルートを
+        ///   同じディレクトリに保つこと。</b> <see cref="AssetPath.AnimationsDirectory"/> を
+        ///   どちらか片方だけリテラルに戻すと、<b>待機ループは動いたまま感情モーションだけが
+        ///   黙って見つからなくなる</b> —— エラーもログも出ない。
+        ///   <see cref="AssetPath.Enumerate"/> と <see cref="AssetPath.AnimationRoots"/> は
+        ///   別の関数なので、名前を共有していることを固定するのはここだけ。
+        /// </summary>
+        [Test]
+        public void PersistentIdleSitsUnderTheAnimationRoot()
+        {
+            var env = Env();
+            var root = AssetPath.AnimationRoots(env)[0];
+
+            Assert.That(root, Is.EqualTo("/persist/" + AssetPath.AnimationsDirectory));
+            Assert.That(Paths(env, AssetKind.Vrma)[0], Does.StartWith(root + "/"));
+        }
+
         [Test]
         public void CommandLineWinsOverEverything()
         {

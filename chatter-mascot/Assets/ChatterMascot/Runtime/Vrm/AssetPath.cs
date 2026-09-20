@@ -150,8 +150,22 @@ namespace ChatterMascot.Vrm
         }
 
         private static Spec Of(AssetKind kind) => kind == AssetKind.Vrm
-            ? new Spec("-vrm", "CHATTER_MASCOT_VRM", SelectedVrmFile, "models", "*.vrm", "vita.vrm")
-            : new Spec("-vrma", "CHATTER_MASCOT_VRMA", "idle.vrma", "animations", "*.vrma", "idle_loop.vrma");
+            ? new Spec("-vrm", "CHATTER_MASCOT_VRM", SelectedVrmFile, ModelsDirectory, "*.vrm", "vita.vrm")
+            : new Spec("-vrma", "CHATTER_MASCOT_VRMA", "idle.vrma", AnimationsDirectory, "*.vrma", "idle_loop.vrma");
+
+        /// <summary>
+        /// 素材を置くディレクトリ名。<b>ここが唯一の出どころ。</b>
+        ///
+        /// ★★ <b>リテラルで持たないこと。</b> 探索（<see cref="Enumerate"/>）・カテゴリ別モーションの
+        ///   走査（<see cref="AnimationRoots"/>）・設定パネルの書き込みと削除（<c>SettingsPanelBridge</c>）が
+        ///   同じ名前を使う。散らばっていると改名が片方にしか届かず、
+        ///   <b>待機ループは動いたまま感情モーションだけが黙って見つからなくなる</b> ——
+        ///   いちばん気付きにくい壊れ方をする。
+        /// </summary>
+        public const string ModelsDirectory = "models";
+
+        /// <inheritdoc cref="ModelsDirectory"/>
+        public const string AnimationsDirectory = "animations";
 
         /// <summary>
         /// 設定パネルが選んだモデルを置く<b>固定のファイル名</b>（<c>models/</c> 配下）。
@@ -345,12 +359,12 @@ namespace ChatterMascot.Vrm
             var result = new List<string>(3);
             if (env == null) return result;
 
-            AddRoot(result, Join(env.PersistentDataPath, "animations"));
+            AddRoot(result, Join(env.PersistentDataPath, AnimationsDirectory));
             if (env.HasUserConfigDirectory)
             {
-                AddRoot(result, Join(RuntimeDirectory(env), "animations"));
+                AddRoot(result, Join(RuntimeDirectory(env), AnimationsDirectory));
             }
-            AddRoot(result, Join(env.StreamingAssetsPath, "animations"));
+            AddRoot(result, Join(env.StreamingAssetsPath, AnimationsDirectory));
             return result;
         }
 

@@ -15,7 +15,8 @@ if pgrep -f "Unity.app/Contents/MacOS/Unity.*${PROJECT_PATH}" >/dev/null 2>&1; t
 fi
 
 # ★ Unity CLI を使うスクリプトだけが呼ぶ。source した時点の関門にしないこと ——
-#   Unity.app を直に叩く build-android.sh まで、呼びもしないツールを理由に止まる。
+#   共通部分（PROJECT_PATH / NOTICE の一致）だけが要るスクリプトを、呼びもしないツールを
+#   理由に止めないため。
 #
 # ★ UNITY_VERSION は CLI の --editor-version へ渡す。渡さないと CLI は
 #   ProjectVersion.txt の版で走るので、**指定したつもりの版で走らない**。

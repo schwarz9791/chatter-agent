@@ -551,6 +551,14 @@ UniVRM の spring bone は、**コライダーの半径は毎フレーム `lossy
 ★ **`Mobile_RPAsset` の `m_PrefilterXRKeywords` は、XR を有効にしたビルドで URP が `1 → 0` に書き換える。**
 戻さないこと（XR 用のシェーダーバリアントを削らせないための値）。
 
+★ **Unity を回すと追跡ファイルが2通りで汚れる。どちらも我々のものではないのでコミットしないこと。**
+
+- `Assets/XR/Settings/OpenXR Package Settings.asset` —— ビルドでもテストでも**毎回**、
+  Editor に入っているモジュール（ここでは Web）の枠が生える
+- **失敗したビルドは後始末をしない** —— XR Simulation の設定は `Assets/XR/Temp/` へ退避されたまま
+  元の場所から消え、`ProjectSettings.asset` の `preloadedAssets` には XR の項目が残る。
+  **消えたファイルをそのままコミットしないこと**（成功したビルドはどちらも元に戻す）
+
 ★ **マニフェストの XR まわりはパッケージが注入する**（`XR_ACTIVITY_START_MODE_FULL_SPACE_UNMANAGED`、
 `android.software.xr.api.openxr` / `android.software.xr.api.spatial`、`android.hardware.vulkan.version`、
 Hand Interaction Profile からの `android.hardware.xr.input.hand_tracking` の `uses-feature`

@@ -263,8 +263,9 @@ private の `vroid-motion-exporter` に切り出してある。
 
 ## 動かす
 
-**Unity CLI（`unity` コマンド）が要る。** `scripts/test.sh` / `build.sh` / `run.sh` はどれも
-内部で `unity` を呼ぶ（→ [`knowledge/mascot-unity.md`](./knowledge/mascot-unity.md)「★ Unity CLI」）。
+**Unity CLI（`unity` コマンド）が要る。** `scripts/test.sh` / `build.sh` / `run.sh` /
+`build-android.sh` はどれも内部で `unity` を呼ぶ
+（→ [`knowledge/mascot-unity.md`](./knowledge/mascot-unity.md)「★ Unity CLI」）。
 
 ```bash
 cd core && npm run start:server            # 合成エンジンはサーバーが起こす

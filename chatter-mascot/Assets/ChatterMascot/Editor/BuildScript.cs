@@ -17,13 +17,10 @@ namespace ChatterMascot.EditorTools
     ///   <c>-batchmode</c> はダイアログを出さないので、この失敗の仕方をしない。
     ///
     /// <code>
-    /// /Applications/Unity/Hub/Editor/6000.3.14f1-arm64/Unity.app/Contents/MacOS/Unity \
-    ///   -batchmode -quit -nographics \
-    ///   -projectPath chatter-mascot \
-    ///   -executeMethod ChatterMascot.EditorTools.BuildScript.BuildMacOS \
-    ///   -logFile - \
-    ///   -buildScene Assets/Scenes/TransparencyProbe.unity \
-    ///   -buildOutput Build/TransparencyProbe.app
+    /// unity build chatter-mascot --target StandaloneOSX \
+    ///   --execute-method ChatterMascot.EditorTools.BuildScript.BuildMacOS \
+    ///   -o Build/ChatterMascot.app \
+    ///   --args "-buildScene Assets/Scenes/Mascot.unity"
     /// </code>
     ///
     /// ★ <b>Editor を開いたままだと失敗する。</b> Unity はプロジェクトを排他ロックする。

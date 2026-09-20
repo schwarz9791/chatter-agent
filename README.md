@@ -179,9 +179,12 @@ Settings and assets live under `~/.config/chatter-agent/` (or under `XDG_CONFIG_
 
 The model can be swapped from the settings panel, but **there's no UI for motion.** Create the directory, drop a `.vrma` file in, and it's picked up on the next launch. There's no directory for `neutral` (the default behavior is not to play an emotion motion).
 
-**Android XR uses the same layout.** Put `models/mascot.vrm` and `animations/` under
-`Android/data/tech.sukima.chattermascot/files/` on the device (there is no settings UI there, so
-`adb push` it — see [`docs/mascot.md`](./docs/mascot.md)).
+**Android XR uses the same directories** (under `Android/data/tech.sukima.chattermascot/files/` on the
+device), **but the two files directly under them are fixed names: it reads only `models/mascot.vrm` and
+`animations/idle.vrma`.** The free-form name in the table above (`animations/*.vrma`) has no effect there —
+push one and it silently falls back to the bundled motion. **The per-category directories
+(`animations/happy/` and so on) do take free-form names.** There is no settings UI on the device, so
+`adb push` the files — see [`docs/mascot.md`](./docs/mascot.md).
 
 ## Development
 

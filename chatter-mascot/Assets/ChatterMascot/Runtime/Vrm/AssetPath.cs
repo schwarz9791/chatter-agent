@@ -105,9 +105,12 @@ namespace ChatterMascot.Vrm
     /// | 5 | <c>${XDG_CONFIG_HOME:-~/.config}/chatter-agent/</c> | <c>models/*.vrm</c> | <c>animations/*.vrma</c> | デスクトップのみ |
     /// | 6 | <c>streamingAssetsPath/</c>（同梱） | <c>vita.vrm</c> | <c>idle_loop.vrma</c> | 全 |
     ///
-    /// ★ <b>4 と 5 は<u>同じ形</u>に揃えてある</b>（<c>models/</c> と <c>animations/</c>）。
-    ///   置き場所がプラットフォームごとに違うと、「どこに置けばいいか」の説明が2種類になる。
+    /// ★ <b>4 と 5 は<u>置き場所（ディレクトリ名）</u>を揃えてある</b>（<c>models/</c> と
+    ///   <c>animations/</c>）。プラットフォームごとに違うと、「どこに置けばいいか」の説明が2種類になる。
     ///   <see cref="Spec.UserDirectory"/> を両方で共有しているので、片方だけ動かせない。
+    ///   ★ <b>受け付けるファイル名は違う。</b> 4 は<b>固定名1本</b>、5 は <c>*.vrm</c> /
+    ///   <c>*.vrma</c> の<b>走査</b>（上の表の <c>PersistentFile</c> 列と <c>Pattern</c> 列のとおり）。
+    ///   <b>「4 の置き場所なら何を置いても読まれる」ではない。</b>
     ///
     /// ★ <b>設定は起動引数・環境変数より<u>下</u>。</b> <c>-vrm</c> は切り分けの逃げ道
     ///   （「設定が壊れていても、この引数を付ければ必ず出る」）なので、設定より優先を保つ。

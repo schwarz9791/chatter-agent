@@ -370,25 +370,29 @@ adb shell pm grant|revoke tech.sukima.chattermascot android.permission.HAND_TRAC
 
 ### モデルとモーションを入れる
 
-Android に設定 UI は無いので、端末の `files/` 配下へ直接置く。**デスクトップの
-`~/.config/chatter-agent/` と同じ形**（`models/` と `animations/`）なので、置き場所の説明は1種類で済む。
+Android に設定 UI は無いので、端末の `files/` 配下へ直接置く。**ディレクトリはデスクトップの
+`~/.config/chatter-agent/` と同じ**（`models/` と `animations/`）。ただし**直下の2本は固定名**で、
+デスクトップのような任意名の走査は効かない（端末に共有のファイルシステムが無いので、その段ごと落ちる）。
 
 ```bash
 ADB=~/Library/Android/sdk/platform-tools/adb
 D=/sdcard/Android/data/tech.sukima.chattermascot/files
 $ADB push mascot.vrm  $D/models/mascot.vrm        # 固定名。これ以外は読まない
-$ADB push idle.vrma   $D/animations/idle.vrma     # 待機ループの差し替え
+$ADB push idle.vrma   $D/animations/idle.vrma     # 固定名。待機ループの差し替え
 $ADB shell am force-stop tech.sukima.chattermascot
 ```
 
 感情モーションは `animations/<カテゴリ>/*.vrma`（`idle` / `happy` / `angry` / `sad` / `relaxed` /
-`surprised`）。ここもデスクトップと同じ。
+`surprised`）。**こちらは任意名のままで効く** —— カテゴリの走査は `persistentDataPath` を無条件に
+積むので、固定名に縛られるのは直下の1本だけ。
 
 ★ **以前の版を入れた端末は置き場所が変わっている。** `files/model.vrm` と `files/idle.vrma` は
 もう読まないので、`models/mascot.vrm` と `animations/idle.vrma` へ移すこと。
 
 ```bash
-$ADB shell mv $D/model.vrm $D/models/mascot.vrm   # 先に mkdir -p が要ることがある
+$ADB shell mkdir -p $D/models $D/animations         # 設定 UI が無いので、作られる経路が無い
+$ADB shell mv $D/model.vrm $D/models/mascot.vrm     # 置いていなければ飛ばす
+$ADB shell mv $D/idle.vrma $D/animations/idle.vrma  # 同上
 ```
 
 ### キャラクターの大きさと置き場所（`xr`）

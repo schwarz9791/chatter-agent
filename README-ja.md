@@ -179,9 +179,11 @@ cd chatter-mascot
 
 モデルの差し替えは設定パネルからできますが、**モーションに UI はありません。** ディレクトリを掘って `.vrma` を置くと、次の起動で拾います。`neutral` に対応するディレクトリはありません（感情モーションを出さない、が既定の振る舞いです）。
 
-**Android XR も同じ形です。** 端末の `Android/data/tech.sukima.chattermascot/files/` の下に
-`models/mascot.vrm` と `animations/` を置きます（設定 UI が無いので `adb push` で。手順は
-[`docs/mascot.md`](./docs/mascot.md)）。
+**Android XR もディレクトリは同じです**（端末の `Android/data/tech.sukima.chattermascot/files/` の下）。
+ただし**直下の2本は固定名で、`models/mascot.vrm` と `animations/idle.vrma` しか読みません** ——
+上の表の任意名（`animations/*.vrma`）は効かず、置いても黙って同梱のものに戻ります。
+**カテゴリ別（`animations/happy/` など）は任意名のままで効きます。** 設定 UI が無いので `adb push`
+で入れます（手順は [`docs/mascot.md`](./docs/mascot.md)）。
 
 ## 開発
 

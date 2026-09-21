@@ -38,7 +38,8 @@ trap restore_audio_manager EXIT INT TERM
 #   （→ Desktop/Native/ChatterMascotNative.cs）。set -e があるので明示的に受ける。
 #
 # ★ unity.sh にも build-native.sh を呼ぶ手当てがあるが、ここは残すこと。あちらは
-#   .meta を守るための存在チェックで、ソースの変更は拾わない。
+#   .meta を守るための存在チェックで、ソースの変更は拾わない。クリーンなツリーでは
+#   両方とも走り、universal clang ビルドが2回走る。
 if ! "$(dirname "${BASH_SOURCE[0]}")/build-native.sh"; then
   echo "[Native] ネイティブプラグインを作れませんでした。メニューバー常駐は動きません" >&2
 fi

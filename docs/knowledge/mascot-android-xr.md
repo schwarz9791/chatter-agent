@@ -554,8 +554,32 @@ UniVRM の spring bone は、**コライダーの半径は毎フレーム `lossy
 戻さないこと（XR 用のシェーダーバリアントを削らせないための値）。
 
 ★ **Unity を回すと追跡ファイルが汚れる。** `Assets/XR/Settings/OpenXR Package Settings.asset` は
-ビルドでもテストでも**毎回**、Editor に入っているモジュール（ここでは Web）の枠が生える。
+Editor に入っているモジュール（ここでは Web）の枠が生える。
 我々のものではないのでコミットしないこと。
+
+★ **`Keys` は Editor にインストールされている Build Support モジュールと一対一で対応する。**
+`01`=Standalone（macOS の Editor 本体）/ `07`=Android / `0d`=WebGL。実測したマシンの
+`unity editors` は `Platforms: Android, Android SDK & NDK Tools, OpenJDK, Web` を返し、
+`Keys` は `01000000070000000d000000` だった（2026-09-21 / Unity 6000.3.14f1）。
+
+★ **全 `BuildTargetGroup` を舐めているのではない。** 舐めているなら iOS(4) や WSA(14) も
+生えるはずで、生えていない。生えるのはモジュールが入っている枠だけ ——
+`docs/mascot.md` が要求するのは Mac / Android Build Support だけなので、Web を
+入れていない構成が正。この枠は出荷物ではなく、コミットしない理由もそこにある。
+
+★ **切り分けた範囲では、引き金は `test.sh` × `Library/` が無いとき。** `run.sh` では出ない
+（`-buildTarget OSXUniversal` を付けても出ない）。ビルド経路は確かめていない。`Library/` が
+要るのは、リフレッシュが `SessionState`（実体は `Library/` の中）で「Editor を開いた最初の1回
+だけ」に制限されているため。新規作成のときだけ `fileID` がランダムに振られる（実測3回とも別の値）。
+
+★ **一度コミットすると、そのマシンでは差分が止まる。** 既存のエントリは作り直されず
+再利用されるため（実測: 冷えた `Library/` で2サイクル、ファイルのハッシュが不変）。
+**だからといってコミットしないこと** —— 止まるのは同じモジュール構成のマシンだけで、
+構成が違う人には出所不明の差分として残る。
+
+★ **消したければ Web モジュールを外す。** Unity Hub にも `unity` CLI にもモジュール削除の
+機能は無く、`PlaybackEngines/WebGLSupport` を手で消して `modules.json` の該当エントリを
+`"selected": false` にする必要がある（非公式な手順。戻すには再ダウンロード）。
 
 - **失敗したビルドは後始末をしない** —— XR Simulation の設定は `Assets/XR/Temp/` へ退避されたきり
   元の場所から消え（追跡ファイルの**削除**として出る）、`ProjectSettings.asset` の

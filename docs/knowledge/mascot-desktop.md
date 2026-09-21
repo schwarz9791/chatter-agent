@@ -439,9 +439,11 @@ guid: a692ce6a5257a459fb5b8910fa38355f
 ★ **Inspector で直さないこと。** `.bundle` は git に入っていない（バイナリはレビューできず、
 `plugin/bin/*.mjs` のように CI でソースとの一致を検証できない）ので、
 **新規クローンには `.meta` しか無い**。手で直すと「誰かのマシンでだけ通る」状態になる。
-直し方はコードに置いてある:
+**`FixAll` は `platformData` を書き直すだけで、Unity が振り直した GUID は戻せない。**
+直し方は2手、`.bundle` がある状態で行うこと:
 
 ```bash
+git checkout -- Assets/Plugins/macOS/ChatterMascotNative.bundle.meta
 ./scripts/run.sh ChatterMascot.EditorTools.NativePluginSettings.FixAll
 ```
 

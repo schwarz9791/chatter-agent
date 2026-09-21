@@ -16,11 +16,9 @@ SRC="$PROJECT_PATH/Assets/Plugins/macOS~/ChatterMascotNative"
 BUNDLE="$PROJECT_PATH/Assets/Plugins/macOS/ChatterMascotNative.bundle"
 BINARY="$BUNDLE/Contents/MacOS/ChatterMascotNative"
 
-if [ ! -d "$SRC" ]; then
-  echo "[Native] ソースがありません: $SRC" >&2
-  exit 1
-fi
-
+# ★ 入れ物を先に作ること。 ソースが無い・clang が落ちるといった失敗でも、.bundle が
+#   アセットとして存在していれば .meta が孤児として捨てられない
+#   （→ docs/knowledge/mascot-unity.md）。呼び出し側はこれを前提にしている。
 mkdir -p "$(dirname "$BINARY")"
 
 # ★ Info.plist を置くこと。 無いと .bundle として認識されず、
@@ -42,9 +40,19 @@ cat > "$BUNDLE/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
+if [ ! -d "$SRC" ]; then
+  echo "[Native] ソースがありません: $SRC" >&2
+  exit 1
+fi
+
 # ★ arm64 と x86_64 の両方を積むこと。 Unity の macOS ビルドは universal で、
 #   片方しか無いと Rosetta 環境や Intel Mac で DllNotFoundException になる。
 # ★ -mmacosx-version-min は Player Settings の macOSTargetOSVersion に合わせる。
+#
+# ★ 出力は一時ファイルに書いてから置き換える。中断しても中途半端な成果物を残さない。
+#   存在チェックしかしない呼び出し側（unity.sh）が、壊れたバンドルを掴み続けるのを防ぐ。
+trap 'rm -f "$BINARY.tmp"' EXIT
+
 clang -bundle \
   -arch arm64 -arch x86_64 \
   -mmacosx-version-min=12.0 \
@@ -53,8 +61,10 @@ clang -bundle \
   -O2 \
   -Wall -Wextra \
   -framework Cocoa -framework Carbon \
-  -o "$BINARY" \
+  -o "$BINARY.tmp" \
   "$SRC"/*.m
+
+mv -f "$BINARY.tmp" "$BINARY"
 
 echo "[Native] できました: $BINARY"
 echo "[Native] $(lipo -archs "$BINARY")"

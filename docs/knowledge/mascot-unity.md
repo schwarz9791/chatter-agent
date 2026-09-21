@@ -656,6 +656,7 @@ UniVRM 型が漏れると、`ChatterMascot.Tests.asmdef`（`overrideReferences: 
 ## `IconSettings.FixAll` は毎回のセットアップでは要らない
 
 結果（`m_BuildTargetIcons`）は `ProjectSettings.asset` にコミット済みなので、新規クローンでは
-何もしなくてよい —— `NativePluginSettings.FixAll`（新規クローンのたびに要る）とはここが違う。
-再実行が要るのはアイコン画像（`Assets/ChatterMascot/Icon/AppIcon.png`）を差し替えたときだけ。
+何もしなくてよい —— `NativePluginSettings.FixAll`（`scripts/` を通さず Unity を開いてしまった
+ときの復旧手順）とはここが違う。再実行が要るのはアイコン画像
+（`Assets/ChatterMascot/Icon/AppIcon.png`）を差し替えたときだけ。
 

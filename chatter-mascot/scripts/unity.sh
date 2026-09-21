@@ -33,7 +33,8 @@ fi
 NATIVE_BUNDLE_BIN="$PROJECT_PATH/Assets/Plugins/macOS/ChatterMascotNative.bundle/Contents/MacOS/ChatterMascotNative"
 if [ ! -f "$NATIVE_BUNDLE_BIN" ]; then
   if ! "$(dirname "${BASH_SOURCE[0]}")/build-native.sh"; then
-    echo "[Native] バンドルを作れませんでした。このまま Unity を回すと .bundle.meta が壊れます" >&2
+    # ★ 失敗しても build-native.sh が .bundle の入れ物を残すので、.meta は孤児にならない。
+    echo "[Native] バンドルを作れませんでした。常駐機能は動きません" >&2
   fi
 fi
 

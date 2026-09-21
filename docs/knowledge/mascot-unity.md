@@ -419,11 +419,12 @@ Unity は「`.meta` はあるがアセットが無い」と見て**孤児とし�
 `guid` が別の値に変わっていた**（残っていたのは `fileFormatVersion` と `guid` の 2 行だけ）。**`.gitignore` が「`.meta` は追跡する
 （GUID が動くと、参照している側が壊れる）」と書いている、まさにその事故。**
 
-★ **`build.sh` はこの穴を踏まない。** Unity より先に `build-native.sh` を呼ぶため。
-踏むのは **`test.sh` と `run.sh` を、バンドルが無い状態で走らせたとき**
-（→ [#95](https://github.com/schwarz9791/chatter-agent/issues/95)。直すのは別の PR）。
-[#97](https://github.com/schwarz9791/chatter-agent/issues/97) の新規ワークツリーでも同じ形で踏んだ
-（`build-android.sh` も `build-native.sh` を呼ばないので、Android だけ触る場合も先に作っておくこと）。
+★ **`scripts/unity.sh` が Unity の手前でバンドルの実体を用意するので、`scripts/` 経由で
+回すかぎり踏まない**（[#95](https://github.com/schwarz9791/chatter-agent/issues/95)）。
+**残る経路は `scripts/` を通らないとき** —— Unity Hub から手で開く、MCP 経由で Editor を
+触るなど。そこは CI の grep ジョブ（コミットされた `.meta` の GUID と `PluginImporter` ブロックを
+検査する）が最後の砦になる。[#93](https://github.com/schwarz9791/chatter-agent/issues/93) と
+[#97](https://github.com/schwarz9791/chatter-agent/issues/97) では、この形で実際に踏んだ。
 
 ★★ **ビルドは通ってしまう。** `.app` の `Contents/PlugIns/` にはバンドルが入るし、
 EditMode テストも全部通る。**気づけるのは `git diff` だけ** —— batchmode で Unity を回したら
@@ -655,6 +656,7 @@ UniVRM 型が漏れると、`ChatterMascot.Tests.asmdef`（`overrideReferences: 
 ## `IconSettings.FixAll` は毎回のセットアップでは要らない
 
 結果（`m_BuildTargetIcons`）は `ProjectSettings.asset` にコミット済みなので、新規クローンでは
-何もしなくてよい —— `NativePluginSettings.FixAll`（新規クローンのたびに要る）とはここが違う。
-再実行が要るのはアイコン画像（`Assets/ChatterMascot/Icon/AppIcon.png`）を差し替えたときだけ。
+何もしなくてよい —— `NativePluginSettings.FixAll`（`scripts/` を通さず Unity を開いてしまった
+ときの復旧手順）とはここが違う。再実行が要るのはアイコン画像
+（`Assets/ChatterMascot/Icon/AppIcon.png`）を差し替えたときだけ。
 

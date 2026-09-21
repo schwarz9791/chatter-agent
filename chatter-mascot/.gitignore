@@ -56,7 +56,9 @@ mono_crash.*.blob
 #   CI で「ソースと一致するか」を検証する手段が無い（clang の出力に再現性が無い）。
 #   ソースは Assets/Plugins/macOS~/ にあり、./scripts/build-native.sh で作れる。
 # ★ .meta は追跡する（GUID が動くと、参照している側が壊れる）。
-#   下の !*.meta が 13 行目の除外規則より後に来るので、こちらが勝つ。
+#   *.bundle はスラッシュを含まない glob なので basename 全体に一致する必要があり、
+#   `*.bundle.meta` は末尾が `.meta` で `.bundle` ではないため、そもそも対象外
+#   （下の打ち消しは今は何も打ち消していない。より広いパターンを足したときの保険として残す）。
 *.bundle
 !/[Aa]ssets/**/*.bundle.meta
 

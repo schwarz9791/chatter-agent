@@ -33,20 +33,19 @@ xcode-select --install   # 既に Xcode があれば不要
 ./scripts/build-native.sh
 ```
 
-`./scripts/build.sh` が Unity より先に自動でこれを呼ぶので、普段は意識しなくてよい。
+`scripts/` 経由で Unity を回すとき（`build.sh` / `test.sh` / `run.sh` / `build-android.sh`）は
+自動で呼ばれるので、普段は意識しなくてよい。
 
-★ **新規クローンでは、Unity を開く前にここまで済ませること。** `.bundle` は git に無いので
-クローン直後は `.meta` しか無く、Unity が既定でインポートし直すと**プラットフォームの絞りが
-「すべて」に化ける**。バンドルを作ったあとに一度だけ:
+★ **Unity Hub から手で開くなど `scripts/` を通さないときは、開く前にここまで済ませること。**
+`.bundle` は git に無いので新規クローン直後は `.meta` しか無く、先に Unity を開くと
+**`.bundle.meta` の GUID ごとプラットフォームの絞りが飛ぶ**。**ビルドもテストも通ってしまうので、
+気づけるのは `git diff` だけ**（→ [`knowledge/mascot-unity.md`](./knowledge/mascot-unity.md)）。
+飛ばしてしまったら、バンドルがある状態で:
 
 ```bash
+git checkout -- Assets/Plugins/macOS/ChatterMascotNative.bundle.meta
 ./scripts/run.sh ChatterMascot.EditorTools.NativePluginSettings.FixAll
 ```
-
-★ **順序を逆にしないこと。** バンドルが無い状態で `test.sh` / `run.sh` を先に走らせると
-**`.bundle.meta` の GUID ごと設定が飛ぶ**（`build.sh` は先に `build-native.sh` を呼ぶので踏まない）。
-**ビルドもテストも通ってしまうので、気づけるのは `git diff` だけ**
-（→ [`knowledge/mascot-unity.md`](./knowledge/mascot-unity.md)）。
 
 ### パッケージの導入
 
@@ -279,9 +278,6 @@ cd chatter-mascot
 
 どのスクリプトも Editor を閉じてから実行する（Unity はプロジェクトを排他ロックする）。
 環境の診断には `unity doctor` が使える。
-
-★ **クローン直後に `test.sh` / `run.sh` から始めないこと。** ネイティブプラグインの
-バンドルが無い状態で Unity を回すと `.bundle.meta` が壊れる（→ 上の「Xcode コマンドラインツール」）。
 
 シーンの `MascotRunner` に接続先（既定 `ws://127.0.0.1:8570`）を入れて Play。クライアント側に
 合成エンジンは要らない——音声は同じ authority から HTTP で取る。

@@ -20,6 +20,23 @@ if ! command -v unity >/dev/null 2>&1; then
   exit 1
 fi
 
+# ★ Unity を起動する前にネイティブプラグインの実体を用意すること。
+#   .bundle は git に入れていないのでクリーンなツリーには .meta しか無く、この状態で Unity を
+#   起動すると孤児として .meta が捨てられる。あとからバンドルを作ると別の GUID で再インポートされ、
+#   参照している側が壊れる（→ docs/knowledge/mascot-unity.md）。
+#
+# ★ 既にあるときは作り直さない。ここは Unity を回すすべてのスクリプトが通るので、無条件に
+#   clang を走らせるとテストの起動が毎回遅くなる。ソースの変更を拾うのは build.sh の役目。
+#
+# ★ 失敗しても止めない。バンドルが無くても Unity は回る（常駐機能だけが落ちる）。
+#   .meta は build-native.sh が入れ物を残すことで守られる。
+NATIVE_BUNDLE_BIN="$PROJECT_PATH/Assets/Plugins/macOS/ChatterMascotNative.bundle/Contents/MacOS/ChatterMascotNative"
+if [ ! -f "$NATIVE_BUNDLE_BIN" ]; then
+  if ! "$(dirname "${BASH_SOURCE[0]}")/build-native.sh"; then
+    echo "[Native] バンドルを作れませんでした。常駐機能は動きません" >&2
+  fi
+fi
+
 # ★ UNITY_VERSION は CLI の --editor-version へ渡す。渡さないと CLI は
 #   ProjectVersion.txt の版で走るので、**指定したつもりの版で走らない**。
 #

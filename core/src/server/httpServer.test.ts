@@ -6,6 +6,7 @@ import * as path from "path";
 import { createAudioStore } from "./audioStore";
 import { TtsHttpError } from "../tts/voicevoxClient";
 import { createHttpServer, type HttpServerDeps } from "./httpServer";
+import type { AssetCatalog } from "./assetCatalog";
 import type { ControlApi, ControlResponse } from "./controlApi";
 import type { SpeechRecord } from "../core/types";
 
@@ -65,7 +66,13 @@ function stubControl(): ControlApi {
     patchConfig: (body) => ({ status: 200, kind: "json", body: { called: "patchConfig", body } }),
     ttsPreview: () => Promise.resolve({ status: 200, kind: "wav", body: wavOf(44) }),
     summaryPreview: () => Promise.resolve(ok("summaryPreview")),
+    assets: () => ok("assets"),
   };
+}
+
+/** このファイルが見るのは `/audio/…` のルーティングと絞りだけ。中身は `assetCatalog.test.ts` */
+function stubCatalog(): AssetCatalog {
+  return { manifest: () => [], resolve: () => null };
 }
 
 async function start(overrides: Partial<HttpServerDeps> = {}): Promise<string> {
@@ -77,6 +84,7 @@ async function start(overrides: Partial<HttpServerDeps> = {}): Promise<string> {
     disabled: () => false,
     responseTimeoutMs: () => 5_000,
     control: stubControl(),
+    catalog: stubCatalog(),
     ...overrides,
   });
   servers.push(server);
@@ -285,6 +293,114 @@ describe("GET /audio/<epoch>-<seq>.wav", () => {
   });
 });
 
+// ───────────────────────────────────────────────────────────────────────────
+// GET /v1/assets, GET /v1/assets/<path>（#117: VRM / VRMA の配布）
+//
+// ★ ここで見るのは HTTP の口（ルーティング・Range・絞り）だけ。カタログの中身
+//   （固定名優先・シンボリックリンク・ハッシュのキャッシュ）は `assetCatalog.test.ts`。
+// ───────────────────────────────────────────────────────────────────────────
+
+/** 本物の一時ファイルを1本だけ持つ、最小のカタログ */
+function catalogWithFile(content: string): { catalog: AssetCatalog; size: number } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cm-asset-"));
+  tmpDirs.push(dir);
+  const absolute = path.join(dir, "mascot.vrm");
+  fs.writeFileSync(absolute, content);
+  const size = Buffer.byteLength(content);
+  const catalog: AssetCatalog = {
+    manifest: () => [{ path: "models/mascot.vrm", size, sha256: "dummy" }],
+    resolve: (requestedPath) => (requestedPath === "models/mascot.vrm" ? { absolute, size } : null),
+  };
+  return { catalog, size };
+}
+
+describe("GET /v1/assets/<path>（#117）", () => {
+  it("GET /v1/assets はマニフェスト（制御 API 経由）", async () => {
+    const base = await start();
+    const res = await fetch(`${base}/v1/assets`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ called: "assets" });
+  });
+
+  it("本体を 200 で返す", async () => {
+    const { catalog } = catalogWithFile("0123456789ab");
+    const base = await start({ catalog });
+    const res = await fetch(`${base}/v1/assets/models/mascot.vrm`);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/octet-stream");
+    // ★ 資産ルートだけ bytes を名乗る（/audio/… の none は変えない）
+    expect(res.headers.get("accept-ranges")).toBe("bytes");
+    expect(await res.text()).toBe("0123456789ab");
+  });
+
+  it("★ Range: bytes=<N>- を206 + Content-Range で返す（途中から再開）", async () => {
+    const { catalog } = catalogWithFile("0123456789ab");
+    const base = await start({ catalog });
+    const res = await fetch(`${base}/v1/assets/models/mascot.vrm`, { headers: { range: "bytes=4-" } });
+
+    expect(res.status).toBe(206);
+    expect(res.headers.get("content-range")).toBe("bytes 4-11/12");
+    expect(res.headers.get("content-length")).toBe("8");
+    expect(await res.text()).toBe("456789ab");
+  });
+
+  it("★ 開始位置がサイズ以上の Range は 416", async () => {
+    const { catalog } = catalogWithFile("0123456789ab");
+    const base = await start({ catalog });
+    const res = await fetch(`${base}/v1/assets/models/mascot.vrm`, { headers: { range: "bytes=100-" } });
+
+    expect(res.status).toBe(416);
+    expect(res.headers.get("content-range")).toBe("bytes */12");
+  });
+
+  it("終端付き・複数レンジは解釈せず 200 で全体を返す", async () => {
+    const { catalog } = catalogWithFile("0123456789ab");
+    const base = await start({ catalog });
+    const res = await fetch(`${base}/v1/assets/models/mascot.vrm`, { headers: { range: "bytes=0-3" } });
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("0123456789ab");
+  });
+
+  it("★ マニフェストに無いパスは 404（resolve が唯一の解決口）", async () => {
+    const base = await start(); // 既定のスタブカタログは何も持たない
+    const res = await fetch(`${base}/v1/assets/models/mascot.vrm`);
+    expect(res.status).toBe(404);
+  });
+
+  it("知らない形の path は 404（ルーティングに乗らない）", async () => {
+    const base = await start();
+    const res = await fetch(`${base}/v1/assets/../../etc/passwd`);
+    expect(res.status).toBe(404);
+  });
+
+  it("HEAD は本体を返さずヘッダだけ返す", async () => {
+    const { catalog } = catalogWithFile("0123456789ab");
+    const base = await start({ catalog });
+    const res = await fetch(`${base}/v1/assets/models/mascot.vrm`, { method: "HEAD" });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-length")).toBe("12");
+    expect(await res.text()).toBe("");
+  });
+
+  it("★★ 非ループバックからの未認証アクセスは 401", async () => {
+    const socketPath = await startUnix();
+    const res = await requestUnix(socketPath, { method: "GET", path: "/v1/assets/models/mascot.vrm" });
+    expect(res.status).toBe(401);
+  });
+
+  it("★ OPTIONS は Allow と access-control-allow-headers に range を返す", async () => {
+    const base = await start();
+    const res = await fetch(`${base}/v1/assets/models/mascot.vrm`, { method: "OPTIONS" });
+
+    expect(res.status).toBe(204);
+    expect(res.headers.get("allow")).toBe("GET, HEAD, OPTIONS");
+    expect(res.headers.get("access-control-allow-headers")).toBe("range");
+  });
+});
+
 describe("トークン認証（#98）", () => {
   it("ループバックはトークンを送らなくても通る", async () => {
     const base = await start();
@@ -417,6 +533,7 @@ async function startUnix(overrides: Partial<HttpServerDeps> = {}): Promise<strin
     disabled: () => false,
     responseTimeoutMs: () => 5_000,
     control: stubControl(),
+    catalog: stubCatalog(),
     ...overrides,
   });
   servers.push(server);

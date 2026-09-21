@@ -211,6 +211,10 @@ jobs:
       - name: Verify player (WebSocket → 音声取得 → 再生 → ack)
         run: npm run verify:player
 
+      # 素材は使い捨ての XDG_CONFIG_HOME に仕込むので、モデルも合成エンジンも要らない
+      - name: Verify assets (マニフェスト → GET /v1/assets/ → Range で再開)
+        run: npm run verify:assets
+
   unity-audio-settings:
     name: Unity のオーディオ設定が出荷値
     runs-on: ubuntu-latest

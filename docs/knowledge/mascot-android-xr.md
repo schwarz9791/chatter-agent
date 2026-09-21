@@ -329,6 +329,19 @@ Android のログは `adb logcat -s Unity`。★★ **Android では 401 と「�
 [#100](https://github.com/schwarz9791/chatter-agent/issues/100)。計測コードはこの決定の後
 `AudioClipPlayer.cs` から取り除いてある。
 
+## 素材配布（#117）
+
+### `.part` は「切れた」だけでは消さない
+
+`AssetSyncClient.FetchOneAsync` は `synced/.parts/<sha256>.part` に書きながらモデル・モーションを
+取得する。Range で続きから取れる作りにしてあるのは、この経路が細い回線を前提にしていて
+**途中で切られるのが普通に起きる**ため。
+
+消してよいのは「中身が信用できないと分かったとき」だけ——応答コードが期待（新規取得なら `200`、
+続きからなら `206`）とも「応答そのものが無い」とも違うときに限る。応答が無い・期待どおりの応答
+だったときは**残す**。一律に消すと、切られるたびに毎回ゼロからやり直しになり、再開できる作りに
+した意味が消える。
+
 ## XR（Full Space）
 
 Android ビルドは OpenXR（`com.unity.xr.androidxr-openxr`）で Full Space に入り、キャラクターを空間に固定して立たせる

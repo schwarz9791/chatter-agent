@@ -298,6 +298,57 @@ TTS + 再生は生成よりずっと遅い。Claude Code は 2 秒で 20 文吐�
 - **音声の GET にもタイムアウトを置く。** 返らない相手を掴むと head-of-line blocking で**以後すべてが無音になり、エラーも1行も出ない**。★ **サーバー側の設定と突き合わせる必要は無い** — サーバーが応答を `synthesisTimeoutMs` で打ち切って `503` を返す（上の「応答の期限」）ので、待たされ続ける側は塞がっている
 - **`503` が続いたら、取り直す間隔を伸ばすこと。** 固定間隔だと、エンジンを起動し忘れているだけで **1 req/s のループが恒久的に回る**。指数バックオフにして上限で頭を打たせ、`200` が返ったら元に戻す
 
+## 素材配布 — `GET /v1/assets/<path>`
+
+**VRM モデルと VRMA モーションを配る口**（[#117](https://github.com/schwarz9791/chatter-agent/issues/117)）。
+Android / XR クライアントが `adb push` 無しで取りに行けるようにするためのもので、発話の契約とは
+独立している。`server/assetCatalog.ts` が用意したマニフェストに載っているものだけを返す
+（→ `docs/core.md`）。
+
+```
+GET /v1/assets/models/mascot.vrm
+GET /v1/assets/animations/idle.vrma
+GET /v1/assets/animations/<category>/<name>.vrma
+```
+
+| | |
+|---|---|
+| `200` / `206` | 本体全体 / `Range: bytes=<N>-` に応じた途中から |
+| `404` | マニフェストに無いパス（3形のいずれにも合わない、または実ファイルが無い） |
+| `416` | `Range` の開始位置が本体サイズ以上。`Content-Range: bytes */<size>` を返す |
+
+`<path>` は `core/src/core/assetPath.ts` が検査する**3つの形だけ**を通す。**URL デコードしない**
+——デコードすると `%2e%2e` が `..` に化けて通り道になるため。
+
+認証は発話経路と**同じ関所**を通る（→ 下の「セキュリティ」）。ループバックは無認証、
+**非ループバックからは `Authorization: Bearer <token>` が必須**で、欠けていれば `401`。
+ここに専用の認証は無い。
+
+- `models/mascot.vrm`
+- `animations/idle.vrma`
+- `animations/<category>/<name>.vrma`（`category` は `idle`/`happy`/`angry`/`sad`/`relaxed`/`surprised`
+  の6つに固定。`name` は `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`）
+
+### ★ `GET /audio/…` とわざと違う——Range に対応する
+
+**`GET /audio/…` は Range を実装しない**（1文ぶんの WAV は数百KB で分割の得が無い）が、**こちらは
+実装する**（`Accept-Ranges: bytes`）。モデルは数十 MB になりうるので、途中で切れた転送を毎回
+最初からやり直させない。
+
+`Range: bytes=<N>-`（終端を指定しない1本）だけを解釈する。終端付き・複数レンジは「Range 無し」と
+同じに倒して `200` で全体を返す——モデルもモーションも先頭から順に読むだけなので、それ以上の
+解釈を増やす理由が無い。
+
+### マニフェスト — `GET /v1/assets`
+
+```json
+{ "files": [{ "path": "models/mascot.vrm", "size": 12345, "sha256": "…" }] }
+```
+
+`{root}/models/` と `{root}/animations/` を走査して組む。**固定名優先、無ければ Ordinal 昇順の先頭**
+——`chatter-mascot` 側がデスクトップで実際に読む1本と同じ規則。`path` は上の3形のどれかで、
+Ordinal 昇順に並ぶ。
+
 ## 制御 API — `/v1/*`
 
 **設定パネル（[#76](https://github.com/schwarz9791/chatter-agent/issues/76)）が設定を読み書きする口。**
@@ -326,7 +377,10 @@ POST  /v1/tts/preview      200 audio/wav      ★ 固定文。任意テキスト
 POST  /v1/summary/preview  200 {"summary":"…","outcome":"ok","elapsedMs":11845}
                            200 {"summary":null,"outcome":"timeout","detail":"…"}   ★ 失敗も 200
                            429 {"error":"too_many_requests"}
+GET   /v1/assets           200 {"files":[{"path":"models/mascot.vrm","size":12345,"sha256":"…"}]}
 ```
+
+★ **`GET /v1/assets` はマニフェストだけ。本体は別ルート**（`GET /v1/assets/<path>`。上の「素材配布」）。
 
 ### 書き込み口の絞りは3重
 
@@ -399,7 +453,7 @@ LAN からなら `GET, HEAD, OPTIONS` を返す。
 
 **`Origin` ヘッダを持つ接続は、`allowedOrigins` に載っていなければ拒否する。** WebSocket は CORS の対象外なので、これが無いとユーザーが開いた任意の Web ページが `new WebSocket("ws://127.0.0.1:8570")` で会話を読み、ack を投げてマスコットを黙らせられる。`host` を `127.0.0.1` に絞っても塞がらない。
 
-**`GET /audio/…` にも同じ規則を適用する。** そのうえで、**許可した `Origin` には `Access-Control-Allow-Origin` を返す** — WebSocket と違って `fetch` は CORS の対象なので、403 を返さないだけでは足りず、許可していてもブラウザ側で音声だけブロックされる。
+**`GET /audio/…` と `GET /v1/assets/<path>` にも同じ規則を適用する。** そのうえで、**許可した `Origin` には `Access-Control-Allow-Origin` を返す** — WebSocket と違って `fetch` は CORS の対象なので、403 を返さないだけでは足りず、許可していてもブラウザ側で音声・素材だけブロックされる。
 
 > ★ **ブラウザの `<audio src>` は `Origin` を送らないので、この検査を素通りする**（読み取りはできないが再生はできる）。実質的な防御は **`epoch` が推測しにくいこと**になっている。`epoch` を短縮したり、連番のような予測可能な値に変えたりしないこと。
 

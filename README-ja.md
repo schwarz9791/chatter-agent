@@ -180,11 +180,14 @@ cd chatter-mascot
 
 モデルの差し替えは設定パネルからできますが、**モーションに UI はありません。** ディレクトリを掘って `.vrma` を置くと、次の起動で拾います。`neutral` に対応するディレクトリはありません（感情モーションを出さない、が既定の振る舞いです）。
 
-**Android XR もディレクトリは同じです**（端末の `Android/data/tech.sukima.chattermascot/files/` の下）。
-ただし**直下の2本は固定名で、`models/mascot.vrm` と `animations/idle.vrma` しか読みません** ——
-上の表の任意名（`animations/*.vrma`）は効かず、置いても黙って同梱のものに戻ります。
-**カテゴリ別（`animations/happy/` など）は任意名のままで効きます。** 設定 UI が無いので `adb push`
-で入れます（手順は [`docs/mascot.md`](./docs/mascot.md)）。
+**Android XR もディレクトリは同じです**（端末の `Android/data/tech.sukima.chattermascot/files/` の下）が、
+**`adb push` は要りません。** 接続先とトークンを設定すれば（`configure-android.sh`）、起動のたびに
+サーバーの `GET /v1/assets` から自動で取りに行きます（既定 `auto`。反映は次回の起動から）。
+手置きもこれまでどおり使え、同期より優先されます。ただし**直下の2本は固定名で、
+`models/mascot.vrm` と `animations/idle.vrma` しか読みません** —— 上の表の任意名
+（`animations/*.vrma`）はここには効きません。**カテゴリ別（`animations/happy/` など）は
+同期・手置きのどちらでも任意名のままで効きます。** 手順は
+[`docs/mascot.md`](./docs/mascot.md)「モデルとモーションを入れる」。
 
 ## 開発
 
@@ -199,6 +202,7 @@ npm run verify:phase-a   # hook → 記録 + 配信キュー
 npm run verify:phase-b   # 配信キュー → WebSocket
 npm run verify:tts       # 合成と GET /audio/
 npm run verify:player    # WebSocket → 音声取得 → 再生 → ack
+npm run verify:assets    # マニフェスト → GET /v1/assets/ → Range で再開
 ```
 
 `verify:tts` と `verify:player` は合成エンジンと再生コマンドをスタブに差し替えるので、AivisSpeech もオーディオデバイスも要りません。
@@ -220,7 +224,6 @@ cd chatter-mascot
 
 ## ロードマップ
 
-- サーバー側からのモデル・モーションの配信
 - 多言語対応 —— TTS を差し替えられるようにする / 辞書ベースの感情判定をやめる
 - Claude 以外のコーディングエージェントへの対応
 - XR 空間である程度動き回る対応、空間アンカー対応

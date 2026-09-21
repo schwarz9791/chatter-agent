@@ -4,6 +4,7 @@ import * as os from "os";
 import * as path from "path";
 import { createConfigStore, createDefaultConfig, type ConfigStore } from "../core/config";
 import { VERSION } from "../core/version";
+import type { AssetCatalog } from "./assetCatalog";
 import { createControlApi, type ControlApiDeps } from "./controlApi";
 
 let dir: string;
@@ -35,6 +36,8 @@ function store(env: NodeJS.ProcessEnv = {}): ConfigStore {
   return createConfigStore({ filePath, env });
 }
 
+const stubAssetCatalog: AssetCatalog = { manifest: () => [], resolve: () => null };
+
 function api(overrides: Partial<ControlApiDeps> = {}) {
   return createControlApi({
     config: store(),
@@ -47,6 +50,7 @@ function api(overrides: Partial<ControlApiDeps> = {}) {
       homeDir,
       registerSessionId: () => {},
     },
+    assetCatalog: stubAssetCatalog,
     ...overrides,
   });
 }
@@ -62,6 +66,15 @@ describe("GET /v1/health", () => {
     const res = api().health();
     expect(res.status).toBe(200);
     expect(body(res)).toEqual({ ok: true, version: VERSION });
+  });
+});
+
+describe("GET /v1/assets", () => {
+  it("カタログのマニフェストをそのまま返す", () => {
+    const files = [{ path: "models/mascot.vrm", size: 12, sha256: "abc" }];
+    const res = api({ assetCatalog: { manifest: () => files, resolve: () => null } }).assets();
+    expect(res.status).toBe(200);
+    expect(body(res)).toEqual({ files });
   });
 });
 

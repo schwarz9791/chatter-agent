@@ -27,6 +27,14 @@ namespace ChatterMascot.Vrm
         Settings,
 
         PersistentData,
+
+        /// <summary>
+        /// サーバーから取得したファイル（#117。<c>AssetSyncClient</c> が
+        /// <c>persistentDataPath/synced/</c> に置く）。手置き（<see cref="PersistentData"/>）の
+        /// <b>直後</b>——手置きは常に勝つ。
+        /// </summary>
+        Synced,
+
         UserConfig,
         StreamingAssets,
     }
@@ -53,6 +61,7 @@ namespace ChatterMascot.Vrm
                 case AssetSource.EnvironmentVariable: return "環境変数";
                 case AssetSource.Settings: return "設定";
                 case AssetSource.PersistentData: return "persistentDataPath";
+                case AssetSource.Synced: return "同期";
                 case AssetSource.UserConfig: return "ユーザー設定";
                 case AssetSource.StreamingAssets: return "同梱";
                 default: return source.ToString();
@@ -101,16 +110,24 @@ namespace ChatterMascot.Vrm
     /// | 1 | 起動引数 | <c>-vrm</c> | <c>-vrma</c> | 全 |
     /// | 2 | 環境変数 | <c>CHATTER_MASCOT_VRM</c> | <c>CHATTER_MASCOT_VRMA</c> | 全 |
     /// | 3 | <b>設定</b>（#76） | <c>models/&lt;選んだ名前&gt;</c> | —— | デスクトップのみ |
-    /// | 4 | <c>persistentDataPath/</c> | <c>models/mascot.vrm</c> | <c>animations/idle.vrma</c> | 全 |
-    /// | 5 | <c>${XDG_CONFIG_HOME:-~/.config}/chatter-agent/</c> | <c>models/*.vrm</c> | <c>animations/*.vrma</c> | デスクトップのみ |
-    /// | 6 | <c>streamingAssetsPath/</c>（同梱） | <c>vita.vrm</c> | <c>idle_loop.vrma</c> | 全 |
+    /// | 4 | <c>persistentDataPath/</c>（手置き） | <c>models/mascot.vrm</c> | <c>animations/idle.vrma</c> | 全 |
+    /// | 5 | <c>persistentDataPath/synced/</c>（#117。<c>AssetSyncClient</c> が取得） | <c>models/mascot.vrm</c> | <c>animations/idle.vrma</c> | 全 |
+    /// | 6 | <c>${XDG_CONFIG_HOME:-~/.config}/chatter-agent/</c> | <c>models/*.vrm</c> | <c>animations/*.vrma</c> | デスクトップのみ |
+    /// | 7 | <c>streamingAssetsPath/</c>（同梱） | <c>vita.vrm</c> | <c>idle_loop.vrma</c> | 全 |
     ///
-    /// ★ <b>4 と 5 は<u>置き場所（ディレクトリ名）</u>を揃えてある</b>（<c>models/</c> と
-    ///   <c>animations/</c>）。プラットフォームごとに違うと、「どこに置けばいいか」の説明が2種類になる。
-    ///   <see cref="Spec.UserDirectory"/> を両方で共有しているので、片方だけ動かせない。
-    ///   ★ <b>受け付けるファイル名は違う。</b> 4 は<b>固定名1本</b>、5 は <c>*.vrm</c> /
+    /// ★ <b>4・5・6 は<u>置き場所（ディレクトリ名）</u>を揃えてある</b>（<c>models/</c> と
+    ///   <c>animations/</c>）。プラットフォームごとに違うと、「どこに置けばいいか」の説明が複数種類になる。
+    ///   <see cref="Spec.UserDirectory"/> を3段で共有しているので、どれか1つだけ動かせない。
+    ///   ★ <b>受け付けるファイル名は違う。</b> 4・5 は<b>固定名1本</b>、6 は <c>*.vrm</c> /
     ///   <c>*.vrma</c> の<b>走査</b>（上の表の <c>PersistentFile</c> 列と <c>Pattern</c> 列のとおり）。
-    ///   <b>「4 の置き場所なら何を置いても読まれる」ではない。</b>
+    ///   <b>「4・5 の置き場所なら何を置いても読まれる」ではない。</b>
+    ///
+    /// ★ <b>5 は手置き（4）の<u>直後</u>に置くこと。</b> 手置きは常に勝つ——同じ固定名を
+    ///   サーバーからも取得するので、探索順が逆だと同期したファイルが手置きを覆してしまう。
+    ///   デスクトップは同期しない（サーバーと同じファイルシステムを直接読んでいるので意味が無い）が、
+    ///   この段自体はプラットフォームを問わず載る（<see cref="AssetEnv.HasUserConfigDirectory"/> を見ない）
+    ///   ——同期を起こすかどうかは呼び出し側（<c>MascotRunner</c>）の判断で、探索順はどちらの
+    ///   プラットフォームでも同じ形を保つ。
     ///
     /// ★ <b>設定は起動引数・環境変数より<u>下</u>。</b> <c>-vrm</c> は切り分けの逃げ道
     ///   （「設定が壊れていても、この引数を付ければ必ず出る」）なので、設定より優先を保つ。
@@ -166,6 +183,15 @@ namespace ChatterMascot.Vrm
 
         /// <inheritdoc cref="ModelsDirectory"/>
         public const string AnimationsDirectory = "animations";
+
+        /// <summary>
+        /// サーバーから取得したファイルの置き場所（<c>persistentDataPath/</c> 直下。#117）。
+        ///
+        /// ★★ <see cref="ModelsDirectory"/> と同じ理由でリテラルで持たない。探索
+        ///   （<see cref="Enumerate"/> / <see cref="AnimationRoots"/>）と <c>AssetSyncClient</c>
+        ///   の両方がここを使う。
+        /// </summary>
+        public const string SyncedDirectory = "synced";
 
         /// <summary>
         /// 設定パネルが選んだモデルを置く<b>固定のファイル名</b>（<c>models/</c> 配下）。
@@ -248,6 +274,12 @@ namespace ChatterMascot.Vrm
             //   保つのが目的で、直下に置くと配置がプラットフォームごとに2種類になる
             Add(result, AssetSource.PersistentData, env,
                 Join(Join(env.PersistentDataPath, spec.UserDirectory), spec.PersistentFile));
+
+            // ★ 手置き（PersistentData）の直後。プラットフォームを問わず載せる——
+            //   同期を起こすかどうかの判断（デスクトップでは何もしない）は呼び出し側
+            //   （MascotRunner）が持ち、探索順はどちらのプラットフォームでも同じ形にする
+            Add(result, AssetSource.Synced, env,
+                Join(Join(Join(env.PersistentDataPath, SyncedDirectory), spec.UserDirectory), spec.PersistentFile));
 
             foreach (var file in userFiles) Add(result, AssetSource.UserConfig, env, file);
 
@@ -343,23 +375,27 @@ namespace ChatterMascot.Vrm
         /// | 順 | 出どころ | 対象 |
         /// |---|---|---|
         /// | 1 | <c>persistentDataPath/animations/</c> | 全 |
-        /// | 2 | <c>${XDG_CONFIG_HOME:-~/.config}/chatter-agent/animations/</c> | デスクトップのみ |
-        /// | 3 | <c>streamingAssetsPath/animations/</c>（同梱） | 全 |
+        /// | 2 | <c>persistentDataPath/synced/animations/</c>（#117） | 全 |
+        /// | 3 | <c>${XDG_CONFIG_HOME:-~/.config}/chatter-agent/animations/</c> | デスクトップのみ |
+        /// | 4 | <c>streamingAssetsPath/animations/</c>（同梱） | 全 |
         ///
         /// ★ <see cref="Enumerate"/> と違い、ここは「ファイル1本」ではなく「ルートディレクトリ」を
         ///   返す。<c>AnimationManifest.Build</c> が各ルート × 6カテゴリ（<c>MotionCategories.All</c>）で
         ///   <c>ListFiles(Join(root, カテゴリ名), "*.vrma")</c> を呼ぶ。
         /// ★ <c>env == null</c> は空。<c>Join</c> が <c>null</c> を返した段（基準が空）は飛ばす——
         ///   <see cref="Enumerate"/> の <c>Add</c> と同じ思想。
-        /// ★ ユーザー段（2）は <see cref="AssetEnv.HasUserConfigDirectory"/> のときだけ。
-        ///   Android には共有ファイルシステムが無い。
+        /// ★ ユーザー段（3）は <see cref="AssetEnv.HasUserConfigDirectory"/> のときだけ。
+        ///   Android には共有ファイルシステムが無い。同期の段（2）はこれを見ない——
+        ///   <see cref="Enumerate"/> の <c>Synced</c> と同じく、探索順はどちらの
+        ///   プラットフォームでも同じ形にする。
         /// </summary>
         public static IReadOnlyList<string> AnimationRoots(AssetEnv env)
         {
-            var result = new List<string>(3);
+            var result = new List<string>(4);
             if (env == null) return result;
 
             AddRoot(result, Join(env.PersistentDataPath, AnimationsDirectory));
+            AddRoot(result, Join(Join(env.PersistentDataPath, SyncedDirectory), AnimationsDirectory));
             if (env.HasUserConfigDirectory)
             {
                 AddRoot(result, Join(RuntimeDirectory(env), AnimationsDirectory));

@@ -181,11 +181,14 @@ Settings and assets live under `~/.config/chatter-agent/` (or under `XDG_CONFIG_
 The model can be swapped from the settings panel, but **there's no UI for motion.** Create the directory, drop a `.vrma` file in, and it's picked up on the next launch. There's no directory for `neutral` (the default behavior is not to play an emotion motion).
 
 **Android XR uses the same directories** (under `Android/data/tech.sukima.chattermascot/files/` on the
-device), **but the two files directly under them are fixed names: it reads only `models/mascot.vrm` and
-`animations/idle.vrma`.** The free-form name in the table above (`animations/*.vrma`) has no effect there —
-push one and it silently falls back to the bundled motion. **The per-category directories
-(`animations/happy/` and so on) do take free-form names.** There is no settings UI on the device, so
-`adb push` the files — see [`docs/mascot.md`](./docs/mascot.md).
+device), but **you don't need `adb push`.** Once the connection target and token are configured
+(`configure-android.sh`), it fetches automatically from the server's `GET /v1/assets` on every launch
+(default `auto`; takes effect from the next launch). Manually placed files still work too, and take
+priority over synced ones. **The two files directly under those directories are still fixed names: it
+reads only `models/mascot.vrm` and `animations/idle.vrma`.** The free-form name in the table above
+(`animations/*.vrma`) has no effect there. **The per-category directories (`animations/happy/` and so
+on) do take free-form names, whether synced or manually placed.** See
+[`docs/mascot.md`](./docs/mascot.md) ("モデルとモーションを入れる").
 
 ## Development
 
@@ -200,6 +203,7 @@ npm run verify:phase-a   # hook → record + delivery queue
 npm run verify:phase-b   # delivery queue → WebSocket
 npm run verify:tts       # synthesis and GET /audio/
 npm run verify:player    # WebSocket → fetch audio → play → ack
+npm run verify:assets    # manifest → GET /v1/assets/ → resume via Range
 ```
 
 `verify:tts` and `verify:player` swap in stubs for the synthesis engine and the playback command, so you need neither AivisSpeech nor an audio device.
@@ -221,7 +225,6 @@ cd chatter-mascot
 
 ## Roadmap
 
-- Distributing models and motion from the server side
 - Multi-language support — make the TTS swappable / drop the dictionary-based emotion classification
 - Support for coding agents other than Claude
 - Support for moving around in XR space to some degree, and spatial anchor support

@@ -29,11 +29,10 @@ fi
 #   clang を走らせるとテストの起動が毎回遅くなる。ソースの変更を拾うのは build.sh の役目。
 #
 # ★ 失敗しても止めない。バンドルが無くても Unity は回る（常駐機能だけが落ちる）。
-#   ただし黙って続けると .meta が壊れるので、何が起きるかを名指しする。
+#   .meta は build-native.sh が入れ物を残すことで守られる。
 NATIVE_BUNDLE_BIN="$PROJECT_PATH/Assets/Plugins/macOS/ChatterMascotNative.bundle/Contents/MacOS/ChatterMascotNative"
 if [ ! -f "$NATIVE_BUNDLE_BIN" ]; then
   if ! "$(dirname "${BASH_SOURCE[0]}")/build-native.sh"; then
-    # ★ 失敗しても build-native.sh が .bundle の入れ物を残すので、.meta は孤児にならない。
     echo "[Native] バンドルを作れませんでした。常駐機能は動きません" >&2
   fi
 fi

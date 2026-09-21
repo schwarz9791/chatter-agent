@@ -24,6 +24,10 @@
 - **Mac Build Support (IL2CPP)** — macOS Standalone のビルドに要る
 - **Android Build Support**（OpenJDK / SDK & NDK 込み）— Android ビルドに要る。同梱の SDK / NDK / JDK だけで足り、外部の SDK 設定は要らない
 
+★ **これ以外のプラットフォームを入れないこと。** OpenXR の設定アセットには、Editor に入っている
+Build Support の枠がそのまま生える。要らないものを入れておくと、**Unity を回すだけで追跡ファイルが
+汚れる**（→ [`docs/knowledge/mascot-android-xr.md`](./knowledge/mascot-android-xr.md)）。
+
 ### Xcode コマンドラインツール（macOS のみ）
 
 メニューバー常駐のネイティブプラグインを `clang` でビルドするのに要る。

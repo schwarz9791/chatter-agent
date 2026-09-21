@@ -607,6 +607,12 @@ Editor に入っているモジュール（ここでは Web）の枠が生える
 機能は無く、`PlaybackEngines/WebGLSupport` を手で消して `modules.json` の該当エントリを
 `"selected": false` にする必要がある（非公式な手順。戻すには再ダウンロード）。
 
+★ **外すと本当に止まる（実測）。** 上の手順を踏んだうえで、再現条件そのもの（`Library/` を
+退避してから `test.sh`）を走らせた。`Keys` は `0100000007000000` のままで、追跡ファイルは
+1つも汚れなかった。`modules.json` の差分は `webgl` の `"selected"` の**1行だけ**で、
+Android 系のエントリには触れない。`Library/` は 12G → 2.3G に減った
+（2026-09-21 / Unity 6000.3.14f1 arm64 / EditMode 815 件は通過したまま）。
+
 - **失敗したビルドは後始末をしない** —— XR Simulation の設定は `Assets/XR/Temp/` へ退避されたきり
   元の場所から消え（追跡ファイルの**削除**として出る）、`ProjectSettings.asset` の
   `preloadedAssets` には XR の項目が足されたまま残る。退避先の `Assets/XR/Temp/` は

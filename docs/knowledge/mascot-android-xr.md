@@ -125,6 +125,24 @@ Android の出荷値そのもの（→ [`mascot-speech.md`](./mascot-speech.md)�
 （Android には積まないが、実体が無いと `.bundle.meta` が孤児として捨てられるため）。
 IL2CPP の作業ディレクトリ `.utmp/` は `.gitignore` 済み。
 
+### 端末に1行出す（Toast）は JNI 直呼び。`CharSequence` に C# の `string` をそのまま渡せる
+
+`Ui/DeviceToast` が `android.widget.Toast` を `AndroidJavaClass` 経由で叩いている。リポジトリで
+唯一の JNI 呼び出し。
+
+★ **Java 側の宣言は `makeText(Context, CharSequence, int)` で、Unity が C# の `System.String` から
+導出する signature は `Ljava/lang/String;`。それでも通る。** Unity の `AndroidJNIHelper.GetMethodID`
+が、導出した signature で引けなかったときに**リフレクションで互換メソッドを探しに行く**ため。
+世に出回る Unity の Toast 例が軒並み `new AndroidJavaObject("java.lang.String", message)` で
+包んでいるが、**包まなくてよい**（エミュレータ `XR_Glasses` / API 36 で表示を確認。2026-09-21）。
+
+★★ **ただし「静かに失敗しうる呼び出し」であることは変わらない。** メソッド解決に失敗しても
+例外は `Debug.LogWarning` に落ちるので、**端末上では「何も出ない」としか見えない。** signature の
+読みだけでは可否を決められないので、**実機で一度も鳴らしていない JNI 呼び出しを足さないこと。**
+
+★ 折り返しは**文面のリテラルに `\n` を書く。** 「。」で機械的に折る形にすると、切りたくない文まで
+巻き込む——切る位置は文面ごとに違う。
+
 ### 検証時の接続
 
 `scripts/run-android.sh` が `adb reverse tcp:8570 tcp:${CHATTER_AGENT_PORT:-8570}` を張るので、

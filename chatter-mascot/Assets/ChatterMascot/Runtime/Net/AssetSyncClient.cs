@@ -42,8 +42,9 @@ namespace ChatterMascot.Net
         public event Action<int, int, int> Completed;
 
         /// <summary>
-        /// マニフェストを取得・解釈できず、この回の同期を諦めた。文面は
-        /// <see cref="ManifestUnreachableMessage"/> か <see cref="ManifestUnreadableMessage"/> のどちらか。
+        /// マニフェストの取得・解釈・中身のいずれかで躓き、この回の同期を諦めた。文面は
+        /// <see cref="ManifestUnreachableMessage"/> / <see cref="ManifestUnreadableMessage"/> /
+        /// <see cref="ManifestEmptyMessage"/> のいずれか。
         ///
         /// ★ <b>サーバーが落ちている・端末が別の Wi-Fi にいる・トークンが古い、という
         ///   一番踏む失敗が無音にならないよう、ここで端末に届ける。</b> <see cref="Completed"/> と
@@ -51,11 +52,24 @@ namespace ChatterMascot.Net
         /// </summary>
         public event Action<string> Failed;
 
+        // ★ 端末に出す文面の改行は**リテラルに書く**（DescribeResult も同じ）。トーストは幅が
+        //   狭いので折り返したいが、切る位置は文面ごとに違う——「。」で機械的に折ると、
+        //   切りたくない文まで巻き込む。
+        //
+        // ★ 3つとも2行目を揃える。躓いた理由は違っても**次にやることは同じ**（何もしなくてよい）
+        //   なので、違う言い方をすると対処が違うように読める。
+
         /// <summary>マニフェストを取得できなかった（接続できない・応答が無い）ときの文面。</summary>
-        internal const string ManifestUnreachableMessage = "サーバーに繋がりません。モデルとモーションは前回のままです";
+        internal const string ManifestUnreachableMessage =
+            "サーバーに繋がりません。\n以前に設定されたモデルとモーションを使用します。";
 
         /// <summary>マニフェストは取得できたが読めなかった（契約から外れている）ときの文面。</summary>
-        internal const string ManifestUnreadableMessage = "サーバーの応答を読めませんでした。モデルとモーションは前回のままです";
+        internal const string ManifestUnreadableMessage =
+            "サーバーの応答を読めませんでした。\n以前に設定されたモデルとモーションを使用します。";
+
+        /// <summary>マニフェストは読めたが素材が1件も載っていなかったときの文面。</summary>
+        internal const string ManifestEmptyMessage =
+            "サーバーにモデルとモーションがありません。\n以前に設定されたモデルとモーションを使用します。";
 
         public readonly string BaseUrl;
         private readonly int _timeoutSeconds;
@@ -136,6 +150,9 @@ namespace ChatterMascot.Net
             if (plan.Manifest.Count == 0)
             {
                 Warn?.Invoke("[AssetSync] サーバーに素材がありません。前回の内容のまま使います");
+                // ★ ここも端末に届ける。素材の置き忘れは**ユーザーに手の打てる状態**なので、
+                //   繋がらなかったときと同じく無音にしない
+                Failed?.Invoke(ManifestEmptyMessage);
                 return;
             }
 
@@ -174,16 +191,16 @@ namespace ChatterMascot.Net
             //   全部こぼしたのと、取って反映待ちなのは、次にやることが違う
             if (planned > 0 && fetched <= 0)
             {
-                return "モデルとモーションを取得できませんでした。次に起動したときにやり直します";
+                return "モデルとモーションを取得できませんでした。\n次に起動したときにやり直します。";
             }
 
             if (fetched < planned)
             {
-                return $"モデルとモーションの一部を更新しました（{fetched}/{planned} 件）。" +
-                       "次に起動したときに続きを取りに行きます";
+                return $"モデルとモーションの一部を更新しました（{fetched}/{planned} 件）。\n" +
+                       "次に起動したときに続きを取りに行きます。";
             }
 
-            return "モデルとモーションを更新しました。次に起動したときから反映されます";
+            return "モデルとモーションを更新しました。\n次に起動したときから反映されます。";
         }
 
         private async Task<string> FetchManifestAsync()

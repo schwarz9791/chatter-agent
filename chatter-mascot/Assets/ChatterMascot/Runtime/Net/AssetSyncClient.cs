@@ -41,6 +41,22 @@ namespace ChatterMascot.Net
         /// </summary>
         public event Action<int, int, int> Completed;
 
+        /// <summary>
+        /// マニフェストを取得・解釈できず、この回の同期を諦めた。文面は
+        /// <see cref="ManifestUnreachableMessage"/> か <see cref="ManifestUnreadableMessage"/> のどちらか。
+        ///
+        /// ★ <b>サーバーが落ちている・端末が別の Wi-Fi にいる・トークンが古い、という
+        ///   一番踏む失敗が無音にならないよう、ここで端末に届ける。</b> <see cref="Completed"/> と
+        ///   違って文面はここで決め切る——判断材料ではなく、そのまま出す1行を渡す。
+        /// </summary>
+        public event Action<string> Failed;
+
+        /// <summary>マニフェストを取得できなかった（接続できない・応答が無い）ときの文面。</summary>
+        internal const string ManifestUnreachableMessage = "サーバーに繋がりません。モデルとモーションは前回のままです";
+
+        /// <summary>マニフェストは取得できたが読めなかった（契約から外れている）ときの文面。</summary>
+        internal const string ManifestUnreadableMessage = "サーバーの応答を読めませんでした。モデルとモーションは前回のままです";
+
         public readonly string BaseUrl;
         private readonly int _timeoutSeconds;
         private readonly string _token;
@@ -94,12 +110,14 @@ namespace ChatterMascot.Net
             {
                 // ★ 取得に失敗したら何もしない。前回のキャッシュを消さない
                 Warn?.Invoke("[AssetSync] マニフェストを取得できませんでした: " + e.Message);
+                Failed?.Invoke(ManifestUnreachableMessage);
                 return;
             }
 
             if (manifestJson == null)
             {
                 Warn?.Invoke("[AssetSync] マニフェストを取得できませんでした");
+                Failed?.Invoke(ManifestUnreachableMessage);
                 return;
             }
 
@@ -107,6 +125,17 @@ namespace ChatterMascot.Net
             if (!plan.ManifestOk)
             {
                 Warn?.Invoke("[AssetSync] マニフェストを読めませんでした。前回の内容のまま使います");
+                Failed?.Invoke(ManifestUnreadableMessage);
+                return;
+            }
+
+            // ★★ **空のマニフェストでは何も片付けないこと。** `AssetSyncPlan.Build` が
+            //   `Delete` を出さないのと同じ理由——「空」と「サーバーの設定ミス」は区別できない。
+            //   ここで `CleanupOrphanParts` まで進むと、**取りかけの `.part` が全部「マニフェストに
+            //   無いもの」になって消える**ので、細い経路で落としかけていた数十 MB が最初からになる。
+            if (plan.Manifest.Count == 0)
+            {
+                Warn?.Invoke("[AssetSync] サーバーに素材がありません。前回の内容のまま使います");
                 return;
             }
 
@@ -190,44 +219,57 @@ namespace ChatterMascot.Net
             var partPath = AssetPath.Join(partsDir, entry.Sha256 + PartExtension);
 
             var existingLength = File.Exists(partPath) ? new FileInfo(partPath).Length : 0;
-            var append = existingLength > 0;
 
-            using (var request = UnityWebRequest.Get(BaseUrl + AssetPathPrefix + entry.Path))
+            // ★★ **.part が entry.Size ぶん以上あるときは HTTP をまったく叩かないこと。**
+            //   ちょうど entry.Size ぶん届いている .part に Range: bytes=<size>- を投げると、
+            //   満たせる範囲が無いのでサーバーは 416 を返し、下の resumable 判定が false になって
+            //   すぐ下の ★★ に反して完全に正しいファイルを消して0から引き直すことになる。
+            //   検証（ハッシュ照合）の段へそのまま合流させる——一致すれば採用、不一致なら
+            //   （サイズ超過の壊れた .part も含めて）そこで片付く。届いた経路によらず検証は同じでよい。
+            //
+            // ★★ **existingLength > 0 を条件から落とさないこと。** entry.Size が 0 の資産で
+            //   「存在しない .part をハッシュしようとして毎回失敗する」ループに落ちる。
+            if (!(existingLength > 0 && existingLength >= entry.Size))
             {
-                request.timeout = _timeoutSeconds;
-                SetAuthHeader(request);
-                if (append) request.SetRequestHeader("Range", "bytes=" + existingLength + "-");
+                var append = existingLength > 0;
 
-                // ★ メモリに載せずディスクへ流す。モデルは数十 MB になるので DownloadHandlerBuffer は使わない
-                request.downloadHandler = new DownloadHandlerFile(partPath, append) { removeFileOnAbort = false };
+                using (var request = UnityWebRequest.Get(BaseUrl + AssetPathPrefix + entry.Path))
+                {
+                    request.timeout = _timeoutSeconds;
+                    SetAuthHeader(request);
+                    if (append) request.SetRequestHeader("Range", "bytes=" + existingLength + "-");
 
-                try
-                {
-                    await SendAsync(request);
-                }
-                catch (Exception e)
-                {
-                    // ★ 例外はここまで届いた分の .part を残す。次回、続きから取り直せる
-                    Warn?.Invoke($"[AssetSync] {entry.Path}: 取得できませんでした（続きから再試行します）: {e.Message}");
-                    return false;
-                }
+                    // ★ メモリに載せずディスクへ流す。モデルは数十 MB になるので DownloadHandlerBuffer は使わない
+                    request.downloadHandler = new DownloadHandlerFile(partPath, append) { removeFileOnAbort = false };
 
-                var expected = append ? 206 : 200;
-                if (request.result != UnityWebRequest.Result.Success || request.responseCode != expected)
-                {
-                    // ★★ **途中まで届いた .part を捨てるのは、中身が信用できないと分かったときだけ。**
-                    //   細い経路を前提にした仕組みなので、転送が途中で切れるのは普通のこと。ここで
-                    //   一律に消すと毎回ゼロからやり直しになり、**再開できる作りにした意味が消える**。
-                    //
-                    //   ・期待どおりの応答（206 / 200）だった → 届いた分は正しい続き。残す
-                    //   ・応答そのものが無い（responseCode == 0）→ 何も書かれていない。残す
-                    //   ・それ以外 → 範囲指定を無視した全体やエラー本文が .part に混ざった可能性が
-                    //     ある。捨てて次回また最初から
-                    var resumable = request.responseCode == expected || request.responseCode == 0;
-                    if (!resumable) TryDelete(partPath);
-                    Warn?.Invoke($"[AssetSync] {entry.Path}: 取得に失敗しました (HTTP {request.responseCode})" +
-                                 (resumable ? "。次回は続きから取り直します" : ""));
-                    return false;
+                    try
+                    {
+                        await SendAsync(request);
+                    }
+                    catch (Exception e)
+                    {
+                        // ★ 例外はここまで届いた分の .part を残す。次回、続きから取り直せる
+                        Warn?.Invoke($"[AssetSync] {entry.Path}: 取得できませんでした（続きから再試行します）: {e.Message}");
+                        return false;
+                    }
+
+                    var expected = append ? 206 : 200;
+                    if (request.result != UnityWebRequest.Result.Success || request.responseCode != expected)
+                    {
+                        // ★★ **途中まで届いた .part を捨てるのは、中身が信用できないと分かったときだけ。**
+                        //   細い経路を前提にした仕組みなので、転送が途中で切れるのは普通のこと。ここで
+                        //   一律に消すと毎回ゼロからやり直しになり、**再開できる作りにした意味が消える**。
+                        //
+                        //   ・期待どおりの応答（206 / 200）だった → 届いた分は正しい続き。残す
+                        //   ・応答そのものが無い（responseCode == 0）→ 何も書かれていない。残す
+                        //   ・それ以外 → 範囲指定を無視した全体やエラー本文が .part に混ざった可能性が
+                        //     ある。捨てて次回また最初から
+                        var resumable = request.responseCode == expected || request.responseCode == 0;
+                        if (!resumable) TryDelete(partPath);
+                        Warn?.Invoke($"[AssetSync] {entry.Path}: 取得に失敗しました (HTTP {request.responseCode})" +
+                                     (resumable ? "。次回は続きから取り直します" : ""));
+                        return false;
+                    }
                 }
             }
 

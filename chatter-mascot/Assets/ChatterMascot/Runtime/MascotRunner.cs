@@ -455,6 +455,9 @@ namespace ChatterMascot
                 //   見た目が変わらないことを文面でそのまま言う（→ DescribeResult）
                 client.Completed += (fetched, planned, deleted) =>
                     DeviceToast.Show(AssetSyncClient.DescribeResult(fetched, planned, deleted));
+                // ★ マニフェストの取得・解釈に失敗したことも端末に出す。サーバーが落ちている・
+                //   端末が別の Wi-Fi にいる・トークンが古い、という一番踏む失敗が無音にならないため
+                client.Failed += DeviceToast.Show;
 
                 Debug.Log("[Mascot] synced/ の更新を起こします。反映は次回の起動からです");
                 _ = client.SyncAsync();

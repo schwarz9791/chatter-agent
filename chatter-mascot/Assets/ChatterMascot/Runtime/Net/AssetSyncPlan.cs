@@ -68,6 +68,12 @@ namespace ChatterMascot.Net
         /// ★ <b>マニフェストが読めなかったら <see cref="Delete"/> を1件も出さないこと。</b>
         ///   取得に失敗したときは前回のキャッシュを消してはいけない——差分を計算する前に
         ///   打ち切っておけば、呼び出し側は <see cref="ManifestOk"/> だけ見ればよい。
+        ///
+        /// ★ <b>読めた <c>entries</c> が0件でも <see cref="Delete"/> を1件も出さないこと。</b>
+        ///   「空」と「サーバーの設定ミス」は区別できない——別のランタイムルートで起動した、
+        ///   素材を一時的に退避した、というだけで端末のキャッシュが丸ごと消え、細い経路で
+        ///   数十 MB を取り直すことになる。消さずに残す側に倒すと古いファイルが残るだけで、
+        ///   コストが釣り合わない。★ 1件でも載っていれば従来どおり差分削除は効く。
         /// </summary>
         public static AssetSyncPlan Build(string manifestJson, IReadOnlyDictionary<string, string> local)
         {
@@ -76,6 +82,11 @@ namespace ChatterMascot.Net
             {
                 return new AssetSyncPlan(
                     false, Array.Empty<AssetManifestEntry>(), Array.Empty<string>(), Array.Empty<AssetManifestEntry>());
+            }
+
+            if (entries.Count == 0)
+            {
+                return new AssetSyncPlan(true, Array.Empty<AssetManifestEntry>(), Array.Empty<string>(), entries);
             }
 
             var localFiles = local ?? new Dictionary<string, string>(StringComparer.Ordinal);

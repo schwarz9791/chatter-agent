@@ -95,6 +95,33 @@ namespace ChatterMascot.Tests
             Assert.That(plan.Fetch, Is.Empty);
         }
 
+        /// <summary>
+        /// ★ 「空」と「読めなかった」は別物——空のマニフェストは <c>ManifestOk</c> が <c>true</c>
+        ///   のまま、それでも <see cref="AssetSyncPlan.Delete"/> は1件も出さない。「空」と
+        ///   「サーバーの設定ミス」は区別できないので、消さない側に倒す。
+        /// </summary>
+        [Test]
+        public void EmptyManifestIsOkButDeletesNothing()
+        {
+            var local = new Dictionary<string, string> { [ModelPath] = HashA, [IdlePath] = HashB };
+            var plan = AssetSyncPlan.Build(Manifest(), local);
+
+            Assert.That(plan.ManifestOk, Is.True);
+            Assert.That(plan.Delete, Is.Empty);
+            Assert.That(plan.Fetch, Is.Empty);
+        }
+
+        /// <summary>★ 空のマニフェストへのガードは効かせすぎない——1件でも載っていれば従来どおり差分削除は効く。</summary>
+        [Test]
+        public void SingleEntryManifestStillDeletesLocalExtras()
+        {
+            var local = new Dictionary<string, string> { [ModelPath] = HashA, [IdlePath] = HashB };
+            var plan = AssetSyncPlan.Build(Manifest((ModelPath, 10, HashA)), local);
+
+            Assert.That(plan.ManifestOk, Is.True);
+            Assert.That(plan.Delete, Is.EqualTo(new[] { IdlePath }));
+        }
+
         /// <summary><c>animations/&lt;category&gt;/&lt;name&gt;.vrma</c> の3形目。</summary>
         [Test]
         public void AcceptsCategorizedAnimationPaths()

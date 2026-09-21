@@ -137,5 +137,52 @@ namespace ChatterMascot.Tests
 
             Assert.That(plan.ManifestOk, Is.EqualTo(accepted), path);
         }
+
+        /// <summary>
+        /// 端末に出す1行（<c>AssetSyncClient.DescribeResult</c>）。
+        /// ★ <b>何も変わらなかった起動では黙る。</b> 定常状態ではマニフェストしか流れないので、
+        ///   毎回出すと「変わっていない」ことを知らせるだけの通知が起動のたびに出る。
+        /// </summary>
+        [Test]
+        public void UnchangedSyncSaysNothing()
+        {
+            Assert.That(AssetSyncClient.DescribeResult(0, 0, 0), Is.Null);
+        }
+
+        [Test]
+        public void FullSyncMentionsTheNextLaunch()
+        {
+            var message = AssetSyncClient.DescribeResult(3, 3, 0);
+
+            Assert.That(message, Is.Not.Null);
+            Assert.That(message, Does.Contain("次に起動"));
+        }
+
+        /// <summary>削除だけでも内容は変わっているので黙らない。</summary>
+        [Test]
+        public void DeleteOnlySyncStillSpeaks()
+        {
+            Assert.That(AssetSyncClient.DescribeResult(0, 0, 2), Is.Not.Null);
+        }
+
+        /// <summary>
+        /// ★ 取りきれなかったことを隠さない。細い回線では1回の起動で終わらないので、
+        ///   もう一度立ち上げれば続きを取ると分かる文面にする。
+        /// </summary>
+        [Test]
+        public void PartialSyncSaysItWillContinue()
+        {
+            var message = AssetSyncClient.DescribeResult(1, 3, 0);
+
+            Assert.That(message, Does.Contain("1/3"));
+            Assert.That(message, Does.Contain("続き"));
+        }
+
+        /// <summary>取得しようとして1件も取れなかったときも、黙らず「続きを取る」と言う。</summary>
+        [Test]
+        public void FailedSyncIsNotSilent()
+        {
+            Assert.That(AssetSyncClient.DescribeResult(0, 2, 0), Is.Not.Null);
+        }
     }
 }

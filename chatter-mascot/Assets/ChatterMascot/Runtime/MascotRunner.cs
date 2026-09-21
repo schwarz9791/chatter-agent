@@ -7,6 +7,7 @@ using ChatterMascot.Net;
 using ChatterMascot.Playback;
 using ChatterMascot.Protocol;
 using ChatterMascot.Settings;
+using ChatterMascot.Ui;
 using ChatterMascot.Vrm;
 using UnityEngine;
 
@@ -450,6 +451,10 @@ namespace ChatterMascot
                     AudioFetcher.DeriveAudioBaseUrl(serverUrl), AssetSyncTimeoutMs, ServerToken, syncedRoot);
                 client.Log += message => Debug.Log("[Mascot] " + message);
                 client.Warn += message => Debug.LogWarning("[Mascot] " + message);
+                // ★ 変わったときだけ端末に出す。反映は次回の起動なので、その場で
+                //   見た目が変わらないことを文面でそのまま言う（→ DescribeResult）
+                client.Completed += (fetched, planned, deleted) =>
+                    DeviceToast.Show(AssetSyncClient.DescribeResult(fetched, planned, deleted));
 
                 Debug.Log("[Mascot] synced/ の更新を起こします。反映は次回の起動からです");
                 _ = client.SyncAsync();

@@ -33,6 +33,14 @@ namespace ChatterMascot.Net
 
         public event Action<string> Warn;
 
+        /// <summary>
+        /// 1回ぶんの同期が終わった。<c>(取得できた件数, 取得しようとした件数, 消した件数)</c>。
+        ///
+        /// ★ <b>出す文面をここで決めないこと。</b> 何に使うか（ログ / 端末の通知）は
+        ///   呼び出し側の都合なので、判断できる材料だけ渡す（→ <see cref="DescribeResult"/>）。
+        /// </summary>
+        public event Action<int, int, int> Completed;
+
         public readonly string BaseUrl;
         private readonly int _timeoutSeconds;
         private readonly string _token;
@@ -116,6 +124,31 @@ namespace ChatterMascot.Net
 
             Log?.Invoke($"[AssetSync] 完了: 取得 {fetched}/{plan.Fetch.Count} 件、削除 {plan.Delete.Count} 件。" +
                         "反映は次回の起動からです");
+            Completed?.Invoke(fetched, plan.Fetch.Count, plan.Delete.Count);
+        }
+
+        /// <summary>
+        /// 端末に出す1行。<b>言うことが無ければ <c>null</c>。</b>
+        ///
+        /// ★ <b>何も変わらなかった起動では出さない。</b> 定常状態ではマニフェストしか流れないので、
+        ///   毎回出すと「変わっていない」ことを知らせるだけの通知が起動のたびに出る。
+        ///
+        /// ★ <b>取りきれなかったことを隠さない。</b> 細い回線では1回の起動で終わらない。
+        ///   「次の起動で続きを取る」と言えば、もう一度立ち上げればよいと分かる。
+        /// </summary>
+        public static string DescribeResult(int fetched, int planned, int deleted)
+        {
+            if (fetched <= 0 && deleted <= 0 && planned <= 0) return null;
+
+            if (fetched < planned)
+            {
+                return $"モデルとモーションを一部だけ更新しました（{fetched}/{planned} 件）。" +
+                       "次に起動したときに続きを取りに行きます";
+            }
+
+            if (fetched <= 0 && deleted <= 0) return null;
+
+            return "モデルとモーションを更新しました。次に起動したときから反映されます";
         }
 
         private async Task<string> FetchManifestAsync()

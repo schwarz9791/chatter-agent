@@ -342,6 +342,19 @@ Android のログは `adb logcat -s Unity`。★★ **Android では 401 と「�
 だったときは**残す**。一律に消すと、切られるたびに毎回ゼロからやり直しになり、再開できる作りに
 した意味が消える。
 
+### `File.Replace` は Android / IL2CPP でも動く
+
+揃った `.part` を本来の場所へ移すとき、宛先が既にあれば `File.Replace` を使う。`File.Move` に
+overwrite 付きの多重定義が無い（`ProjectSettings` の `apiCompatibilityLevel: 6` ＝ .NET Standard
+**2.0**。2.1 ではないので3引数の `Move` はコンパイルが通らない）ためで、**消してから書く形にしては
+いけない** —— 同期は `Awake`、モデルの読み込みは `Start` から走るので**両者が並走する**。隙間に
+読んだ側がファイルを見失うと、同梱のモデルに落ちる。
+
+`File.Replace` が Mono / IL2CPP の Android で動くかは資料が見つからなかったので実測した。
+Android XR エミュレータ（`XR_Glasses`、API 36）で、同期済みの `.vrma` にバイトを足して
+ハッシュを変えてから起動 → `取得 1/1 件`、ファイルは正しいサイズへ戻り、例外も警告も出なかった
+（2026-09-21）。
+
 ## XR（Full Space）
 
 Android ビルドは OpenXR（`com.unity.xr.androidxr-openxr`）で Full Space に入り、キャラクターを空間に固定して立たせる

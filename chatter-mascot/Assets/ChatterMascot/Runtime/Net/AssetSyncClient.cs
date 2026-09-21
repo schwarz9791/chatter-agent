@@ -256,7 +256,13 @@ namespace ChatterMascot.Net
                 var finalDir = DirectoryOf(finalPath);
                 if (finalDir != null) Directory.CreateDirectory(finalDir);
 
-                // ★ 別名で書いてから置き換える（MascotSettingsHost.WriteSettings と同じ作法）
+                // ★★ **置き換えは1回の rename で済ませること。** 同期は Awake から起こされ、
+                //   モデル・モーションの読み込み（VrmStage / VrmMotionPlayer）は Start から走る
+                //   ——**両者は並走する**。消してから書く形にすると、その隙間に読んだ側が
+                //   ファイルを見失い、同梱のモデルに落ちる。
+                //
+                // ★ `File.Move` に overwrite 付きの多重定義は無い（このプロジェクトの
+                //   API 互換レベルは .NET Standard 2.0）。宛先があるときは `File.Replace` を使う
                 if (File.Exists(finalPath)) File.Replace(partPath, finalPath, null);
                 else File.Move(partPath, finalPath);
             }

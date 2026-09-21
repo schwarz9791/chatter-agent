@@ -24,6 +24,10 @@
 - **Mac Build Support (IL2CPP)** — macOS Standalone のビルドに要る
 - **Android Build Support**（OpenJDK / SDK & NDK 込み）— Android ビルドに要る。同梱の SDK / NDK / JDK だけで足り、外部の SDK 設定は要らない
 
+★ **これ以外のプラットフォームを入れないこと。** OpenXR の設定アセットには、Editor に入っている
+Build Support の枠がそのまま生える。要らないものを入れておくと、**Unity を回すだけで追跡ファイルが
+汚れる**（→ [`docs/knowledge/mascot-android-xr.md`](./knowledge/mascot-android-xr.md)）。
+
 ### Xcode コマンドラインツール（macOS のみ）
 
 メニューバー常駐のネイティブプラグインを `clang` でビルドするのに要る。
@@ -141,15 +145,20 @@ Assets/ChatterMascot/
 | 1 | 起動引数 | `-vrm <path>` | `-vrma <path>` | 全 |
 | 2 | 環境変数 | `CHATTER_MASCOT_VRM` | `CHATTER_MASCOT_VRMA` | 全 |
 | 3 | 設定パネルで選んだモデル | `models/mascot.vrm`（固定名） | —— | デスクトップのみ |
-| 4 | `Application.persistentDataPath/` | `models/mascot.vrm` | `animations/idle.vrma` | 全 |
-| 5 | `${XDG_CONFIG_HOME:-~/.config}/chatter-agent/` | `models/*.vrm` | `animations/*.vrma`（直下のみ） | デスクトップのみ |
-| 6 | 同梱（`StreamingAssets/`） | `vita.vrm` | `idle_loop.vrma` | 全 |
+| 4 | `Application.persistentDataPath/`（手置き） | `models/mascot.vrm` | `animations/idle.vrma` | 全 |
+| 5 | `Application.persistentDataPath/synced/`（サーバーから自動取得。[#117](https://github.com/schwarz9791/chatter-agent/issues/117)） | `models/mascot.vrm` | `animations/idle.vrma` | 全 |
+| 6 | `${XDG_CONFIG_HOME:-~/.config}/chatter-agent/` | `models/*.vrm` | `animations/*.vrma`（直下のみ） | デスクトップのみ |
+| 7 | 同梱（`StreamingAssets/`） | `vita.vrm` | `idle_loop.vrma` | 全 |
 
-5 は `core/src/core/paths.ts` の `getRuntimeDir` と**同じ規則**（ユーザーから見て「chatter-agent
+5 は手置き（4）の**直後**に置いてある——手置きは常に勝つので、同期したファイルが手置きを
+黙って上書きすることが無い。デスクトップは同期を起こさない（サーバーと同じファイルシステムを
+直接読んでいるので意味が無い）が、この段自体はプラットフォームを問わず探索順に載っている。
+
+6 は `core/src/core/paths.ts` の `getRuntimeDir` と**同じ規則**（ユーザーから見て「chatter-agent
 の設定はここ1箇所」を保つため）。辞書順の先頭を採る。`animations/<category>/*.vrma`
 （`idle` / `happy` / `angry` / `sad` / `relaxed` / `surprised`。感情モーションと小ネタの置き場）
-は候補には入らない。全部読めなければ Cube が出たままになる——無地の Cube は「異常事態」の
-可視のシグナル。
+は候補には入らない——探索順は下の「感情モーションと小ネタの素材」を見ること。全部読めなければ
+Cube が出たままになる——無地の Cube は「異常事態」の可視のシグナル。
 
 ## Player Settings（macOS Standalone）
 
@@ -248,6 +257,17 @@ macOS と Android を同じコードで通せる。引き換えは ping watchdog
 
 ### 感情モーションと小ネタの素材
 
+`animations/<category>/*.vrma` の探索は「ファイル1本」ではなく「ルートディレクトリ」単位。
+各ルート × 6カテゴリ（`idle`/`happy`/`angry`/`sad`/`relaxed`/`surprised`）を走査し、任意名を
+辞書順で全部拾う。
+
+| 順 | 出どころ | 対象 |
+|---|---|---|
+| 1 | `persistentDataPath/animations/`（手置き） | 全 |
+| 2 | `persistentDataPath/synced/animations/`（サーバーから自動取得。[#117](https://github.com/schwarz9791/chatter-agent/issues/117)） | 全 |
+| 3 | `${XDG_CONFIG_HOME:-~/.config}/chatter-agent/animations/` | デスクトップのみ |
+| 4 | 同梱（`StreamingAssets/animations/`） | 全 |
+
 `animations/<category>/*.vrma` は **VRoid Studio の AnimationClip** を `.vrma` にしたもので、
 VRoid Studio 由来のため再配布できない——同梱せず `~/.config/chatter-agent/animations/<category>/`
 にだけ置く。抽出と変換の道具は抽出そのものがグレーゾーンなので、このリポジトリには置かず
@@ -305,10 +325,14 @@ cd chatter-mascot
   "ui": { "hideHotKey": "ctrl+opt+h" },
   "character": { "idleMotion": true, "cursorGaze": true, "blink": true, "vrm": "" },
   "display": { "frameRate": 30 },
-  "connection": { "serverUrl": "", "token": "" },
+  "connection": { "serverUrl": "", "token": "", "assetSync": "auto" },
   "xr": { "scale": 0.18, "distance": 0.6, "azimuth": 20, "feetBelowEye": 0.2 }
 }
 ```
+
+`connection.assetSync` は `"auto"`（既定）か `"off"`。**デスクトップでは値を持っていても何もしない**
+——サーバーと同じファイルシステムを直接読んでいるので同期の意味が無い。効くのは Android / XR
+だけ（→ 下の「Android / XR」の「モデルとモーションを入れる」）。
 
 `display.frameRate` は `30` か `60` のみ（既定 `30`。それ以外は既定へフォールバック）。設定
 パネルの「モーション」→「フレームレート」から変えられ、反映はデスクトップ限定——Android は
@@ -371,9 +395,44 @@ adb shell pm grant|revoke tech.sukima.chattermascot android.permission.HAND_TRAC
 
 ### モデルとモーションを入れる
 
-Android に設定 UI は無いので、端末の `files/` 配下へ直接置く。**ディレクトリはデスクトップの
-`~/.config/chatter-agent/` と同じ**（`models/` と `animations/`）。ただし**直下の2本は固定名**で、
-デスクトップのような任意名の走査は効かない（端末に共有のファイルシステムが無いので、その段ごと落ちる）。
+**`adb push` は要らない。** `connection.serverUrl` / `connection.token`（→ 下の「LAN 接続」）が
+入っていれば、起動のたびに `chatter-agent-server` の `GET /v1/assets` からモデル・モーションを
+自動で取りに行く（`connection.assetSync`。既定 `"auto"`、`"off"` で止められる。→ 上の「macOS: 設定パネルとメニューバー」）。
+Mac 側にファイルを置く場所はデスクトップと同じ `~/.config/chatter-agent/models/` /
+`~/.config/chatter-agent/animations/`（→ [`README-ja.md`](../README-ja.md)「モデルとモーション」）。
+
+```bash
+cd chatter-mascot
+ADB=~/Library/Android/sdk/platform-tools/adb
+APP=tech.sukima.chattermascot
+
+./scripts/configure-android.sh   # 接続先とトークンを書いて、アプリを起動し直す
+                                 # → この起動で同期が走る（まだ見た目は変わらない）
+
+# 同期が終わったら、もう一度起動し直すと反映される
+$ADB shell am force-stop $APP
+$ADB shell am start -n $APP/com.unity3d.player.UnityPlayerGameActivity
+```
+
+★ **反映は次回の起動から。** 同期はバックグラウンドで走るが、モデル・モーションを読むのは
+起動時の1回きりなので、取得したその場のセッションには出ない——**取得した回の次に起動したとき**
+に反映される。初回は数十 MB を取りに行くので、2回目の起動は同期の完了を待ってから。
+進み具合は `adb logcat -s Unity` の `[AssetSync]` で見る。
+
+取得先は `persistentDataPath/synced/`（→ 上の「モデルとアニメーションの探索順」の5段目）。
+サーバーのマニフェストとの差分（ハッシュが違うファイル）だけを取り直し、サーバー側から消えた
+ファイルは削除する。
+
+★ **Mac 側の素材を「全部」消しても、端末は前回のまま**（1本でも残っていれば、消えた分の削除は効く）。
+「素材が無い」と「サーバーの設定ミス」は区別できないので、消さない側に倒してある —— 取り違えると
+細い経路で数十 MB を取り直すことになり、割に合わない。ただし**黙って前回のまま動かさず**、端末には
+「サーバーにモデルとモーションがありません」と出す（置き忘れに気づけるように）。端末側も空に
+したいなら `synced/` を手で消す。
+
+端末の `files/` 配下へ直接置く**手置き**の経路もこれまでどおり使え、探索順では同期より優先される
+（→ 上の探索順の表の4段目）。**ディレクトリはデスクトップの `~/.config/chatter-agent/` と同じ**
+（`models/` と `animations/`）。ただし**直下の2本は固定名**で、デスクトップのような任意名の走査は
+効かない（端末に共有のファイルシステムが無いので、その段ごと落ちる）。
 
 ```bash
 ADB=~/Library/Android/sdk/platform-tools/adb
@@ -384,8 +443,8 @@ $ADB shell am force-stop tech.sukima.chattermascot
 ```
 
 感情モーションは `animations/<カテゴリ>/*.vrma`（`idle` / `happy` / `angry` / `sad` / `relaxed` /
-`surprised`）。**こちらは任意名のままで効く** —— カテゴリの走査は `persistentDataPath` を無条件に
-積むので、固定名に縛られるのは直下の1本だけ。
+`surprised`）。**こちらは任意名のままで効く** —— 同期・手置きのどちらでも、カテゴリの走査は
+`persistentDataPath` 系を無条件に積むので、固定名に縛られるのは直下の1本だけ。
 
 ★ **`files/` の直下に置く旧レイアウト（`model.vrm` / `idle.vrma`）はもう読まない。** 残っていても
 警告は出ず、同梱のモデルとモーションで起動する。

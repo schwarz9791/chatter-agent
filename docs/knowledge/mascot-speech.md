@@ -294,6 +294,10 @@ EditMode で固定した（終了経路は Editor の Play Mode では戻り値�
 回帰テスト: `SpeechFrameTests` の `TrailingNewlineIsRejected` /
 `NonAsciiDigitsInAudioPathAreRejected`。
 
+★ **同じ契約が `Net/AssetSyncPlan.cs`（#117）にもある。** `animations/<category>/<name>.vrma` の
+`name` を検査する `AnimationFilePattern` も `core/src/core/assetPath.ts` の `NAME_PATTERN` を
+`\A` / `\z` で括って移している——ここも `$` のままだと末尾に改行を持つ名前を通してしまう。
+
 ## ★ `JsonUtility` を使わない
 
 契約は `audio` キーの**欠落**と `null` を区別することを要求している

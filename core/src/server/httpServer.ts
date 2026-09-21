@@ -10,6 +10,11 @@
  *   503  エンジンに繋がらない・合成が返らない。**あとで取りに来い**
  *
  * /v1/*   設定パネル（#76）の制御 API。中身は `server/controlApi.ts`
+ *
+ * GET /v1/assets/<path>
+ *   200 / 206  本体全体 / `Range: bytes=<N>-` に応じた途中から（→ `server/assetCatalog.ts`）
+ *   404  マニフェストに無い
+ *   416  Range の開始位置が本体サイズを超えている
  * ```
  *
  * ★★ **非ループバックからの接続は、ルーティングより前にトークン認証を通る**
@@ -36,10 +41,14 @@
  *   リソースごと**になった（RFC 9110 §15.5.6 が要求しているのは元々こちらの形）。
  */
 
+import * as fs from "fs";
 import * as http from "http";
+import { pipeline } from "stream";
+import { parseAssetPath } from "../core/assetPath";
 import { parseAudioPath } from "../core/audioPath";
 import type { SpeechRecord } from "../core/types";
 import { hasSpeakableText } from "../text/speakable";
+import type { AssetCatalog } from "./assetCatalog";
 import { SynthesisUnavailableError, type AudioStore } from "./audioStore";
 import { isAuthorized } from "./auth";
 import type { ControlApi, ControlResponse } from "./controlApi";
@@ -92,6 +101,8 @@ export interface HttpServerDeps {
    *   症状は「設定パネルが何も表示しない」で、原因の見当が付かない。
    */
   control: ControlApi;
+  /** 配布する VRM / VRMA のカタログ（→ `server/assetCatalog.ts`）。`GET /v1/assets/<path>` が引く */
+  catalog: AssetCatalog;
 }
 
 /** 503 のときにクライアントへ渡す再試行の目安 */
@@ -119,10 +130,11 @@ function isWriteMethod(method: string): boolean {
  */
 interface Route {
   readonly methods: readonly string[];
-  readonly kind: "audio" | "control";
+  readonly kind: "audio" | "control" | "asset";
 }
 
 const AUDIO_ROUTE: Route = { methods: ["GET"], kind: "audio" };
+const ASSET_ROUTE: Route = { methods: ["GET"], kind: "asset" };
 
 /** `/v1/*` のルート表。**パスは完全一致**（正規表現の羅列にしない） */
 const CONTROL_ROUTES = new Map<string, Route>([
@@ -131,14 +143,18 @@ const CONTROL_ROUTES = new Map<string, Route>([
   ["/v1/config", { methods: ["GET", "PATCH"], kind: "control" }],
   ["/v1/tts/preview", { methods: ["POST"], kind: "control" }],
   ["/v1/summary/preview", { methods: ["POST"], kind: "control" }],
+  ["/v1/assets", { methods: ["GET"], kind: "control" }],
 ]);
 
 function resolveRoute(pathname: string): Route | null {
+  // ★ `/v1/assets` は完全一致で先に当たるので、`/v1/assets/<path>` のマニフェストと
+  //   ぶつからない
   const control = CONTROL_ROUTES.get(pathname);
   if (control !== undefined) return control;
-  // ★ 受け取った文字列をパスの組み立てに使わない。正規表現で `(epoch, seq)` に
-  //   分解してから、Map とキューを引く（`speechQueue.read` と同じ論法）
-  return parseAudioPath(pathname) === null ? null : AUDIO_ROUTE;
+  // ★ 受け取った文字列をパスの組み立てに使わない。正規表現で `(epoch, seq)` /
+  //   相対パスに分解してから、Map / カタログを引く（`speechQueue.read` と同じ論法）
+  if (parseAudioPath(pathname) !== null) return AUDIO_ROUTE;
+  return parseAssetPath(pathname) === null ? null : ASSET_ROUTE;
 }
 
 /**
@@ -165,6 +181,22 @@ function allowFor(route: Route, mayWrite: boolean): string[] {
 function isJsonContentType(value: string | undefined): boolean {
   if (typeof value !== "string") return false;
   return (value.split(";")[0] ?? "").trim().toLowerCase() === "application/json";
+}
+
+/**
+ * `Range: bytes=<N>-`（終端を指定しない1本）だけを解釈する。
+ *
+ * ★ **これ以外の形は「Range 無し」と同じに倒す。** `bytes=0-100` のような終端付き・
+ *   複数レンジ（`bytes=0-10,20-30`）は取りに来る理由が無い（モデルもモーションも
+ *   先頭から順に読むだけ）ので、解釈を増やさず 200 で全体を返す。
+ */
+function parseSingleRangeStart(header: string | undefined, size: number): number | "unsatisfiable" | null {
+  if (typeof header !== "string") return null;
+  const matched = /^bytes=(\d+)-$/.exec(header);
+  if (matched === null) return null;
+  const start = Number(matched[1]);
+  if (!Number.isSafeInteger(start)) return null;
+  return start >= size ? "unsatisfiable" : start;
 }
 
 /** 応答の期限切れ。合成の失敗（`SynthesisUnavailableError`）とは別物 */
@@ -386,18 +418,18 @@ export function createHttpServer(deps: HttpServerDeps): http.Server {
     //   返らず、safelist 外のヘッダを付けるブラウザ系クライアントの本リクエストが
     //   ブロックされる（許可 Origin に ACAO を返した手当てもそこへ到達しない）。
     //
-    // ★ `Access-Control-Allow-Headers` に `range` を並べないこと。下で
-    //   `Accept-Ranges: none` と宣言している以上、**対応していないものを対応していると
-    //   言う**ことになる。
-    //   ★ `content-type` を返すのは**制御 API のときだけ**。あちらは
-    //   `application/json` を必須にしている（下の絞り3）ので、返さないと
-    //   ブラウザ系クライアントの `PATCH` がプリフライトで止まる。逆に `/audio/…` で返すと
-    //   「対応していないものを対応していると言う」側に倒れる
+    // ★ `Access-Control-Allow-Headers` は**そのリソースが実際に対応しているものだけ**を出す。
+    //   `content-type` を返すのは制御 API のときだけ（`application/json` を必須にしている
+    //   —— 下の絞り3 —— ので、返さないとブラウザ系クライアントの `PATCH` がプリフライトで
+    //   止まる）。`range` を返すのは資産ルートのときだけ（実際に対応している。→ `handleAsset`）。
+    //   `/audio/…` はどちらも返さない —— `Accept-Ranges: none` と宣言している以上、
+    //   「対応していないものを対応していると言う」側に倒れない
     if (method === "OPTIONS") {
       res.writeHead(204, {
         allow,
         "access-control-allow-methods": allow,
         ...(route.kind === "control" ? { "access-control-allow-headers": "content-type" } : {}),
+        ...(route.kind === "asset" ? { "access-control-allow-headers": "range" } : {}),
       });
       return void res.end();
     }
@@ -418,6 +450,7 @@ export function createHttpServer(deps: HttpServerDeps): http.Server {
     }
 
     if (route.kind === "control") return handleControl(req, res, pathname, method);
+    if (route.kind === "asset") return handleAsset(req, res, pathname, method);
     return handleAudio(res, pathname, method);
   }
 
@@ -478,6 +511,8 @@ export function createHttpServer(deps: HttpServerDeps): http.Server {
         return deps.control.ttsPreview();
       case "/v1/summary/preview":
         return deps.control.summaryPreview();
+      case "/v1/assets":
+        return deps.control.assets();
       default:
         // resolveRoute を通っている以上ここには来ない。来たら表とこの switch がズレている
         return { status: 404, kind: "json", body: { error: "not_found" } };
@@ -531,5 +566,60 @@ export function createHttpServer(deps: HttpServerDeps): http.Server {
     });
     if (method === "HEAD") return void res.end();
     res.end(Buffer.from(wav));
+  }
+
+  async function handleAsset(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    pathname: string,
+    method: string,
+  ): Promise<void> {
+    const ref = parseAssetPath(pathname);
+    if (ref === null) return endWith(res, 404, "not found\n");
+
+    // ★ マニフェストに載っているものしか返さない（→ `assetCatalog.resolve` の ★）
+    const resolved = deps.catalog.resolve(ref.rel);
+    if (resolved === null) return endWith(res, 404, "not found\n");
+    const { absolute, size } = resolved;
+
+    const range = parseSingleRangeStart(req.headers.range, size);
+    if (range === "unsatisfiable") {
+      if (res.writableEnded || res.destroyed) return;
+      res.writeHead(416, {
+        "content-type": "application/octet-stream",
+        "content-range": `bytes */${size}`,
+        "accept-ranges": "bytes",
+        "cache-control": "no-store",
+      });
+      return void res.end();
+    }
+
+    const start = range ?? 0;
+    const status = range === null ? 200 : 206;
+
+    if (res.writableEnded || res.destroyed) return;
+    res.writeHead(status, {
+      "content-type": "application/octet-stream",
+      "content-length": String(size - start),
+      "cache-control": "no-store",
+      // ★ Accept-Ranges: bytes を返すのは資産ルートだけ。`/audio/…` の `none` は変えない
+      //   （数百KB の1文を分割で得るものが無い、という理由がそのまま残っている）
+      "accept-ranges": "bytes",
+      ...(range === null ? {} : { "content-range": `bytes ${start}-${size - 1}/${size}` }),
+    });
+    if (method === "HEAD") return void res.end();
+
+    // ★★ **`pipe` ではなく `pipeline` を使うこと。** `pipe` は宛先が閉じても
+    //   読み出し側を開いたまま残すので、ファイルディスクリプタが溢れる。
+    //   **この経路では途中で切られるのが普通のこと**（切れたところから
+    //   取り直せるようにしてある）なので、漏れれば常駐プロセスの寿命に直結する。
+    //
+    // ★ ヘッダを送った後の失敗はもう応答で伝えられない。`pipeline` が両方を閉じるのに
+    //   任せて、ここではログに出すだけにする（`endWith` の ★と同じ思想:
+    //   破棄済みの応答に writeHead しない）
+    pipeline(fs.createReadStream(absolute, range === null ? undefined : { start }), res, (err) => {
+      if (err === null || err === undefined) return;
+      warn(`[HTTP] ${pathname} の送出に失敗しました: ${String(err)}`);
+    });
   }
 }

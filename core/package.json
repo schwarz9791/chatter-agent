@@ -20,6 +20,7 @@
     "verify:phase-b": "node scripts/verify-phase-b.mjs",
     "verify:player": "node scripts/verify-player.mjs",
     "verify:tts": "node scripts/verify-tts.mjs",
+    "verify:assets": "node scripts/verify-assets.mjs",
     "start:server": "node dist/chatter-agent-server.mjs",
     "start:player": "node dist/chatter-agent-player.mjs"
   },

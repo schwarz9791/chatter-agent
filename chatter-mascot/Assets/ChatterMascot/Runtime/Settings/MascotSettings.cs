@@ -43,7 +43,7 @@ namespace ChatterMascot.Settings
             bool idleMotion, bool cursorGaze, bool blink,
             string vrmFileName,
             int frameRate,
-            string serverUrl, string token,
+            string serverUrl, string token, string assetSync,
             float xrScale, float xrDistance, float xrAzimuth, float xrFeetBelowEye)
         {
             Muted = muted;
@@ -57,6 +57,7 @@ namespace ChatterMascot.Settings
             FrameRate = frameRate;
             ServerUrl = serverUrl;
             Token = token;
+            AssetSync = assetSync;
             XrScale = xrScale;
             XrDistance = xrDistance;
             XrAzimuth = xrAzimuth;
@@ -148,6 +149,19 @@ namespace ChatterMascot.Settings
         public string Token { get; }
 
         /// <summary>
+        /// サーバーから <c>models/</c> / <c>animations/</c> を取りに行くか
+        /// （<c>"auto"</c> / <c>"off"</c>、既定 <c>"auto"</c>）。
+        ///
+        /// ★ デスクトップでは同期しない——サーバーと同じファイルシステムを直接読んでいるので
+        ///   意味が無い（<c>MascotRunner</c> が <c>AssetEnvFactory.HasUserConfigDirectory</c> で
+        ///   落とす）。ここは Android 側で人手に止めたいときの逃げ道。
+        /// ★ <see cref="ServerUrl"/> と同じく<b>起動時に1回だけ</b>読まれる。反映は次回の起動から。
+        /// ★★ デスクトップの設定パネル（<c>SettingsSchema</c>）には出さないこと——
+        ///   デスクトップは同期しないので、出しても押す意味の無い項目になる。
+        /// </summary>
+        public string AssetSync { get; }
+
+        /// <summary>
         /// Android XR でのキャラクターの大きさ（<c>ModelAnchor.localScale</c> の一様倍率）。
         ///
         /// ★ <b>デスクトップの「キャラクターの大きさ」（<see cref="SettingsMapping.ScaleMin"/> ほか）
@@ -178,7 +192,7 @@ namespace ChatterMascot.Settings
                     true, true, true,
                     "",
                     SettingsMapping.DefaultFrameRate,
-                    "", "",
+                    "", "", SettingsMapping.DefaultAssetSync,
                     SettingsMapping.XrDefaultScale, SettingsMapping.XrDefaultDistance,
                     SettingsMapping.XrDefaultAzimuth, SettingsMapping.XrDefaultFeetBelowEye);
             }
@@ -197,7 +211,7 @@ namespace ChatterMascot.Settings
             bool? idleMotion = null, bool? cursorGaze = null, bool? blink = null,
             string vrmFileName = null,
             int? frameRate = null,
-            string serverUrl = null, string token = null,
+            string serverUrl = null, string token = null, string assetSync = null,
             float? xrScale = null, float? xrDistance = null, float? xrAzimuth = null, float? xrFeetBelowEye = null)
         {
             return new MascotSettings(
@@ -212,6 +226,7 @@ namespace ChatterMascot.Settings
                 frameRate ?? FrameRate,
                 serverUrl ?? ServerUrl,
                 token ?? Token,
+                assetSync ?? AssetSync,
                 xrScale ?? XrScale,
                 xrDistance ?? XrDistance,
                 xrAzimuth ?? XrAzimuth,
@@ -229,6 +244,7 @@ namespace ChatterMascot.Settings
         public MascotSettings WithFrameRate(int value) => Copy(frameRate: value);
         public MascotSettings WithServerUrl(string value) => Copy(serverUrl: value);
         public MascotSettings WithToken(string value) => Copy(token: value);
+        public MascotSettings WithAssetSync(string value) => Copy(assetSync: value);
         public MascotSettings WithXrScale(float value) => Copy(xrScale: value);
         public MascotSettings WithXrDistance(float value) => Copy(xrDistance: value);
         public MascotSettings WithXrAzimuth(float value) => Copy(xrAzimuth: value);
@@ -262,6 +278,7 @@ namespace ChatterMascot.Settings
                 && FrameRate == other.FrameRate
                 && string.Equals(ServerUrl, other.ServerUrl, StringComparison.Ordinal)
                 && string.Equals(Token, other.Token, StringComparison.Ordinal)
+                && string.Equals(AssetSync, other.AssetSync, StringComparison.Ordinal)
                 && XrScale.Equals(other.XrScale)
                 && XrDistance.Equals(other.XrDistance)
                 && XrAzimuth.Equals(other.XrAzimuth)
@@ -286,6 +303,7 @@ namespace ChatterMascot.Settings
             hash = (hash * 397) ^ FrameRate;
             hash = (hash * 397) ^ (ServerUrl != null ? ServerUrl.GetHashCode() : 0);
             hash = (hash * 397) ^ (Token != null ? Token.GetHashCode() : 0);
+            hash = (hash * 397) ^ (AssetSync != null ? AssetSync.GetHashCode() : 0);
             hash = (hash * 397) ^ XrScale.GetHashCode();
             hash = (hash * 397) ^ XrDistance.GetHashCode();
             hash = (hash * 397) ^ XrAzimuth.GetHashCode();

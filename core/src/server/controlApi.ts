@@ -8,6 +8,7 @@
  * PATCH /v1/config           200 {"values":…}（**適用後に読み直した値**）
  * POST  /v1/tts/preview      200 audio/wav（★ 固定文）
  * POST  /v1/summary/preview  200 {"summary":…,"outcome":…,"elapsedMs":…}（★ 失敗も 200）
+ * GET   /v1/assets           200 {"files":[{"path":…,"size":…,"sha256":…}]}（→ `server/assetCatalog.ts`）
  * ```
  *
  * ★ **HTTP を知らない層にしてある。** `req` / `res` は `httpServer.ts` が扱い、ここは
@@ -29,6 +30,7 @@ import { configKeys, createDefaultConfig, type ConfigKey, type ConfigStore } fro
 import { writeFileAtomic } from "../core/atomicWrite";
 import { VERSION } from "../core/version";
 import { runSummaryPreview, type SummaryPreviewDeps } from "../summarizer/summaryPreview";
+import type { AssetCatalog } from "./assetCatalog";
 
 /**
  * テスト音声の固定文。
@@ -116,6 +118,8 @@ export interface ControlApiDeps {
   synthesizePreview: (text: string) => Promise<ArrayBuffer>;
   /** テスト要約（→ `summarizer/summaryPreview.ts`）。**同期の pipeline を呼ばないこと** */
   summaryPreview: Omit<SummaryPreviewDeps, "now">;
+  /** 配布する VRM / VRMA のカタログ（→ `server/assetCatalog.ts`） */
+  assetCatalog: AssetCatalog;
   now?: () => number;
 }
 
@@ -126,6 +130,7 @@ export interface ControlApi {
   patchConfig(body: unknown): ControlResponse;
   ttsPreview(): Promise<ControlResponse>;
   summaryPreview(): Promise<ControlResponse>;
+  assets(): ControlResponse;
 }
 
 export function createControlApi(deps: ControlApiDeps): ControlApi {
@@ -249,6 +254,10 @@ export function createControlApi(deps: ControlApiDeps): ControlApi {
       } finally {
         summaryGate.release();
       }
+    },
+
+    assets() {
+      return json(200, { files: deps.assetCatalog.manifest() });
     },
   };
 }

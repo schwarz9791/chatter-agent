@@ -48,15 +48,23 @@ namespace ChatterMascot.Tests
         [Test]
         public void BundledModelIsAlwaysTheLastResort()
         {
-            Assert.That(Paths(Env(), AssetKind.Vrm),
-                Is.EqualTo(new[] { "/persist/models/mascot.vrm", "/streaming/vita.vrm" }));
+            Assert.That(Paths(Env(), AssetKind.Vrm), Is.EqualTo(new[]
+            {
+                "/persist/models/mascot.vrm",
+                "/persist/synced/models/mascot.vrm",
+                "/streaming/vita.vrm",
+            }));
         }
 
         [Test]
         public void VrmaUsesItsOwnNames()
         {
-            Assert.That(Paths(Env(), AssetKind.Vrma),
-                Is.EqualTo(new[] { "/persist/animations/idle.vrma", "/streaming/idle_loop.vrma" }));
+            Assert.That(Paths(Env(), AssetKind.Vrma), Is.EqualTo(new[]
+            {
+                "/persist/animations/idle.vrma",
+                "/persist/synced/animations/idle.vrma",
+                "/streaming/idle_loop.vrma",
+            }));
         }
 
         /// <summary>
@@ -92,7 +100,12 @@ namespace ChatterMascot.Tests
         public void ArgumentAtTheEndHasNoValue()
         {
             var env = Env(commandLine: new[] { "app", "-vrm" });
-            Assert.That(Paths(env, AssetKind.Vrm), Is.EqualTo(new[] { "/persist/models/mascot.vrm", "/streaming/vita.vrm" }));
+            Assert.That(Paths(env, AssetKind.Vrm), Is.EqualTo(new[]
+            {
+                "/persist/models/mascot.vrm",
+                "/persist/synced/models/mascot.vrm",
+                "/streaming/vita.vrm",
+            }));
         }
 
         /// <summary>
@@ -142,6 +155,7 @@ namespace ChatterMascot.Tests
             Assert.That(Paths(env, AssetKind.Vrm), Is.EqualTo(new[]
             {
                 "/persist/models/mascot.vrm",
+                "/persist/synced/models/mascot.vrm",
                 dir + "/A.vrm",   // Ordinal では大文字が先
                 dir + "/a.vrm",
                 dir + "/b.vrm",
@@ -149,15 +163,22 @@ namespace ChatterMascot.Tests
             }));
         }
 
-        /// <summary>★ Android には共有ファイルシステムが無い。</summary>
+        /// <summary>
+        /// ★ Android には共有ファイルシステムが無いのでユーザー設定の段は落ちるが、
+        ///   同期の段（<see cref="AssetSource.Synced"/>）は落ちない——プラットフォームを問わず載る。
+        /// </summary>
         [Test]
         public void UserConfigIsSkippedWithoutSharedFileSystem()
         {
             var dir = "/home/u/.config/chatter-agent/models";
             var env = Env(desktop: false, listFiles: (_, __) => new[] { dir + "/a.vrm" });
 
-            Assert.That(Paths(env, AssetKind.Vrm),
-                Is.EqualTo(new[] { "/persist/models/mascot.vrm", "/streaming/vita.vrm" }));
+            Assert.That(Paths(env, AssetKind.Vrm), Is.EqualTo(new[]
+            {
+                "/persist/models/mascot.vrm",
+                "/persist/synced/models/mascot.vrm",
+                "/streaming/vita.vrm",
+            }));
         }
 
         [Test]
@@ -196,8 +217,12 @@ namespace ChatterMascot.Tests
         public void NullFromListFilesIsTolerated()
         {
             var env = Env(listFiles: (_, __) => null);
-            Assert.That(Paths(env, AssetKind.Vrm),
-                Is.EqualTo(new[] { "/persist/models/mascot.vrm", "/streaming/vita.vrm" }));
+            Assert.That(Paths(env, AssetKind.Vrm), Is.EqualTo(new[]
+            {
+                "/persist/models/mascot.vrm",
+                "/persist/synced/models/mascot.vrm",
+                "/streaming/vita.vrm",
+            }));
         }
 
         /// <summary>
@@ -407,6 +432,38 @@ namespace ChatterMascot.Tests
                 Is.False);
         }
 
+        // ── サーバーから同期したファイル（#117） ────────────────────
+
+        /// <summary>★ 手置き（PersistentData）の直後に来ること。順序が逆だと手置きが覆される。</summary>
+        [Test]
+        public void SyncedComesRightAfterPersistentData()
+        {
+            var candidates = AssetPath.Enumerate(Env(), AssetKind.Vrm).ToList();
+            var persistent = candidates.FindIndex(c => c.Source == AssetSource.PersistentData);
+            var synced = candidates.FindIndex(c => c.Source == AssetSource.Synced);
+
+            Assert.That(persistent, Is.GreaterThanOrEqualTo(0), "PersistentData の候補が出ていない");
+            Assert.That(synced, Is.EqualTo(persistent + 1));
+            Assert.That(candidates[synced].Path, Is.EqualTo("/persist/synced/models/mascot.vrm"));
+        }
+
+        /// <summary>★ .vrma も .vrm と同じ固定名を synced/ 配下で受け付ける。</summary>
+        [Test]
+        public void SyncedUsesTheSameFixedNameForAnimations()
+        {
+            Assert.That(Paths(Env(), AssetKind.Vrma), Does.Contain("/persist/synced/animations/idle.vrma"));
+        }
+
+        /// <summary>★ Android（共有ファイルシステムが無い）でもこの段は残る。</summary>
+        [Test]
+        public void SyncedSurvivesWithoutAUserConfigDirectory()
+        {
+            var env = Env(desktop: false);
+            Assert.That(
+                AssetPath.Enumerate(env, AssetKind.Vrm).ToList().Exists(c => c.Source == AssetSource.Synced),
+                Is.True);
+        }
+
         // ── AnimationRoots（#70。AnimationManifest のルート探索） ────────────────────
 
         /// <summary>
@@ -420,12 +477,16 @@ namespace ChatterMascot.Tests
             Assert.That(AssetPath.AnimationRoots(env), Is.EqualTo(new[]
             {
                 "/persist/animations",
+                "/persist/synced/animations",
                 "/home/u/.config/chatter-agent/animations",
                 "/streaming/animations",
             }));
         }
 
-        /// <summary>★ Android には共有ファイルシステムが無いので、ユーザー段が丸ごと落ちる。</summary>
+        /// <summary>
+        /// ★ Android には共有ファイルシステムが無いのでユーザー段は丸ごと落ちるが、
+        ///   同期の段はプラットフォームを問わず残る。
+        /// </summary>
         [Test]
         public void AnimationRootsDropTheUserStepWithoutASharedFileSystem()
         {
@@ -433,6 +494,7 @@ namespace ChatterMascot.Tests
             Assert.That(AssetPath.AnimationRoots(env), Is.EqualTo(new[]
             {
                 "/persist/animations",
+                "/persist/synced/animations",
                 "/streaming/animations",
             }));
         }
@@ -445,6 +507,7 @@ namespace ChatterMascot.Tests
             Assert.That(AssetPath.AnimationRoots(env), Is.EqualTo(new[]
             {
                 "/persist/animations",
+                "/persist/synced/animations",
                 "/xdg/chatter-agent/animations",
                 "/streaming/animations",
             }));

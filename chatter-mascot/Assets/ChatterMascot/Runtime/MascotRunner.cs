@@ -7,6 +7,7 @@ using ChatterMascot.Net;
 using ChatterMascot.Playback;
 using ChatterMascot.Protocol;
 using ChatterMascot.Settings;
+using ChatterMascot.Ui;
 using ChatterMascot.Vrm;
 using UnityEngine;
 
@@ -236,6 +237,20 @@ namespace ChatterMascot
         public string ServerToken { get; private set; } = "";
 
         /// <summary>
+        /// <c>connection.assetSync</c>（<c>"auto"</c> / <c>"off"</c>）。<see cref="ServerToken"/> と同じく
+        /// <c>Awake</c> で1回だけ読む。★ 接続先を <c>-serverUrl</c> で上書きしたかどうかとは無関係
+        /// ——同期の可否は接続先そのものとは別の設定なので、<see cref="ResolveServerUrl"/> は
+        /// 上書きの分岐に入る前にこれを読む。
+        /// </summary>
+        private string _assetSyncMode = SettingsMapping.DefaultAssetSync;
+
+        /// <summary>
+        /// synced/ の1リクエストあたりの上限（ミリ秒）。★ モデルは数十 MB になりうるので、
+        /// 音声（<see cref="audioFetchTimeoutMs"/>）より長く取る。
+        /// </summary>
+        private const int AssetSyncTimeoutMs = 120000;
+
+        /// <summary>
         /// 設定パネルのテスト音声を鳴らす（#76）。失敗したら理由、成功なら <c>null</c>。
         ///
         /// ★ <b>通常の再生経路をそのまま通す。</b> 別経路で鳴らすと、
@@ -402,6 +417,55 @@ namespace ChatterMascot
             if (_quitProbe) Debug.Log("[Mascot] -quitProbe: 最初の終了要求を1回だけ強制的に保留します");
 
             ResolveServerUrl();
+            StartAssetSyncIfNeeded();
+        }
+
+        /// <summary>
+        /// <c>synced/</c> の更新を起こす（#117。<c>ResolveServerUrl</c> の<u>後</u>——接続先とトークンが
+        /// 要る）。
+        ///
+        /// ★ デスクトップでは何もしない。サーバーと同じファイルシステムを直接読んでいるので
+        ///   同期の意味が無い（→ <c>Vrm.AssetPath</c> の doc）。
+        /// ★ <b>反映は次回の起動から。</b> <c>VrmStage</c> / <c>VrmIdleAnimation</c> /
+        ///   <c>VrmMotionPlayer</c> は起動時に1回だけ読むので、ここで取得しても今のセッションの
+        ///   見た目は変わらない。
+        /// ★ 発話経路と独立に走らせる。ここで例外を漏らすと <c>Awake</c> ごと止まり、
+        ///   シーンの残りの初期化に道連れが出る——握りつぶしてログだけ出す。
+        /// </summary>
+        private void StartAssetSyncIfNeeded()
+        {
+            try
+            {
+                var env = AssetEnvFactory.Current();
+                if (env.HasUserConfigDirectory) return;
+                if (_assetSyncMode == SettingsMapping.AssetSyncOff) return;
+
+                // ★ 完全修飾で呼ぶこと（→ Start() の同じ注意）。serverUrl は -serverUrl や
+                //   settings.json の値をそのまま持ちうるので、ここでも検査してから使う
+                if (!ChatterMascot.Net.ServerUrl.IsValid(serverUrl)) return;
+
+                var syncedRoot = AssetPath.Join(env.PersistentDataPath, AssetPath.SyncedDirectory);
+                if (string.IsNullOrEmpty(syncedRoot)) return;
+
+                var client = new AssetSyncClient(
+                    AudioFetcher.DeriveAudioBaseUrl(serverUrl), AssetSyncTimeoutMs, ServerToken, syncedRoot);
+                client.Log += message => Debug.Log("[Mascot] " + message);
+                client.Warn += message => Debug.LogWarning("[Mascot] " + message);
+                // ★ 変わったときだけ端末に出す。反映は次回の起動なので、その場で
+                //   見た目が変わらないことを文面でそのまま言う（→ DescribeResult）
+                client.Completed += (fetched, planned, deleted) =>
+                    DeviceToast.Show(AssetSyncClient.DescribeResult(fetched, planned, deleted));
+                // ★ マニフェストの取得・解釈に失敗したことも端末に出す。サーバーが落ちている・
+                //   端末が別の Wi-Fi にいる・トークンが古い、という一番踏む失敗が無音にならないため
+                client.Failed += DeviceToast.Show;
+
+                Debug.Log("[Mascot] synced/ の更新を起こします。反映は次回の起動からです");
+                _ = client.SyncAsync();
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[Mascot] synced/ の更新を起こせませんでした: " + e.Message);
+            }
         }
 
         /// <summary>
@@ -449,6 +513,9 @@ namespace ChatterMascot
         {
             var settingsPath = SettingsLocation.Resolve(AssetEnvFactory.Current());
             var fromFile = ReadConnectionSettings(settingsPath);
+
+            // ★ 上書きの分岐に入る前に読む。同期の可否は接続先そのものとは別の設定
+            _assetSyncMode = fromFile.AssetSync;
 
             var overridden = CommandLine.Argument("-serverUrl");
             if (!string.IsNullOrEmpty(overridden))

@@ -69,6 +69,7 @@ namespace ChatterMascot.Settings
                 {
                     ["serverUrl"] = settings.ServerUrl ?? "",
                     ["token"] = settings.Token ?? "",
+                    ["assetSync"] = settings.AssetSync ?? SettingsMapping.DefaultAssetSync,
                 },
                 // ★ デスクトップの設定パネルは書かないが、往復で落とさないよう含めておく
                 //   （→ connection と同じ扱い）
@@ -342,6 +343,11 @@ namespace ChatterMascot.Settings
                             ReadToken(property.Value, "connection.token", settings.Token, warn));
                         break;
 
+                    case "assetSync":
+                        settings = settings.WithAssetSync(
+                            ReadAssetSync(property.Value, "connection.assetSync", settings.AssetSync, warn));
+                        break;
+
                     default:
                         Warn(warn, $"知らないキー \"connection.{property.Key}\" は無視します");
                         break;
@@ -446,6 +452,26 @@ namespace ChatterMascot.Settings
 
             // ★ 値そのものは出さない。トークンをログに残さない規律は MascotRunner と揃える
             Warn(warn, $"{key} に使える文字は英数字と _ - だけです。既定を使います");
+            return fallback;
+        }
+
+        /// <summary>
+        /// ★★ 許可リスト（<see cref="SettingsMapping.AssetSyncAuto"/> / <see cref="SettingsMapping.AssetSyncOff"/>）。
+        ///   知らない値は既定に倒す——<see cref="ReadServerUrl"/> / <see cref="ReadToken"/> と同じ厳しさ。
+        /// </summary>
+        private static string ReadAssetSync(JToken value, string key, string fallback, Action<string> warn)
+        {
+            if (value.Type != JTokenType.String)
+            {
+                Warn(warn, $"{key} が文字列ではありません（{value}）。既定を使います");
+                return fallback;
+            }
+
+            var text = value.Value<string>().Trim();
+            if (text == SettingsMapping.AssetSyncAuto || text == SettingsMapping.AssetSyncOff) return text;
+
+            Warn(warn, $"{key} は \"{SettingsMapping.AssetSyncAuto}\" か \"{SettingsMapping.AssetSyncOff}\" です" +
+                       $"（{text}）。既定を使います");
             return fallback;
         }
 

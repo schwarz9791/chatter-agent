@@ -125,6 +125,24 @@ Android の出荷値そのもの（→ [`mascot-speech.md`](./mascot-speech.md)�
 （Android には積まないが、実体が無いと `.bundle.meta` が孤児として捨てられるため）。
 IL2CPP の作業ディレクトリ `.utmp/` は `.gitignore` 済み。
 
+### 端末に1行出す（Toast）は JNI 直呼び。`CharSequence` に C# の `string` をそのまま渡せる
+
+`Ui/DeviceToast` が `android.widget.Toast` を `AndroidJavaClass` 経由で叩いている。リポジトリで
+唯一の JNI 呼び出し。
+
+★ **Java 側の宣言は `makeText(Context, CharSequence, int)` で、Unity が C# の `System.String` から
+導出する signature は `Ljava/lang/String;`。それでも通る。** Unity の `AndroidJNIHelper.GetMethodID`
+が、導出した signature で引けなかったときに**リフレクションで互換メソッドを探しに行く**ため。
+世に出回る Unity の Toast 例が軒並み `new AndroidJavaObject("java.lang.String", message)` で
+包んでいるが、**包まなくてよい**（エミュレータ `XR_Glasses` / API 36 で表示を確認。2026-09-21）。
+
+★★ **ただし「静かに失敗しうる呼び出し」であることは変わらない。** メソッド解決に失敗しても
+例外は `Debug.LogWarning` に落ちるので、**端末上では「何も出ない」としか見えない。** signature の
+読みだけでは可否を決められないので、**実機で一度も鳴らしていない JNI 呼び出しを足さないこと。**
+
+★ 折り返しは**文面のリテラルに `\n` を書く。** 「。」で機械的に折る形にすると、切りたくない文まで
+巻き込む——切る位置は文面ごとに違う。
+
 ### 検証時の接続
 
 `scripts/run-android.sh` が `adb reverse tcp:8570 tcp:${CHATTER_AGENT_PORT:-8570}` を張るので、
@@ -328,6 +346,66 @@ Android のログは `adb logcat -s Unity`。★★ **Android では 401 と「�
 ★ **エミュレータであって実機ではない。** 実機（XREAL Aura）での再測定は
 [#100](https://github.com/schwarz9791/chatter-agent/issues/100)。計測コードはこの決定の後
 `AudioClipPlayer.cs` から取り除いてある。
+
+## 素材配布（#117）
+
+### `.part` は「切れた」だけでは消さない
+
+`AssetSyncClient.FetchOneAsync` は `synced/.parts/<sha256>.part` に書きながらモデル・モーションを
+取得する。Range で続きから取れる作りにしてあるのは、この経路が細い回線を前提にしていて
+**途中で切られるのが普通に起きる**ため。
+
+消してよいのは「中身が信用できないと分かったとき」だけ——応答コードが期待（新規取得なら `200`、
+続きからなら `206`）とも「応答そのものが無い」とも違うときに限る。応答が無い・期待どおりの応答
+だったときは**残す**。一律に消すと、切られるたびに毎回ゼロからやり直しになり、再開できる作りに
+した意味が消える。
+
+### `File.Replace` は Android / IL2CPP でも動く
+
+揃った `.part` を本来の場所へ移すとき、宛先が既にあれば `File.Replace` を使う。`File.Move` に
+overwrite 付きの多重定義が無い（`ProjectSettings` の `apiCompatibilityLevel: 6` ＝ .NET Standard
+**2.0**。2.1 ではないので3引数の `Move` はコンパイルが通らない）ためで、**消してから書く形にしては
+いけない** —— 同期は `Awake`、モデルの読み込みは `Start` から走るので**両者が並走する**。隙間に
+読んだ側がファイルを見失うと、同梱のモデルに落ちる。
+
+`File.Replace` が Mono / IL2CPP の Android で動くかは資料が見つからなかったので実測した。
+Android XR エミュレータ（`XR_Glasses`、API 36）で、同期済みの `.vrma` にバイトを足して
+ハッシュを変えてから起動 → `取得 1/1 件`、ファイルは正しいサイズへ戻り、例外も警告も出なかった
+（2026-09-21）。
+
+### 完走した `.part` を手で作って確かめる
+
+`.part` が `entry.Size` ぶん以上あるときに HTTP を叩かない手当て（「最後の1バイトと rename の
+間で落ちた」状態の救済）は、**HTTP とファイルシステムの両方が要るので EditMode では固定できない。**
+手で作るなら、同期済みの本体をそのまま `.part` 名へコピーして本体を消す:
+
+```bash
+D=/sdcard/Android/data/tech.sukima.chattermascot/files/synced
+SHA=$(shasum -a 256 ~/.config/chatter-agent/animations/happy/<名前>.vrma | cut -d' ' -f1)
+adb shell cp $D/animations/happy/<名前>.vrma $D/.parts/$SHA.part
+adb shell chmod 666 $D/.parts/$SHA.part
+adb shell rm $D/animations/happy/<名前>.vrma
+```
+
+手当てが効いていれば `取得 1/1 件` で本体が戻り、**`HTTP 416` のログ行が1度も出ない**
+（＝ HTTP を叩いていない）。効いていなければ `取得に失敗しました (HTTP 416)` が出て、
+**完全に正しい `.part` が消える**（2026-09-21 / Android XR エミュレータ `XR_Glasses` API 36 で
+前後とも再現）。
+
+★★ **`chmod 666` を省かないこと。** `adb shell cp` / `adb push` で置いたファイルは所有者が
+`shell` になり、**アプリから開けない。** そのときの症状は
+
+```
+[AssetSync] 同期が異常終了しました: Failed to create file .../.parts/<sha>.part
+```
+
+で、`DownloadHandlerFile` がコンストラクタで投げている。これは `SyncAsync` のいちばん外側の
+`catch` に落ちるので **`Failed` が上がらず端末に何も出ない**（ログだけ）。**手で置いたファイルの
+権限を疑う前に、同期のロジックを疑って時間を溶かしやすい。**
+
+`adb root` は素のエミュレータイメージでは通らず、`run-as` はリリースビルドが debuggable では
+ないので使えない。`chmod` が一番手軽。実運用では `synced/` の中身をアプリ自身が作るので、
+この権限の問題は**手で置いたときにしか起きない**。
 
 ## XR（Full Space）
 
@@ -580,6 +658,12 @@ Editor に入っているモジュール（ここでは Web）の枠が生える
 ★ **消したければ Web モジュールを外す。** Unity Hub にも `unity` CLI にもモジュール削除の
 機能は無く、`PlaybackEngines/WebGLSupport` を手で消して `modules.json` の該当エントリを
 `"selected": false` にする必要がある（非公式な手順。戻すには再ダウンロード）。
+
+★ **外すと本当に止まる（実測）。** 上の手順を踏んだうえで、再現条件そのもの（`Library/` を
+退避してから `test.sh`）を走らせた。`Keys` は `0100000007000000` のままで、追跡ファイルは
+1つも汚れなかった。`modules.json` の差分は `webgl` の `"selected"` の**1行だけ**で、
+Android 系のエントリには触れない。`Library/` は 12G → 2.3G に減った
+（2026-09-21 / Unity 6000.3.14f1 arm64 / EditMode 815 件は通過したまま）。
 
 - **失敗したビルドは後始末をしない** —— XR Simulation の設定は `Assets/XR/Temp/` へ退避されたきり
   元の場所から消え（追跡ファイルの**削除**として出る）、`ProjectSettings.asset` の

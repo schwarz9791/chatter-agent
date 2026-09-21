@@ -22,6 +22,7 @@ core/src/
 │   ├── dispatcher.ts        配信済み seq と**採番の世代**の判断。フレームの組み立てもここ（ユニットテストのため純粋な部品に切り出してある）
 │   ├── audioStore.ts        ★合成のキャッシュと single-flight。ディスクを持たない（issue #29）
 │   ├── engineProcess.ts     ★合成エンジンを起こす条件の判断と、プロセスグループごとの停止（issue #51）
+│   ├── assetCatalog.ts      配布する VRM / VRMA のカタログ（固定名優先→Ordinal 先頭、sha256 のキャッシュ。issue #117）
 │   ├── httpServer.ts        ルーティング（`/audio/…` と `/v1/*`）。認証の関所（issue #98）と、書き込み口の3重の絞り（issue #76）
 │   ├── controlApi.ts        ★設定パネルの制御 API（`/v1/*`）。**HTTP を知らない層**（issue #76）
 │   ├── auth.ts              非ループバックからの `Authorization: Bearer` を検証する（純粋関数。issue #98）
@@ -41,6 +42,7 @@ core/src/
 ├── core/         契約と基盤
 │   ├── types.ts             SpeechRecord / SpeechFrame / SpeechEpoch / LEGACY_EPOCH / Emotion / SpeechKind / SpeakMessage
 │   ├── audioPath.ts         `/audio/<epoch>-<seq>.wav` の組み立てと検証。server と player が共有する
+│   ├── assetPath.ts         `/v1/assets/<path>` の3形の検証（issue #117）
 │   ├── paths.ts             ← cc-mascot-xr 流用。`getServerTokenPath` は `server.token`（issue #98）
 │   ├── config.ts            ← cc-mascot-xr configStore 流用
 │   ├── configPatch.ts       ★`PATCH /v1/config` の検証と書き戻しの組み立て（純粋関数。issue #76）
@@ -182,6 +184,7 @@ npm run verify:phase-a   # spool → speech.jsonl（scripts/verify-phase-a.sh。
 npm run verify:phase-b   # 配信キュー → WebSocket（scripts/verify-phase-b.mjs）
 npm run verify:tts       # server の合成と GET /audio/（scripts/verify-tts.mjs）
 npm run verify:player    # WebSocket → 音声取得 → 再生 → ack（scripts/verify-player.mjs）
+npm run verify:assets    # マニフェスト → GET /v1/assets/ → Range で再開（scripts/verify-assets.mjs。issue #117）
 npm run start:server     # 手で動かすとき。**エンジンが居なければサーバーが起こす**（#51）
 npm run start:player     # 耳で聞くとき
 ```
@@ -209,7 +212,7 @@ hook → CLI → server → player の全経路を1本で見る。
 `verify:player` 側は逆に、スタブのサーバーが返す 200 / 503 / 404 に対してクライアントが
 どう振る舞うかだけを見る。
 
-3本（`phase-b` / `tts` / `player`）は `scripts/lib/harness.mjs` を共有する。入っているのは
+4本（`phase-b` / `tts` / `player` / `assets`）は `scripts/lib/harness.mjs` を共有する。入っているのは
 `check` / `show` / `until`・使い捨てルート・スタブ用の WAV・「子プロセスを起動してこの行が
 出るまで待つ」まで。**判定とスタブはここに置かないこと** — 落ちたときに「スタブの挙動」と
 「本物の挙動」のどちらを疑うかが増える。
@@ -281,6 +284,8 @@ cc-mascot から移植したコードを oxfmt で整形すると、上流との
 | サーバーのロック | `{root}/server.lock/`（ディレクトリ） | **server**（bind の前に取る。2台目は起動に失敗する） |
 | player のロック | `{root}/player.lock/`（ディレクトリ） | **player**（接続の前に取る。2台目は起動に失敗する） |
 | player の一時 WAV | `{root}/player-tmp/<エポック>-<seq>.wav` | **player**（起動時にディレクトリごと作り直す。`seq` は採番の世代を跨いで一意でないので、ファイル名に世代を混ぜる） |
+| VRM モデル | `{root}/models/` | 人間 / 設定パネル（書く）。server が読んでマニフェストに載せる（→ `server/assetCatalog.ts`） |
+| VRMA モーション | `{root}/animations/` | 人間（書く）。server が読んでマニフェストに載せる |
 
 ★ **`emotion-keywords.json` は「書く人」が2者になる唯一のファイル。** 最初だけ CLI が既定を書き出し、
 以後は人間が編集する。CLI は**ファイルが無いときだけ**書く——既にあれば絶対に上書きしない。

@@ -20,6 +20,8 @@ import * as path from "path";
 import { createConfigStore } from "../core/config";
 import { acquireLock } from "../core/lock";
 import {
+  getAnimationsDir,
+  getModelsDir,
   getServerLockDir,
   getServerTokenPath,
   getSpeechQueueDir,
@@ -29,6 +31,7 @@ import {
 import { registerSummarizerSession } from "../core/summarizerSessions";
 import { createSpeechQueue } from "../core/speechQueue";
 import { createVoicevoxClient, flattenStyles, hasStyle } from "../tts/voicevoxClient";
+import { createAssetCatalog } from "./assetCatalog";
 import { createAudioStore, type Voice } from "./audioStore";
 import { createControlApi } from "./controlApi";
 import { describeEngineSkip, resolveEngineSpawn, startEngine, type EngineProcess } from "./engineProcess";
@@ -347,6 +350,10 @@ async function main(): Promise<void> {
     synthesize: (text, voice) => ttsFor(voice).synthesize(text),
   });
 
+  // 配布する VRM / VRMA のカタログ（#117）。`chatter-mascot` 側がデスクトップで実際に
+  // 読むディレクトリ名と揃えてある（→ `core/paths.ts`）
+  const assetCatalog = createAssetCatalog(getModelsDir(), getAnimationsDir());
+
   /**
    * 設定パネル（#76）の制御 API。**書き込み口はループバック限定**（→ `server/httpServer.ts`）。
    *
@@ -368,12 +375,14 @@ async function main(): Promise<void> {
       //   （書き手を1人に保つため。→ `core/summarizerSessions.ts`）
       registerSessionId: (sessionId) => registerSummarizerSession(getSummarizerSessionsPath(), sessionId),
     },
+    assetCatalog,
   });
 
   const httpServer = createHttpServer({
     store: audioStore,
     token,
     control,
+    catalog: assetCatalog,
     // ★ 本文の権威はキュー。ack / trim で消えた entry の音声は作らない
     lookup: (seq) => queue.read(seq),
     allowedOrigins: config.get("allowedOrigins"),

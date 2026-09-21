@@ -163,6 +163,19 @@ export function getPlayerTmpDir(e: PathEnv = currentPathEnv()): string {
 }
 
 /**
+ * VRM モデルを置く場所。`chatter-mascot` 側 `AssetPath.ModelsDirectory` と同じディレクトリ名
+ * （→ `server/assetCatalog.ts`）。ユーザーから見た置き場所を1つに揃えるため。
+ */
+export function getModelsDir(e: PathEnv = currentPathEnv()): string {
+  return path.join(getRuntimeDir(e), "models");
+}
+
+/** VRMA モーションを置く場所。`chatter-mascot` 側 `AssetPath.AnimationsDirectory` と同じディレクトリ名 */
+export function getAnimationsDir(e: PathEnv = currentPathEnv()): string {
+  return path.join(getRuntimeDir(e), "animations");
+}
+
+/**
  * 要約 CLI の cwd。
  *
  * プロジェクトのディレクトリで走らせるとその `CLAUDE.md` が読み込まれてコンテキストが膨らむ

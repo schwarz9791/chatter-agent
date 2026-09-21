@@ -229,6 +229,18 @@ namespace ChatterMascot.Settings
         }
 
         /// <summary>
+        /// <see cref="MascotSettings.AssetSync"/> の選べる値。
+        ///
+        /// ★★ <b>既定を変えるならここだけ直すこと</b>（<see cref="DefaultFrameRate"/> と同じ理由）。
+        ///   <see cref="MascotSettings.Defaults"/> と <c>SettingsJson</c> の許可リストが両方これを読む。
+        /// </summary>
+        public const string AssetSyncAuto = "auto";
+
+        public const string AssetSyncOff = "off";
+
+        public const string DefaultAssetSync = AssetSyncAuto;
+
+        /// <summary>
         /// <c>display.frameRate</c> を反映していいプラットフォームか（→ <c>MascotRunner.targetFrameRate</c>
         /// の doc）。
         ///

@@ -138,15 +138,21 @@ namespace ChatterMascot.Net
         /// </summary>
         public static string DescribeResult(int fetched, int planned, int deleted)
         {
-            if (fetched <= 0 && deleted <= 0 && planned <= 0) return null;
+            // 取りに行くものも消すものも無かった＝定常状態
+            if (planned <= 0 && deleted <= 0) return null;
+
+            // ★ 1件も取れなかったときに「更新した」と言わないこと。取りに行って
+            //   全部こぼしたのと、取って反映待ちなのは、次にやることが違う
+            if (planned > 0 && fetched <= 0)
+            {
+                return "モデルとモーションを取得できませんでした。次に起動したときにやり直します";
+            }
 
             if (fetched < planned)
             {
-                return $"モデルとモーションを一部だけ更新しました（{fetched}/{planned} 件）。" +
+                return $"モデルとモーションの一部を更新しました（{fetched}/{planned} 件）。" +
                        "次に起動したときに続きを取りに行きます";
             }
-
-            if (fetched <= 0 && deleted <= 0) return null;
 
             return "モデルとモーションを更新しました。次に起動したときから反映されます";
         }

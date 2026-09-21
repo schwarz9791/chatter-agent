@@ -178,11 +178,18 @@ namespace ChatterMascot.Tests
             Assert.That(message, Does.Contain("続き"));
         }
 
-        /// <summary>取得しようとして1件も取れなかったときも、黙らず「続きを取る」と言う。</summary>
+        /// <summary>
+        /// ★★ <b>1件も取れなかったときに「更新した」と言わないこと。</b> 取りに行って全部
+        ///   こぼしたのと、取れて反映を待っているのとでは、次にやることが違う——前者は
+        ///   もう一度立ち上げれば最初から取り直し、後者は立ち上げれば見た目が変わる。
+        /// </summary>
         [Test]
-        public void FailedSyncIsNotSilent()
+        public void FailedSyncDoesNotClaimAnUpdate()
         {
-            Assert.That(AssetSyncClient.DescribeResult(0, 2, 0), Is.Not.Null);
+            var message = AssetSyncClient.DescribeResult(0, 2, 0);
+
+            Assert.That(message, Is.Not.Null);
+            Assert.That(message, Does.Not.Contain("更新しました"));
         }
     }
 }

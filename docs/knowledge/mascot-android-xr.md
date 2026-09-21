@@ -355,6 +355,40 @@ Android XR エミュレータ（`XR_Glasses`、API 36）で、同期済みの `.
 ハッシュを変えてから起動 → `取得 1/1 件`、ファイルは正しいサイズへ戻り、例外も警告も出なかった
 （2026-09-21）。
 
+### 完走した `.part` を手で作って確かめる
+
+`.part` が `entry.Size` ぶん以上あるときに HTTP を叩かない手当て（「最後の1バイトと rename の
+間で落ちた」状態の救済）は、**HTTP とファイルシステムの両方が要るので EditMode では固定できない。**
+手で作るなら、同期済みの本体をそのまま `.part` 名へコピーして本体を消す:
+
+```bash
+D=/sdcard/Android/data/tech.sukima.chattermascot/files/synced
+SHA=$(shasum -a 256 ~/.config/chatter-agent/animations/happy/<名前>.vrma | cut -d' ' -f1)
+adb shell cp $D/animations/happy/<名前>.vrma $D/.parts/$SHA.part
+adb shell chmod 666 $D/.parts/$SHA.part
+adb shell rm $D/animations/happy/<名前>.vrma
+```
+
+手当てが効いていれば `取得 1/1 件` で本体が戻り、**`HTTP 416` のログ行が1度も出ない**
+（＝ HTTP を叩いていない）。効いていなければ `取得に失敗しました (HTTP 416)` が出て、
+**完全に正しい `.part` が消える**（2026-09-21 / Android XR エミュレータ `XR_Glasses` API 36 で
+前後とも再現）。
+
+★★ **`chmod 666` を省かないこと。** `adb shell cp` / `adb push` で置いたファイルは所有者が
+`shell` になり、**アプリから開けない。** そのときの症状は
+
+```
+[AssetSync] 同期が異常終了しました: Failed to create file .../.parts/<sha>.part
+```
+
+で、`DownloadHandlerFile` がコンストラクタで投げている。これは `SyncAsync` のいちばん外側の
+`catch` に落ちるので **`Failed` が上がらず端末に何も出ない**（ログだけ）。**手で置いたファイルの
+権限を疑う前に、同期のロジックを疑って時間を溶かしやすい。**
+
+`adb root` は素のエミュレータイメージでは通らず、`run-as` はリリースビルドが debuggable では
+ないので使えない。`chmod` が一番手軽。実運用では `synced/` の中身をアプリ自身が作るので、
+この権限の問題は**手で置いたときにしか起きない**。
+
 ## XR（Full Space）
 
 Android ビルドは OpenXR（`com.unity.xr.androidxr-openxr`）で Full Space に入り、キャラクターを空間に固定して立たせる

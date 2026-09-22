@@ -156,7 +156,7 @@ Assets/ChatterMascot/
 
 6 は `core/src/core/paths.ts` の `getRuntimeDir` と**同じ規則**（ユーザーから見て「chatter-agent
 の設定はここ1箇所」を保つため）。辞書順の先頭を採る。`animations/<category>/*.vrma`
-（`idle` / `happy` / `angry` / `sad` / `relaxed` / `surprised`。感情モーションと小ネタの置き場）
+（`idle` / `happy` / `angry` / `sad` / `relaxed` / `surprised` / `walk`。感情モーション・小ネタ・歩行の置き場）
 は候補には入らない——探索順は下の「感情モーションと小ネタの素材」を見ること。全部読めなければ
 Cube が出たままになる——無地の Cube は「異常事態」の可視のシグナル。
 
@@ -258,7 +258,7 @@ macOS と Android を同じコードで通せる。引き換えは ping watchdog
 ### 感情モーションと小ネタの素材
 
 `animations/<category>/*.vrma` の探索は「ファイル1本」ではなく「ルートディレクトリ」単位。
-各ルート × 6カテゴリ（`idle`/`happy`/`angry`/`sad`/`relaxed`/`surprised`）を走査し、任意名を
+各ルート × 7カテゴリ（`idle`/`happy`/`angry`/`sad`/`relaxed`/`surprised`/`walk`）を走査し、任意名を
 辞書順で全部拾う。
 
 | 順 | 出どころ | 対象 |
@@ -279,6 +279,9 @@ private の `vroid-motion-exporter` に切り出してある。
 （`CooldownSeconds` 既定1秒がカテゴリを問わない最短間隔、`SameCategoryCooldownSeconds` 既定
 15秒が同じカテゴリの間隔）。`neutral` と `kind: prompt` は感情モーションを出さない。待機の
 小ネタ（`idle/`）は発話が止まってから 30〜60 秒の乱数間隔で発火する。
+
+歩行（`walk/`）だけは XR で使い、**止めるまでループする**（→ [`knowledge/mascot-vrm.md`](./knowledge/mascot-vrm.md)）。
+発火は平面に置き直した後の徘徊だけで、macOS では使わない（→ 下「Android / XR」）。
 
 ## 動かす
 
@@ -444,8 +447,15 @@ $ADB shell am force-stop tech.sukima.chattermascot
 ```
 
 感情モーションは `animations/<カテゴリ>/*.vrma`（`idle` / `happy` / `angry` / `sad` / `relaxed` /
-`surprised`）。**こちらは任意名のままで効く** —— 同期・手置きのどちらでも、カテゴリの走査は
+`surprised` / `walk`）。**こちらは任意名のままで効く** —— 同期・手置きのどちらでも、カテゴリの走査は
 `persistentDataPath` 系を無条件に積むので、固定名に縛られるのは直下の1本だけ。
+
+★ **`adb push` に無いディレクトリを作らせたら `chmod` が要る。** `push` が作るディレクトリは
+`shell` 所有になり、アプリから辿れない（置いたファイルが走査に出てこない。エラーは出ない）。
+
+```bash
+$ADB shell chmod -R 777 $D/animations
+```
 
 ★ **`files/` の直下に置く旧レイアウト（`model.vrm` / `idle.vrma`）はもう読まない。** 残っていても
 警告は出ず、同梱のモデルとモーションで起動する。
@@ -467,6 +477,19 @@ $ADB shell am force-stop tech.sukima.chattermascot   # 起動時に1回だけ読
 正面から右回りの角度（度）、`feetBelowEye` は足元が目より何 m 下か。範囲外は警告して既定に
 戻る。頭を水平にして起動した場合の値で、上下を向いて起動すると目から足元へのずれをその
 傾きぶん回した位置に出る。起動時の配置だけに効き、手でつまんで置き直した位置は再起動で戻る。
+
+### つまんで置き直す／歩く範囲を決める
+
+手でつまむとキャラクターを動かせる。離すと真下の水平面（机・床）に足元が乗り、こちらを向く。
+**平面に乗せた直後だけ、足元に歩行範囲の円が 15 秒出る。** フチのハンドルをつまんで前後に
+動かすと半径が変わる（10〜60cm、既定 20cm）。キャラクターは発話が止まってからしばらくすると
+この円の中をたまに歩き、**円の外へは出ない**。
+
+- **円の中をつまむと、そこへ歩いて行く**（キャラクターにもハンドルにも当たらないつまみ）
+- 歩くには `animations/walk/` に `.vrma` が要る（→ 上「感情モーションと小ネタの素材」）。無ければ歩かない
+- **平面に置き直すまでは歩かない**（起動直後は床が分からないため）
+- 発話中・つまんでいる間は歩かない
+- 半径と置いた位置は覚えない。再起動すると起動時の配置と 20cm に戻る
 
 ### 接続
 
@@ -587,4 +610,4 @@ B・C どちらの経路でもこのポートへ向ける。C（`configure-andro
 | 設定パネルが出ない・作り直される / 右クリックが取れない / 値が保存されない・戻る / スライダーやポップアップの挙動 / ファイル選択 / サーバーに繋がらないときの表示 | [`mascot-settings.md`](./knowledge/mascot-settings.md) |
 | モデルが映らない・背中が映る・小さい / 表情が変わらない / まばたき / 視線が合わない / モーションが T ポーズになる・固まる / 髪が流れる | [`mascot-vrm.md`](./knowledge/mascot-vrm.md) |
 | 音が出ない・途切れる / 口が合わない / オーディオデバイスを掴んだまま / 接続が切れる / ack が届かない / 終了時に取りこぼす / JSON のパースがおかしい | [`mascot-speech.md`](./knowledge/mascot-speech.md) |
-| Android でビルドが通らない / 白飛びする / LAN で繋がらない / XR で何も映らない・位置がおかしい / 背景が黒い / つまめない | [`mascot-android-xr.md`](./knowledge/mascot-android-xr.md) |
+| Android でビルドが通らない / 白飛びする / LAN で繋がらない / XR で何も映らない・位置がおかしい / 背景が黒い / つまめない / 歩かない・歩行範囲の円が出ない | [`mascot-android-xr.md`](./knowledge/mascot-android-xr.md) |

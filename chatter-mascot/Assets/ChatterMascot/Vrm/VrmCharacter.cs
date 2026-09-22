@@ -234,6 +234,35 @@ namespace ChatterMascot.Vrm
                 : _motion.Play(clip, MotionKind.Emotion, Time.realtimeSinceStartupAsDouble);
         }
 
+        /// <summary>歩行モーションを1本以上読めていて、いま歩き始められるか。</summary>
+        public bool CanWalk =>
+            _motion?.Loaded?.Count(MotionCategory.Walk) > 0 &&
+            _idle != null && _idle.IsLoaded && _idle.Enabled;
+
+        /// <summary>いま歩行を再生中か。</summary>
+        public bool IsWalking => _motion?.IsPlayingWalk ?? false;
+
+        /// <summary>
+        /// 歩行を始める。<see cref="MotionCategory.Walk"/> から1本選び、<see cref="MotionKind.Walk"/>
+        /// で <see cref="VrmMotionPlayer.Play"/> に渡す——<see cref="PreviewMotion"/> と同じ経路だが、
+        /// 割り込み規則が違う（<see cref="MotionKind"/> の doc 参照）。
+        /// </summary>
+        /// <returns>再生を開始できたら <c>true</c>。</returns>
+        public bool TryStartWalking()
+        {
+            if (_motion == null) return false;
+            var clip = _motion.Loaded?.Pick(MotionCategory.Walk, () => UnityEngine.Random.value);
+            if (clip == null) return false;
+            return _motion.Play(clip, MotionKind.Walk, Time.realtimeSinceStartupAsDouble) == MotionPlayResult.Started;
+        }
+
+        /// <summary>歩行を止める。歩行中でなければ何もしない。</summary>
+        public void StopWalking()
+        {
+            if (!IsWalking) return;
+            _motion.RequestFadeOut(Time.realtimeSinceStartupAsDouble);
+        }
+
         /// <summary>
         /// Desktop 側（<c>CursorGazeSource</c>）が刺す。<c>null</c> なら自律的な漂いに倒れる。
         ///
@@ -367,7 +396,7 @@ namespace ChatterMascot.Vrm
 
         /// <summary>
         /// 目視確認用の起動引数 <c>-motionProbe &lt;category&gt;</c>（#70）。<c>idle</c> /
-        /// <c>happy</c> / <c>angry</c> / <c>sad</c> / <c>relaxed</c> / <c>surprised</c>。
+        /// <c>happy</c> / <c>angry</c> / <c>sad</c> / <c>relaxed</c> / <c>surprised</c> / <c>walk</c>。
         /// <c>null</c>/空なら無効。<see cref="Start"/> で読んで覚える。
         /// </summary>
         private string _motionProbeArgument;
@@ -777,7 +806,7 @@ namespace ChatterMascot.Vrm
             if (!category.HasValue)
             {
                 Debug.LogWarning($"[Mascot] motionProbe: '{_motionProbeArgument}' は既知のカテゴリではありません" +
-                                  "（idle / happy / angry / sad / relaxed / surprised）");
+                                  "（idle / happy / angry / sad / relaxed / surprised / walk）");
                 return;
             }
 
@@ -806,6 +835,7 @@ namespace ChatterMascot.Vrm
                 case "sad": return MotionCategory.Sad;
                 case "relaxed": return MotionCategory.Relaxed;
                 case "surprised": return MotionCategory.Surprised;
+                case "walk": return MotionCategory.Walk;
                 default: return null;
             }
         }

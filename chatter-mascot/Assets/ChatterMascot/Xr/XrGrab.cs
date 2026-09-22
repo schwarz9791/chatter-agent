@@ -11,7 +11,10 @@ using UnityEngine.XR.ARSubsystems;
 namespace ChatterMascot.Xr
 {
     /// <summary>
-    /// 手でつまんで動かし、離したら平面へ置き直す。
+    /// 手でつまんで動かし、離したら平面へ置き直す。掴む対象はモデル本体と、歩行範囲の円の
+    /// ハンドル（<see cref="XrWalk"/>）の2つ —— aim レイ・pinchValue のヒステリシス・掴みの
+    /// 排他はここに一本化したまま、先にハンドル、当たらなければモデルの順で見る。
+    /// どちらにも当たらなかったつまみは、歩行範囲の中を指した「行き先の指示」として扱う。
     ///
     /// ★ <b>シーンに置かない。</b> <see cref="XrStage"/> が配置（<see cref="XrPlacement"/>）の
     ///   直後に <c>AddComponent</c> で生やす —— 配置前のアンカーを掴ませないため。
@@ -27,6 +30,7 @@ namespace ChatterMascot.Xr
 
         private XROrigin _origin;
         private VrmStage _stage;
+        private XrWalk _walk;
 
         private bool _scenePermissionGranted;
 
@@ -37,16 +41,20 @@ namespace ChatterMascot.Xr
         /// <summary>掴んでいる手。掴んでいなければ null。</summary>
         private Hand _grabbedHand;
 
+        /// <summary>掴んでいるのがハンドルか（false ならモデル本体）。</summary>
+        private bool _grabbedHandle;
+
         /// <summary>掴んだ瞬間の、aim レイに沿ったヒット距離。</summary>
         private float _grabDistance;
 
         /// <summary>掴んだ瞬間の、レイ上の点から <c>ModelAnchor</c> へのオフセット。</summary>
         private Vector3 _grabOffset;
 
-        public void Begin(XROrigin origin, VrmStage stage)
+        public void Begin(XROrigin origin, VrmStage stage, XrWalk walk)
         {
             _origin = origin;
             _stage = stage;
+            _walk = walk;
             foreach (var hand in _hands) hand.Enable();
         }
 
@@ -146,13 +154,27 @@ namespace ChatterMascot.Xr
         {
             var ray = ReadAimRay(hand, offset);
 
+            if (_walk != null && _walk.TryGrabHandle(ray))
+            {
+                _grabbedHand = hand;
+                _grabbedHandle = true;
+                Debug.Log($"[Mascot] XR grab: 歩行範囲のハンドルを掴みました hand={hand.Name}");
+                return;
+            }
+
             var collider = SyncedModelCollider();
-            if (collider == null) return;
-            if (!collider.Raycast(ray, out var hit, float.PositiveInfinity)) return;
+            // ★ ハンドルにもキャラクターにも当たらないつまみは、歩行範囲の中を指した「行き先の指示」
+            if (collider == null || !collider.Raycast(ray, out var hit, float.PositiveInfinity))
+            {
+                _walk?.TryWalkTo(ray);
+                return;
+            }
 
             _grabbedHand = hand;
+            _grabbedHandle = false;
             _grabDistance = hit.distance;
             _grabOffset = _stage.ModelAnchor.position - hit.point;
+            _walk?.SetModelGrabbed(true);
             Debug.Log($"[Mascot] XR grab: 掴みました hand={hand.Name}");
         }
 
@@ -170,6 +192,12 @@ namespace ChatterMascot.Xr
 
         private void UpdateHeld(Hand hand, Transform offset)
         {
+            if (_grabbedHandle)
+            {
+                _walk.DragHandle(ReadAimRay(hand, offset));
+                return;
+            }
+
             _stage.ModelAnchor.position = ReadAimRay(hand, offset).GetPoint(_grabDistance) + _grabOffset;
         }
 
@@ -184,14 +212,25 @@ namespace ChatterMascot.Xr
         {
             _grabbedHand = null;
 
+            if (_grabbedHandle)
+            {
+                _walk?.ReleaseHandle();
+                Debug.Log("[Mascot] XR grab: 歩行範囲のハンドルを離しました");
+                return;
+            }
+
+            _walk?.SetModelGrabbed(false);
+
             var anchor = _stage.ModelAnchor;
             var collider = SyncedModelCollider();
             var landed = "none";
+            float? groundY = null;
             if (_planeManager != null && collider != null &&
-                TryFindGroundHeight(anchor.position, collider.bounds.max.y, out var groundY))
+                TryFindGroundHeight(anchor.position, collider.bounds.max.y, out var foundGroundY))
             {
-                anchor.position = new Vector3(anchor.position.x, groundY, anchor.position.z);
-                landed = groundY.ToString("F2");
+                groundY = foundGroundY;
+                anchor.position = new Vector3(anchor.position.x, foundGroundY, anchor.position.z);
+                landed = foundGroundY.ToString("F2");
             }
 
             var faced = XrGrabRules.TryYawToFace(anchor.position, _origin.Camera.transform.position, out var yaw);
@@ -199,6 +238,12 @@ namespace ChatterMascot.Xr
 
             // ★ 平面への落下と向け直しは瞬間移動なので、揺れものが移動を慣性として拾わないよう戻す。
             _stage.ResetSpringBones();
+
+            // ★ 平面が見つかったときだけ歩行範囲を出す。平面が無ければ歩行も有効にならない。
+            if (groundY.HasValue)
+            {
+                _walk?.PlaceAt(anchor.position, groundY.Value, faced ? yaw : anchor.rotation.eulerAngles.y);
+            }
 
             Debug.Log($"[Mascot] XR grab: 離しました plane={landed} yaw={(faced ? yaw.ToString("F1") : "unchanged")}");
         }

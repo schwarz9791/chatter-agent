@@ -380,7 +380,7 @@ namespace ChatterMascot.Vrm
         /// | 4 | <c>streamingAssetsPath/animations/</c>（同梱） | 全 |
         ///
         /// ★ <see cref="Enumerate"/> と違い、ここは「ファイル1本」ではなく「ルートディレクトリ」を
-        ///   返す。<c>AnimationManifest.Build</c> が各ルート × 6カテゴリ（<c>MotionCategories.All</c>）で
+        ///   返す。<c>AnimationManifest.Build</c> が各ルート × 全カテゴリ（<c>MotionCategories.All</c>）で
         ///   <c>ListFiles(Join(root, カテゴリ名), "*.vrma")</c> を呼ぶ。
         /// ★ <c>env == null</c> は空。<c>Join</c> が <c>null</c> を返した段（基準が空）は飛ばす——
         ///   <see cref="Enumerate"/> の <c>Add</c> と同じ思想。

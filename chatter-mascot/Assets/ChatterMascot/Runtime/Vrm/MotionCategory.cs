@@ -4,8 +4,9 @@ using ChatterMascot.Protocol;
 namespace ChatterMascot.Vrm
 {
     /// <summary>
-    /// ワンショットで再生するモーションの分類（#70）。<c>Emotion</c> の5値に、
-    /// 発話が続かない間の小ネタ用に <see cref="Idle"/> を足したもの。
+    /// 再生するモーションの分類。<c>Emotion</c> 由来の5値（<see cref="Happy"/> 等）に加えて、
+    /// 発話が続かない間の小ネタ用の <see cref="Idle"/>、感情に依らず発火する <see cref="Walk"/>
+    /// が並ぶ——<b>全カテゴリが <c>Emotion</c> と一対一ではない</b>。
     ///
     /// ★ <c>Emotion.Neutral</c> に対応するカテゴリは無い。<see cref="MotionCategories.FromEmotion"/>
     ///   参照。
@@ -18,6 +19,7 @@ namespace ChatterMascot.Vrm
         Sad,
         Relaxed,
         Surprised,
+        Walk,
     }
 
     /// <summary>
@@ -40,6 +42,7 @@ namespace ChatterMascot.Vrm
             MotionCategory.Sad,
             MotionCategory.Relaxed,
             MotionCategory.Surprised,
+            MotionCategory.Walk,
         };
 
         /// <summary>
@@ -59,6 +62,7 @@ namespace ChatterMascot.Vrm
                 case MotionCategory.Sad: return "sad";
                 case MotionCategory.Relaxed: return "relaxed";
                 case MotionCategory.Surprised: return "surprised";
+                case MotionCategory.Walk: return "walk";
                 default: return category.ToString();
             }
         }

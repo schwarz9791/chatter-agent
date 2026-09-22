@@ -242,7 +242,9 @@ namespace ChatterMascot.Xr
 
                 // ★ 配置の後にすること。配置前につまむと、XrPlacement.Solve が動く前の
                 //   （まだ正しくない）アンカーを掴ませてしまう
-                _origin.gameObject.AddComponent<XrGrab>().Begin(_origin, _stage);
+                var walk = _origin.gameObject.AddComponent<XrWalk>();
+                walk.Begin(_origin, _stage);
+                _origin.gameObject.AddComponent<XrGrab>().Begin(_origin, _stage, walk);
             }
         }
     }

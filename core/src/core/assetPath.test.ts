@@ -11,7 +11,7 @@ describe("parseAssetPath / buildAssetPath", () => {
   });
 
   it("すべてのカテゴリで通る", () => {
-    for (const category of ["idle", "happy", "angry", "sad", "relaxed", "surprised"]) {
+    for (const category of ["idle", "happy", "angry", "sad", "relaxed", "surprised", "walk"]) {
       const rel = `animations/${category}/wave.vrma`;
       expect(parseAssetPath(buildAssetPath(rel)), rel).toEqual({ rel });
     }

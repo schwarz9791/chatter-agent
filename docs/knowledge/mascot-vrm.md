@@ -1206,6 +1206,19 @@ B = #70 **27.3%**（26.7 26.8 27.8 28.3 27.3 27.3。途中で小ネタが1本再
 `VrmCharacter`。VRM10 依存で EditMode テストが当たらない層）は配線だけを持つ。`Runtime.VrmAnimation` への代入は
 `VrmIdleAnimation.Present` の1箇所に寄せてある。
 
+## ★ ループ再生は `wrapMode` ではなく `state.time` の折り返しで作る（#71）
+
+歩行（`animations/walk/`）だけは、止めるまで回り続ける。**`wrapMode` を `Loop` にしないこと**
+——`ClipEnd.Overshoots` が1周ごとに真になり、#103 の終端ガード（`ClampToClipEnd`）が最初の
+終端で止めてしまう。`ClampForever` のままにして `ClipEnd.Wrap` で `state.time` 自身を先頭側へ
+折り返す（`VrmMotionPlayer.WrapWalkLoop`）。末尾の重複キーの外挿を避けたまま回り続けられる。
+
+★ **フェードの両端でも折り返すこと**（`AdvanceCurrentClip`）。終端で止めると、フェードの残り
+時間ぶん「最後の姿勢のまま固まったもの」を混ぜることになる。
+
+★ **ループするモーションは自分から `FadeOut` へ進まない。** 止める口は `RequestFadeOut` だけで、
+`Play` は「何も再生していないときだけ始まる」側に倒す——割り込むのは常に感情モーションの側。
+
 ## 素材の `.vrma` は別リポジトリで作る（#70）
 
 #70 の感情モーションと待機の小ネタは **VRoid Studio 2.14.0 の AnimationClip** を `.vrma` にして使う。

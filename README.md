@@ -137,6 +137,16 @@ cd core && npm run start:server
 
 ### Client
 
+How the server and client pair up depends on the case. See
+[`docs/mascot.md`](./docs/mascot.md) ("接続" / Connection) for the details.
+
+| Case | Server | Client |
+|---|---|---|
+| A. Mac only | `cd core && npm run start:server` | macOS app / CLI player |
+| B. Emulator or a USB-connected device, against the Mac's server | Start it as-is (listens on loopback only by default) | `./scripts/run-android.sh` (goes over `adb reverse`, so it needs neither a token nor exposing the server to the LAN. Keep the device's `connection` empty — `./scripts/configure-android.sh --clear`) |
+| C. Over the LAN (a Wi-Fi device) | `CHATTER_AGENT_HOST=0.0.0.0 npm run start:server` | `./scripts/configure-android.sh` → `./scripts/run-android.sh` |
+| D. Running Mac and Android at once | A second server on its own runtime root and port | Case B or C, pointed at that port |
+
 ```bash
 # CLI player (audio only. Sound plays without waiting on Unity)
 cd core && npm run start:player
@@ -148,7 +158,13 @@ open chatter-mascot/Build/ChatterMascot.app
 ```
 
 ```bash
-# Android XR (write the connection target onto the device first, then install)
+# Android (case B: emulator or a USB-connected device, against the Mac's server)
+cd chatter-mascot
+./scripts/run-android.sh
+```
+
+```bash
+# Android (case C: over the LAN)
 cd chatter-mascot
 ./scripts/configure-android.sh          # assembles the LAN IP automatically
 ./scripts/run-android.sh                # installs, launches, and streams logcat

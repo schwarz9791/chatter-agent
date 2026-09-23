@@ -372,8 +372,9 @@ cd chatter-mascot
 
 `run-android.sh` は `adb reverse tcp:8570 tcp:${CHATTER_AGENT_PORT:-8570}` → `install -r` →
 `am start` → `adb logcat -s Unity` の順に行う。`adb` は
-`$HOME/Library/Android/sdk/platform-tools/adb`（`ADB` 環境変数で上書き可）。この経路はサーバーから
-見るとループバック接続になる（LAN 越しの接続やトークンの検証には下の「LAN 接続」を使う）。
+`$HOME/Library/Android/sdk/platform-tools/adb`（`ADB` 環境変数で上書き可）。この経路が効くのは
+端末の `settings.json` に `connection` が無いときだけ（サーバーから見るとループバック接続。
+LAN 越しの接続やトークンの検証は下の「接続」の C を使う）。
 
 logcat に出るはずの行:
 
@@ -395,7 +396,7 @@ adb shell pm grant|revoke tech.sukima.chattermascot android.permission.HAND_TRAC
 
 ### モデルとモーションを入れる
 
-**`adb push` は要らない。** `connection.serverUrl` / `connection.token`（→ 下の「LAN 接続」）が
+**`adb push` は要らない。** `connection.serverUrl` / `connection.token`（→ 下の「接続」の C）が
 入っていれば、起動のたびに `chatter-agent-server` の `GET /v1/assets` からモデル・モーションを
 自動で取りに行く（`connection.assetSync`。既定 `"auto"`、`"off"` で止められる。→ 上の「macOS: 設定パネルとメニューバー」）。
 Mac 側にファイルを置く場所はデスクトップと同じ `~/.config/chatter-agent/models/` /
@@ -467,7 +468,24 @@ $ADB shell am force-stop tech.sukima.chattermascot   # 起動時に1回だけ読
 戻る。頭を水平にして起動した場合の値で、上下を向いて起動すると目から足元へのずれをその
 傾きぶん回した位置に出る。起動時の配置だけに効き、手でつまんで置き直した位置は再起動で戻る。
 
-### LAN 接続
+### 接続
+
+サーバーとクライアントの組み合わせは4ケースある。
+
+| ケース | サーバーの起動 | クライアント側 |
+|---|---|---|
+| A. Mac だけ | `npm run start:server` | macOS アプリ / CLI プレーヤー |
+| B. エミュレータ・USB 接続の実機を Mac のサーバーへ | 既定のまま（127.0.0.1 で listen） | `./scripts/run-android.sh`。`adb reverse` 経由 |
+| C. LAN 越し（Wi-Fi の実機） | `CHATTER_AGENT_HOST=0.0.0.0 npm run start:server` | `./scripts/configure-android.sh` → `./scripts/run-android.sh` |
+| D. Mac と Android を同時に動かす | 別のランタイムルート・別ポートでもう1本 | B か C をそのポートで |
+
+#### B: ループバック（`adb reverse`）
+
+`run-android.sh` が `adb reverse tcp:8570 tcp:${CHATTER_AGENT_PORT:-8570}` を張るので、端末の
+`settings.json` に `connection` が無ければ `MascotRunner` の既定 `ws://127.0.0.1:8570` のまま
+Mac のサーバーに届く。サーバーから見るとループバック接続なので、トークンも LAN への公開も要らない。
+
+#### C: LAN 越し
 
 ビルドし直さず、`settings.json` を書き換えるだけで Android から Mac の `chatter-agent-server`
 に繋がる。接続先とトークンは `connection` セクションに持つ。
@@ -491,7 +509,7 @@ CHATTER_AGENT_HOST=0.0.0.0 npm run start:server
 なぜこの形か・繋がらないときの切り分けは
 [`mascot-android-xr.md`](./knowledge/mascot-android-xr.md)「LAN 接続（#98）」。
 
-### 検証時の接続（デスクトップと Android を同時に確かめる）
+#### D: Mac と Android を同時に動かす
 
 1つのランタイムルートに繋ぐクライアントは1台にすること（→ [`protocol.md`](./protocol.md)
 「クライアント側の責務」6）。デスクトップの常用サーバーと Android を同時に確かめるなら、
@@ -504,6 +522,24 @@ XDG_CONFIG_HOME=/tmp/cm-android CHATTER_AGENT_PORT=8571 \
 cd ../chatter-mascot
 CHATTER_AGENT_PORT=8571 ./scripts/run-android.sh
 ```
+
+B・C どちらの経路でもこのポートへ向ける。C（`configure-android.sh`）を使うときは、
+サーバーに渡したのと同じ `XDG_CONFIG_HOME` / `CHATTER_AGENT_PORT` を `configure-android.sh`
+にも渡すこと（下の「落とし穴」）。
+
+#### 落とし穴
+
+- ★ **`connection` が入っていると B（`adb reverse`）の経路は使われない。** C から B へ戻すときは
+  `./scripts/configure-android.sh --clear` で `connection` だけ消す
+- ★ **`CHATTER_AGENT_HOST=0.0.0.0` を忘れると Android から繋がらない。** logcat には
+  `[Mascot] 接続エラー: Unable to connect to the remote server → mono-io-layer-error (111)`
+  が出る（サーバーのポートが開いていない＝ECONNREFUSED）
+- トークンはサーバーの起動時に生成される。`configure-android.sh` は先に `chatter-agent-server`
+  を起動してから使うこと
+- `settings.json` は起動時にしか読まれない。書き換えても反映は次回の起動から
+  （`--no-restart` を使ったときも同じ）
+- 別ルートのサーバー（D）を使うときは、`configure-android.sh` にも同じ `XDG_CONFIG_HOME` と
+  `CHATTER_AGENT_PORT` を渡す。渡さないと常用サーバーのトークンとポートを書き込んでしまう
 
 ### Android 側の必須設定
 

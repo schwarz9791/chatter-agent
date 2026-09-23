@@ -137,6 +137,16 @@ cd core && npm run start:server
 
 ### クライアント
 
+サーバーとクライアントの組み合わせ方はケースで変わります。詳しくは
+[`docs/mascot.md`](./docs/mascot.md)「接続」。
+
+| ケース | サーバー | クライアント |
+|---|---|---|
+| A. Mac だけ | `cd core && npm run start:server` | macOS アプリ / CLI プレーヤー |
+| B. エミュレータ・USB 接続の実機を Mac のサーバーへ | そのまま起動（既定でループバックのみ listen） | `./scripts/run-android.sh`（`adb reverse` 経由。トークンも LAN 公開も要りません。端末の `connection` は空にしておきます —— `./scripts/configure-android.sh --clear`） |
+| C. LAN 越し（Wi-Fi の実機） | `CHATTER_AGENT_HOST=0.0.0.0 npm run start:server` | `./scripts/configure-android.sh` → `./scripts/run-android.sh` |
+| D. Mac と Android を同時に動かす | 別のランタイムルート・別ポートでもう1本 | B か C をそのポートで |
+
 ```bash
 # CLI プレーヤー（耳で聞くだけ。Unity を待たずに音が出ます）
 cd core && npm run start:player
@@ -148,7 +158,13 @@ open chatter-mascot/Build/ChatterMascot.app
 ```
 
 ```bash
-# Android XR（端末に接続先を書いてから入れる）
+# Android（B: エミュレータ・USB 接続の実機を Mac のサーバーへ）
+cd chatter-mascot
+./scripts/run-android.sh
+```
+
+```bash
+# Android（C: LAN 越し）
 cd chatter-mascot
 ./scripts/configure-android.sh          # LAN の IP を自動で組み立てます
 ./scripts/run-android.sh                # install して起動、logcat を流します

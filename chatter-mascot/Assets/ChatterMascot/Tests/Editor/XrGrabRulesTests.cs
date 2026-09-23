@@ -5,7 +5,8 @@ using UnityEngine;
 namespace ChatterMascot.Tests
 {
     /// <summary>
-    /// <see cref="XrGrabRules.IsPinching"/> のヒステリシスと <see cref="XrGrabRules.TryYawToFace"/> のヨー。
+    /// <see cref="XrGrabRules.IsPinching"/> のヒステリシス、<see cref="XrGrabRules.HeldDistance"/> の
+    /// 奥行き、<see cref="XrGrabRules.TryYawToFace"/> のヨー。
     /// </summary>
     [TestFixture]
     public sealed class XrGrabRulesTests
@@ -152,6 +153,42 @@ namespace ChatterMascot.Tests
             var distance = XrGrabRules.HeldDistance(ray, HandPosition.y - 2f, 0.5f);
 
             Assert.That(distance, Is.EqualTo(XrGrabRules.MaxHeldDistance).Within(Tolerance));
+        }
+
+        /// <summary>手の高さを面の高さの前後でなめらかに動かしても、距離が跳ばない。</summary>
+        [Test]
+        public void HeldDistanceIsContinuousAcrossThePlaneHeight()
+        {
+            const float planeHeight = 0.4f;
+            const float grabDistance = 1f;
+            const float step = 0.001f;
+            var direction = new Vector3(0f, -0.8f, 1f).normalized;
+
+            var y = planeHeight - 0.2f;
+            var previous = XrGrabRules.HeldDistance(new Ray(new Vector3(0f, y, 0f), direction), planeHeight, grabDistance);
+            for (y += step; y <= planeHeight + 0.5f; y += step)
+            {
+                var current = XrGrabRules.HeldDistance(new Ray(new Vector3(0f, y, 0f), direction), planeHeight, grabDistance);
+                Assert.That(Mathf.Abs(current - previous), Is.LessThan(0.02f), $"y={y:F3}");
+                previous = current;
+            }
+        }
+
+        /// <summary>手が面の高さぎりぎり上でも、掴んだ距離の近くを保つ（手元へ吸い込まれない）。</summary>
+        [Test]
+        public void HeldDistanceStaysNearGrabDistanceJustAbovePlaneHeight()
+        {
+            const float planeHeight = 0.4f;
+            const float grabDistance = 1f;
+            var direction = new Vector3(0f, -0.8f, 1f).normalized;
+
+            Assert.That(
+                XrGrabRules.HeldDistance(new Ray(new Vector3(0f, planeHeight, 0f), direction), planeHeight, grabDistance),
+                Is.EqualTo(grabDistance).Within(Tolerance));
+
+            var justAbove = XrGrabRules.HeldDistance(
+                new Ray(new Vector3(0f, planeHeight + 0.001f, 0f), direction), planeHeight, grabDistance);
+            Assert.That(justAbove, Is.GreaterThan(grabDistance * 0.9f));
         }
     }
 }

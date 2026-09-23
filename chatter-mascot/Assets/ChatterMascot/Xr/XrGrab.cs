@@ -31,6 +31,9 @@ namespace ChatterMascot.Xr
         /// <summary>足元からこの割合（当たり判定の高さに対して）までは、体ではなく床を指したとみなす。</summary>
         private const float FeetHeightFraction = 0.1f;
 
+        /// <summary>つまんでいる間、アンカーを行き先へ寄せる速さ（1/秒）。大きいほど遅れが小さい。</summary>
+        private const float HeldFollowRate = 20f;
+
         private XROrigin _origin;
         private VrmStage _stage;
         private XrWalk _walk;
@@ -49,6 +52,15 @@ namespace ChatterMascot.Xr
 
         /// <summary>掴んだ瞬間の、aim レイに沿ったヒット距離。</summary>
         private float _grabDistance;
+
+        /// <summary>掴んだ点の、足元（<c>ModelAnchor</c>）からの高さ。</summary>
+        private float _grabAboveFeet;
+
+        /// <summary>掴んだ点を沿わせる水平面の高さ（ワールド）。</summary>
+        private float _heldHeight;
+
+        /// <summary>つまんでいる間の <c>ModelAnchor</c> の行き先。アンカーはここへ寄せて追う。</summary>
+        private Vector3 _heldTarget;
 
         /// <summary>掴んだ瞬間の、レイ上の点から <c>ModelAnchor</c> へのオフセット。</summary>
         private Vector3 _grabOffset;
@@ -186,6 +198,9 @@ namespace ChatterMascot.Xr
             _grabbedHandle = false;
             _grabDistance = hit.distance;
             _grabOffset = _stage.ModelAnchor.position - hit.point;
+            _grabAboveFeet = -_grabOffset.y;
+            _heldHeight = hit.point.y;
+            _heldTarget = _stage.ModelAnchor.position;
             _walk?.SetModelGrabbed(true);
             Debug.Log($"[Mascot] XR grab: 掴みました hand={hand.Name}");
         }
@@ -210,7 +225,26 @@ namespace ChatterMascot.Xr
                 return;
             }
 
-            _stage.ModelAnchor.position = ReadAimRay(hand, offset).GetPoint(_grabDistance) + _grabOffset;
+            var ray = ReadAimRay(hand, offset);
+
+            // ★ 水平面を指していれば、指した点に足元を置く。掴んだ点をレイに乗せる形だと、
+            //   段差のある面を指したとき足元が指した点より手前へずれ、縁から外れて下の面へ落ちる。
+            //   面を指していない間は、最後に指した面の高さで奥行きを決める
+            if (TryRaycastHorizontalPlane(ray, out var planePoint))
+            {
+                _heldHeight = planePoint.y + _grabAboveFeet;
+                _heldTarget = planePoint;
+            }
+            else
+            {
+                var distance = XrGrabRules.HeldDistance(ray, _heldHeight, _grabDistance);
+                _heldTarget = ray.GetPoint(distance) + _grabOffset;
+            }
+
+            // ★ 指す面が切り替わると目標が跳ぶので、寄せて追う
+            var anchor = _stage.ModelAnchor;
+            anchor.position = Vector3.Lerp(anchor.position, _heldTarget,
+                1f - Mathf.Exp(-HeldFollowRate * Time.unscaledDeltaTime));
         }
 
         private static Ray ReadAimRay(Hand hand, Transform offset)
@@ -233,7 +267,9 @@ namespace ChatterMascot.Xr
 
             _walk?.SetModelGrabbed(false);
 
+            // ★ 寄せている途中で離したら、追いつき先に置く。指した所に着かせるため
             var anchor = _stage.ModelAnchor;
+            anchor.position = _heldTarget;
             var collider = SyncedModelCollider();
             var landed = "none";
             float? groundY = null;
@@ -277,13 +313,25 @@ namespace ChatterMascot.Xr
         /// </summary>
         private bool TryFindGroundHeight(Vector3 feetWorld, float searchFromYWorld, out float groundY)
         {
-            groundY = 0f;
+            var worldOrigin = new Vector3(feetWorld.x, searchFromYWorld, feetWorld.z);
+            var found = TryRaycastHorizontalPlane(new Ray(worldOrigin, Vector3.down), out var point);
+            groundY = point.y;
+            return found;
+        }
+
+        /// <summary>
+        /// ワールドのレイが最初に当たる上向きの水平面上の点（ワールド）。平面検知が動いていない・
+        /// 当たらなければ false。
+        /// </summary>
+        private bool TryRaycastHorizontalPlane(Ray worldRay, out Vector3 point)
+        {
+            point = default;
+            if (_planeManager == null) return false;
 
             var trackablesParent = _origin.TrackablesParent;
-            var worldOrigin = new Vector3(feetWorld.x, searchFromYWorld, feetWorld.z);
             var localRay = new Ray(
-                trackablesParent.InverseTransformPoint(worldOrigin),
-                trackablesParent.InverseTransformDirection(Vector3.down));
+                trackablesParent.InverseTransformPoint(worldRay.origin),
+                trackablesParent.InverseTransformDirection(worldRay.direction));
 
             using var hits = _planeManager.Raycast(localRay, TrackableType.PlaneWithinPolygon, Allocator.Temp);
             var found = false;
@@ -295,7 +343,7 @@ namespace ChatterMascot.Xr
                 if (hit.distance >= closestDistance) continue;
 
                 closestDistance = hit.distance;
-                groundY = trackablesParent.TransformPoint(hit.pose.position).y;
+                point = trackablesParent.TransformPoint(hit.pose.position);
                 found = true;
             }
 
@@ -306,8 +354,8 @@ namespace ChatterMascot.Xr
         /// 片手ぶんの入力と、つまみの状態。
         ///
         /// ★ Hand Interaction Profile（OpenXR）のバインド。手の関節ではなく、aim レイと
-        ///   pinchValue だけを読む —— 奥行きの操作は考えず、Mac のドラッグに相当する
-        ///   操作にするため（つまんだレイの先に追従、離したら平面へ）。
+        ///   pinchValue だけを読む —— Mac のドラッグに相当する操作にするため（つまんだレイの先に
+        ///   追従、離したら平面へ）。奥行きはレイの向きから決める（<see cref="XrGrabRules.HeldDistance"/>）。
         /// ★ バインドが解決していない（手の入力が無い）ときは、どのアクションも既定値を返し
         ///   <c>IsPressed()</c> は false になるので、追跡していない手として扱われる。
         /// </summary>

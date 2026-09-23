@@ -19,6 +19,7 @@ namespace ChatterMascot.Xr
         public const float MaxRadius = 0.60f;
 
         private const float CircleVisibleSeconds = 15f;
+        private const float OutOfRangeCircleSeconds = 3f;
         private const float HandleAzimuthOffsetDegrees = 45f;
 
         /// <summary>
@@ -128,8 +129,11 @@ namespace ChatterMascot.Xr
         }
 
         /// <summary>
-        /// aim レイの先が歩行範囲の中なら、そこへ歩かせる。円の外・床と交わらないときは何もしない。
+        /// aim レイの先が歩行範囲の中なら、そこへ歩かせる。床と交わらないときは何もしない。
         /// つまみがハンドルにもキャラクターにも当たらなかったときに呼ぶ。
+        ///
+        /// ★ 円の外の床を指したときは、歩ける範囲を示すために円を短く出す。反応が無いと
+        ///   平面を見失ったように見えるため。既に出ている円の残り時間は縮めない。
         ///
         /// ★ <b>歩き出せる状態か、<c>Wander.GoTo</c> の前に確かめる。</b> 発話中や他のモーション
         ///   （idle の小ネタ・感情表現）が再生中なら歩き出さない —— <c>Wander</c> だけを
@@ -140,7 +144,12 @@ namespace ChatterMascot.Xr
         {
             if (!_placed || _wander == null || _character == null) return false;
             if (!TryFloorPoint(ray, out var point)) return false;
-            if (Vector2.Distance(point, _center) > _radius) return false;
+            if (Vector2.Distance(point, _center) > _radius)
+            {
+                _hideCircleAt = System.Math.Max(_hideCircleAt, Time.realtimeSinceStartupAsDouble + OutOfRangeCircleSeconds);
+                Debug.Log("[Mascot] XR walk: 範囲外を指したので歩行範囲を出します");
+                return false;
+            }
 
             if (_character.Speaking)
             {

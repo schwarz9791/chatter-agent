@@ -54,10 +54,7 @@ namespace ChatterMascot.Xr
         /// 指した点までの距離で更新し続け、指さなくなった瞬間の値をそのまま引き継ぐ。</summary>
         private float _heldDistance;
 
-        /// <summary>掴んだ点の、足元（<c>ModelAnchor</c>）からの高さ。</summary>
-        private float _grabAboveFeet;
-
-        /// <summary>掴んだ点を沿わせる水平面の高さ（ワールド）。</summary>
+        /// <summary>水平面を一度も指していない間に、掴んだ点を沿わせる高さ（ワールド）。</summary>
         private float _heldHeight;
 
         /// <summary>つまんでいる間の <c>ModelAnchor</c> の行き先。アンカーはここへ寄せて追う。</summary>
@@ -70,10 +67,11 @@ namespace ChatterMascot.Xr
         /// ゼロへ縮め、動かさずに離せば足元は掴んだ位置に留まる。</summary>
         private Vector3 _slip;
 
-        /// <summary>直前フレームで指した水平面上の点。<see cref="_slip"/> を縮める基準にする。</summary>
+        /// <summary>最後に指した水平面上の点。<see cref="_slip"/> を縮める基準と、面を外れた後に
+        /// 足元を沿わせる高さにする。</summary>
         private Vector3 _lastPlanePoint;
 
-        /// <summary>直前フレームで水平面を指していたか。</summary>
+        /// <summary>掴んでから水平面を一度でも指したか。</summary>
         private bool _hasLastPlanePoint;
 
         public void Begin(XROrigin origin, VrmStage stage, XrWalk walk)
@@ -216,7 +214,6 @@ namespace ChatterMascot.Xr
             _grabbedHandle = false;
             _heldDistance = hit.distance;
             _grabOffset = _stage.ModelAnchor.position - hit.point;
-            _grabAboveFeet = -_grabOffset.y;
             _heldHeight = hit.point.y;
             _heldTarget = _stage.ModelAnchor.position;
 
@@ -226,6 +223,7 @@ namespace ChatterMascot.Xr
             {
                 _slip = _stage.ModelAnchor.position - grabPlanePoint;
                 _slip.y = 0f;
+                _heldDistance = Vector3.Distance(ray.origin, grabPlanePoint);
                 _lastPlanePoint = grabPlanePoint;
                 _hasLastPlanePoint = true;
             }
@@ -262,10 +260,11 @@ namespace ChatterMascot.Xr
             var ray = ReadAimRay(hand, offset);
 
             // ★ 水平面を指していれば、指した点に足元を置く（掴んだ瞬間のずれは指した点が
-            //   動くぶんだけ縮める）。面を指していない間は、最後に指した面の高さで奥行きを決める。
+            //   動くぶんだけ縮める）。面を外れた後も、最後に指した面の高さとレイの交点に足元を
+            //   置く —— 置き方がそろうので、面の縁や距離の上限で目標が跳ばない。
+            //   面を一度も指していない間だけ、掴んだ点をレイに沿わせる。
             if (TryRaycastHorizontalPlane(ray, XrGrabRules.MaxHeldDistance, out var planePoint))
             {
-                _heldHeight = planePoint.y + _grabAboveFeet;
                 _heldDistance = Vector3.Distance(ray.origin, planePoint);
 
                 if (_hasLastPlanePoint)
@@ -276,6 +275,11 @@ namespace ChatterMascot.Xr
                 _lastPlanePoint = planePoint;
                 _hasLastPlanePoint = true;
                 _heldTarget = planePoint + _slip;
+            }
+            else if (_hasLastPlanePoint)
+            {
+                var distance = XrGrabRules.HeldDistance(ray, _lastPlanePoint.y, _heldDistance);
+                _heldTarget = ray.GetPoint(distance) + _slip;
             }
             else
             {

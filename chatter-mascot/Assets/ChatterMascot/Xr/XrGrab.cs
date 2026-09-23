@@ -28,6 +28,9 @@ namespace ChatterMascot.Xr
         /// <summary>追跡を短く見失っても、つまみを離したと判定しない猶予（秒）。</summary>
         private const float TrackingGraceSeconds = 0.2f;
 
+        /// <summary>足元からこの割合（当たり判定の高さに対して）までは、体ではなく床を指したとみなす。</summary>
+        private const float FeetHeightFraction = 0.1f;
+
         private XROrigin _origin;
         private VrmStage _stage;
         private XrWalk _walk;
@@ -170,6 +173,15 @@ namespace ChatterMascot.Xr
                 return;
             }
 
+            // ★ 足元に当たったつまみは、歩ける範囲の中なら行き先の指示を優先する。当たり判定は
+            //   足先まで包むので、そのままだと足元の近くを指しても体を掴んで置き直しになる
+            var bounds = collider.bounds;
+            if (hit.point.y < _stage.ModelAnchor.position.y + bounds.size.y * FeetHeightFraction &&
+                _walk != null && _walk.TryWalkTo(ray))
+            {
+                return;
+            }
+
             _grabbedHand = hand;
             _grabbedHandle = false;
             _grabDistance = hit.distance;
@@ -239,10 +251,15 @@ namespace ChatterMascot.Xr
             // ★ 平面への落下と向け直しは瞬間移動なので、揺れものが移動を慣性として拾わないよう戻す。
             _stage.ResetSpringBones();
 
-            // ★ 平面が見つかったときだけ歩行範囲を出す。平面が無ければ歩行も有効にならない。
+            // ★ 平面が見つかったときだけ歩行範囲を出す。無ければ Unplace で歩行を止め、
+            //   円を消す —— 次の XrWalk.Update が古い中心へアンカーを引き戻すのを防ぐ。
             if (groundY.HasValue)
             {
                 _walk?.PlaceAt(anchor.position, groundY.Value, faced ? yaw : anchor.rotation.eulerAngles.y);
+            }
+            else
+            {
+                _walk?.Unplace();
             }
 
             Debug.Log($"[Mascot] XR grab: 離しました plane={landed} yaw={(faced ? yaw.ToString("F1") : "unchanged")}");

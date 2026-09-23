@@ -196,18 +196,21 @@ namespace ChatterMascot.Xr
                 return;
             }
 
-            if (TryHorizontalYaw(Position, _target, out var targetYaw))
-            {
-                YawDegrees = TurnToward(YawDegrees, targetYaw, TurnDegreesPerSecond * dt);
-            }
-
             // ★★ <b>進むのは「目的地の方向」ではなく「体の正面」。</b> 目的地へ直接寄せると、
             //   向き直っている間は正面と進行方向がずれて横へ滑って見える。正面へ進めば、
-            //   回りながら歩いてもカーブを描くだけで滑らない（その場で回る必要も無くなる）。
-            // ★ 一歩を残りの距離で抑える。正面へ進むので、抑えないと目的地を通り越して
-            //   行ったり来たりしうる（到着判定の半径より一歩が大きいとき）
-            var step = Mathf.Min(speed * dt, Vector2.Distance(Position, _target));
-            Position = Advance(Position, Position + Forward(YawDegrees) * step, step, center, radius);
+            //   回りながら歩いてもカーブを描くだけで滑らない。
+            // ★ <b>一歩の速さは旋回速度×残りの距離で頭打ちにする。</b> 並進で生じる方位角の
+            //   変化を旋回の速さ以下に抑えることで、向きが方位に追いつき続ける
+            //   ——真横・背後の目的地では歩幅が縮んでその場に近い足踏みになり
+            //   （歩行クリップは流し続ける）、向き直りが済むにつれて歩幅も伸びる。
+            if (TryHorizontalYaw(Position, _target, out var targetYaw))
+            {
+                YawDegrees = Mathf.MoveTowardsAngle(YawDegrees, targetYaw, TurnDegreesPerSecond * dt);
+                var bearing = Mathf.DeltaAngle(YawDegrees, targetYaw) * Mathf.Deg2Rad;
+                var distance = Vector2.Distance(Position, _target);
+                var pace = Mathf.Min(speed, TurnDegreesPerSecond * Mathf.Deg2Rad * distance) * Mathf.Max(0f, Mathf.Cos(bearing));
+                Position = Advance(Position, Position + Forward(YawDegrees) * (pace * dt), center, radius);
+            }
 
             if (Vector2.Distance(Position, _target) <= ArrivalMeters) Phase = WanderPhase.Facing;
         }
@@ -220,7 +223,7 @@ namespace ChatterMascot.Xr
                 return;
             }
 
-            YawDegrees = TurnToward(YawDegrees, targetYaw, TurnDegreesPerSecond * dt);
+            YawDegrees = Mathf.MoveTowardsAngle(YawDegrees, targetYaw, TurnDegreesPerSecond * dt);
             if (Mathf.Abs(Mathf.DeltaAngle(YawDegrees, targetYaw)) <= FacingToleranceDegrees) EnterResting();
         }
 
@@ -243,12 +246,6 @@ namespace ChatterMascot.Xr
         private static bool TryHorizontalYaw(Vector2 from, Vector2 to, out float yawDegrees) =>
             XrGrabRules.TryYawToFace(new Vector3(from.x, 0f, from.y), new Vector3(to.x, 0f, to.y), out yawDegrees);
 
-        private static float TurnToward(float currentDegrees, float targetDegrees, float maxDeltaDegrees)
-        {
-            var delta = Mathf.DeltaAngle(currentDegrees, targetDegrees);
-            return currentDegrees + Mathf.Clamp(delta, -maxDeltaDegrees, maxDeltaDegrees);
-        }
-
         /// <summary>歩幅・1周期の歩数・周期・モデルの縮尺から移動速度（m/s）を求める。フットスライドの
         /// 唯一の出どころ —— この式と歩行クリップの実際の歩幅がずれると足が地面を擦る。</summary>
         public static float Speed(float strideMeters, int stepsPerCycle, float cycleSeconds, float modelScale)
@@ -268,37 +265,22 @@ namespace ChatterMascot.Xr
         }
 
         /// <summary>
-        /// <paramref name="from"/> から <paramref name="to"/> へ最大 <paramref name="step"/> だけ進めた位置を、
-        /// 円の外へは出さずに返す。
+        /// <paramref name="from"/> から <paramref name="to"/> への一歩を、円の外へは出さずに返す。
+        /// 円の外へ出る一歩は<b>丸ごと捨てて</b> <paramref name="from"/> をそのまま返す。
         ///
-        /// ★ <b>単純に円へクランプしない。</b> 半径を縮めた直後は <paramref name="from"/> が既に
-        ///   円の外にあり得るので、縁へ瞬間移動してしまう。進んだ後の中心からの距離が
-        ///   <c>max(radius, 進む前の距離)</c> を超えないように抑える —— 外から中へ戻る動きは通り、
-        ///   中から外へ出る動きだけ止まる。
+        /// ★ <b>径方向へ吸い戻さない。</b> 縁へ引き戻す動きは正面に対して横へずれる
+        ///   ——それ自体がフットスライドになる。一歩を通すか丸ごと捨てるかだけにすれば、
+        ///   通った一歩は常に正面（<see cref="Forward"/>）の向きのまま。
+        /// ★ <b>単純に半径へクランプしない。</b> 半径を縮めた直後は <paramref name="from"/> が既に
+        ///   円の外にあり得るので、縁へクランプすると瞬間移動になる。上限は
+        ///   <c>max(radius, 進む前の中心からの距離)</c> —— 外から中へ戻る一歩は通り、
+        ///   中から外へ出る一歩だけ止まる。
         /// </summary>
-        public static Vector2 Advance(Vector2 from, Vector2 to, float step, Vector2 center, float radius)
+        public static Vector2 Advance(Vector2 from, Vector2 to, Vector2 center, float radius)
         {
-            var moved = MoveTowards(from, to, step);
-
-            var offset = moved - center;
-            var distance = offset.magnitude;
             var maxDistance = Mathf.Max(radius, Vector2.Distance(from, center));
-            if (distance > maxDistance && distance > 1e-6f)
-            {
-                moved = center + offset / distance * maxDistance;
-            }
-
-            return moved;
-        }
-
-        private static Vector2 MoveTowards(Vector2 from, Vector2 to, float step)
-        {
-            var toTarget = to - from;
-            var distance = toTarget.magnitude;
-            if (distance <= 1e-6f) return to;
-            if (step >= distance) return to;
-            if (step <= 0f) return from;
-            return from + toTarget / distance * step;
+            if (Vector2.Distance(to, center) > maxDistance) return from;
+            return to;
         }
     }
 }

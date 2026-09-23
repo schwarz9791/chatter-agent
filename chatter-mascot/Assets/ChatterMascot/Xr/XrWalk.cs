@@ -24,7 +24,8 @@ namespace ChatterMascot.Xr
         /// <summary>
         /// 歩行クリップに合わせた既定の歩幅・1周期の歩数・周期。<b>足が滑るならここを合わせる</b>
         /// —— 接地判定でも IK でもなく、速度と歩幅のズレだけがフットスライドの原因
-        /// （<see cref="Wander.Speed"/>）。
+        /// （<see cref="Wander.Speed"/>）。同梱モデルと歩行クリップに合わせた値で、
+        /// 他のモデル・クリップに一般化する導出は別課題。
         /// </summary>
         private const float StrideMeters = 0.53f;
         private const int StepsPerCycle = 2;
@@ -84,6 +85,17 @@ namespace ChatterMascot.Xr
         }
 
         /// <summary>
+        /// 平面が見つからず着地できなかった（<c>XrGrab.Release</c>）ときに呼ぶ。歩行を無効にし、
+        /// 円をフェードアウトへ回す。<b>これを呼ばずに次の <see cref="Update"/> を迎えると、
+        /// 古い中心へアンカーが引き戻される。</b>
+        /// </summary>
+        public void Unplace()
+        {
+            _placed = false;
+            if (_character != null && _character.IsWalking) _character.StopWalking();
+        }
+
+        /// <summary>
         /// aim レイがハンドルに当たっていれば掴む。
         /// ★ <b>円が消えている間は掴ませない。</b> 見えていないものを掴めると、キャラクターを
         ///   掴もうとしたつまみがハンドルに吸われる。
@@ -118,12 +130,29 @@ namespace ChatterMascot.Xr
         /// <summary>
         /// aim レイの先が歩行範囲の中なら、そこへ歩かせる。円の外・床と交わらないときは何もしない。
         /// つまみがハンドルにもキャラクターにも当たらなかったときに呼ぶ。
+        ///
+        /// ★ <b>歩き出せる状態か、<c>Wander.GoTo</c> の前に確かめる。</b> 発話中や他のモーション
+        ///   （idle の小ネタ・感情表現）が再生中なら歩き出さない —— <c>Wander</c> だけを
+        ///   Walking へ進めても、モーションが始められなければ <c>Update</c> が即座に
+        ///   <c>Wander.Stop()</c> で畳むだけになる。
         /// </summary>
         public bool TryWalkTo(Ray ray)
         {
             if (!_placed || _wander == null || _character == null) return false;
             if (!TryFloorPoint(ray, out var point)) return false;
             if (Vector2.Distance(point, _center) > _radius) return false;
+
+            if (_character.Speaking)
+            {
+                Debug.Log("[Mascot] XR walk: 歩き出せません（発話中）");
+                return false;
+            }
+
+            if (!_character.IsWalking && !_character.TryStartWalking())
+            {
+                Debug.Log("[Mascot] XR walk: 歩き出せません（他のモーション再生中）");
+                return false;
+            }
 
             var now = Time.realtimeSinceStartupAsDouble;
             _wander.GoTo(now, point);
@@ -162,7 +191,15 @@ namespace ChatterMascot.Xr
 
         private void Update()
         {
-            if (!_placed || _wander == null || _character == null) return;
+            if (!_placed)
+            {
+                // ★ 平面が無くて置けなかった／Unplace 済み。円は最後の位置のまま
+                //   フェードアウトへ回す —— ここで Sync を止めると消える途中で固まって見える
+                SyncCircle(false);
+                return;
+            }
+
+            if (_wander == null || _character == null) return;
 
             var now = Time.realtimeSinceStartupAsDouble;
 
@@ -187,7 +224,7 @@ namespace ChatterMascot.Xr
                 _character.StopWalking();
             }
 
-            SyncCircle();
+            SyncCircle(CircleVisible);
 
             // ★ XrGrab がモデルの位置を握っている間は上書きしない
             if (_modelHeld) return;
@@ -206,11 +243,11 @@ namespace ChatterMascot.Xr
         /// <summary>円が出ている間か。ハンドルをつまんでいる間は消さない。</summary>
         private bool CircleVisible => _handleHeld || Time.realtimeSinceStartupAsDouble < _hideCircleAt;
 
-        private void SyncCircle()
+        private void SyncCircle(bool visible)
         {
             if (_view == null) return;
 
-            _view.Sync(new Vector3(_center.x, 0f, _center.y), _floorY, _radius, _handleAngleDegrees, CircleVisible);
+            _view.Sync(new Vector3(_center.x, 0f, _center.y), _floorY, _radius, _handleAngleDegrees, visible);
         }
 
         private static double RandomDouble() => UnityEngine.Random.value;

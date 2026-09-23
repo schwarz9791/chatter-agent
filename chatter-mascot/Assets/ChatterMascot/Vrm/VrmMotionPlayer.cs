@@ -557,7 +557,6 @@ namespace ChatterMascot.Vrm
 
         /// <summary>
         /// 歩行専用: 提示中の legacy Animation の <c>state.time</c> をクリップ長で折り返す。
-        /// <c>Playing</c> の <c>Walk</c> 節からだけ呼ぶ。
         ///
         /// ★ <see cref="ClampToClipEnd"/> と同じ理由（クラス <see cref="ClipEnd"/> の doc）で、
         ///   終端の手前に留めるのではなく <see cref="ClipEnd.Wrap"/> で先頭側へ折り返す——

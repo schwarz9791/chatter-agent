@@ -16,6 +16,9 @@ namespace ChatterMascot.Xr
         private const float FloorClearanceMeters = 0.002f;
         private const float HandleRadiusMeters = 0.015f;
 
+        /// <summary>不透明度が 0↔1 を渡るのにかける秒数。出現・消滅の両方に使う。</summary>
+        private const float FadeSeconds = 0.5f;
+
         /// <summary>ハンドルを円の塗りより少し浮かせる（同じ高さだと面が食い合う）。</summary>
         private const float HandleLiftMeters = 0.001f;
         private const int RingSegments = 48;
@@ -36,12 +39,19 @@ namespace ChatterMascot.Xr
         private bool _built;
         private bool _buildFailed;
 
+        /// <summary>不透明度。0（消えている）〜1（出ている）。<see cref="Sync"/> でだけ動かす。</summary>
+        private float _opacity;
+
         /// <summary>ハンドルのつまみ判定。ビューを組めなかったときは <c>null</c>。</summary>
         public Collider HandleCollider { get; private set; }
 
         /// <summary>
         /// 円・フチ・ハンドルを、渡された値どおりに置く。<paramref name="handleAngleDegrees"/> は
         /// キャラクターのヨーと同じ約束（ローカル −Z が正面）で測ったハンドルの方角。
+        ///
+        /// ★ <paramref name="visible"/> は即座の on/off ではなく、不透明度を <see cref="FadeSeconds"/>
+        ///   かけて 0↔1 へ動かす目標。<b>消える側の呼び出しでも毎フレーム呼び続けること</b>
+        ///   ——呼ばれなくなるとフェードが途中で止まって固まる。
         /// </summary>
         public void Sync(Vector3 center, float floorY, float radius, float handleAngleDegrees, bool visible)
         {
@@ -57,9 +67,19 @@ namespace ChatterMascot.Xr
             _handle.localPosition = Quaternion.Euler(0f, handleAngleDegrees, 0f) * Vector3.back * radius
                                     + Vector3.up * HandleLiftMeters;
 
-            _fill.gameObject.SetActive(visible);
-            _rim.gameObject.SetActive(visible);
-            _handle.gameObject.SetActive(visible);
+            var target = visible ? 1f : 0f;
+            var opacity = Mathf.MoveTowards(_opacity, target, Time.unscaledDeltaTime / FadeSeconds);
+            if (opacity != _opacity)
+            {
+                _opacity = opacity;
+                _fillMaterial.SetColor("_BaseColor", new Color(FillColor.r, FillColor.g, FillColor.b, FillColor.a * _opacity));
+                _rimMaterial.SetColor("_BaseColor", new Color(RimColor.r, RimColor.g, RimColor.b, RimColor.a * _opacity));
+            }
+
+            var active = _opacity > 0f;
+            _fill.gameObject.SetActive(active);
+            _rim.gameObject.SetActive(active);
+            _handle.gameObject.SetActive(active);
         }
 
         private void Build()

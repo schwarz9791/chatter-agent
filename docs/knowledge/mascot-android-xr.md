@@ -764,7 +764,7 @@ Jetpack XR（Unity ではない）の動く Gradle 構成。Unity 採用なら�
   `AndroidManifestPostProcessor` と `insecureHttpOption` で満たしている
 - 接続先の手動入力は**すでに入っている**（[#98](https://github.com/schwarz9791/chatter-agent/issues/98)。
   `settings.json` の `connection.serverUrl` / `configure-android.sh` — 手順は
-  [`../mascot.md`](../mascot.md)「LAN 接続」）。後から
+  [`../mascot.md`](../mascot.md)「接続」の C）。後から
   `NsdManager`（`android.net.nsd`）で mDNS 検出を足すのは未着手
 
 ★ **エンジンの `--host 0.0.0.0 --cors_policy_mode all` は不要になった**（#29）。

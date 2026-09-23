@@ -26,7 +26,10 @@ namespace ChatterMascot.Vrm
         /// <summary>指定したクリップが <c>null</c>、または読み込みが終わっていない（壊れた <c>.vrma</c> を含む）。</summary>
         NotLoaded,
 
-        /// <summary>割り込めない何かが既に再生中（感情モーション同士、または小ネタ中の小ネタ）。</summary>
+        /// <summary>
+        /// 割り込めない何かが既に再生中（感情モーション同士、小ネタ中の小ネタ、
+        /// または何か再生中に歩行を始めようとした）。
+        /// </summary>
         Busy,
     }
 }

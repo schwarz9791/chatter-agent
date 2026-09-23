@@ -12,13 +12,12 @@
  *   そのまま弾かれる（`core/audioPath.ts` と同じ論法）。
  *
  * ★ category の正は `chatter-mascot` 側 `Vrm/MotionCategory.cs` の `DirectoryName`
- *   （`idle`/`happy`/`angry`/`sad`/`relaxed`/`surprised`）。core の `Emotion` 型
- *   （`neutral` を含む5値+1）を流用しないこと —— あちらは `neutral`、ディレクトリ名は
- *   `idle` で、そのまま揃わない。
+ *   （`idle`/`happy`/`angry`/`sad`/`relaxed`/`surprised`/`walk`）。core の `Emotion` 型を
+ *   流用しないこと —— `idle` / `walk` は感情由来ではないカテゴリで、`Emotion` には無い。
  */
 
 /** `animations/<ここ>/` のディレクトリ名。`assetCatalog.ts` の走査もこの並びに従う */
-export const ASSET_CATEGORIES = ["idle", "happy", "angry", "sad", "relaxed", "surprised"] as const;
+export const ASSET_CATEGORIES = ["idle", "happy", "angry", "sad", "relaxed", "surprised", "walk"] as const;
 
 export type AssetCategory = (typeof ASSET_CATEGORIES)[number];
 

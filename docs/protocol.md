@@ -326,8 +326,8 @@ GET /v1/assets/animations/<category>/<name>.vrma
 
 - `models/mascot.vrm`
 - `animations/idle.vrma`
-- `animations/<category>/<name>.vrma`（`category` は `idle`/`happy`/`angry`/`sad`/`relaxed`/`surprised`
-  の6つに固定。`name` は `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`）
+- `animations/<category>/<name>.vrma`（`category` は `idle`/`happy`/`angry`/`sad`/`relaxed`/`surprised`/`walk`
+  の7つに固定。`name` は `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`）
 
 ### ★ `GET /audio/…` とわざと違う——Range に対応する
 

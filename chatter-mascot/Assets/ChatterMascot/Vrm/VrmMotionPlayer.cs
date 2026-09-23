@@ -8,26 +8,34 @@ using UniVRM10;
 namespace ChatterMascot.Vrm
 {
     /// <summary>
-    /// ワンショットで再生するモーションの種別。<see cref="EmotionMotionTrigger"/> が発火させるのが
-    /// <see cref="Emotion"/>、<see cref="IdleAccentTimer"/> が発火させるのが <see cref="Accent"/>。
+    /// モーション再生の種別。<see cref="EmotionMotionTrigger"/> が発火させるのが
+    /// <see cref="Emotion"/>、<see cref="IdleAccentTimer"/> が発火させるのが <see cref="Accent"/>、
+    /// 歩行の開始・停止の外部呼び出しが使うのが <see cref="Walk"/>。<see cref="Emotion"/> /
+    /// <see cref="Accent"/> はワンショットで、<see cref="Walk"/> だけ止めるまでループする。
     ///
-    /// ★ <see cref="VrmMotionPlayer.Play"/> の割り込み規則がこの2値で変わる——
-    ///   <see cref="Emotion"/> は <see cref="Accent"/> に割り込めるが、<see cref="Emotion"/> 同士は
-    ///   割り込まない（最後まで見せる。ユーザーと決めたこと。2026-09-04）。
+    /// ★ <see cref="VrmMotionPlayer.Play"/> の割り込み規則がこの3値で変わる——
+    ///   <see cref="Emotion"/> は <see cref="Accent"/> と <see cref="Walk"/> のどちらにも
+    ///   割り込めるが、<see cref="Emotion"/> 同士は割り込まない（最後まで見せる。
+    ///   ユーザーと決めたこと。2026-09-04）。<see cref="Walk"/> は何も再生していないときだけ
+    ///   始まる——歩行中に割り込むのは常に <see cref="Emotion"/> 側。
     /// </summary>
     public enum MotionKind
     {
         Emotion,
         Accent,
+        Walk,
     }
 
     /// <summary>
-    /// 感情モーション・小ネタ（<see cref="MotionCategory"/>）を読み込み、ワンショットで再生する。
+    /// 感情モーション・小ネタ・歩行（<see cref="MotionCategory"/>）を読み込み、再生する。
     /// <b><c>IDisposable</c>。<c>MonoBehaviour</c> ではない。</b> <see cref="VrmCharacter"/> が所有する。
     ///
     /// 状態機械は <c>Idle → FadeIn → Playing → FadeOut → Idle</c>。<c>Idle</c> 以外の間、
-    /// <see cref="IsPlaying"/> は <c>true</c>。<see cref="Kind"/>（<see cref="MotionKind"/>）で
-    /// 「今のはどっちの発火か」を覚え、<see cref="Play"/> の割り込み判定に使う。
+    /// <see cref="IsPlaying"/> は <c>true</c>。<see cref="MotionKind"/> で「今のはどっちの発火か」を
+    /// 覚え、<see cref="Play"/> の割り込み判定に使う。<c>Emotion</c> / <c>Accent</c> は
+    /// <c>Playing</c> がクリップ長で自動的に <c>FadeOut</c> へ進むが、<c>Walk</c> は
+    /// <c>Playing</c> に留まり続け（クリップを折り返して回し続ける）、<see cref="RequestFadeOut"/>
+    /// を呼ばれるまで自分からは終わらない。
     ///
     /// ★ <b>待機（<see cref="VrmIdleAnimation"/>）とスロットを奪い合う。</b> <c>Vrm10Runtime</c> の
     ///   <c>VrmAnimation</c> スロットは1つしか無いので、感情モーションを差している間は
@@ -141,6 +149,9 @@ namespace ChatterMascot.Vrm
 
         /// <summary>いま再生しているのが感情モーションか（<see cref="EmotionMotionTrigger"/> に渡す）。</summary>
         public bool IsPlayingEmotion => IsPlaying && _kind == MotionKind.Emotion;
+
+        /// <summary>いま再生しているのが歩行か（<c>VrmCharacter.IsWalking</c> の裏側）。</summary>
+        public bool IsPlayingWalk => IsPlaying && _kind == MotionKind.Walk;
 
         /// <summary>
         /// いまの状態の読み取り専用の文字列表現（<see cref="StallProbe"/> 用、#103）。
@@ -365,12 +376,15 @@ namespace ChatterMascot.Vrm
         /// <paramref name="clip"/> が <c>null</c> か読めていない
         /// （<see cref="MotionPlayResult.NotLoaded"/>）／
         /// <paramref name="kind"/><c> == Emotion</c> で既に感情モーション再生中、または
-        /// <paramref name="kind"/><c> == Accent</c> で既に何か再生中
-        /// （どちらも <see cref="MotionPlayResult.Busy"/>）。
+        /// <paramref name="kind"/><c> == Accent</c> か <c> == Walk</c> で既に何か再生中
+        /// （すべて <see cref="MotionPlayResult.Busy"/>）。
         ///
-        /// ★ <b>感情モーションは小ネタ（<c>Accent</c>）に割り込める。</b> 割り込まれた小ネタの
-        ///   クリップは <c>Animation.Stop()</c> で寝かせ直す。感情モーション同士は
-        ///   割り込まない（上の拒否条件どおり）。
+        /// ★ <b>感情モーションは小ネタ（<c>Accent</c>）・歩行（<c>Walk</c>）のどちらにも
+        ///   割り込める。</b> 割り込まれたクリップは <c>Animation.Stop()</c> で寝かせ直す。
+        ///   感情モーション同士は割り込まない（上の拒否条件どおり）。
+        /// ★ <b>歩行は何も再生していないときだけ開始できる。</b> 止めるまで回り続ける
+        ///   （<see cref="Tick"/> の <c>Walk</c> 節を参照）ので、他の何かと同時に始まる
+        ///   想定を持たない——止めるのは <see cref="RequestFadeOut"/>。
         /// </summary>
         public MotionPlayResult Play(MotionClip clip, MotionKind kind, double now)
         {
@@ -384,9 +398,10 @@ namespace ChatterMascot.Vrm
             if (!_loaded.TryGetValue(clip, out var loaded)) return MotionPlayResult.NotLoaded;
             if (kind == MotionKind.Emotion && IsPlayingEmotion) return MotionPlayResult.Busy;
             if (kind == MotionKind.Accent && IsPlaying) return MotionPlayResult.Busy;
+            if (kind == MotionKind.Walk && IsPlaying) return MotionPlayResult.Busy;
 
-            // ★ ここに来る「_current != null」は、感情モーションが小ネタへ割り込むケースだけ
-            //   （上のガードにより、Accent は何も再生中でないときしか開始できない）
+            // ★ ここに来る「_current != null」は、感情モーションが小ネタ・歩行へ割り込むケースだけ
+            //   （上のガードにより、Accent と Walk はどちらも何も再生中でないときしか開始できない）
             if (_current != null)
             {
                 _current.Animation.Stop();
@@ -441,7 +456,7 @@ namespace ChatterMascot.Vrm
                     // ★ FadeIn の終了は壁時計だけで決まる（下の CrossFade.Progress）ので、
                     //   FadeSeconds より短いクリップは巻き戻しが無いと to 側がフェードの残り
                     //   時間ずっと終端を越えて評価される（ClampToClipEnd の doc、#103）
-                    ClampToClipEnd(_current);
+                    AdvanceCurrentClip();
                     _fade.Tick(now);
                     if (_fade.IsDone)
                     {
@@ -463,6 +478,14 @@ namespace ChatterMascot.Vrm
                         return;
                     }
 
+                    // ★ 歩行は自分からは終わらない。クリップ長に着いたら FadeOut へ進む代わりに
+                    //   折り返して回し続ける——止めるのは RequestFadeOut の専管
+                    if (_kind == MotionKind.Walk)
+                    {
+                        WrapWalkLoop(_current);
+                        return;
+                    }
+
                     // ★ length まで待つと最終フレームを FadeSeconds ぶん保持してから戻る。
                     //   ClampToClipEnd が返す state をそのまま使うこと（LoadedClip.State の
                     //   doc どおり foreach を二重に走らせない）
@@ -480,7 +503,7 @@ namespace ChatterMascot.Vrm
                     return;
 
                 case PlayState.FadeOut:
-                    ClampToClipEnd(_current);
+                    AdvanceCurrentClip();
 
                     _fade.Tick(now);
                     if (_fade.IsDone)
@@ -494,6 +517,63 @@ namespace ChatterMascot.Vrm
                         _ended = true;
                     }
                     return;
+            }
+        }
+
+        /// <summary>
+        /// ループするモーションを止める唯一の口。待機へのフェードを始めて <c>FadeOut</c> へ移す。
+        /// 既に畳んでいる（<c>Idle</c> / <c>FadeOut</c>）なら何もしない。
+        ///
+        /// ★★ <b><c>FadeIn</c> の最中にも効かせること。</b> 入り切る前に止めたくなることがあり
+        ///   （フェードより短い移動）、<c>Playing</c> だけを見ていると止める指示が黙って捨てられる
+        ///   ——ワンショットと違ってループは自分から終わらないので、<b>誰にも止められない再生が
+        ///   永久に残る</b>（そして次の再生が <see cref="MotionPlayResult.Busy"/> で弾かれ続ける）。
+        /// ★ フェード元は<b>いま実際に差さっているもの</b>を採る（<c>FadeIn</c> なら入りかけの
+        ///   フェードそのもの）。クリップを直に採ると、混ざっていた姿勢から飛ぶ。
+        /// ★ <see cref="MotionKind"/> は確かめない——ループするものにだけ呼ぶのは呼び出し側の契約
+        ///   （<c>VrmCharacter.StopWalking</c> の <c>IsWalking</c> ガード）。
+        /// </summary>
+        public void RequestFadeOut(double now)
+        {
+            if (_state != PlayState.Playing && _state != PlayState.FadeIn) return;
+
+            var from = _idle.Current != null ? _idle.Current.ControlRig : _current.Instance.ControlRig;
+            BeginFade(from, _idle.Idle.ControlRig, now);
+            SetState(PlayState.FadeOut);
+        }
+
+        /// <summary>
+        /// 提示中のクリップを1フレームぶん整える。歩行は折り返し、ワンショットは終端で止める。
+        /// フェードの両端（<c>FadeIn</c> / <c>FadeOut</c>）から呼ぶ。
+        ///
+        /// ★ <b>フェード中も歩行は折り返すこと。</b> 終端で止めると、フェードの残り時間ぶん
+        ///   最後の姿勢のまま固まったものを混ぜることになる。
+        /// </summary>
+        private void AdvanceCurrentClip()
+        {
+            if (_kind == MotionKind.Walk) WrapWalkLoop(_current);
+            else ClampToClipEnd(_current);
+        }
+
+        /// <summary>
+        /// 歩行専用: 提示中の legacy Animation の <c>state.time</c> をクリップ長で折り返す。
+        ///
+        /// ★ <see cref="ClampToClipEnd"/> と同じ理由（クラス <see cref="ClipEnd"/> の doc）で、
+        ///   終端の手前に留めるのではなく <see cref="ClipEnd.Wrap"/> で先頭側へ折り返す——
+        ///   <c>wrapMode</c> はここでも <c>ClampForever</c> のまま変えない。
+        /// </summary>
+        private static void WrapWalkLoop(LoadedClip clip)
+        {
+            if (clip == null) return;
+
+            var state = clip.State;
+            if (state == null) return;
+
+            if (ClipEnd.Overshoots(state.time, state.length))
+            {
+                state.time = ClipEnd.Wrap(state.time, state.length);
+                // ★ 実行順 0 のここで差し直せば、11000 の Retarget は差し直した姿勢を読む
+                clip.Animation.Sample();
             }
         }
 
@@ -532,8 +612,8 @@ namespace ChatterMascot.Vrm
 
         /// <summary>
         /// フェードを開始する——<see cref="CrossFadeAnimation"/> の生成と
-        /// <see cref="VrmIdleAnimation.Present"/> をここに寄せる。<see cref="Play"/> と
-        /// Playing→FadeOut（<see cref="Tick"/>）の2箇所から呼ぶ。
+        /// <see cref="VrmIdleAnimation.Present"/> をここに寄せる。<see cref="Play"/>、
+        /// Playing→FadeOut（<see cref="Tick"/>）、<see cref="RequestFadeOut"/> の3箇所から呼ぶ。
         /// </summary>
         private void BeginFade(
             (INormalizedPoseProvider Pose, ITPoseProvider TPose) from,

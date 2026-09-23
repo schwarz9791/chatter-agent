@@ -193,6 +193,7 @@ cd chatter-mascot
 | `animations/*.vrma`（直下） | 待機ループの差し替え（同梱のものの代わり） |
 | `animations/idle/` | 待機中の小ネタ（30〜60 秒ごとに1本） |
 | `animations/happy/` `angry/` `sad/` `relaxed/` `surprised/` | その感情の発言でワンショット再生 → 待機へ戻る |
+| `animations/walk/` | XR で歩き回るときの歩行モーション（ループ再生。macOS では使わない） |
 
 モデルの差し替えは設定パネルからできますが、**モーションに UI はありません。** ディレクトリを掘って `.vrma` を置くと、次の起動で拾います。`neutral` に対応するディレクトリはありません（感情モーションを出さない、が既定の振る舞いです）。
 

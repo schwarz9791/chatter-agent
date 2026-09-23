@@ -345,7 +345,7 @@ namespace ChatterMascot.Vrm
             //   ワールド軸に沿うので、回したあとで測り直さないとカメラ距離がずれる
             FaceCamera(instance);
 
-            _bounds = MeasureBounds(instance, boneBoundsMarginMeters);
+            _bounds = MeasureBounds(instance, ScaledBoneBoundsMargin(instance));
             _collider = AttachCollider(instance.gameObject, _bounds);
 
             if (placeholder != null) placeholder.SetActive(false);
@@ -439,10 +439,17 @@ namespace ChatterMascot.Vrm
         /// </summary>
         private void Remeasure()
         {
-            _bounds = MeasureBounds(_instance, boneBoundsMarginMeters);
+            _bounds = MeasureBounds(_instance, ScaledBoneBoundsMargin(_instance));
             FitCollider(_collider, _bounds);
             Frame();
         }
+
+        /// <summary>
+        /// 余白をモデルの縮尺に合わせたもの。ボーンの位置はワールドで測るので、余白も
+        /// 同じ縮尺で縮めないと、小さく置いたモデル（XR）ほど箱が体に比べて膨らむ。
+        /// </summary>
+        private float ScaledBoneBoundsMargin(Vrm10Instance instance) =>
+            boneBoundsMarginMeters * instance.transform.UniformedLossyScale();
 
         /// <summary>
         /// Humanoid ボーンのワールド位置から bounds を測る。

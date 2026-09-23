@@ -27,5 +27,23 @@ namespace ChatterMascot.Vrm
         {
             return time > Limit(length);
         }
+
+        /// <summary>
+        /// 折り返した時刻。<paramref name="time"/> が <paramref name="length"/> を何周分
+        /// 超えていても <c>[0, Limit(length)]</c> に入る。
+        ///
+        /// ★ 周回するモーション（歩行）を <c>wrapMode</c> の <c>Loop</c> ではなくこの関数で
+        ///   折り返すのは、<c>ClampForever</c> のまま終端の手前で止め続けるのと同じ理由
+        ///   （クラスの doc 参照）——<c>state.time</c> 自身を終端の先へ進ませない。
+        /// </summary>
+        public static float Wrap(float time, float length)
+        {
+            if (!float.IsFinite(length) || length <= 0f) return 0f;
+            if (!float.IsFinite(time)) return 0f;
+
+            var wrapped = time % length;
+            if (wrapped < 0f) wrapped += length;
+            return Mathf.Min(wrapped, Limit(length));
+        }
     }
 }

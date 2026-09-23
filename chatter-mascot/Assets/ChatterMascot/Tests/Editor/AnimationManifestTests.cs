@@ -7,7 +7,8 @@ namespace ChatterMascot.Tests
 {
     /// <summary>
     /// <see cref="AnimationManifest"/>。<see cref="AssetPath.AnimationRoots"/> の各ルート ×
-    /// 6カテゴリを舐めて、どの <c>.vrma</c> を採用するかを決める合成ロジック。
+    /// 全カテゴリ（<see cref="MotionCategories.All"/>）を舐めて、どの <c>.vrma</c> を
+    /// 採用するかを決める合成ロジック。
     ///
     /// ★ VRM10 に依存する実際の読み込み（<c>Vrm/VrmMotionPlayer</c>）はここからは見えないので、
     ///   ここでは「<c>ListFiles</c> が返した文字列からどの <see cref="MotionClip"/> の集合が
@@ -321,7 +322,7 @@ namespace ChatterMascot.Tests
             var manifest = AnimationManifest.Build(Env(files));
 
             Assert.That(manifest.Describe(),
-                Is.EqualTo("idle=2 happy=1 angry=0 sad=0 relaxed=0 surprised=0"));
+                Is.EqualTo("idle=2 happy=1 angry=0 sad=0 relaxed=0 surprised=0 walk=0"));
         }
     }
 }

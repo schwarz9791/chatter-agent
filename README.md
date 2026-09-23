@@ -193,6 +193,7 @@ Settings and assets live under `~/.config/chatter-agent/` (or under `XDG_CONFIG_
 | `animations/*.vrma` (directly under it) | replaces the idle loop (in place of the bundled one) |
 | `animations/idle/` | little extras while idle (one every 30–60 seconds) |
 | `animations/happy/` `angry/` `sad/` `relaxed/` `surprised/` | plays once for speech with that emotion → returns to idle |
+| `animations/walk/` | the walking motion for wandering in XR (looped; unused on macOS) |
 
 The model can be swapped from the settings panel, but **there's no UI for motion.** Create the directory, drop a `.vrma` file in, and it's picked up on the next launch. There's no directory for `neutral` (the default behavior is not to play an emotion motion).
 

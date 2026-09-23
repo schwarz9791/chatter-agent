@@ -4,6 +4,19 @@ using UnityEngine;
 
 namespace ChatterMascot.Xr
 {
+    /// <summary><see cref="XrWalk.TryWalkTo"/> の結果。</summary>
+    public enum WalkToResult
+    {
+        /// <summary>歩き出した。</summary>
+        Started,
+
+        /// <summary>指した点が歩行範囲の外だった。</summary>
+        OutOfRange,
+
+        /// <summary>範囲内かどうかによらず、歩き出さなかった（未配置・床と交わらない・発話中・他のモーション中など）。</summary>
+        Rejected,
+    }
+
     /// <summary>
     /// 歩行範囲（円）の状態を持つ唯一の場所。<see cref="Wander"/> を毎フレーム回し、
     /// 結果を <c>ModelAnchor</c> の xz とヨーへ反映する。円の描画は <see cref="XrWalkAreaView"/> に任せる。
@@ -19,6 +32,7 @@ namespace ChatterMascot.Xr
         public const float MaxRadius = 0.60f;
 
         private const float CircleVisibleSeconds = 15f;
+        private const float OutOfRangeCircleSeconds = 3f;
         private const float HandleAzimuthOffsetDegrees = 45f;
 
         /// <summary>
@@ -128,37 +142,51 @@ namespace ChatterMascot.Xr
         }
 
         /// <summary>
-        /// aim レイの先が歩行範囲の中なら、そこへ歩かせる。円の外・床と交わらないときは何もしない。
-        /// つまみがハンドルにもキャラクターにも当たらなかったときに呼ぶ。
+        /// aim レイの先が歩行範囲の中なら、そこへ歩かせる。床と交わらないとき・範囲の外を指した
+        /// ときは歩き出さない。円を出すかどうかは呼び出し側が結果を見て決める
+        /// （<see cref="ShowAreaBriefly"/>）。つまみがハンドルにもキャラクターにも当たらなかった
+        /// ときに呼ぶ。
         ///
         /// ★ <b>歩き出せる状態か、<c>Wander.GoTo</c> の前に確かめる。</b> 発話中や他のモーション
         ///   （idle の小ネタ・感情表現）が再生中なら歩き出さない —— <c>Wander</c> だけを
         ///   Walking へ進めても、モーションが始められなければ <c>Update</c> が即座に
         ///   <c>Wander.Stop()</c> で畳むだけになる。
         /// </summary>
-        public bool TryWalkTo(Ray ray)
+        public WalkToResult TryWalkTo(Ray ray)
         {
-            if (!_placed || _wander == null || _character == null) return false;
-            if (!TryFloorPoint(ray, out var point)) return false;
-            if (Vector2.Distance(point, _center) > _radius) return false;
+            if (!_placed || _wander == null || _character == null) return WalkToResult.Rejected;
+            if (!TryFloorPoint(ray, out var point)) return WalkToResult.Rejected;
+            if (Vector2.Distance(point, _center) > _radius) return WalkToResult.OutOfRange;
 
             if (_character.Speaking)
             {
                 Debug.Log("[Mascot] XR walk: 歩き出せません（発話中）");
-                return false;
+                return WalkToResult.Rejected;
             }
 
             if (!_character.IsWalking && !_character.TryStartWalking())
             {
                 Debug.Log("[Mascot] XR walk: 歩き出せません（他のモーション再生中）");
-                return false;
+                return WalkToResult.Rejected;
             }
 
             var now = Time.realtimeSinceStartupAsDouble;
             _wander.GoTo(now, point);
             _hideCircleAt = now + CircleVisibleSeconds;
             Debug.Log($"[Mascot] XR walk: 指された先へ歩きます ({point.x:F2}, {point.y:F2})");
-            return true;
+            return WalkToResult.Started;
+        }
+
+        /// <summary>
+        /// 検知した水平面を指したのに歩行範囲の外だったときに、範囲を短く出す。反応が無いと
+        /// 平面を見失ったように見えるため。既に出ている円の残り時間は縮めない。未配置なら何もしない。
+        /// </summary>
+        public void ShowAreaBriefly()
+        {
+            if (!_placed) return;
+
+            _hideCircleAt = System.Math.Max(_hideCircleAt, Time.realtimeSinceStartupAsDouble + OutOfRangeCircleSeconds);
+            Debug.Log("[Mascot] XR walk: 範囲外を指したので歩行範囲を出します");
         }
 
         /// <summary>

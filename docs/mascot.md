@@ -331,7 +331,7 @@ cd chatter-mascot
   "version": 1,
   "audio": { "mute": false, "muteHotKey": "ctrl+opt+m", "volume": 1.0 },
   "ui": { "hideHotKey": "ctrl+opt+h" },
-  "character": { "idleMotion": true, "cursorGaze": true, "blink": true, "vrm": "" },
+  "character": { "idleMotion": true, "cursorGaze": true, "blink": true, "vrm": "", "walk": true },
   "display": { "frameRate": 30 },
   "connection": { "serverUrl": "", "token": "", "assetSync": "auto" },
   "xr": { "height": 25, "distance": 0.6, "azimuth": 20, "feetBelowEye": 0.2 }
@@ -341,6 +341,9 @@ cd chatter-mascot
 `connection.assetSync` は `"auto"`（既定）か `"off"`。**デスクトップでは値を持っていても何もしない**
 ——サーバーと同じファイルシステムを直接読んでいるので同期の意味が無い。効くのは Android / XR
 だけ（→ 下の「Android / XR」の「モデルとモーションを入れる」）。
+
+`character.walk`（既定 `true`）も**デスクトップでは何もしない**——歩くのは Android XR だけ。
+XR の設定パネルの「歩く」からその場で切り替えられる（→ 下の「設定パネル」）。
 
 `xr.height` は Android XR でのキャラクターの大きさ（cm。既定 `25`）。15cm〜読み込んだモデルの
 実寸を**等比で6段**に刻み、途中の段は5cm単位に丸める（実寸を超える値は実寸へ寄る）。
@@ -489,8 +492,9 @@ $ADB shell chmod -R 777 $D/animations
 | 項目 | 備考 |
 |---|---|
 | 大きさ | 下の「置き場所と大きさ」。**その場で反映**される |
-| モデルとモーションをサーバーから受け取る | ON/OFF。**次回の起動から反映**（→ 上「モデルとモーションを入れる」） |
+| モデルとモーションを同期 | ON/OFF。**次回の起動から反映**（→ 上「モデルとモーションを入れる」） |
 | モーションを確認 / 再生 | デスクトップと同じ、保存しない一時的な選択 |
+| 歩く | ON/OFF。**その場で反映**される。OFF の間は歩行範囲の円を出さず、歩いている最中なら止める。ON に戻すとその場から歩く。キャラクターの置き直し自体はできる |
 | 指している先を目で追う | ON = aim レイの指す先 / OFF = ユーザーの頭（今までの挙動） |
 | まばたき | |
 | 位置をリセット | `ModelAnchor` を起動時の位置・向きへ戻し、歩行範囲の半径も既定（20cm）へ戻す |
@@ -656,4 +660,4 @@ B・C どちらの経路でもこのポートへ向ける。C（`configure-andro
 | 設定パネルが出ない・作り直される / 右クリックが取れない / 値が保存されない・戻る / スライダーやポップアップの挙動 / ファイル選択 / サーバーに繋がらないときの表示 | [`mascot-settings.md`](./knowledge/mascot-settings.md) |
 | モデルが映らない・背中が映る・小さい / 表情が変わらない / まばたき / 視線が合わない / モーションが T ポーズになる・固まる / 髪が流れる | [`mascot-vrm.md`](./knowledge/mascot-vrm.md) |
 | 音が出ない・途切れる / 口が合わない / オーディオデバイスを掴んだまま / 接続が切れる / ack が届かない / 終了時に取りこぼす / JSON のパースがおかしい | [`mascot-speech.md`](./knowledge/mascot-speech.md) |
-| Android でビルドが通らない / 白飛びする / LAN で繋がらない / XR で何も映らない・位置がおかしい / 背景が黒い / つまめない / 歩かない・歩行範囲の円が出ない / 設定パネルが開かない・呼び出し口が出ない・消えない / 手のひらメニューが向きを拾わない / 髪が固まる（大きさの変更） | [`mascot-android-xr.md`](./knowledge/mascot-android-xr.md) |
+| Android でビルドが通らない / 白飛びする / LAN で繋がらない / XR で何も映らない・位置がおかしい / 背景が黒い / つまめない / 歩かない・歩行範囲の円が出ない / 設定パネルが開かない・行が見えない・呼び出し口が出ない・消えない / 手のひらメニューが向きを拾わない / 髪が固まる（大きさの変更） | [`mascot-android-xr.md`](./knowledge/mascot-android-xr.md) |

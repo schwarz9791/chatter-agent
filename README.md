@@ -39,7 +39,7 @@ Claude Code
 | | Responsibilities |
 |---|---|
 | **server** | receiving the messages, formatting text (Markdown removal, sentence splitting, emotion classification, AI summarization), managing and delivering the speech queue, speech synthesis (including waking the synthesis engine up), holding settings |
-| **client** | receiving speech, fetching and playing audio, notifying that playback finished (ack), VRM rendering / facial expressions / motion / lip sync, (desktop version only) window / staying resident / settings UI |
+| **client** | receiving speech, fetching and playing audio, notifying that playback finished (ack), VRM rendering / facial expressions / motion / lip sync, settings UI (desktop: native panel; Android XR: in-space panel), (desktop version only) window / staying resident |
 
 The speech contract is in [`docs/protocol.md`](./docs/protocol.md). If you're writing a client, that's all you need.
 

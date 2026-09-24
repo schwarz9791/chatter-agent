@@ -43,6 +43,7 @@ namespace ChatterMascot.Xr
         private VrmStage _stage;
         private XROrigin _origin;
         private XrGrab _grab;
+        private XrWalk _walk;
 
         private XrSettingsPanel _panel;
         private GameObject _gear;
@@ -67,11 +68,12 @@ namespace ChatterMascot.Xr
         /// <summary>パネルの行にレイが当たったフレーム。</summary>
         private int _hoverHitFrame = -1;
 
-        public void Begin(VrmStage stage, XROrigin origin, XrGrab grab)
+        public void Begin(VrmStage stage, XROrigin origin, XrGrab grab, XrWalk walk)
         {
             _stage = stage;
             _origin = origin;
             _grab = grab;
+            _walk = walk;
 
             var panelGo = new GameObject("XR Settings Panel");
             // ★ Canvas は RequireComponent で即座に付くので、組み上がるまで（EnsureBuilt/Open の
@@ -86,6 +88,9 @@ namespace ChatterMascot.Xr
 
             var host = MascotSettingsHost.Instance;
             if (host != null) host.ChangedExternally += OnSettingsChangedExternally;
+            // ★ Apply 経由の自分起点の変更は ChangedExternally が来ないので、起動時の値は
+            //   ここで一度だけ直接伝える（→ HandleSetting の Walk の case も同様に直接伝える）
+            _walk.SetEnabled(host != null ? host.Current.Walk : MascotSettings.Defaults.Walk);
         }
 
         private void OnDestroy()
@@ -180,6 +185,7 @@ namespace ChatterMascot.Xr
 
         private void OnSettingsChangedExternally(MascotSettings previous, MascotSettings next)
         {
+            _walk.SetEnabled(next.Walk);
             Refresh();
         }
 
@@ -271,6 +277,16 @@ namespace ChatterMascot.Xr
                 {
                     var on = SettingsPanelJson.ParseBool(value, host.Current.AssetSync != SettingsMapping.AssetSyncOff);
                     host.Apply(host.Current.WithAssetSync(on ? SettingsMapping.AssetSyncAuto : SettingsMapping.AssetSyncOff));
+                    Refresh();
+                    return;
+                }
+
+                case SettingKeys.Walk:
+                {
+                    var on = SettingsPanelJson.ParseBool(value, host.Current.Walk);
+                    host.Apply(host.Current.WithWalk(on));
+                    // ★ Apply は自分起点の変更なので ChangedExternally が来ない。ここで直接伝える
+                    _walk.SetEnabled(on);
                     Refresh();
                     return;
                 }
@@ -381,6 +397,8 @@ namespace ChatterMascot.Xr
 
             var next = host.Current.ResetKeepingConnection();
             host.Apply(next);
+            // ★ Apply は自分起点の変更なので ChangedExternally が来ない。ここで直接伝える
+            _walk.SetEnabled(next.Walk);
 
             var realCm = _stage.RealHeightCm;
             if (realCm.HasValue && realCm.Value > 0f)

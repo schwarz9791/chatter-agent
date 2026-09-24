@@ -34,7 +34,15 @@ namespace ChatterMascot.Xr
         private const float PixelsToMeters = WidthMeters / WidthPixels;
 
         private const float DistanceMeters = 0.5f;
-        private const float VerticalDropMeters = 0.12f;
+
+        /// <summary>
+        /// パネルの高さの上限（メートル）。項目が増えて超えるときは、パネル全体を縮めて収める。
+        /// ★ グラスの表示視野は狭く、下へ伸ばすと視野から外れるうえ、机などの面にめり込む。
+        /// </summary>
+        private const float MaxHeightMeters = 0.3f;
+
+        /// <summary>正面へ戻すときの寄せの速さ（1/秒）。既定値。</summary>
+        private const float FollowRate = 6f;
 
         private const float PaddingPixels = 20f;
         private const float RowHeightPixels = 44f;
@@ -43,13 +51,25 @@ namespace ChatterMascot.Xr
         private const float NoteHeightPixels = 24f;
         private const float SidePaddingPixels = 16f;
 
-        /// <summary>ラベルと値を分ける横位置（行の幅に対する割合）。</summary>
+        /// <summary>ラベルと値を分ける横位置（行の幅に対する割合）。Choice はラベルが空なら使わない。</summary>
         private const float ValueColumnStart = 0.58f;
+
+        /// <summary>行の内寸（左右の余白を除いた幅）。Choice の ‹ › の列幅をこの割合で決める。</summary>
+        private const float RowContentWidthPixels = WidthPixels - SidePaddingPixels * 2f;
+
+        /// <summary>Choice の ‹ › 1つぶんの幅。既定値——タップしやすい大きさを優先した目安。</summary>
+        private const float ChoiceArrowWidthPixels = 32f;
+
+        /// <summary>値欄の中で ‹ › が占める割合（行の幅に対して）。</summary>
+        private const float ChoiceArrowFraction = ChoiceArrowWidthPixels / RowContentWidthPixels;
 
         private const float LabelFontSize = 22f;
         private const float ValueFontSize = 22f;
         private const float NoteFontSize = 15f;
         private const float SectionFontSize = 24f;
+
+        /// <summary>長い文字列を枠に収めるときに縮めてよい下限。既定値。</summary>
+        private const int MinFontSize = 12;
 
         private static readonly Color PanelColor = new Color(0.04f, 0.04f, 0.07f, 0.92f);
         private static readonly Color RowColor = new Color(1f, 1f, 1f, 0.05f);
@@ -61,6 +81,9 @@ namespace ChatterMascot.Xr
         private static readonly Color SectionColor = new Color(0.75f, 0.82f, 1f, 1f);
         private static readonly Color CloseRowColor = new Color(1f, 1f, 1f, 0.1f);
 
+        /// <summary>Choice で、ホバーしている側の ‹ / › を目立たせる色。</summary>
+        private static readonly Color ChoiceActiveArrowColor = new Color(0.75f, 0.82f, 1f, 1f);
+
         /// <summary>行1件。<b>作り直さない更新</b>のために、見た目のパーツを持ち回る。</summary>
         private sealed class Row
         {
@@ -71,6 +94,10 @@ namespace ChatterMascot.Xr
             public Text Value;
             public Text Note;
             public RectTransform NoteRect;
+
+            /// <summary>Choice だけが持つ ‹ / › の表示。<c>Bool</c> / <c>Button</c> では null。</summary>
+            public Text ChoicePrev;
+            public Text ChoiceNext;
 
             /// <summary>この行が操作を受け付けるか（<c>Section</c> や <c>Enabled=false</c> は不可）。</summary>
             public bool Interactive;
@@ -108,6 +135,14 @@ namespace ChatterMascot.Xr
 
         private bool _built;
 
+        /// <summary>パネルの中心を置く位置。</summary>
+        private Vector3 _center;
+
+        private Transform _userCamera;
+
+        /// <summary>視線の正面へ戻している最中か（→ <see cref="XrMenuRules.ShouldFollowPanel"/>）。</summary>
+        private bool _following;
+
         public void Open(Transform userCamera, string closeLabel, IReadOnlyList<SettingSpec> items)
         {
             EnsureBuilt();
@@ -115,8 +150,8 @@ namespace ChatterMascot.Xr
 
             IsOpen = true;
             gameObject.SetActive(true);
-            Place(userCamera);
             Rebuild(items);
+            Place(userCamera);
         }
 
         /// <summary>開いている間に項目を更新する。閉じていれば何もしない。</summary>
@@ -182,18 +217,56 @@ namespace ChatterMascot.Xr
 
         // ── 置き場所 ───────────────────────────────────────────
 
-        /// <summary>
-        /// カメラの前方・少し下に、カメラの方を向けて置く。<b>開いたときの1回だけ</b>
-        /// （常に追従はしない——手で追いかけると読みにくい）。
-        /// </summary>
+        /// <summary>視線の正面に、中心を合わせてカメラの方へ向けて置く。</summary>
         private void Place(Transform userCamera)
         {
+            _userCamera = userCamera;
+            _following = false;
             if (userCamera == null) return;
 
-            transform.rotation = userCamera.rotation;
-            var center = userCamera.position + userCamera.forward * DistanceMeters + Vector3.down * VerticalDropMeters;
-            // ★ pivot が左上（下記 EnsureBuilt）なので、見た目を中央に置くには半幅ぶん左へずらす
-            transform.position = center - transform.right * (WidthMeters / 2f);
+            _center = GazeTarget(userCamera);
+            Face(userCamera);
+            Fit();
+        }
+
+        /// <summary>
+        /// 視線から大きく外れたら、正面へ寄せて戻す（→ <see cref="XrMenuRules.ShouldFollowPanel"/>）。
+        /// ★ グラスの表示視野は狭く、固定したままだと少し視線を動かしただけで見失う。
+        /// </summary>
+        private void LateUpdate()
+        {
+            if (!IsOpen || _userCamera == null) return;
+
+            var degrees = Vector3.Angle(_userCamera.forward, _center - _userCamera.position);
+            _following = XrMenuRules.ShouldFollowPanel(_following, degrees);
+            if (!_following) return;
+
+            var t = 1f - Mathf.Exp(-FollowRate * Time.unscaledDeltaTime);
+            _center = Vector3.Lerp(_center, GazeTarget(_userCamera), t);
+            Face(_userCamera);
+            Fit();
+        }
+
+        private static Vector3 GazeTarget(Transform userCamera) =>
+            userCamera.position + userCamera.forward * DistanceMeters;
+
+        /// <summary>カメラから見て正対させる。傾き（ロール）は持ち込まず、上は常にワールドの上。</summary>
+        private void Face(Transform userCamera)
+        {
+            var toPanel = _center - userCamera.position;
+            if (toPanel.sqrMagnitude > 0f) transform.rotation = Quaternion.LookRotation(toPanel, Vector3.up);
+        }
+
+        /// <summary>
+        /// 高さが <see cref="MaxHeightMeters"/> に収まる縮尺にして、中心を <see cref="_center"/> に合わせる。
+        /// ★ pivot が左上（下記 EnsureBuilt）なので、中心から半幅・半高ぶんずらした所に置く。
+        /// </summary>
+        private void Fit()
+        {
+            var size = _panelRect.sizeDelta;
+            var scale = Mathf.Min(PixelsToMeters, MaxHeightMeters / size.y);
+            transform.localScale = Vector3.one * scale;
+            transform.position = _center - transform.right * (size.x * scale / 2f) + transform.up * (size.y * scale / 2f);
         }
 
         // ── 当たり判定 ─────────────────────────────────────────
@@ -238,7 +311,7 @@ namespace ChatterMascot.Xr
                     if (!TryRowLocalPoint(row.Rect, local, out var rowLocal)) continue;
 
                     hit = row;
-                    isNext = row.Spec.Kind == SettingKind.Choice && rowLocal.x >= row.Rect.rect.center.x;
+                    isNext = HoverIsNext(row, rowLocal.x);
                     break;
                 }
             }
@@ -250,16 +323,56 @@ namespace ChatterMascot.Xr
             _hoveredIsNext = isNext;
             _hoveringClose = hoveringClose;
 
-            if (_hoveredRow != null) _hoveredRow.Background.color = RowHoverColor;
+            if (_hoveredRow != null)
+            {
+                _hoveredRow.Background.color = RowHoverColor;
+                SetChoiceArrowColors(_hoveredRow, _hoveredIsNext);
+            }
             if (_hoveringClose && _closeBackground != null) _closeBackground.color = RowHoverColor;
+        }
+
+        /// <summary>
+        /// Choice の押す判定: <b>値欄の左半分 = 前、右半分 = 次。ラベル欄を押したら次。</b>
+        /// ラベルが空の行は値欄が行の全幅になる（→ <see cref="BuildRow"/>）ので、行全体を
+        /// 左右半分に分けるのと同じになる。Choice 以外は常に false（呼び出し側で無視される）。
+        /// </summary>
+        private static bool HoverIsNext(Row row, float localX)
+        {
+            if (row.Spec.Kind != SettingKind.Choice) return false;
+
+            var hasLabel = !string.IsNullOrEmpty(row.Spec.Label);
+            var valueAreaStartX = hasLabel ? row.Rect.rect.width * ValueColumnStart : 0f;
+            if (localX < valueAreaStartX) return true; // ラベル欄
+
+            var valueAreaMidX = (valueAreaStartX + row.Rect.rect.width) / 2f;
+            return localX >= valueAreaMidX;
         }
 
         private void ClearHover()
         {
-            if (_hoveredRow != null) _hoveredRow.Background.color = RowColor;
+            if (_hoveredRow != null)
+            {
+                _hoveredRow.Background.color = RowColor;
+                ResetChoiceArrowColors(_hoveredRow);
+            }
             if (_hoveringClose && _closeBackground != null) _closeBackground.color = CloseRowColor;
             _hoveredRow = null;
             _hoveringClose = false;
+        }
+
+        private static void SetChoiceArrowColors(Row row, bool isNext)
+        {
+            if (row.ChoicePrev == null || row.ChoiceNext == null) return;
+            row.ChoicePrev.color = isNext ? LabelColor : ChoiceActiveArrowColor;
+            row.ChoiceNext.color = isNext ? ChoiceActiveArrowColor : LabelColor;
+        }
+
+        private static void ResetChoiceArrowColors(Row row)
+        {
+            if (row.ChoicePrev == null || row.ChoiceNext == null) return;
+            var color = row.Spec.Enabled ? LabelColor : DisabledLabelColor;
+            row.ChoicePrev.color = color;
+            row.ChoiceNext.color = color;
         }
 
         private void Invoke(Row row, bool isNext)
@@ -378,6 +491,7 @@ namespace ChatterMascot.Xr
             foreach (var spec in items) y = BuildRow(spec, y);
 
             _panelRect.sizeDelta = new Vector2(WidthPixels, PaddingPixels - y);
+            Fit();
         }
 
         private static string Signature(IReadOnlyList<SettingSpec> items)
@@ -424,14 +538,47 @@ namespace ChatterMascot.Xr
             var background = rowRect.gameObject.AddComponent<Image>();
             background.color = RowColor;
 
-            Text label;
+            Text label = null;
             Text value = null;
+            Text choicePrev = null;
+            Text choiceNext = null;
+
             if (spec.Kind == SettingKind.Button)
             {
                 label = BuildText(rowRect, Vector2.zero, Vector2.one, TextAnchor.MiddleCenter, LabelFontSize, LabelColor);
                 label.text = spec.Label;
             }
-            else
+            else if (spec.Kind == SettingKind.Choice)
+            {
+                // ★ ‹ を値欄の左端、› を値欄の右端に置き、値ラベルはその間に中央寄せ。
+                //   ラベルが空なら値欄は行の全幅になる（→ HoverIsNext を同じ境界に揃える）。
+                var hasLabel = !string.IsNullOrEmpty(spec.Label);
+                if (hasLabel)
+                {
+                    label = BuildText(rowRect, new Vector2(0f, 0f), new Vector2(ValueColumnStart, 1f),
+                        TextAnchor.MiddleLeft, LabelFontSize, LabelColor);
+                    label.text = spec.Label;
+                    label.rectTransform.offsetMin = new Vector2(SidePaddingPixels, 0f);
+                }
+
+                var valueAreaStart = hasLabel ? ValueColumnStart : 0f;
+                var prevEnd = valueAreaStart + ChoiceArrowFraction;
+                var nextStart = 1f - ChoiceArrowFraction;
+
+                choicePrev = BuildText(rowRect, new Vector2(valueAreaStart, 0f), new Vector2(prevEnd, 1f),
+                    TextAnchor.MiddleCenter, ValueFontSize, LabelColor);
+                choicePrev.text = "‹";
+                if (!hasLabel) choicePrev.rectTransform.offsetMin = new Vector2(SidePaddingPixels, 0f);
+
+                choiceNext = BuildText(rowRect, new Vector2(nextStart, 0f), new Vector2(1f, 1f),
+                    TextAnchor.MiddleCenter, ValueFontSize, LabelColor);
+                choiceNext.text = "›";
+                choiceNext.rectTransform.offsetMax = new Vector2(-SidePaddingPixels, 0f);
+
+                value = BuildText(rowRect, new Vector2(prevEnd, 0f), new Vector2(nextStart, 1f),
+                    TextAnchor.MiddleCenter, ValueFontSize, LabelColor);
+            }
+            else // Bool
             {
                 label = BuildText(rowRect, new Vector2(0f, 0f), new Vector2(ValueColumnStart, 1f),
                     TextAnchor.MiddleLeft, LabelFontSize, LabelColor);
@@ -463,6 +610,8 @@ namespace ChatterMascot.Xr
                 Background = background,
                 Label = label,
                 Value = value,
+                ChoicePrev = choicePrev,
+                ChoiceNext = choiceNext,
                 Note = note,
                 NoteRect = noteRect,
                 Interactive = spec.Enabled && RowActionFor(spec) != RowAction.None,
@@ -498,7 +647,8 @@ namespace ChatterMascot.Xr
             var labelColor = spec.Enabled ? LabelColor : DisabledLabelColor;
             var noteColor = spec.Enabled ? NoteColor : DisabledNoteColor;
 
-            row.Label.color = labelColor;
+            // ★ Choice でラベルが空の行は Label が無い（値欄が行の全幅）
+            if (row.Label != null) row.Label.color = labelColor;
             row.Background.color = row == _hoveredRow ? RowHoverColor : RowColor;
 
             if (row.Value != null)
@@ -507,12 +657,26 @@ namespace ChatterMascot.Xr
                 row.Value.color = labelColor;
             }
 
+            if (row.ChoicePrev != null && row.ChoiceNext != null)
+            {
+                // ★ ホバー中はそちらの色を保つ（Background と同じ、いま見ている側の表示を作り直しで崩さない）
+                if (row == _hoveredRow)
+                {
+                    SetChoiceArrowColors(row, _hoveredIsNext);
+                }
+                else
+                {
+                    row.ChoicePrev.color = labelColor;
+                    row.ChoiceNext.color = labelColor;
+                }
+            }
+
             if (row.Note != null) row.Note.text = spec.Note;
             if (row.Note != null) row.Note.color = noteColor;
             if (row.NoteRect != null) row.NoteRect.gameObject.SetActive(!string.IsNullOrEmpty(spec.Note));
         }
 
-        /// <summary>Bool は ON/OFF、Choice は ‹ 値ラベル ›、Button は値を持たない。</summary>
+        /// <summary>Bool は ON/OFF、Choice は値ラベルだけ（‹ › は別の Text）、Button は値を持たない。</summary>
         private static string DisplayValue(SettingSpec spec)
         {
             switch (spec.Kind)
@@ -521,7 +685,7 @@ namespace ChatterMascot.Xr
                     return spec.Value == "true" ? "ON" : "OFF";
 
                 case SettingKind.Choice:
-                    return "‹ " + LabelOf(spec) + " ›";
+                    return LabelOf(spec);
 
                 default:
                     return "";
@@ -570,6 +734,11 @@ namespace ChatterMascot.Xr
             text.color = color;
             text.horizontalOverflow = HorizontalWrapMode.Wrap;
             text.verticalOverflow = VerticalWrapMode.Truncate;
+            // ★ 長いラベル・値は切らずに縮めて収める。枠の大きさは項目によらず一定なので、
+            //   どの項目が長いかをレンダラが知らなくても済む
+            text.resizeTextForBestFit = true;
+            text.resizeTextMinSize = MinFontSize;
+            text.resizeTextMaxSize = Mathf.RoundToInt(fontSize);
             return text;
         }
 

@@ -87,6 +87,10 @@ namespace ChatterMascot.Xr
                 else available = true;
                 facing |= _facing[i];
             }
+            if (available != TrackingAvailable)
+            {
+                Debug.Log($"[Mascot] XR: 手の関節 → {(available ? "取れている" : "取れていない")}");
+            }
             TrackingAvailable = available;
             PalmFacingSelf = facing;
         }

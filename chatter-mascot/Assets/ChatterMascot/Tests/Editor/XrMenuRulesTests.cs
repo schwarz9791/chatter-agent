@@ -103,6 +103,21 @@ namespace ChatterMascot.Tests
         }
 
         [Test]
+        public void PanelFollowsOnlyAfterLeavingTheGazeWidely()
+        {
+            Assert.That(XrMenuRules.ShouldFollowPanel(false, XrMenuRules.PanelFollowStartDegrees - 1f), Is.False);
+            Assert.That(XrMenuRules.ShouldFollowPanel(false, XrMenuRules.PanelFollowStartDegrees + 1f), Is.True);
+        }
+
+        [Test]
+        public void PanelKeepsFollowingUntilItIsBackInFront()
+        {
+            var between = (XrMenuRules.PanelFollowStartDegrees + XrMenuRules.PanelFollowStopDegrees) / 2f;
+            Assert.That(XrMenuRules.ShouldFollowPanel(true, between), Is.True);
+            Assert.That(XrMenuRules.ShouldFollowPanel(true, XrMenuRules.PanelFollowStopDegrees - 1f), Is.False);
+        }
+
+        [Test]
         public void ShowsThePalmButtonOnlyWhenTrackedAndFacing()
         {
             Assert.That(XrMenuRules.ShowPalmButton(panelOpen: false, handTrackingAvailable: true, palmFacingSelf: true), Is.True);

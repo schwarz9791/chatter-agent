@@ -55,6 +55,7 @@ namespace ChatterMascot.Xr
         private float _radius = DefaultRadius;
         private float _handleAngleDegrees;
         private bool _placed;
+        private bool _enabled = true;
 
         private double _hideCircleAt;
         private bool _handleHeld;
@@ -77,12 +78,37 @@ namespace ChatterMascot.Xr
         }
 
         /// <summary>
+        /// 設定（<c>character.walk</c>）を反映する。OFF の間は円を出さず歩き出さない。
+        ///
+        /// ★ <b>OFF でも歩行範囲（置いた位置・半径）は捨てない。</b> ON に戻したらその場から
+        ///   歩き出せるよう、「置いたか」と「歩いてよいか」を別の状態で持つ（→ <see cref="Active"/>）。
+        /// ★ キャラクターの置き直し自体は止めない。それは <c>XrGrab</c> の責務。
+        /// </summary>
+        public void SetEnabled(bool enabled)
+        {
+            if (_enabled == enabled) return;
+            _enabled = enabled;
+            if (!enabled)
+            {
+                if (_character != null && _character.IsWalking) _character.StopWalking();
+                return;
+            }
+            // ★ 戻したことが分かるよう、歩ける範囲を少しだけ見せる
+            ShowAreaBriefly();
+        }
+
+        /// <summary>歩行範囲が置かれていて、かつ設定で歩いてよい。</summary>
+        private bool Active => _placed && _enabled;
+
+        /// <summary>
         /// キャラクターを平面へ着地させた（<c>XrGrab.Release</c>）直後に呼ぶ。中心・接地高さ・
         /// ハンドルの位置を決め、円を出す。<b>これが呼ばれるまで歩行は無効。</b>
         ///
         /// ★ <b>半径は変えない。</b> つまんで置き直すたびに既定へ戻すと、広げた歩行範囲が
         ///   毎回失われる —— 半径を変えるのは <see cref="DragHandle"/> と、既定へ戻す
         ///   <see cref="ResetArea"/> だけにすること。
+        /// ★ 設定（<see cref="SetEnabled"/>）が OFF の間も位置は覚える。円と歩き出しは
+        ///   <see cref="Active"/> が止める。
         /// </summary>
         public void PlaceAt(Vector3 feetWorld, float groundY, float characterYawDegrees)
         {
@@ -129,7 +155,7 @@ namespace ChatterMascot.Xr
         /// </summary>
         public bool TryGrabHandle(Ray ray)
         {
-            if (!_placed || !CircleVisible || _view == null || _view.HandleCollider == null) return false;
+            if (!Active || !CircleVisible || _view == null || _view.HandleCollider == null) return false;
 
             // ★ ハンドルは毎フレーム動かしているので、Raycast の前に当たり判定を取り直すこと
             //   （autoSyncTransforms はオフ。XrGrab.SyncedModelCollider と同じ理由）
@@ -167,7 +193,7 @@ namespace ChatterMascot.Xr
         /// </summary>
         public WalkToResult TryWalkTo(Ray ray)
         {
-            if (!_placed || _wander == null || _character == null) return WalkToResult.Rejected;
+            if (!Active || _wander == null || _character == null) return WalkToResult.Rejected;
             if (!TryFloorPoint(ray, out var point)) return WalkToResult.Rejected;
             if (Vector2.Distance(point, _center) > _radius) return WalkToResult.OutOfRange;
 
@@ -196,7 +222,7 @@ namespace ChatterMascot.Xr
         /// </summary>
         public void ShowAreaBriefly()
         {
-            if (!_placed) return;
+            if (!Active) return;
 
             _hideCircleAt = System.Math.Max(_hideCircleAt, Time.realtimeSinceStartupAsDouble + OutOfRangeCircleSeconds);
             Debug.Log("[Mascot] XR walk: 範囲外を指したので歩行範囲を出します");
@@ -232,9 +258,9 @@ namespace ChatterMascot.Xr
 
         private void Update()
         {
-            if (!_placed)
+            if (!Active)
             {
-                // ★ 平面が無くて置けなかった／Unplace 済み。円は最後の位置のまま
+                // ★ 平面が無くて置けなかった／Unplace 済み／設定で OFF。円は最後の位置のまま
                 //   フェードアウトへ回す —— ここで Sync を止めると消える途中で固まって見える
                 SyncCircle(false);
                 return;

@@ -207,6 +207,9 @@ namespace ChatterMascot.Vrm
                 BakeSpringBoneScale(_instance, newScale / oldScale);
             }
             Remeasure();
+            // ★ autoSyncTransforms はオフなので、同期しないと Collider.bounds が拡縮前のまま残る
+            //   （bounds を基準に置くもの——頭上の歯車など——が古い大きさの位置に出る）
+            Physics.SyncTransforms();
         }
 
         private void Start()

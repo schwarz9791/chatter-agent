@@ -55,6 +55,9 @@ namespace ChatterMascot.Settings
                     ["cursorGaze"] = settings.CursorGaze,
                     ["blink"] = settings.Blink,
                     ["vrm"] = settings.VrmFileName ?? "",
+                    // ★ デスクトップの設定パネルは書かないが、往復で落とさないよう含めておく
+                    //   （→ connection と同じ扱い）
+                    ["walk"] = settings.Walk,
                 },
                 // ★ 書くのはデスクトップの設定パネルだけ（→ MascotSettings.FrameRate の doc）。
                 //   settings.json は Android とファイルを共有するが、Android はこの値を
@@ -284,6 +287,11 @@ namespace ChatterMascot.Settings
                     case "vrm":
                         settings = settings.WithVrmFileName(
                             ReadFileName(property.Value, "character.vrm", settings.VrmFileName, warn));
+                        break;
+
+                    case "walk":
+                        settings = settings.WithWalk(
+                            ReadBool(property.Value, "character.walk", settings.Walk, warn));
                         break;
 
                     default:

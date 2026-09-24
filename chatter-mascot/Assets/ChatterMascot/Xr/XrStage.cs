@@ -288,7 +288,7 @@ namespace ChatterMascot.Xr
                 walk.Begin(_origin, _stage);
                 var grab = _origin.gameObject.AddComponent<XrGrab>();
                 var settings = _origin.gameObject.AddComponent<XrSettingsBridge>();
-                settings.Begin(_stage, _origin, grab);
+                settings.Begin(_stage, _origin, grab, walk);
                 grab.Begin(_origin, _stage, walk, settings);
 
                 // ★ 目で追う（XR 版）。CursorProvider は Desktop 側と同じ注入の形——

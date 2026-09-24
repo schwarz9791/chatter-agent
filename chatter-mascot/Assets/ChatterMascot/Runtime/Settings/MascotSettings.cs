@@ -44,7 +44,8 @@ namespace ChatterMascot.Settings
             string vrmFileName,
             int frameRate,
             string serverUrl, string token, string assetSync,
-            float xrHeight, float xrLegacyScale, float xrDistance, float xrAzimuth, float xrFeetBelowEye)
+            float xrHeight, float xrLegacyScale, float xrDistance, float xrAzimuth, float xrFeetBelowEye,
+            bool walk)
         {
             Muted = muted;
             MuteHotKey = muteHotKey;
@@ -63,6 +64,7 @@ namespace ChatterMascot.Settings
             XrDistance = xrDistance;
             XrAzimuth = xrAzimuth;
             XrFeetBelowEye = xrFeetBelowEye;
+            Walk = walk;
         }
 
         public bool Muted { get; }
@@ -195,6 +197,13 @@ namespace ChatterMascot.Settings
         /// <summary>Android XR での、キャラの足元が目より何 m 下か。</summary>
         public float XrFeetBelowEye { get; }
 
+        /// <summary>
+        /// Android XR で歩行範囲の円を出し、指した先へ歩かせるか。既定は <b>true</b>。
+        ///
+        /// ★ デスクトップの設定パネルには出さない（デスクトップは歩かない）。
+        /// </summary>
+        public bool Walk { get; }
+
         public static MascotSettings Defaults
         {
             get
@@ -207,7 +216,8 @@ namespace ChatterMascot.Settings
                     SettingsMapping.DefaultFrameRate,
                     "", "", SettingsMapping.DefaultAssetSync,
                     SettingsMapping.XrDefaultHeight, 0f, SettingsMapping.XrDefaultDistance,
-                    SettingsMapping.XrDefaultAzimuth, SettingsMapping.XrDefaultFeetBelowEye);
+                    SettingsMapping.XrDefaultAzimuth, SettingsMapping.XrDefaultFeetBelowEye,
+                    true);
             }
         }
 
@@ -226,7 +236,8 @@ namespace ChatterMascot.Settings
             int? frameRate = null,
             string serverUrl = null, string token = null, string assetSync = null,
             float? xrHeight = null, float? xrLegacyScale = null,
-            float? xrDistance = null, float? xrAzimuth = null, float? xrFeetBelowEye = null)
+            float? xrDistance = null, float? xrAzimuth = null, float? xrFeetBelowEye = null,
+            bool? walk = null)
         {
             return new MascotSettings(
                 muted ?? Muted,
@@ -245,7 +256,8 @@ namespace ChatterMascot.Settings
                 xrLegacyScale ?? XrLegacyScale,
                 xrDistance ?? XrDistance,
                 xrAzimuth ?? XrAzimuth,
-                xrFeetBelowEye ?? XrFeetBelowEye);
+                xrFeetBelowEye ?? XrFeetBelowEye,
+                walk ?? Walk);
         }
 
         public MascotSettings WithMuted(bool value) => Copy(muted: value);
@@ -265,6 +277,7 @@ namespace ChatterMascot.Settings
         public MascotSettings WithXrDistance(float value) => Copy(xrDistance: value);
         public MascotSettings WithXrAzimuth(float value) => Copy(xrAzimuth: value);
         public MascotSettings WithXrFeetBelowEye(float value) => Copy(xrFeetBelowEye: value);
+        public MascotSettings WithWalk(bool value) => Copy(walk: value);
 
         /// <summary>
         /// 「すべての設定をリセット」用。<b>接続先とトークンだけは残す</b>。
@@ -299,7 +312,8 @@ namespace ChatterMascot.Settings
                 && XrLegacyScale.Equals(other.XrLegacyScale)
                 && XrDistance.Equals(other.XrDistance)
                 && XrAzimuth.Equals(other.XrAzimuth)
-                && XrFeetBelowEye.Equals(other.XrFeetBelowEye);
+                && XrFeetBelowEye.Equals(other.XrFeetBelowEye)
+                && Walk == other.Walk;
         }
 
         public override bool Equals(object obj)
@@ -326,6 +340,7 @@ namespace ChatterMascot.Settings
             hash = (hash * 397) ^ XrDistance.GetHashCode();
             hash = (hash * 397) ^ XrAzimuth.GetHashCode();
             hash = (hash * 397) ^ XrFeetBelowEye.GetHashCode();
+            hash = (hash * 397) ^ (Walk ? 1 : 0);
             return hash;
         }
     }

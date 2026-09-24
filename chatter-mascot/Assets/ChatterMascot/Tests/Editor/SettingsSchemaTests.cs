@@ -552,7 +552,7 @@ namespace ChatterMascot.Tests
             {
                 null, SettingKeys.XrHeight, SettingKeys.AssetSync,
                 null, SettingKeys.MotionPreview, SettingKeys.MotionPreviewPlay,
-                SettingKeys.CursorGaze, SettingKeys.Blink,
+                SettingKeys.Walk, SettingKeys.CursorGaze, SettingKeys.Blink,
                 null, SettingKeys.ResetPosition, SettingKeys.ResetAll,
             }));
         }
@@ -572,6 +572,27 @@ namespace ChatterMascot.Tests
             {
                 Assert.That(keys, Has.None.EqualTo(key), key);
             }
+        }
+
+        /// <summary>★ 歩行は XR だけの項目（デスクトップは歩かない）</summary>
+        [Test]
+        public void DesktopDoesNotOfferWalk()
+        {
+            var keys = SettingsSchema.Build(Context()).Select(s => s.Key).ToList();
+            Assert.That(keys, Has.None.EqualTo(SettingKeys.Walk));
+        }
+
+        [Test]
+        public void XrReflectsTheWalkSetting()
+        {
+            var context = XrContext();
+            context.Settings = MascotSettings.Defaults.WithWalk(false);
+
+            var spec = Find(SettingsSchema.Build(context), SettingKeys.Walk);
+
+            Assert.That(spec.Kind, Is.EqualTo(SettingKind.Bool));
+            Assert.That(spec.Value, Is.EqualTo("false"));
+            Assert.That(spec.Label, Is.EqualTo("歩く"));
         }
 
         [Test]
@@ -656,6 +677,22 @@ namespace ChatterMascot.Tests
             Assert.That(choice.Enabled, Is.False);
             Assert.That(choice.Note, Does.Contain("読み込み中"));
             Assert.That(button.Enabled, Is.False);
+        }
+
+        /// <summary>★ Desktop の見た目は変えない（項目単体のラベルも）</summary>
+        [Test]
+        public void KeepsTheMotionPreviewLabelOnDesktop()
+        {
+            var spec = Find(SettingsSchema.Build(Context()), SettingKeys.MotionPreview);
+            Assert.That(spec.Label, Is.EqualTo("モーションを確認"));
+        }
+
+        /// <summary>★ 見出し「モーション」の直下に置くので、ラベルが無くても何の行か分かる</summary>
+        [Test]
+        public void XrMotionPreviewHasNoLabel()
+        {
+            var spec = Find(SettingsSchema.Build(XrContext()), SettingKeys.MotionPreview);
+            Assert.That(spec.Label, Is.Empty);
         }
 
         [Test]

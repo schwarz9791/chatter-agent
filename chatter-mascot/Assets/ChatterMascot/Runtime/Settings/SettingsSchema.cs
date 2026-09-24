@@ -54,6 +54,9 @@ namespace ChatterMascot.Settings
         public const string Blink = "blink";
         public const string FrameRate = "frameRate";
 
+        /// <summary>XR で歩行範囲の円を出し、指した先へ歩かせるか。XR の設定パネルだけに出す</summary>
+        public const string Walk = "walk";
+
         public const string SummaryEnabled = "summaryEnabled";
 
         public const string MuteHotKey = "muteHotKey";
@@ -292,13 +295,14 @@ namespace ChatterMascot.Settings
             items.Add(SettingSpec.Section("キャラクター"));
             items.Add(BuildXrHeightChoice(c, settings));
             items.Add(SettingSpec.Bool(
-                SettingKeys.AssetSync, "モデルとモーションをサーバーから受け取る",
+                SettingKeys.AssetSync, "モデルとモーションを同期",
                 settings.AssetSync != SettingsMapping.AssetSyncOff,
                 note: "次回の起動から反映されます"));
 
             // ── モーション ───────────────────────────────────
             items.Add(SettingSpec.Section("モーション"));
             AddMotionPreview(items, c, settings);
+            items.Add(SettingSpec.Bool(SettingKeys.Walk, "歩く", settings.Walk));
             items.Add(SettingSpec.Bool(SettingKeys.CursorGaze, "指している先を目で追う", settings.CursorGaze));
             items.Add(SettingSpec.Bool(SettingKeys.Blink, "まばたき", settings.Blink));
 
@@ -362,6 +366,9 @@ namespace ChatterMascot.Settings
         /// ★★ 保存しない。settings.json にも core にも書かない
         ///   （→ SettingsContext.MotionPreview の doc）——本番の発話に連動する再生と
         ///   混同しないため、確認用の選択はパネルを閉じたら忘れてよい。
+        ///
+        /// ★ XR ではラベルを出さない。見出し「モーション」の直下に置くので、
+        ///   何の行かは見出しで分かる。
         /// </summary>
         private static void AddMotionPreview(List<SettingSpec> items, SettingsContext c, MascotSettings settings)
         {
@@ -370,8 +377,9 @@ namespace ChatterMascot.Settings
             var motionClips = c.MotionClips;
             var motionEnabled = settings.IdleMotion && motionClips != null && motionClips.Count > 0;
             var motionValue = EffectiveMotionPreview(motionClips, c.MotionPreview);
+            var label = c.Platform == SettingsPlatform.Xr ? "" : "モーションを確認";
             items.Add(SettingSpec.Choice(
-                SettingKeys.MotionPreview, "モーションを確認", motionValue, motionClips,
+                SettingKeys.MotionPreview, label, motionValue, motionClips,
                 enabled: motionEnabled, note: MotionPreviewNote(motionClips, settings.IdleMotion)));
             items.Add(SettingSpec.Button(SettingKeys.MotionPreviewPlay, "再生", enabled: motionEnabled));
         }

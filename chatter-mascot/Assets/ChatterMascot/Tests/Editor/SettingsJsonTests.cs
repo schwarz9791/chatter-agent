@@ -172,12 +172,31 @@ namespace ChatterMascot.Tests
                 .WithIdleMotion(false)
                 .WithCursorGaze(false)
                 .WithBlink(false)
-                .WithVrmFileName("foo.vrm");
+                .WithVrmFileName("foo.vrm")
+                .WithWalk(false);
 
             MascotSettings parsed;
             string error;
             Assert.That(SettingsJson.TryParse(SettingsJson.Write(source), out parsed, out error, null), Is.True, error);
             Assert.That(parsed, Is.EqualTo(source));
+        }
+
+        /// <summary>★ character.idleMotion / cursorGaze / blink と同じ流儀で読み書きする</summary>
+        [Test]
+        public void RoundTripsTheWalkFlag()
+        {
+            var written = SettingsJson.Write(MascotSettings.Defaults.WithWalk(false));
+            var parsed = Parse(written);
+
+            Assert.That(parsed.Walk, Is.False);
+            Assert.That(_warnings, Is.Empty);
+        }
+
+        [Test]
+        public void DefaultsWalkToTrueWhenMissing()
+        {
+            var parsed = Parse("{\"character\":{\"idleMotion\":true}}");
+            Assert.That(parsed.Walk, Is.True);
         }
 
         /// <summary>★ スライダー由来の 0.7000000119 をそのまま残さない</summary>

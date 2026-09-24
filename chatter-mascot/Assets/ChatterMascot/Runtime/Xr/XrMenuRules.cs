@@ -73,6 +73,23 @@ namespace ChatterMascot.Xr
         /// <summary>
         /// 手のひらの呼び出し口（ボタン）を出すか。<b>パネルが開いている間は出さない。</b>
         /// </summary>
+        /// <summary>パネルが視線からこの角度（度）を超えて外れたら、正面へ戻し始める。既定値。</summary>
+        public const float PanelFollowStartDegrees = 15f;
+
+        /// <summary>戻し始めたパネルは、視線からこの角度（度）以内に入ったら止める。既定値。</summary>
+        public const float PanelFollowStopDegrees = 5f;
+
+        /// <summary>
+        /// パネルを視線の正面へ戻すか。<b>ヒステリシス付き。</b>
+        ///
+        /// ★ 常に追従させない。少し視線を動かしただけで付いてくると、読んでいる行や
+        ///   指そうとした行が逃げる。大きく外れたときだけ戻し、正面近くまで来たら止める。
+        /// </summary>
+        public static bool ShouldFollowPanel(bool wasFollowing, float degreesFromGaze)
+        {
+            return wasFollowing ? degreesFromGaze > PanelFollowStopDegrees : degreesFromGaze > PanelFollowStartDegrees;
+        }
+
         public static bool ShowPalmButton(bool panelOpen, bool handTrackingAvailable, bool palmFacingSelf)
         {
             if (panelOpen) return false;

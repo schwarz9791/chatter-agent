@@ -16,14 +16,14 @@ namespace ChatterMascot.Tests
         [Test]
         public void StaysVisibleWithinTheGraceWindow()
         {
-            var lastHitAt = 10.0 - (XrMenuRules.HoverGraceSeconds - 0.1);
+            var lastHitAt = 10.0 - (XrMenuRules.GearVisibleSeconds - 0.1);
             Assert.That(XrMenuRules.ShowInvoker(false, now: 10.0, lastHitAt: lastHitAt), Is.True);
         }
 
         [Test]
         public void HidesAfterTheGraceWindowElapses()
         {
-            var lastHitAt = 10.0 - (XrMenuRules.HoverGraceSeconds + 0.1);
+            var lastHitAt = 10.0 - (XrMenuRules.GearVisibleSeconds + 0.1);
             Assert.That(XrMenuRules.ShowInvoker(false, now: 10.0, lastHitAt: lastHitAt), Is.False);
         }
 
@@ -44,19 +44,6 @@ namespace ChatterMascot.Tests
         {
             Assert.That(XrMenuRules.ShowInvoker(false, now: 10.0, lastHitAt: 5.0, graceSeconds: 4f), Is.False);
             Assert.That(XrMenuRules.ShowInvoker(false, now: 10.0, lastHitAt: 5.0, graceSeconds: 6f), Is.True);
-        }
-
-        [Test]
-        public void GearHidesWhileHandTrackingIsAvailable()
-        {
-            Assert.That(XrMenuRules.ShowGear(panelOpen: false, handTrackingAvailable: true, now: 10.0, lastHitAt: 10.0), Is.False);
-        }
-
-        [Test]
-        public void GearFallsBackToShowInvokerWithoutHandTracking()
-        {
-            Assert.That(XrMenuRules.ShowGear(panelOpen: false, handTrackingAvailable: false, now: 10.0, lastHitAt: 10.0), Is.True);
-            Assert.That(XrMenuRules.ShowGear(panelOpen: true, handTrackingAvailable: false, now: 10.0, lastHitAt: 10.0), Is.False);
         }
 
         [Test]

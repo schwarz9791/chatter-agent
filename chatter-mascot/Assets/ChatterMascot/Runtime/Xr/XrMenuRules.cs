@@ -11,11 +11,11 @@ namespace ChatterMascot.Xr
     public static class XrMenuRules
     {
         /// <summary>
-        /// 当たらなくなってもこの秒数は呼び出し口を出したままにする既定値。
+        /// キャラクターをつまんだ・離した後、頭上の歯車を出しておく秒数。既定値。
         ///
-        /// ★ キャラクターから歯車へレイを動かす途中で消えないための猶予。実測値ではなく既定値。
+        /// ★ 歯車へレイを動かして押すまでの猶予。歯車に当たっている間は延び続ける。
         /// </summary>
-        public const float HoverGraceSeconds = 1.5f;
+        public const float GearVisibleSeconds = 5f;
 
         /// <summary>
         /// 呼び出し口を出すか。
@@ -25,21 +25,10 @@ namespace ChatterMascot.Xr
         ///   毎フレーム <paramref name="lastHitAt"/> を「いま」に進めること —— そうすれば
         ///   「いま当たっている」は「経過時間が 0 に近い」として自然に表現できる。
         /// </summary>
-        public static bool ShowInvoker(bool panelOpen, double now, double lastHitAt, float graceSeconds = HoverGraceSeconds)
+        public static bool ShowInvoker(bool panelOpen, double now, double lastHitAt, float graceSeconds = GearVisibleSeconds)
         {
             if (panelOpen) return false;
             return now - lastHitAt < graceSeconds;
-        }
-
-        /// <summary>
-        /// 頭上の歯車を出すか。<see cref="ShowInvoker"/> と同じ判定に、<b>手のひらの向きが判定に
-        /// 使える間は出さない</b>という条件を重ねる——関節が取れている間は手のひらメニューへ委ねる。
-        /// </summary>
-        public static bool ShowGear(
-            bool panelOpen, bool handTrackingAvailable, double now, double lastHitAt, float graceSeconds = HoverGraceSeconds)
-        {
-            if (handTrackingAvailable) return false;
-            return ShowInvoker(panelOpen, now, lastHitAt, graceSeconds);
         }
 
         /// <summary>関節を一瞬見失っても手のひらの向きの判定を保つ猶予（秒）。既定値。</summary>

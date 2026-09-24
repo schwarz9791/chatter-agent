@@ -13,13 +13,11 @@ namespace ChatterMascot.Xr
     /// <see cref="XrSettingsPanel"/> へ渡す。パネルからのイベントは <c>key</c> の
     /// <c>switch</c> で振り分ける。
     ///
-    /// ★ <b>呼び出し口（頭上の歯車 / 手のひらのボタン）もここが持つ。</b> 関節が取れている間は
-    ///   <see cref="XrHandTracking"/>（唯一の関節読み取り口）が手のひらの向きを判定し、
-    ///   取れていなければ歯車へ落ちる——どちらを出すかは <see cref="XrMenuRules"/> が決める。
-    ///   aim レイがキャラ・歯車・手のひらボタンのどれに当たっているかは <see cref="UpdateHover"/>
-    ///   が毎フレーム判定し、開くかどうかは <see cref="TryHandlePinch"/> が pinch の入りだけを
-    ///   見る——入力そのものの読み取りは <see cref="XrGrab"/> に一本化したまま、ここはレイと
-    ///   関節姿勢を受け取って判定するだけ。
+    /// ★ <b>呼び出し口（頭上の歯車 / 手のひらのボタン）もここが持つ。</b> 手のひらのボタンは
+    ///   <see cref="XrHandTracking"/>（唯一の関節読み取り口）が手のひらを自分へ向けたと判定した
+    ///   間だけ、歯車はキャラクターをつまんだ・離した後の一定時間だけ出す（<see cref="XrMenuRules"/>）。
+    ///   開くかどうかは <see cref="TryHandlePinch"/> が pinch の入りだけを見る——入力そのものの
+    ///   読み取りは <see cref="XrGrab"/> に一本化したまま、ここはレイと関節姿勢を受け取って判定するだけ。
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class XrSettingsBridge : MonoBehaviour
@@ -29,7 +27,7 @@ namespace ChatterMascot.Xr
 
         // ── 見た目の既定値（実測値ではない） ─────────────────────
         private const float InvokerCanvasPixels = 96f;
-        private const float InvokerWorldSizeMeters = 0.05f;
+        private const float InvokerWorldSizeMeters = 0.035f;
         private const float GearAboveHeadMeters = 0.06f;
         private const float InvokerHitRadiusMeters = 0.05f;
 
@@ -59,8 +57,8 @@ namespace ChatterMascot.Xr
         private readonly SettingsContext _context = new SettingsContext();
         private readonly Dictionary<string, string> _notices = new Dictionary<string, string>();
 
-        /// <summary>aim レイがキャラか歯車に最後に当たった時刻（<see cref="XrMenuRules"/> が見る）。</summary>
-        private double _lastHitAt = double.NegativeInfinity;
+        /// <summary>歯車を出し直した時刻——キャラをつまんだ・離した・歯車にレイが当たっている（<see cref="XrMenuRules"/> が見る）。</summary>
+        private double _gearShownAt = double.NegativeInfinity;
 
         /// <summary>この時刻までは「すべての設定をリセット」がもう一押しで確定する。</summary>
         private double _resetAllArmedUntil = double.NegativeInfinity;
@@ -110,7 +108,7 @@ namespace ChatterMascot.Xr
 
         /// <summary>
         /// つまんでいなくても毎フレーム渡す。パネルが開いていれば行のホバーを、
-        /// 閉じていればキャラ・歯車に当たっているかを判定する。
+        /// 閉じていれば歯車に当たっているか（当たっている間は歯車を出し続ける）を判定する。
         /// </summary>
         public void UpdateHover(Ray ray)
         {
@@ -122,7 +120,19 @@ namespace ChatterMascot.Xr
                 return;
             }
 
-            if (HitsCharacterOrGear(ray)) _lastHitAt = Time.unscaledTimeAsDouble;
+            if (HitsGear(ray)) _gearShownAt = Time.unscaledTimeAsDouble;
+        }
+
+        /// <summary>
+        /// キャラクターをつまんだ・離したときに呼ぶ（<c>XrGrab</c>）。頭上の歯車を一定時間出す。
+        ///
+        /// ★ <b>手のひらモードでも出す。</b> つまむのは明示的な操作なので邪魔にならず、手のひらを
+        ///   自分へ向けられない環境（エミュレータなど）でもパネルを開ける。
+        /// ★ aim レイのホバーでは出さない。つまんでいない間 aim が動かない環境がある。
+        /// </summary>
+        public void ShowGearForAWhile()
+        {
+            _gearShownAt = Time.unscaledTimeAsDouble;
         }
 
         /// <summary>
@@ -151,20 +161,10 @@ namespace ChatterMascot.Xr
             return collider.Raycast(ray, out _, float.PositiveInfinity);
         }
 
-        private bool HitsCharacterOrGear(Ray ray)
+        private bool HitsGear(Ray ray)
         {
-            if (_gear != null && _gear.activeSelf && _gearCollider != null &&
-                _gearCollider.Raycast(ray, out _, float.PositiveInfinity))
-            {
-                return true;
-            }
-
-            var collider = CharacterCollider();
-            if (collider == null) return false;
-
-            // ★ 直前のフレームでキャラを動かしていると古い当たり判定を見る（autoSyncTransforms オフ）
-            Physics.SyncTransforms();
-            return collider.Raycast(ray, out _, float.PositiveInfinity);
+            return _gear != null && _gear.activeSelf && _gearCollider != null &&
+                   _gearCollider.Raycast(ray, out _, float.PositiveInfinity);
         }
 
         // ── パネルの開閉 ───────────────────────────────────────
@@ -428,7 +428,7 @@ namespace ChatterMascot.Xr
             if (palmVisible) _palmButton.transform.SetPositionAndRotation(_hands.ButtonPosition, _hands.ButtonRotation);
 
             var gearVisible = _stage.Model != null &&
-                               XrMenuRules.ShowGear(_panel.IsOpen, _hands.TrackingAvailable, now, _lastHitAt);
+                               XrMenuRules.ShowInvoker(_panel.IsOpen, now, _gearShownAt);
             _gear.SetActive(gearVisible);
             if (gearVisible) PositionGear();
 

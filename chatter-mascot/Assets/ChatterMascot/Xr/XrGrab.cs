@@ -223,7 +223,7 @@ namespace ChatterMascot.Xr
             hand.LastTrackedAt = Time.unscaledTime;
 
             // ★ つまんでいなくても毎フレーム渡す。設定パネルが開いていればホバーの表示に、
-            //   閉じていれば歯車を出すかどうかの判定に使う（追跡されている手だけ）
+            //   閉じていれば歯車を出し続けるかの判定に使う（追跡されている手だけ）
             if (_settings != null) _settings.UpdateHover(ReadAimRay(hand, offset));
 
             var wasPinching = hand.Pinching;
@@ -307,6 +307,7 @@ namespace ChatterMascot.Xr
             }
 
             _walk?.SetModelGrabbed(true);
+            if (_settings != null) _settings.ShowGearForAWhile();
             Debug.Log($"[Mascot] XR grab: 掴みました hand={hand.Name}");
         }
 
@@ -417,6 +418,7 @@ namespace ChatterMascot.Xr
                 _walk?.Unplace();
             }
 
+            if (_settings != null) _settings.ShowGearForAWhile();
             Debug.Log($"[Mascot] XR grab: 離しました plane={landed} yaw={(faced ? yaw.ToString("F1") : "unchanged")}");
         }
 

@@ -97,6 +97,31 @@ namespace ChatterMascot.Tests
             Assert.That(VrmBounds.OfBones(null, 0.1f).size, Is.EqualTo(Vector3.zero));
         }
 
+        /// <summary>★ 余白は頭頂側の1回分だけ引く（→ <see cref="VrmBounds.RealHeightCm"/> の doc）。</summary>
+        [Test]
+        public void RealHeightCmSubtractsOneMarginFromTheHeight()
+        {
+            Assert.That(VrmBounds.RealHeightCm(1.73f, 1f, 0.1f), Is.EqualTo(163f).Within(1e-3f));
+        }
+
+        /// <summary>
+        /// ★ XR で縮小して置いたモデルの bounds からも、等倍換算した実寸が求まる。
+        ///   <c>marginMeters</c> は<b>縮尺前（等倍）の値</b>のまま渡す —— 高さを縮尺で割ると
+        ///   中に焼き込まれた余白も一緒に等倍へ戻るので、引く側を縮尺倍にしてはいけない。
+        /// </summary>
+        [Test]
+        public void RealHeightCmDividesByTheCurrentScale()
+        {
+            Assert.That(VrmBounds.RealHeightCm(1.73f * 0.18f, 0.18f, 0.1f),
+                Is.EqualTo(163f).Within(1e-2f));
+        }
+
+        [Test]
+        public void RealHeightCmFallsBackToZeroForNonPositiveScale()
+        {
+            Assert.That(VrmBounds.RealHeightCm(1.73f, 0f, 0.1f), Is.EqualTo(0f));
+        }
+
         /// <summary>1点だけなら、その点を中心に margin ぶんの箱になる。</summary>
         [Test]
         public void OfBonesWithASinglePositionCentersOnIt()

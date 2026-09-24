@@ -3,6 +3,16 @@ using System.Collections.Generic;
 namespace ChatterMascot.Settings
 {
     /// <summary>
+    /// 設定パネルを描画する側のプラットフォーム。<see cref="SettingsSchema.Build"/> が
+    /// 出し分けの唯一の入力に使う（→ <see cref="SettingsContext.Platform"/>）。
+    /// </summary>
+    public enum SettingsPlatform
+    {
+        Desktop,
+        Xr,
+    }
+
+    /// <summary>
     /// 設定パネルの項目に流し込む「その時々の状態」。<c>MenuState</c>（#75）と同じ役回りで、
     /// <see cref="SettingsSchema.Build"/> の唯一の入力。
     ///
@@ -18,6 +28,15 @@ namespace ChatterMascot.Settings
     public sealed class SettingsContext
     {
         private static readonly SettingChoice[] NoChoices = new SettingChoice[0];
+
+        /// <summary>
+        /// 設定パネルを描画している側。既定は <see cref="SettingsPlatform.Desktop"/>。
+        ///
+        /// ★★ <b><see cref="SettingsSchema.Build"/> の出し分けの唯一の入力。</b> ここ以外に
+        ///   プラットフォームを見る分岐を増やさないこと——増やすと、Desktop の出力が
+        ///   変わらないことを保証する場所が2つになる。
+        /// </summary>
+        public SettingsPlatform Platform { get; set; } = SettingsPlatform.Desktop;
 
         // ── Unity 側が権威を持つ値 ─────────────────────────────
         public MascotSettings Settings { get; set; } = MascotSettings.Defaults;
@@ -47,6 +66,16 @@ namespace ChatterMascot.Settings
         ///   出す note も無効化の理由も違う（→ <c>SettingsSchema</c> の doc）。
         /// </summary>
         public IReadOnlyList<SettingChoice> MotionClips { get; set; }
+
+        /// <summary>
+        /// XR の「大きさ」の選択肢（→ <see cref="SettingsMapping.XrHeightSteps"/> ＋
+        /// <see cref="SettingsMapping.XrHeightChoices"/>）。デスクトップでは使わない。
+        ///
+        /// ★★ <b>既定は <c>null</c>。空配列にしないこと。</b> <see cref="MotionClips"/> と同じ
+        ///   規約——段は読み込んだモデルの実寸から作るので、モデルが読めるまで <c>null</c>
+        ///   （「読み込み中」）のまま。
+        /// </summary>
+        public IReadOnlyList<SettingChoice> XrHeightChoices { get; set; }
 
         /// <summary>
         /// 「モーションを確認」で選択中の id（<c>"idle/Hub_Idle01.vrma"</c> の形）。

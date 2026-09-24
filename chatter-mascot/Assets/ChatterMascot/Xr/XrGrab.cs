@@ -13,8 +13,11 @@ namespace ChatterMascot.Xr
     /// <summary>
     /// 手でつまんで動かし、離したら平面へ置き直す。掴む対象はモデル本体と、歩行範囲の円の
     /// ハンドル（<see cref="XrWalk"/>）の2つ —— aim レイ・pinchValue のヒステリシス・掴みの
-    /// 排他はここに一本化したまま、先にハンドル、当たらなければモデルの順で見る。
-    /// どちらにも当たらなかったつまみは、歩行範囲の中を指した「行き先の指示」として扱う。
+    /// 排他はここに一本化したまま、先に設定パネル・歯車、次にハンドル、最後にモデルの順で見る。
+    /// どれにも当たらなかったつまみは、歩行範囲の中を指した「行き先の指示」として扱う。
+    ///
+    /// ★ <b>手の入力を増やすのではなく、掴む対象を増やす。</b> 設定パネル・歯車の当たり判定も
+    ///   ここが読んだレイを <see cref="XrSettingsBridge"/> へ渡すだけで、別の入力経路は作らない。
     ///
     /// ★ <b>シーンに置かない。</b> <see cref="XrStage"/> が配置（<see cref="XrPlacement"/>）の
     ///   直後に <c>AddComponent</c> で生やす —— 配置前のアンカーを掴ませないため。
@@ -22,7 +25,9 @@ namespace ChatterMascot.Xr
     [DisallowMultipleComponent]
     public sealed class XrGrab : MonoBehaviour
     {
-        private const string HandTrackingPermission = "android.permission.HAND_TRACKING";
+        /// <summary>internal: <see cref="XrHandTracking"/> も手のひらメニュー用の subsystem を
+        /// 起動してよいかの判定にこの権限を読む——権限の要求自体はここが起動時にまとめて行う。</summary>
+        internal const string HandTrackingPermission = "android.permission.HAND_TRACKING";
         private const string SceneUnderstandingCoarsePermission = "android.permission.SCENE_UNDERSTANDING_COARSE";
 
         /// <summary>追跡を短く見失っても、つまみを離したと判定しない猶予（秒）。</summary>
@@ -37,6 +42,7 @@ namespace ChatterMascot.Xr
         private XROrigin _origin;
         private VrmStage _stage;
         private XrWalk _walk;
+        private XrSettingsBridge _settings;
 
         private bool _scenePermissionGranted;
 
@@ -74,17 +80,76 @@ namespace ChatterMascot.Xr
         /// <summary>掴んでから水平面を一度でも指したか。</summary>
         private bool _hasLastPlanePoint;
 
-        public void Begin(XROrigin origin, VrmStage stage, XrWalk walk)
+        /// <summary>起動時に配置した直後の <c>ModelAnchor</c> の位置・向き。<see cref="ResetPosition"/> の行き先。</summary>
+        private Vector3 _initialAnchorPosition;
+        private Quaternion _initialAnchorRotation;
+
+        public void Begin(XROrigin origin, VrmStage stage, XrWalk walk, XrSettingsBridge settings)
         {
             _origin = origin;
             _stage = stage;
             _walk = walk;
+            _settings = settings;
+            // ★ ここまで ModelAnchor を動かすものは無い（起動時の配置は XR Origin 側を動かすだけ）
+            //   ので、いまの位置・向きがそのまま「起動時の位置」になる
+            _initialAnchorPosition = stage.ModelAnchor.position;
+            _initialAnchorRotation = stage.ModelAnchor.rotation;
             foreach (var hand in _hands) hand.Enable();
+        }
+
+        /// <summary>
+        /// 「位置をリセット」。<c>ModelAnchor</c> を起動時と同じ位置・向きへ戻し、歩行範囲も
+        /// 未配置・既定半径に戻す。つまんでいる最中なら、着地の判定はせずそのまま外す。
+        /// </summary>
+        public void ResetPosition()
+        {
+            if (_grabbedHand != null)
+            {
+                // ★ 掴んでいた対象に応じて外す。歩行範囲のハンドルを外し損ねると、
+                //   「掴んでいる間は円を消さない」判定が真のまま残ってしまう
+                if (_grabbedHandle) _walk?.ReleaseHandle();
+                else _walk?.SetModelGrabbed(false);
+                _grabbedHand = null;
+            }
+
+            var anchor = _stage.ModelAnchor;
+            anchor.SetPositionAndRotation(_initialAnchorPosition, _initialAnchorRotation);
+            // ★ 瞬間移動なので、揺れものが移動を慣性として拾わないよう戻す（Release と同じ理由）
+            _stage.ResetSpringBones();
+            _walk?.ResetArea();
+
+            Debug.Log("[Mascot] XR grab: 位置をリセットしました");
         }
 
         private void OnDestroy()
         {
             foreach (var hand in _hands) hand.Dispose();
+        }
+
+        /// <summary>
+        /// 追跡されている手の aim レイ。<see cref="ChatterMascot.Xr.XrCursorGazeSource"/> が
+        /// 「目で追う」の入力に使う——<b>入力の読み取りはここに一本化したまま</b>、新しく
+        /// Input System のバインドを増やさない。
+        ///
+        /// ★ 両手とも追跡されているときは右手を優先する（簡単で説明できる決め打ち）。
+        ///   どちらも追跡されていなければ <c>false</c>。
+        /// </summary>
+        public bool TryGetAimRay(out Ray ray)
+        {
+            ray = default;
+            if (_origin == null) return false;
+
+            var offset = _origin.CameraFloorOffsetObject.transform;
+            for (var i = _hands.Length - 1; i >= 0; i--)
+            {
+                var hand = _hands[i];
+                if (!hand.IsTracked.IsPressed()) continue;
+
+                ray = ReadAimRay(hand, offset);
+                return true;
+            }
+
+            return false;
         }
 
         private void Start()
@@ -157,6 +222,10 @@ namespace ChatterMascot.Xr
 
             hand.LastTrackedAt = Time.unscaledTime;
 
+            // ★ つまんでいなくても毎フレーム渡す。設定パネルが開いていればホバーの表示に、
+            //   閉じていれば歯車を出すかどうかの判定に使う（追跡されている手だけ）
+            if (_settings != null) _settings.UpdateHover(ReadAimRay(hand, offset));
+
             var wasPinching = hand.Pinching;
             hand.Pinching = XrGrabRules.IsPinching(wasPinching, hand.PinchValue.ReadValue<float>());
 
@@ -177,6 +246,10 @@ namespace ChatterMascot.Xr
         private void TryGrab(Hand hand, Transform offset)
         {
             var ray = ReadAimRay(hand, offset);
+
+            // ★ 設定パネル・歯車を先に見る。当たっていればそちらを押して、
+            //   キャラ・歩行範囲の掴みには進まない
+            if (_settings != null && _settings.TryHandlePinch(ray)) return;
 
             if (_walk != null && _walk.TryGrabHandle(ray))
             {

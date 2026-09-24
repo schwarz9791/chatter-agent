@@ -77,14 +77,17 @@ namespace ChatterMascot.Xr
         }
 
         /// <summary>
-        /// キャラクターを平面へ着地させた（<c>XrGrab.Release</c>）直後に呼ぶ。中心・接地高さ・半径
-        /// （既定へリセット）・ハンドルの位置を決め、円を出す。<b>これが呼ばれるまで歩行は無効。</b>
+        /// キャラクターを平面へ着地させた（<c>XrGrab.Release</c>）直後に呼ぶ。中心・接地高さ・
+        /// ハンドルの位置を決め、円を出す。<b>これが呼ばれるまで歩行は無効。</b>
+        ///
+        /// ★ <b>半径は変えない。</b> つまんで置き直すたびに既定へ戻すと、広げた歩行範囲が
+        ///   毎回失われる —— 半径を変えるのは <see cref="DragHandle"/> と、既定へ戻す
+        ///   <see cref="ResetArea"/> だけにすること。
         /// </summary>
         public void PlaceAt(Vector3 feetWorld, float groundY, float characterYawDegrees)
         {
             _center = new Vector2(feetWorld.x, feetWorld.z);
             _floorY = groundY;
-            _radius = DefaultRadius;
             _handleAngleDegrees = characterYawDegrees + HandleAzimuthOffsetDegrees;
 
             if (_wander == null) _wander = new Wander(_center, characterYawDegrees);
@@ -107,6 +110,16 @@ namespace ChatterMascot.Xr
         {
             _placed = false;
             if (_character != null && _character.IsWalking) _character.StopWalking();
+        }
+
+        /// <summary>
+        /// 「位置をリセット」の一部。半径を既定へ戻し、未配置にする。次に <see cref="PlaceAt"/> が
+        /// 呼ばれるまで歩行は無効のまま。
+        /// </summary>
+        public void ResetArea()
+        {
+            _radius = DefaultRadius;
+            Unplace();
         }
 
         /// <summary>

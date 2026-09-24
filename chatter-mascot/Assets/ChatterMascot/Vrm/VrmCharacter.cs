@@ -264,10 +264,11 @@ namespace ChatterMascot.Vrm
         }
 
         /// <summary>
-        /// Desktop 側（<c>CursorGazeSource</c>）が刺す。<c>null</c> なら自律的な漂いに倒れる。
+        /// Desktop 側（<c>CursorGazeSource</c>）または XR 側（<c>XrCursorGazeSource</c>）が刺す。
+        /// <c>null</c>、または呼び出しが <c>null</c> を返せば自律的な漂いに倒れる。
         ///
-        /// ★ <b>Android にはこの注入元が存在しない</b>（<c>ChatterMascot.Desktop</c> アセンブリごと
-        ///   コンパイルされない）ので、常に <c>null</c> のまま＝漂いへ自動的に倒れる。
+        /// ★ <b>XR は手を追跡できている間だけ値を返す。</b> 手を見失えば呼び出し元が <c>null</c> を
+        ///   返すので、漂いへ自動的に倒れる。
         /// </summary>
         public Func<Vector2?> CursorProvider { get; set; }
 

@@ -152,6 +152,16 @@ namespace ChatterMascot.Vrm
         public GameObject Model { get; private set; }
 
         /// <summary>
+        /// 読み込んだモデルの実寸の高さ（cm、縮尺 1 のときの値）。まだ測れていなければ <c>null</c>。
+        ///
+        /// ★ <b>読み込み直後、モーション（VRMA）が乗る前の1回だけ測る。</b> 以後の
+        ///   <see cref="Remeasure"/>（待機モーション反映後の測り直し・<see cref="Rescale"/>）では
+        ///   更新しない —— ポーズで身長が動いて見えると、XR の大きさの段がぐらつく。
+        /// ★ <b>XR の目標縮尺の唯一の出どころ。</b>「目標cm ÷ 実寸」で縮尺を求める。
+        /// </summary>
+        public float? RealHeightCm { get; private set; }
+
+        /// <summary>
         /// 読み込み完了を購読する。
         ///
         /// ★ <b><c>event +=</c> にしないこと。</b> 購読者（<c>VrmDragHandleBinder</c>）は
@@ -172,6 +182,32 @@ namespace ChatterMascot.Vrm
         /// ★ キャラを瞬間移動させた後に呼ぶと、移動を慣性として拾って揺れものが振り回されない。
         /// </summary>
         public void ResetSpringBones() => _instance?.Runtime?.SpringBone?.RestoreInitialTransform();
+
+        /// <summary>
+        /// 縮尺を変える。<b>起動時の初期化も実行中の変更もこの1経路にすること。</b>
+        ///
+        /// ★ <c>ModelAnchor.localScale</c> を差し替えるだけでなく、spring bone には
+        ///   <b>変化の比（新/旧）</b>で焼き直す（→ <see cref="BakeSpringBoneScale"/>）。焼き込みは
+        ///   乗算で積み重なるので、絶対値ではなく比を渡すこと。
+        /// ★ モデルがまだ読み込まれていなければ縮尺を変えるだけで終わる
+        ///   （spring bone も bounds もまだ無い。読み込み時の <see cref="Adopt"/> が改めて
+        ///   そのときの縮尺で焼き込む）。
+        /// </summary>
+        public void Rescale(float newScale)
+        {
+            if (modelAnchor == null || !(newScale > 0f)) return;
+
+            var oldScale = modelAnchor.UniformedLossyScale();
+            modelAnchor.localScale = Vector3.one * newScale;
+
+            if (_instance == null) return;
+
+            if (oldScale > 0f && !Mathf.Approximately(newScale / oldScale, 1f))
+            {
+                BakeSpringBoneScale(_instance, newScale / oldScale);
+            }
+            Remeasure();
+        }
 
         private void Start()
         {
@@ -348,6 +384,13 @@ namespace ChatterMascot.Vrm
             _bounds = MeasureBounds(instance, ScaledBoneBoundsMargin(instance));
             _collider = AttachCollider(instance.gameObject, _bounds);
 
+            // ★ モーション（VRMA）が乗る前、この時点の bounds でしか測らない
+            //   （RealHeightCm の <summary> 参照）
+            var scale = instance.transform.UniformedLossyScale();
+            RealHeightCm = scale > 0f
+                ? VrmBounds.RealHeightCm(_bounds.size.y, scale, boneBoundsMarginMeters)
+                : (float?)null;
+
             if (placeholder != null) placeholder.SetActive(false);
 
             Model = instance.gameObject;
@@ -366,13 +409,16 @@ namespace ChatterMascot.Vrm
         }
 
         /// <summary>
-        /// <c>ModelAnchor</c> の縮尺を spring bone のパラメータに焼き込み、spring bone を作り直す。
+        /// spring bone のパラメータへ縮尺の変化を焼き込み、spring bone を作り直す。
+        /// <paramref name="scale"/> は<b>変化の比</b> —— 読み込み時は「等倍からいまの縮尺へ」、
+        /// <see cref="Rescale"/> からは「旧縮尺から新縮尺へ」。焼き込みは乗算で積み重なるので、
+        /// どちらの呼び出しも絶対値ではなく比を渡すこと。
         ///
         /// ★ <b>UniVRM の spring bone は、当たり半径・剛性・重力を親の拡縮に追従させない。</b>
         ///   コライダーの半径は毎フレーム拡縮されるので、焼き込まないと小さくした頭のコライダーに
         ///   元の太さの髪が押し出され、横に流れたまま固まる。骨の長さは作り直しのときに
-        ///   <c>lossyScale</c> から測り直される（読み込み時は親に入る前の長さを持っている）。
-        /// ★ <b>剛性と重力も縮尺倍にする。</b> 骨の長さが縮尺倍になるので、そのままだと
+        ///   <c>lossyScale</c> から測り直される。
+        /// ★ <b>剛性と重力も同じ比で掛ける。</b> 骨の長さも同じ比で変わるので、そのままだと
         ///   見た目の角速度が変わる（<c>BlittableModelLevel.SupportsScalingAtRuntime</c> と同じ補正。
         ///   あちらはバッファの作り直しで既定に戻るので使わない）。
         /// </summary>

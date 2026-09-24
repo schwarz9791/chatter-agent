@@ -44,7 +44,7 @@ namespace ChatterMascot.Settings
             string vrmFileName,
             int frameRate,
             string serverUrl, string token, string assetSync,
-            float xrScale, float xrDistance, float xrAzimuth, float xrFeetBelowEye)
+            float xrHeight, float xrLegacyScale, float xrDistance, float xrAzimuth, float xrFeetBelowEye)
         {
             Muted = muted;
             MuteHotKey = muteHotKey;
@@ -58,7 +58,8 @@ namespace ChatterMascot.Settings
             ServerUrl = serverUrl;
             Token = token;
             AssetSync = assetSync;
-            XrScale = xrScale;
+            XrHeight = xrHeight;
+            XrLegacyScale = xrLegacyScale;
             XrDistance = xrDistance;
             XrAzimuth = xrAzimuth;
             XrFeetBelowEye = xrFeetBelowEye;
@@ -162,16 +163,28 @@ namespace ChatterMascot.Settings
         public string AssetSync { get; }
 
         /// <summary>
-        /// Android XR でのキャラクターの大きさ（<c>ModelAnchor.localScale</c> の一様倍率）。
+        /// Android XR でのキャラクターの大きさ（cm。読み込んだモデルの実際の高さに対する目標値）。
         ///
         /// ★ <b>デスクトップの「キャラクターの大きさ」（<see cref="SettingsMapping.ScaleMin"/> ほか）
-        ///   とは別概念。</b> あちらはウィンドウの倍率、こちらは VRM モデル自体のスケール。
-        ///   範囲・既定は <see cref="SettingsMapping.XrScaleMin"/> / <see cref="SettingsMapping.XrScaleMax"/> /
-        ///   <see cref="SettingsMapping.XrDefaultScale"/>。
-        /// ★ デスクトップの設定パネルには出さない。Android には設定 UI が無いので、
-        ///   端末の <c>settings.json</c> を直接書き換える。
+        ///   とは別概念。</b> あちらはウィンドウの倍率、こちらは実寸の高さ。
+        /// ★ <b>実寸を超える値は持たせない。</b> 段への丸め・実寸へのクランプは
+        ///   <see cref="SettingsMapping.NearestXrHeight"/> が行う——ここは丸め後の値をそのまま持つだけ。
+        /// ★ デスクトップの設定パネルには出さない。既定は <see cref="SettingsMapping.XrDefaultHeight"/>。
         /// </summary>
-        public float XrScale { get; }
+        public float XrHeight { get; }
+
+        /// <summary>
+        /// <c>xr.scale</c> だけを持つ古い <c>settings.json</c> を読んだときの、
+        /// 未換算の倍率。<b>0 は「無い」</b>（→ <see cref="XrHeight"/> が既に確定している）。
+        ///
+        /// ★★ <b>ここに実寸換算後の値を書き戻さないこと。</b> 換算にはモデルの実際の高さが要り、
+        ///   それは Runtime 層の外（XR 側でモデルを読み込んだ後）でしか分からない。換算できたら
+        ///   <see cref="XrHeight"/> を確定値にして、ここは 0 に戻す（
+        ///   <c>WithXrHeight(...).WithXrLegacyScale(0f)</c>）。
+        /// ★ 0 を「無い」に使うのは <see cref="VrmFileName"/> の空文字と同じ流儀
+        ///   （<c>xr.scale</c> の有効範囲は 0 より大きいので、0 に実際の値が来ることは無い）。
+        /// </summary>
+        public float XrLegacyScale { get; }
 
         /// <summary>Android XR での、目からキャラまでの水平距離（メートル）。空間固定を組む起動時に1回だけ使う。</summary>
         public float XrDistance { get; }
@@ -193,7 +206,7 @@ namespace ChatterMascot.Settings
                     "",
                     SettingsMapping.DefaultFrameRate,
                     "", "", SettingsMapping.DefaultAssetSync,
-                    SettingsMapping.XrDefaultScale, SettingsMapping.XrDefaultDistance,
+                    SettingsMapping.XrDefaultHeight, 0f, SettingsMapping.XrDefaultDistance,
                     SettingsMapping.XrDefaultAzimuth, SettingsMapping.XrDefaultFeetBelowEye);
             }
         }
@@ -212,7 +225,8 @@ namespace ChatterMascot.Settings
             string vrmFileName = null,
             int? frameRate = null,
             string serverUrl = null, string token = null, string assetSync = null,
-            float? xrScale = null, float? xrDistance = null, float? xrAzimuth = null, float? xrFeetBelowEye = null)
+            float? xrHeight = null, float? xrLegacyScale = null,
+            float? xrDistance = null, float? xrAzimuth = null, float? xrFeetBelowEye = null)
         {
             return new MascotSettings(
                 muted ?? Muted,
@@ -227,7 +241,8 @@ namespace ChatterMascot.Settings
                 serverUrl ?? ServerUrl,
                 token ?? Token,
                 assetSync ?? AssetSync,
-                xrScale ?? XrScale,
+                xrHeight ?? XrHeight,
+                xrLegacyScale ?? XrLegacyScale,
                 xrDistance ?? XrDistance,
                 xrAzimuth ?? XrAzimuth,
                 xrFeetBelowEye ?? XrFeetBelowEye);
@@ -245,7 +260,8 @@ namespace ChatterMascot.Settings
         public MascotSettings WithServerUrl(string value) => Copy(serverUrl: value);
         public MascotSettings WithToken(string value) => Copy(token: value);
         public MascotSettings WithAssetSync(string value) => Copy(assetSync: value);
-        public MascotSettings WithXrScale(float value) => Copy(xrScale: value);
+        public MascotSettings WithXrHeight(float value) => Copy(xrHeight: value);
+        public MascotSettings WithXrLegacyScale(float value) => Copy(xrLegacyScale: value);
         public MascotSettings WithXrDistance(float value) => Copy(xrDistance: value);
         public MascotSettings WithXrAzimuth(float value) => Copy(xrAzimuth: value);
         public MascotSettings WithXrFeetBelowEye(float value) => Copy(xrFeetBelowEye: value);
@@ -279,7 +295,8 @@ namespace ChatterMascot.Settings
                 && string.Equals(ServerUrl, other.ServerUrl, StringComparison.Ordinal)
                 && string.Equals(Token, other.Token, StringComparison.Ordinal)
                 && string.Equals(AssetSync, other.AssetSync, StringComparison.Ordinal)
-                && XrScale.Equals(other.XrScale)
+                && XrHeight.Equals(other.XrHeight)
+                && XrLegacyScale.Equals(other.XrLegacyScale)
                 && XrDistance.Equals(other.XrDistance)
                 && XrAzimuth.Equals(other.XrAzimuth)
                 && XrFeetBelowEye.Equals(other.XrFeetBelowEye);
@@ -304,7 +321,8 @@ namespace ChatterMascot.Settings
             hash = (hash * 397) ^ (ServerUrl != null ? ServerUrl.GetHashCode() : 0);
             hash = (hash * 397) ^ (Token != null ? Token.GetHashCode() : 0);
             hash = (hash * 397) ^ (AssetSync != null ? AssetSync.GetHashCode() : 0);
-            hash = (hash * 397) ^ XrScale.GetHashCode();
+            hash = (hash * 397) ^ XrHeight.GetHashCode();
+            hash = (hash * 397) ^ XrLegacyScale.GetHashCode();
             hash = (hash * 397) ^ XrDistance.GetHashCode();
             hash = (hash * 397) ^ XrAzimuth.GetHashCode();
             hash = (hash * 397) ^ XrFeetBelowEye.GetHashCode();

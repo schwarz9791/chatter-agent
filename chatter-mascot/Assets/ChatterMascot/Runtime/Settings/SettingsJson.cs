@@ -71,16 +71,23 @@ namespace ChatterMascot.Settings
                     ["token"] = settings.Token ?? "",
                     ["assetSync"] = settings.AssetSync ?? SettingsMapping.DefaultAssetSync,
                 },
-                // ★ デスクトップの設定パネルは書かないが、往復で落とさないよう含めておく
-                //   （→ connection と同じ扱い）
-                ["xr"] = new JObject
-                {
-                    ["scale"] = settings.XrScale,
-                    ["distance"] = settings.XrDistance,
-                    ["azimuth"] = settings.XrAzimuth,
-                    ["feetBelowEye"] = settings.XrFeetBelowEye,
-                },
             };
+
+            // ★ デスクトップの設定パネルは書かないが、往復で落とさないよう含めておく
+            //   （→ connection と同じ扱い）
+            var xr = new JObject
+            {
+                ["height"] = settings.XrHeight,
+                ["distance"] = settings.XrDistance,
+                ["azimuth"] = settings.XrAzimuth,
+                ["feetBelowEye"] = settings.XrFeetBelowEye,
+            };
+            // ★ 未換算の倍率（古い書式の xr.scale）が残っている間は書き戻す。
+            //   height が確定した（= 0 に戻った）ら書かない——両方書き続けると、
+            //   手で height を直しても scale が優先されるように見えかねない
+            if (settings.XrLegacyScale != 0f) xr["scale"] = settings.XrLegacyScale;
+            root["xr"] = xr;
+
             return root.ToString(Formatting.Indented) + "\n";
         }
 
@@ -357,7 +364,7 @@ namespace ChatterMascot.Settings
         }
 
         /// <summary>
-        /// Android XR の空間固定パラメータ（→ <see cref="MascotSettings.XrScale"/> ほかの doc）。
+        /// Android XR の空間固定パラメータ（→ <see cref="MascotSettings.XrHeight"/> ほかの doc）。
         /// <b>audio / ui / character / connection と同じ作法</b>：オブジェクトでなければ既定を使い、
         /// 未知キーは警告して無視する。
         /// </summary>
@@ -374,9 +381,18 @@ namespace ChatterMascot.Settings
             {
                 switch (property.Key)
                 {
+                    case "height":
+                        settings = settings.WithXrHeight(ReadXrNumber(
+                            property.Value, "xr.height", settings.XrHeight,
+                            SettingsMapping.XrHeightMin, SettingsMapping.XrHeightMax, warn));
+                        break;
+
+                    // ★★ 古い書式。height が無い（＝未換算）間だけ持つ意味がある値なので、
+                    //   height と同じ既定へ倒さず「無い」を表す 0 へ落とす
+                    //   （→ MascotSettings.XrLegacyScale の doc）
                     case "scale":
-                        settings = settings.WithXrScale(ReadXrNumber(
-                            property.Value, "xr.scale", settings.XrScale,
+                        settings = settings.WithXrLegacyScale(ReadXrNumber(
+                            property.Value, "xr.scale", settings.XrLegacyScale,
                             SettingsMapping.XrScaleMin, SettingsMapping.XrScaleMax, warn));
                         break;
 

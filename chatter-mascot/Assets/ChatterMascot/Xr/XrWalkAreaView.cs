@@ -48,12 +48,15 @@ namespace ChatterMascot.Xr
         /// <summary>
         /// 円・フチ・ハンドルを、渡された値どおりに置く。<paramref name="handleAngleDegrees"/> は
         /// キャラクターのヨーと同じ約束（ローカル −Z が正面）で測ったハンドルの方角。
+        /// <paramref name="radius"/> は既にキャラクターの大きさぶん伸び縮みさせた実寸（円はこれで
+        /// 拡大縮尺する）。<paramref name="scale"/> は同じ倍率で、ハンドルの見た目と当たり判定を
+        /// 円と同じ調子で伸び縮みさせる（歯車と同じ理由——大きいキャラほど的も大きくする）。
         ///
         /// ★ <paramref name="visible"/> は即座の on/off ではなく、不透明度を <see cref="FadeSeconds"/>
         ///   かけて 0↔1 へ動かす目標。<b>消える側の呼び出しでも毎フレーム呼び続けること</b>
         ///   ——呼ばれなくなるとフェードが途中で止まって固まる。
         /// </summary>
-        public void Sync(Vector3 center, float floorY, float radius, float handleAngleDegrees, bool visible)
+        public void Sync(Vector3 center, float floorY, float radius, float handleAngleDegrees, float scale, bool visible)
         {
             if (!_built) Build();
             if (_buildFailed) return;
@@ -66,6 +69,9 @@ namespace ChatterMascot.Xr
             //   呼び出し側がキャラのヨーにそのまま角度を足して渡せる
             _handle.localPosition = Quaternion.Euler(0f, handleAngleDegrees, 0f) * Vector3.back * radius
                                     + Vector3.up * HandleLiftMeters;
+            // ★ SphereCollider.radius はローカル単位なので、見た目と一緒に localScale で伸ばせば
+            //   当たり判定も追従する（別々に大きさを持たせない）
+            _handle.localScale = Vector3.one * HandleRadiusMeters * scale;
 
             var target = visible ? 1f : 0f;
             var opacity = Mathf.MoveTowards(_opacity, target, Time.unscaledDeltaTime / FadeSeconds);

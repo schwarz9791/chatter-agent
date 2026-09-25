@@ -27,6 +27,11 @@ namespace ChatterMascot.Xr
     [DisallowMultipleComponent]
     public sealed class XrWalk : MonoBehaviour
     {
+        /// <summary>
+        /// 半径は<b>基準の身長</b>（歯車と同じ <see cref="XrMenuRules.GearReferenceHeightMeters"/>）での
+        /// もの。ワールドへ出す実際の半径は、歯車と同じ倍率（<see cref="XrMenuRules.GearScale"/>）で
+        /// キャラクターの大きさに応じて伸び縮みする（→ <see cref="ScaleFactor"/>）。
+        /// </summary>
         public const float MinRadius = 0.10f;
         public const float DefaultRadius = 0.20f;
         public const float MaxRadius = 0.60f;
@@ -167,8 +172,9 @@ namespace ChatterMascot.Xr
         }
 
         /// <summary>
-        /// aim レイと床平面（<c>y = floorY</c>）の交点までの水平距離を、<see cref="MinRadius"/>〜
-        /// <see cref="MaxRadius"/> にクランプして半径にする。
+        /// aim レイと床平面（<c>y = floorY</c>）の交点までの水平距離を、キャラクターの大きさの
+        /// 倍率（<see cref="ScaleFactor"/>）で割り戻してから <see cref="MinRadius"/>〜
+        /// <see cref="MaxRadius"/> にクランプし、基準の身長での半径にする。
         ///
         /// ★ レイが床と交わらない（上を向いた／平行、または交点がレイの後ろ）ときは半径を変えない。
         /// </summary>
@@ -177,7 +183,7 @@ namespace ChatterMascot.Xr
             if (!_handleHeld) return;
             if (!TryFloorPoint(ray, out var point)) return;
 
-            _radius = Mathf.Clamp(Vector2.Distance(point, _center), MinRadius, MaxRadius);
+            _radius = Mathf.Clamp(Vector2.Distance(point, _center) / ScaleFactor(), MinRadius, MaxRadius);
         }
 
         /// <summary>
@@ -195,7 +201,7 @@ namespace ChatterMascot.Xr
         {
             if (!Active || _wander == null || _character == null) return WalkToResult.Rejected;
             if (!TryFloorPoint(ray, out var point)) return WalkToResult.Rejected;
-            if (Vector2.Distance(point, _center) > _radius) return WalkToResult.OutOfRange;
+            if (Vector2.Distance(point, _center) > _radius * ScaleFactor()) return WalkToResult.OutOfRange;
 
             if (_character.Speaking)
             {
@@ -258,11 +264,13 @@ namespace ChatterMascot.Xr
 
         private void Update()
         {
+            var k = ScaleFactor();
+
             if (!Active)
             {
                 // ★ 平面が無くて置けなかった／Unplace 済み／設定で OFF。円は最後の位置のまま
                 //   フェードアウトへ回す —— ここで Sync を止めると消える途中で固まって見える
-                SyncCircle(false);
+                SyncCircle(false, k);
                 return;
             }
 
@@ -276,7 +284,7 @@ namespace ChatterMascot.Xr
 
             _wander.Update(
                 now, _character.Speaking, _character.CanWalk && !held,
-                _center, _radius, speed, cameraXz, RandomDouble);
+                _center, _radius * k, speed, cameraXz, RandomDouble);
 
             // ★★ <b>状態とモーションは毎フレーム突き合わせる。遷移した瞬間だけを見ない。</b>
             //   遷移だけを見ると、外から目的地を指された回（Wander.GoTo）を取りこぼし、
@@ -291,7 +299,7 @@ namespace ChatterMascot.Xr
                 _character.StopWalking();
             }
 
-            SyncCircle(CircleVisible);
+            SyncCircle(CircleVisible, k);
 
             // ★ XrGrab がモデルの位置を握っている間は上書きしない
             if (_modelHeld) return;
@@ -310,11 +318,22 @@ namespace ChatterMascot.Xr
         /// <summary>円が出ている間か。ハンドルをつまんでいる間は消さない。</summary>
         private bool CircleVisible => _handleHeld || Time.realtimeSinceStartupAsDouble < _hideCircleAt;
 
-        private void SyncCircle(bool visible)
+        private void SyncCircle(bool visible, float scale)
         {
             if (_view == null) return;
 
-            _view.Sync(new Vector3(_center.x, 0f, _center.y), _floorY, _radius, _handleAngleDegrees, visible);
+            _view.Sync(new Vector3(_center.x, 0f, _center.y), _floorY, _radius * scale, _handleAngleDegrees, scale, visible);
+        }
+
+        /// <summary>
+        /// 半径の倍率。歯車と同じ元（キャラクターの当たり判定の高さ）から、同じ式
+        /// （<see cref="XrMenuRules.GearScale"/>）で求める（→ <see cref="XrSettingsBridge.PositionGear"/>
+        /// と同じ考え方）。
+        /// </summary>
+        private float ScaleFactor()
+        {
+            var collider = _stage.Model != null ? _stage.Model.GetComponentInChildren<Collider>() : null;
+            return XrMenuRules.GearScale(collider != null ? collider.bounds.size.y : 0f);
         }
 
         private static double RandomDouble() => UnityEngine.Random.value;

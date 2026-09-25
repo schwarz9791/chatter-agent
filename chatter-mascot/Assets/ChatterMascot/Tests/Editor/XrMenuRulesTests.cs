@@ -112,5 +112,43 @@ namespace ChatterMascot.Tests
             Assert.That(XrMenuRules.ShowPalmButton(panelOpen: false, handTrackingAvailable: false, palmFacingSelf: true), Is.False);
             Assert.That(XrMenuRules.ShowPalmButton(panelOpen: true, handTrackingAvailable: true, palmFacingSelf: true), Is.False);
         }
+
+        [Test]
+        public void GearScaleIsOneAtTheReferenceHeight()
+        {
+            Assert.That(XrMenuRules.GearScale(XrMenuRules.GearReferenceHeightMeters), Is.EqualTo(1f));
+        }
+
+        [Test]
+        public void GearScaleIsMonotonicNonDecreasingWithHeight()
+        {
+            var previous = XrMenuRules.GearScale(0.15f);
+            for (var h = 0.2f; h <= 3.0f; h += 0.1f)
+            {
+                var current = XrMenuRules.GearScale(h);
+                Assert.That(current, Is.GreaterThanOrEqualTo(previous));
+                previous = current;
+            }
+        }
+
+        [Test]
+        public void GearScaleStaysWithinItsBounds()
+        {
+            foreach (var h in new[] { 0.01f, 0.15f, XrMenuRules.GearReferenceHeightMeters, 1f, 2f, 100f })
+            {
+                var scale = XrMenuRules.GearScale(h);
+                Assert.That(scale, Is.GreaterThanOrEqualTo(1f));
+                Assert.That(scale, Is.LessThanOrEqualTo(XrMenuRules.GearScaleMax));
+            }
+        }
+
+        [Test]
+        public void GearScaleFallsBackToOneForNonPositiveOrNonFiniteInput()
+        {
+            Assert.That(XrMenuRules.GearScale(0f), Is.EqualTo(1f));
+            Assert.That(XrMenuRules.GearScale(-1f), Is.EqualTo(1f));
+            Assert.That(XrMenuRules.GearScale(float.NaN), Is.EqualTo(1f));
+            Assert.That(XrMenuRules.GearScale(float.PositiveInfinity), Is.EqualTo(1f));
+        }
     }
 }

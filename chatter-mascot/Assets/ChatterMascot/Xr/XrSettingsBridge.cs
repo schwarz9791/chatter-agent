@@ -28,7 +28,7 @@ namespace ChatterMascot.Xr
         // ── 見た目の既定値（実測値ではない） ─────────────────────
         private const float InvokerCanvasPixels = 96f;
         private const float InvokerWorldSizeMeters = 0.035f;
-        private const float GearAboveHeadMeters = 0.06f;
+        private const float GearAboveHeadMeters = 0.09f;
         private const float InvokerHitRadiusMeters = 0.05f;
 
         /// <summary>「すべての設定をリセット」の確認待ちの猶予（秒）。既定値。</summary>
@@ -180,8 +180,9 @@ namespace ChatterMascot.Xr
         /// どれかに当たっていればそちらを押して <b>true</b> を返す——呼び出し側はキャラ・歩行範囲の
         /// 掴みへ進まないこと。
         ///
-        /// ★ <b>手のひらボタンを出している手自身のレイは特別扱いしない。</b> 手のひらを自分へ
-        ///   向けたときの aim レイは通常ボタンを指さないので、区別しなくても実用上問題にならない。
+        /// ★ <b>手のひらボタンを出している手自身でつまんでも区別しない。</b> レイの始点がボタンの
+        ///   近くにあれば当たり判定に含める（<see cref="TryPressButton"/>）ので、その手自身で
+        ///   ボタンの近くをつまんでも開く——害がないので、開く手を特別扱いしない。
         /// </summary>
         public bool TryHandlePinch(Ray ray)
         {
@@ -199,14 +200,23 @@ namespace ChatterMascot.Xr
             // ★ 直前のフレームで動かしていると古い当たり判定を見る（autoSyncTransforms オフ）
             Physics.SyncTransforms();
             // ★ レイの始点がコライダーの中にあると Raycast は当たらない扱いになる。
-            //   押しに来る手はボタンへ近づくので、その状態も当たり判定に含める
-            return collider.bounds.Contains(ray.origin) || collider.Raycast(ray, out _, float.PositiveInfinity);
+            //   押しに来る手はボタンへ近づくので、その状態も当たり判定に含める。
+            //   SphereCollider 前提で球として判定する（bounds は AABB なので Contains だと
+            //   角が半径の√3倍まで伸びてしまう）
+            return RayOriginInsideCollider(collider, ray.origin) || collider.Raycast(ray, out _, float.PositiveInfinity);
         }
 
         private bool HitsGear(Ray ray)
         {
             if (_gear == null || !_gear.activeSelf || _gearCollider == null) return false;
-            return _gearCollider.bounds.Contains(ray.origin) || _gearCollider.Raycast(ray, out _, float.PositiveInfinity);
+            return RayOriginInsideCollider(_gearCollider, ray.origin) || _gearCollider.Raycast(ray, out _, float.PositiveInfinity);
+        }
+
+        /// <summary>レイの始点がコライダーの球（半径 = <c>bounds.extents.x</c>）の中にあるか。</summary>
+        private static bool RayOriginInsideCollider(Collider collider, Vector3 origin)
+        {
+            var b = collider.bounds;
+            return (origin - b.center).sqrMagnitude <= b.extents.x * b.extents.x;
         }
 
         // ── パネルの開閉 ───────────────────────────────────────
@@ -499,20 +509,31 @@ namespace ChatterMascot.Xr
             }
         }
 
+        /// <summary>
+        /// 歯車の位置と大きさを合わせる。<b>大きさはキャラクターの表示身長に応じて
+        /// <see cref="XrMenuRules.GearScale"/> で伸ばす。</b> コライダーは歯車と同じ GameObject にあるので
+        /// 当たり判定の半径も一緒に伸びる。
+        /// </summary>
         private void PositionGear()
         {
             var collider = CharacterCollider();
             var anchorPosition = _stage.ModelAnchor.position;
             var topY = collider != null ? collider.bounds.max.y : anchorPosition.y;
-            var position = new Vector3(anchorPosition.x, topY + GearAboveHeadMeters, anchorPosition.z);
+
+            var k = XrMenuRules.GearScale(collider != null ? collider.bounds.size.y : 0f);
+            _gear.transform.localScale = Vector3.one * (InvokerWorldSizeMeters / InvokerCanvasPixels) * k;
+
+            var position = new Vector3(anchorPosition.x, topY + GearAboveHeadMeters * k, anchorPosition.z);
             _gear.transform.SetPositionAndRotation(position, _origin.Camera.transform.rotation);
         }
 
         /// <summary>
-        /// 呼び出し口そのもの（歯車・手のひらボタンで共用）。uGUI の <c>Text</c> 1文字。
-        /// <b>キャラの縮尺に連動しない一定の見た目の大きさ</b>にする——世界に直接置く
-        /// （<c>ModelAnchor</c> の子にしない）ので、<c>ModelAnchor.localScale</c> を変えても
-        /// 大きさは変わらない。
+        /// 呼び出し口そのもの（歯車・手のひらボタンで共用）。uGUI の <c>Text</c> 1文字。ここで作る
+        /// 基本の大きさはキャラの縮尺に連動しない——世界に直接置く（<c>ModelAnchor</c> の子にしない）
+        /// ので、<c>ModelAnchor.localScale</c> を変えても大きさは変わらない。
+        ///
+        /// ★ 歯車だけ <see cref="PositionGear"/> が <see cref="XrMenuRules.GearScale"/> でここからの
+        ///   大きさに倍率をかける。手のひらボタンはここで決めた大きさのまま。
         /// </summary>
         private static GameObject BuildIconButton(string name, out SphereCollider collider)
         {

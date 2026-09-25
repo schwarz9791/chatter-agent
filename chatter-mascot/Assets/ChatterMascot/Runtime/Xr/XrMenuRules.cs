@@ -1,3 +1,5 @@
+using UnityEngine;
+
 namespace ChatterMascot.Xr
 {
     /// <summary>
@@ -83,6 +85,24 @@ namespace ChatterMascot.Xr
         {
             if (panelOpen) return false;
             return handTrackingAvailable && palmFacingSelf;
+        }
+
+        /// <summary>歯車の大きさが1倍になる、キャラクターの表示身長（m）。既定値。</summary>
+        public const float GearReferenceHeightMeters = 0.25f;
+
+        /// <summary>歯車の大きさの上限（倍率）。既定値。</summary>
+        public const float GearScaleMax = 3f;
+
+        /// <summary>
+        /// キャラクターの表示身長に応じた歯車の倍率。
+        ///
+        /// ★ 身長にそのまま比例させると、等身大まで大きくしたときに歯車が大きくなりすぎるので、
+        ///   平方根で伸びを緩める。
+        /// </summary>
+        public static float GearScale(float characterHeightMeters)
+        {
+            if (!float.IsFinite(characterHeightMeters) || characterHeightMeters <= 0f) return 1f;
+            return Mathf.Clamp(Mathf.Sqrt(characterHeightMeters / GearReferenceHeightMeters), 1f, GearScaleMax);
         }
     }
 }

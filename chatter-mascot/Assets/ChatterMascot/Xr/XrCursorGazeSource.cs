@@ -18,8 +18,9 @@ namespace ChatterMascot.Xr
     {
         /// <summary>
         /// 見る点は aim レイ上、キャラ（<c>ModelAnchor</c>）までの距離の点。それをカメラの
-        /// viewport へ投影し、<c>CursorGazeSource</c> と同じ考え方（顔の高さを縦の中心にする）を
-        /// viewport 空間で行う。横はビューポート中心（デスクトップのウィンドウ中心に相当）。
+        /// viewport へ投影し、<c>CursorGazeSource</c> と同じ考え方（顔の位置を中心にする）を
+        /// viewport 空間で行う。横はビューポート中心ではなく<b>顔の水平位置</b>を基準にする——
+        /// XR はデスクトップと違い、キャラがビューポート中心にいるとは限らない。
         /// </summary>
         public static Vector2? TryRead(XrGrab grab, XROrigin origin, VrmStage stage, VrmCharacter character)
         {
@@ -31,9 +32,13 @@ namespace ChatterMascot.Xr
             var point = ray.GetPoint(distance);
 
             var viewport = origin.Camera.WorldToViewportPoint(point);
+            // ★ カメラの後ろの点は WorldToViewportPoint で x/y の符号が反転する
+            if (viewport.z <= 0f) return null;
+
+            var viewportX = character != null ? character.GazeOriginViewportX : 0.5f;
             var viewportY = character != null ? character.GazeOriginViewportY : 0.5f;
 
-            return new Vector2((viewport.x - 0.5f) * 2f, (viewport.y - viewportY) * 2f);
+            return new Vector2((viewport.x - viewportX) * 2f, (viewport.y - viewportY) * 2f);
         }
     }
 }

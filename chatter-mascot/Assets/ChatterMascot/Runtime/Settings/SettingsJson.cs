@@ -392,7 +392,7 @@ namespace ChatterMascot.Settings
                     case "height":
                         settings = settings.WithXrHeight(ReadXrNumber(
                             property.Value, "xr.height", settings.XrHeight,
-                            SettingsMapping.XrHeightMin, SettingsMapping.XrHeightMax, warn));
+                            SettingsMapping.XrHeightReadMin, SettingsMapping.XrHeightReadMax, warn));
                         break;
 
                     // ★★ 古い書式。height が無い（＝未換算）間だけ持つ意味がある値なので、

@@ -33,7 +33,13 @@ namespace ChatterMascot.Xr
         /// <summary>手のひらボタンを、手のひらから頭側へ離す距離（メートル）。既定値。</summary>
         private const float ButtonOffsetMeters = 0.06f;
 
+        /// <summary>許可の確認を間引く間隔（秒）。既定値。</summary>
+        private const double PermissionCheckIntervalSeconds = 1.0;
+
         private bool _subsystemRequested;
+
+        /// <summary>次に許可を確認してよい時刻。<see cref="EnsureSubsystem"/> が進める。</summary>
+        private double _nextPermissionCheckAt = double.NegativeInfinity;
         /// <summary>左右それぞれの「手のひらを自分に向けているか」（ヒステリシスの状態）。</summary>
         private readonly bool[] _facing = new bool[2];
         private readonly double[] _lastJointTrackedAt = { double.NegativeInfinity, double.NegativeInfinity };
@@ -61,7 +67,7 @@ namespace ChatterMascot.Xr
         /// <summary>毎フレーム呼ぶ。関節が読めた・読めなかったに関わらず、判定結果を更新する。</summary>
         public void Tick(XROrigin origin, double now)
         {
-            EnsureSubsystem();
+            EnsureSubsystem(now);
 
             var subsystem = HandTracking.subsystem;
             var running = subsystem != null && subsystem.running;
@@ -112,11 +118,16 @@ namespace ChatterMascot.Xr
             ButtonRotation = head.rotation;
         }
 
-        private void EnsureSubsystem()
+        private void EnsureSubsystem(double now)
         {
             if (_subsystemRequested) return;
             // ★ XrGrab.Start と同じ理由でプラットフォームを絞る（Editor では許可の概念が無い）
             if (Application.platform != RuntimePlatform.Android) return;
+
+            // ★ HasUserAuthorizedPermission は JNI 呼び出しで、毎フレーム呼ぶと積み重なる。
+            //   許可はシステム設定から後で下りることもあるので確認自体はやめず、間隔だけ空ける
+            if (now < _nextPermissionCheckAt) return;
+            _nextPermissionCheckAt = now + PermissionCheckIntervalSeconds;
             if (!Permission.HasUserAuthorizedPermission(XrGrab.HandTrackingPermission)) return;
 
             _subsystemRequested = true;

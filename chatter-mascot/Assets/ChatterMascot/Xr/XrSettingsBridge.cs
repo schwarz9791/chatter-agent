@@ -66,6 +66,13 @@ namespace ChatterMascot.Xr
         /// <summary>パネルの行にレイが当たったフレーム。</summary>
         private int _hoverHitFrame = -1;
 
+        /// <summary>
+        /// 直近に <see cref="RebuildContext"/> で見たモーション本数。<c>null</c> なら読み込み中
+        /// （<see cref="Update"/> が開いている間だけ監視する。<c>Desktop/SettingsPanelBridge.WatchMotionClips</c>
+        /// と同じ形）。
+        /// </summary>
+        private int? _lastMotionClipCount;
+
         public void Begin(VrmStage stage, XROrigin origin, XrGrab grab, XrWalk walk)
         {
             _stage = stage;
@@ -102,6 +109,39 @@ namespace ChatterMascot.Xr
             var now = Time.unscaledTimeAsDouble;
             _hands.Tick(_origin, now);
             UpdateInvokers(now);
+            WatchResetAllConfirmExpiry(now);
+            WatchMotionClips();
+        }
+
+        /// <summary>
+        /// 「すべての設定をリセット」の確認待ちが切れたら note を引っ込める。
+        ///
+        /// ★ <see cref="ApplyResetAllConfirmState"/> は <see cref="Refresh"/> が呼ばれたときにしか
+        ///   評価されない。確認待ちの間に何も操作しなければ <see cref="Refresh"/> 自体が来ないので、
+        ///   ここで時刻を見て切れたことに気づき、1回だけ作り直す。
+        /// </summary>
+        private void WatchResetAllConfirmExpiry(double now)
+        {
+            if (double.IsNegativeInfinity(_resetAllArmedUntil)) return;
+            if (now < _resetAllArmedUntil) return;
+
+            _resetAllArmedUntil = double.NegativeInfinity;
+            Refresh();
+        }
+
+        /// <summary>
+        /// モーションの読み込みが、パネルを開いている間に終わったら選択肢を埋め直す
+        /// （<c>Desktop/SettingsPanelBridge.WatchMotionClips</c> と同じ形）。
+        /// </summary>
+        private void WatchMotionClips()
+        {
+            if (!_panel.IsOpen) return;
+
+            var character = CharacterComponent();
+            var count = character != null ? character.MotionClips?.Count : null;
+            if (count == _lastMotionClipCount) return;
+
+            Refresh();
         }
 
         // ── XrGrab から毎フレーム渡される入力 ───────────────────────
@@ -158,13 +198,15 @@ namespace ChatterMascot.Xr
 
             // ★ 直前のフレームで動かしていると古い当たり判定を見る（autoSyncTransforms オフ）
             Physics.SyncTransforms();
-            return collider.Raycast(ray, out _, float.PositiveInfinity);
+            // ★ レイの始点がコライダーの中にあると Raycast は当たらない扱いになる。
+            //   押しに来る手はボタンへ近づくので、その状態も当たり判定に含める
+            return collider.bounds.Contains(ray.origin) || collider.Raycast(ray, out _, float.PositiveInfinity);
         }
 
         private bool HitsGear(Ray ray)
         {
-            return _gear != null && _gear.activeSelf && _gearCollider != null &&
-                   _gearCollider.Raycast(ray, out _, float.PositiveInfinity);
+            if (_gear == null || !_gear.activeSelf || _gearCollider == null) return false;
+            return _gearCollider.bounds.Contains(ray.origin) || _gearCollider.Raycast(ray, out _, float.PositiveInfinity);
         }
 
         // ── パネルの開閉 ───────────────────────────────────────
@@ -186,6 +228,8 @@ namespace ChatterMascot.Xr
         private void OnSettingsChangedExternally(MascotSettings previous, MascotSettings next)
         {
             _walk.SetEnabled(next.Walk);
+            // ★ 大きさが外から変わったら実際の縮尺も追いつかせる。保存は不要（既に next が確定値）
+            if (previous.XrHeight != next.XrHeight) RescaleTo(next.XrHeight);
             Refresh();
         }
 
@@ -209,6 +253,7 @@ namespace ChatterMascot.Xr
 
             var character = CharacterComponent();
             _context.MotionClips = SettingsSchema.MotionPreviewChoices(character != null ? character.MotionClips : null);
+            _lastMotionClipCount = character != null ? character.MotionClips?.Count : null;
         }
 
         private IReadOnlyList<SettingSpec> BuildItems()
@@ -331,16 +376,28 @@ namespace ChatterMascot.Xr
         /// </summary>
         private void SetHeightCm(float cm)
         {
+            var targetCm = RescaleTo(cm);
+            if (!targetCm.HasValue) return;
+
+            var host = MascotSettingsHost.Instance;
+            if (host != null) host.Apply(host.Current.WithXrHeight(targetCm.Value));
+
+            Debug.Log($"[Mascot] XR settings: 大きさを {targetCm.Value:F0}cm に変えました");
+        }
+
+        /// <summary>
+        /// 目標 cm に一番近い段（<see cref="SettingsMapping.XrHeightSteps"/>）へ実際の縮尺を合わせる。
+        /// <b>設定への保存はしない</b>——呼び出し側が要るときだけ保存する。
+        /// </summary>
+        /// <returns>実際に合わせた cm。実寸が取れていなければ <c>null</c>。</returns>
+        private float? RescaleTo(float cm)
+        {
             var realCm = _stage.RealHeightCm;
-            if (!realCm.HasValue || !(realCm.Value > 0f)) return;
+            if (!realCm.HasValue || !(realCm.Value > 0f)) return null;
 
             var targetCm = SettingsMapping.NearestXrHeight(cm, SettingsMapping.XrHeightSteps(realCm.Value));
             _stage.Rescale(targetCm / realCm.Value);
-
-            var host = MascotSettingsHost.Instance;
-            if (host != null) host.Apply(host.Current.WithXrHeight(targetCm));
-
-            Debug.Log($"[Mascot] XR settings: 大きさを {targetCm:F0}cm に変えました");
+            return targetCm;
         }
 
         /// <summary>
@@ -399,13 +456,7 @@ namespace ChatterMascot.Xr
             host.Apply(next);
             // ★ Apply は自分起点の変更なので ChangedExternally が来ない。ここで直接伝える
             _walk.SetEnabled(next.Walk);
-
-            var realCm = _stage.RealHeightCm;
-            if (realCm.HasValue && realCm.Value > 0f)
-            {
-                var targetCm = SettingsMapping.NearestXrHeight(next.XrHeight, SettingsMapping.XrHeightSteps(realCm.Value));
-                _stage.Rescale(targetCm / realCm.Value);
-            }
+            RescaleTo(next.XrHeight);
             _grab.ResetPosition();
 
             Refresh();

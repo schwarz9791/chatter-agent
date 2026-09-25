@@ -231,7 +231,7 @@ namespace ChatterMascot.Tests
 
         // ── XR の「大きさ」 ─────────────────────────────
 
-        /// <summary>★ issue に書かれた具体例。先頭 15・末尾 実寸・途中は5cm単位</summary>
+        /// <summary>★ 先頭 15・末尾 実寸・途中は5cm単位</summary>
         [Test]
         public void XrHeightStepsMatchesTheWorkedExample()
         {
@@ -255,9 +255,8 @@ namespace ChatterMascot.Tests
         /// <summary>
         /// ★ 丸めで隣り合う段が同じ値になっても、逆転はしない（→ <c>SettingsMapping.XrHeightSteps</c> の doc）。
         ///
-        /// ★★ <c>18.2</c> と <c>24.95</c> は当て推量ではない——実寸が5の倍数から遠いと、
-        ///   丸めが末尾（実寸ちょうど）を追い越す組み合わせを全数探索で見つけた実例
-        ///   （クランプで塞ぐ前は最後から2番目の段が実寸を超えていた）。
+        /// ★★ <c>18.2</c> / <c>24.95</c> は、実寸が5の倍数から遠く、丸めた段が末尾（実寸ちょうど）
+        ///   を追い越しうる値。
         /// </summary>
         [Test]
         public void XrHeightStepsNeverDecreases()
@@ -332,6 +331,30 @@ namespace ChatterMascot.Tests
         public void XrHeightChoicesKeepsNullForALoadingModel()
         {
             Assert.That(SettingsMapping.XrHeightChoices(null), Is.Null);
+        }
+
+        /// <summary>★ 同じ値の選択肢が並ぶと ‹ › を押しても表示が変わらず進めなくなる</summary>
+        [Test]
+        public void XrHeightChoicesHasNoDuplicateValues()
+        {
+            var choices = SettingsMapping.XrHeightChoices(SettingsMapping.XrHeightSteps(30f));
+
+            for (var i = 0; i < choices.Count; i++)
+            {
+                for (var j = i + 1; j < choices.Count; j++)
+                {
+                    Assert.That(choices[j].Value, Is.Not.EqualTo(choices[i].Value), $"i={i} j={j}");
+                }
+            }
+        }
+
+        /// <summary>重複が末尾（実寸）と同じ値でも、残るのは「実寸」の選択肢。</summary>
+        [Test]
+        public void XrHeightChoicesKeepsTheRealHeightLabelWhenDeduplicating()
+        {
+            var choices = SettingsMapping.XrHeightChoices(SettingsMapping.XrHeightSteps(18.2f));
+
+            Assert.That(choices[choices.Count - 1].Label, Does.StartWith("実寸"));
         }
 
         [Test]

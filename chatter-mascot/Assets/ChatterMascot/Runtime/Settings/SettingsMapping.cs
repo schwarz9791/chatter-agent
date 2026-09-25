@@ -87,12 +87,22 @@ namespace ChatterMascot.Settings
         /// XR の「大きさ」の段の下限（cm）と既定値。
         ///
         /// ★ <b>上限は持たない。</b> 選べる最大は<b>読み込んだモデルの実寸</b>で、モデルごとに
-        ///   違う（→ <see cref="XrHeightSteps"/>）。<see cref="XrHeightMax"/> は
-        ///   <c>settings.json</c> の健全性検査に使う広い上限で、実寸の代わりではない。
+        ///   違う（→ <see cref="XrHeightSteps"/>）。<c>settings.json</c> の健全性検査の範囲は
+        ///   別に持つ（→ <see cref="XrHeightReadMin"/> / <see cref="XrHeightReadMax"/>）。
         /// </summary>
         public const float XrHeightMin = 15f;
-        public const float XrHeightMax = 300f;
         public const float XrDefaultHeight = 25f;
+
+        /// <summary>
+        /// <c>settings.json</c> の <c>xr.height</c> を読むときの健全性検査の範囲。
+        ///
+        /// ★ <b>選べる範囲（<see cref="XrHeightMin"/>〜モデルの実寸）とは別物。</b> ここは
+        ///   「数値として壊れていないか」だけを見る広い枠——実寸がモデルによって
+        ///   <see cref="XrHeightMin"/> を下回ったり大きく超えたりしても、その値を
+        ///   既定へ巻き戻さずに読み戻せるようにする。
+        /// </summary>
+        public const float XrHeightReadMin = 1f;
+        public const float XrHeightReadMax = 1000f;
 
         /// <summary>
         /// XR の「大きさ」の段数。<see cref="XrHeightSteps"/> が返す配列の長さと一致する。
@@ -165,18 +175,23 @@ namespace ChatterMascot.Settings
         ///
         /// ★ <b>表示は cm 単位の整数に丸めること。</b> 実寸はモデルの実測値なのでちょうどの
         ///   整数とは限らないが、小数まで見せても段を選ぶ判断の役には立たない。
+        /// ★ <b>同じ値が続く段は1つにまとめる</b>（→ <see cref="XrHeightSteps"/> の丸めの doc）。
+        ///   同じ値の選択肢が並ぶと ‹ › を押しても表示が変わらず、進めなくなる。
         /// </summary>
         public static IReadOnlyList<SettingChoice> XrHeightChoices(IReadOnlyList<float> steps)
         {
             if (steps == null) return null;
 
-            var choices = new SettingChoice[steps.Count];
+            var choices = new List<SettingChoice>(steps.Count);
             for (var i = 0; i < steps.Count; i++)
             {
+                // ★ 後ろ側を残す（末尾の「実寸」を消さない）
+                if (i < steps.Count - 1 && steps[i] == steps[i + 1]) continue;
+
                 var value = Format(steps[i]);
                 var cm = ((int)Math.Round(steps[i])).ToString(CultureInfo.InvariantCulture);
                 var label = i == steps.Count - 1 ? $"実寸（{cm} cm）" : $"{cm} cm";
-                choices[i] = new SettingChoice(value, label);
+                choices.Add(new SettingChoice(value, label));
             }
             return choices;
         }

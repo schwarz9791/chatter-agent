@@ -575,10 +575,23 @@ namespace ChatterMascot.Tests
         [Test]
         public void FallsBackToTheDefaultWhenHeightIsOutOfRange()
         {
-            var parsed = Parse("{\"xr\":{\"height\":1000}}");
+            var parsed = Parse("{\"xr\":{\"height\":2000}}");
 
             Assert.That(parsed.XrHeight, Is.EqualTo(SettingsMapping.XrDefaultHeight));
             Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        /// <summary>
+        /// ★ <c>xr.height</c> の読み取り範囲は健全性検査だけ（→ <see cref="SettingsMapping.XrHeightReadMin"/> /
+        ///   <see cref="SettingsMapping.XrHeightReadMax"/>）。選べる範囲（<see cref="SettingsMapping.XrHeightMin"/>〜
+        ///   実寸）の外でも、数値として壊れていなければそのまま読み戻す。
+        /// </summary>
+        [Test]
+        public void ReadsHeightAsIsWithinTheSanityRange()
+        {
+            Assert.That(Parse("{\"xr\":{\"height\":10}}").XrHeight, Is.EqualTo(10f));
+            Assert.That(Parse("{\"xr\":{\"height\":500}}").XrHeight, Is.EqualTo(500f));
+            Assert.That(_warnings, Is.Empty);
         }
 
         [Test]

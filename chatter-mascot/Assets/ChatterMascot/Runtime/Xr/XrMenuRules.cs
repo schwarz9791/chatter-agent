@@ -59,9 +59,6 @@ namespace ChatterMascot.Xr
             return wasFacingSelf ? dot > PalmFacingExitDot : dot > PalmFacingEnterDot;
         }
 
-        /// <summary>
-        /// 手のひらの呼び出し口（ボタン）を出すか。<b>パネルが開いている間は出さない。</b>
-        /// </summary>
         /// <summary>パネルが視線からこの角度（度）を超えて外れたら、正面へ戻し始める。既定値。</summary>
         public const float PanelFollowStartDegrees = 15f;
 
@@ -79,6 +76,9 @@ namespace ChatterMascot.Xr
             return wasFollowing ? degreesFromGaze > PanelFollowStopDegrees : degreesFromGaze > PanelFollowStartDegrees;
         }
 
+        /// <summary>
+        /// 手のひらの呼び出し口（ボタン）を出すか。<b>パネルが開いている間は出さない。</b>
+        /// </summary>
         public static bool ShowPalmButton(bool panelOpen, bool handTrackingAvailable, bool palmFacingSelf)
         {
             if (panelOpen) return false;

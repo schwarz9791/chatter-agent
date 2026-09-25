@@ -127,6 +127,14 @@ namespace ChatterMascot.Xr
         private Text _closeLabel;
 
         private readonly List<Row> _rows = new List<Row>();
+
+        /// <summary>
+        /// <see cref="BuildRow"/> が <see cref="NewChild"/> で作った矩形の全部（行・note・見出し・
+        /// section の note）。<b><see cref="BuildCloseRow"/> の分は含めない</b>（作り直さない）。
+        /// <see cref="Rebuild"/> の作り直しで、ここに載っているものだけを破棄する。
+        /// </summary>
+        private readonly List<RectTransform> _builtRects = new List<RectTransform>();
+
         private string _layoutSignature = "";
 
         private Row _hoveredRow;
@@ -484,7 +492,8 @@ namespace ChatterMascot.Xr
 
             _layoutSignature = signature;
             ClearHover();
-            foreach (var row in _rows) Destroy(row.Rect.gameObject);
+            foreach (var rect in _builtRects) Destroy(rect.gameObject);
+            _builtRects.Clear();
             _rows.Clear();
 
             var y = -(PaddingPixels + RowHeightPixels) - RowSpacingPixels;
@@ -501,7 +510,9 @@ namespace ChatterMascot.Xr
             {
                 var spec = items[i];
                 // ★ Section はキーを持たないのでラベルで区別する
-                parts[i] = spec.Kind + ":" + (spec.Key ?? spec.Label);
+                // ★ note の有無も構成に含める。無→有の変化を「同じ構成」とみなすと、
+                //   後から付いた note を作り直さない UpdateRows が拾えず捨てられる
+                parts[i] = spec.Kind + ":" + (spec.Key ?? spec.Label) + (string.IsNullOrEmpty(spec.Note) ? "" : ":note");
             }
             return string.Join("\u001f", parts);
         }
@@ -513,6 +524,7 @@ namespace ChatterMascot.Xr
             {
                 y -= SectionGapPixels;
                 var headingRect = NewChild(y, RowHeightPixels);
+                _builtRects.Add(headingRect);
                 var heading = BuildText(headingRect, Vector2.zero, Vector2.one, TextAnchor.LowerLeft, SectionFontSize, SectionColor);
                 heading.text = spec.Label;
                 heading.fontStyle = FontStyle.Bold;
@@ -521,6 +533,7 @@ namespace ChatterMascot.Xr
                 if (!string.IsNullOrEmpty(spec.Note))
                 {
                     var sectionNoteRect = NewChild(y, NoteHeightPixels);
+                    _builtRects.Add(sectionNoteRect);
                     var sectionNote = InsetText(sectionNoteRect, TextAnchor.UpperLeft, NoteFontSize, NoteColor);
                     sectionNote.text = spec.Note;
                     y -= NoteHeightPixels;
@@ -535,6 +548,7 @@ namespace ChatterMascot.Xr
             }
 
             var rowRect = NewChild(y, RowHeightPixels);
+            _builtRects.Add(rowRect);
             var background = rowRect.gameObject.AddComponent<Image>();
             background.color = RowColor;
 
@@ -597,6 +611,7 @@ namespace ChatterMascot.Xr
             if (!string.IsNullOrEmpty(spec.Note))
             {
                 noteRect = NewChild(y, NoteHeightPixels);
+                _builtRects.Add(noteRect);
                 note = InsetText(noteRect, TextAnchor.UpperLeft, NoteFontSize, NoteColor);
                 y -= NoteHeightPixels;
             }

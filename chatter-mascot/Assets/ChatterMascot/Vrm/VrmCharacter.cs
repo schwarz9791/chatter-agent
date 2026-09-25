@@ -320,6 +320,15 @@ namespace ChatterMascot.Vrm
         public float GazeOriginViewportY { get; private set; } = 0.5f;
 
         /// <summary>
+        /// 視線の原点の<b>ビューポート X</b>（0..1、右が 1）。取れなければ 0.5。
+        ///
+        /// ★ <c>XrCursorGazeSource</c> が横の基準に使う。XR では
+        ///   デスクトップと違ってキャラがビューポート中心にいるとは限らないので、
+        ///   <see cref="GazeOriginViewportY"/> と同じく「顔の位置」を基準にする。
+        /// </summary>
+        public float GazeOriginViewportX { get; private set; } = 0.5f;
+
+        /// <summary>
         /// <see cref="GazeOriginViewportY"/> が実測で埋まったか。
         ///
         /// ★ 埋まる前の <c>0.5</c> はフォールバックで、視線の中立を表していない。
@@ -865,12 +874,15 @@ namespace ChatterMascot.Vrm
 
             if (_gazeOriginValid)
             {
-                GazeOriginViewportY = _camera.WorldToViewportPoint(_gazeOriginWorld).y;
+                var gazeOriginViewport = _camera.WorldToViewportPoint(_gazeOriginWorld);
+                GazeOriginViewportY = gazeOriginViewport.y;
+                GazeOriginViewportX = gazeOriginViewport.x;
                 HasGazeOrigin = true;
             }
             else
             {
                 GazeOriginViewportY = 0.5f;
+                GazeOriginViewportX = 0.5f;
                 HasGazeOrigin = false;
                 // ★ _instance が入る（OnLoaded を通る）まではここを毎フレーム必ず通る
                 //   （LateUpdate はフレーム1から走るが、VRM の読み込みは実測で約1.6秒かかる）。

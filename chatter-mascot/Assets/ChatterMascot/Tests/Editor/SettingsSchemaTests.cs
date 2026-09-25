@@ -501,10 +501,6 @@ namespace ChatterMascot.Tests
             Assert.That(choice.Value, Is.EqualTo("idle/Hub_Idle02.vrma"));
         }
 
-        /// <summary>
-        /// ★★ #70 レビュー #5。<c>MotionPlayResult</c> の6分岐すべてに文言が割り当たっていること
-        /// （<c>VrmMotionPlayer.Play</c> の拒否条件と1対1）。
-        /// </summary>
         // ── XR の設定パネル ─────────────────────────────
 
         private static SettingsContext XrContext()
@@ -708,6 +704,10 @@ namespace ChatterMascot.Tests
             }
         }
 
+        /// <summary>
+        /// <c>MotionPlayResult</c> の6分岐すべてに文言が割り当たっていること
+        /// （<c>VrmMotionPlayer.Play</c> の拒否条件と1対1）。
+        /// </summary>
         [Test]
         public void MotionPlayNoticeCoversAllSixResults()
         {

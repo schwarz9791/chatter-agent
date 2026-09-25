@@ -501,8 +501,211 @@ namespace ChatterMascot.Tests
             Assert.That(choice.Value, Is.EqualTo("idle/Hub_Idle02.vrma"));
         }
 
+        // ── XR の設定パネル ─────────────────────────────
+
+        private static SettingsContext XrContext()
+        {
+            return new SettingsContext
+            {
+                Platform = SettingsPlatform.Xr,
+                XrHeightChoices = SettingsMapping.XrHeightChoices(SettingsMapping.XrHeightSteps(160f)),
+            };
+        }
+
+        /// <summary>★★ Desktop の出力は XR の出し分けに影響されないこと（並び・キー・ラベル）</summary>
+        [Test]
+        public void DoesNotChangeTheDesktopOutput()
+        {
+            var keys = SettingsSchema.Build(Context()).Select(s => s.Key).ToList();
+
+            Assert.That(keys, Is.EqualTo(new[]
+            {
+                null, SettingKeys.Vrm, SettingKeys.Scale,
+                null, SettingKeys.Speaker, SettingKeys.Volume, SettingKeys.Speed, SettingKeys.TtsPreview,
+                null, SettingKeys.IdleMotion, SettingKeys.MotionPreview, SettingKeys.MotionPreviewPlay,
+                SettingKeys.CursorGaze, SettingKeys.Blink, SettingKeys.FrameRate,
+                null, SettingKeys.SummaryEnabled,
+                null, SettingKeys.MuteHotKey, SettingKeys.HideHotKey,
+                null, SettingKeys.ResetPosition, SettingKeys.ResetAll,
+                SettingKeys.Quit,
+            }));
+        }
+
+        /// <summary>★ 既定は Desktop。Platform を指定しなければ Desktop の並びが出る</summary>
+        [Test]
+        public void DefaultsToTheDesktopPlatform()
+        {
+            var context = Context();
+            Assert.That(context.Platform, Is.EqualTo(SettingsPlatform.Desktop));
+        }
+
+        [Test]
+        public void XrOffersOnlyTheListedKeysInOrder()
+        {
+            var keys = SettingsSchema.Build(XrContext()).Select(s => s.Key).ToList();
+
+            Assert.That(keys, Is.EqualTo(new[]
+            {
+                null, SettingKeys.XrHeight, SettingKeys.AssetSync,
+                null, SettingKeys.MotionPreview, SettingKeys.MotionPreviewPlay,
+                SettingKeys.Walk, SettingKeys.CursorGaze, SettingKeys.Blink,
+                null, SettingKeys.ResetPosition, SettingKeys.ResetAll,
+            }));
+        }
+
+        /// <summary>★ Desktop 専用の項目は1つも出ない</summary>
+        [Test]
+        public void XrDoesNotOfferDesktopOnlyKeys()
+        {
+            var keys = SettingsSchema.Build(XrContext()).Select(s => s.Key).ToList();
+
+            foreach (var key in new[]
+            {
+                SettingKeys.Vrm, SettingKeys.Scale, SettingKeys.Speaker, SettingKeys.Volume,
+                SettingKeys.Speed, SettingKeys.TtsPreview, SettingKeys.IdleMotion, SettingKeys.FrameRate,
+                SettingKeys.SummaryEnabled, SettingKeys.MuteHotKey, SettingKeys.HideHotKey, SettingKeys.Quit,
+            })
+            {
+                Assert.That(keys, Has.None.EqualTo(key), key);
+            }
+        }
+
+        /// <summary>★ 歩行は XR だけの項目（デスクトップは歩かない）</summary>
+        [Test]
+        public void DesktopDoesNotOfferWalk()
+        {
+            var keys = SettingsSchema.Build(Context()).Select(s => s.Key).ToList();
+            Assert.That(keys, Has.None.EqualTo(SettingKeys.Walk));
+        }
+
+        [Test]
+        public void XrReflectsTheWalkSetting()
+        {
+            var context = XrContext();
+            context.Settings = MascotSettings.Defaults.WithWalk(false);
+
+            var spec = Find(SettingsSchema.Build(context), SettingKeys.Walk);
+
+            Assert.That(spec.Kind, Is.EqualTo(SettingKind.Bool));
+            Assert.That(spec.Value, Is.EqualTo("false"));
+            Assert.That(spec.Label, Is.EqualTo("歩く"));
+        }
+
+        [Test]
+        public void XrHeightIsDisabledUntilTheModelIsLoaded()
+        {
+            var context = XrContext();
+            context.XrHeightChoices = null;
+
+            var spec = Find(SettingsSchema.Build(context), SettingKeys.XrHeight);
+
+            Assert.That(spec.Enabled, Is.False);
+            Assert.That(spec.Note, Does.Contain("読み込んでいます"));
+            Assert.That(spec.Choices, Is.Empty);
+        }
+
+        /// <summary>★ 値は現在の cm を段に寄せたもの（→ SettingsMapping.NearestXrHeight）</summary>
+        [Test]
+        public void XrHeightSnapsTheCurrentValueToTheNearestStep()
+        {
+            var context = XrContext();
+            context.Settings = MascotSettings.Defaults.WithXrHeight(33f); // 15/25/40/60/100/160 の 40 に寄る
+
+            var spec = Find(SettingsSchema.Build(context), SettingKeys.XrHeight);
+
+            Assert.That(spec.Enabled, Is.True);
+            Assert.That(spec.Value, Is.EqualTo("40"));
+            Assert.That(spec.Choices.Select(c => c.Value), Contains.Item(spec.Value));
+        }
+
+        [Test]
+        public void XrAssetSyncReflectsWhetherSyncIsOff()
+        {
+            var on = XrContext();
+            on.Settings = MascotSettings.Defaults.WithAssetSync(SettingsMapping.AssetSyncAuto);
+            Assert.That(Find(SettingsSchema.Build(on), SettingKeys.AssetSync).Value, Is.EqualTo("true"));
+
+            var off = XrContext();
+            off.Settings = MascotSettings.Defaults.WithAssetSync(SettingsMapping.AssetSyncOff);
+            Assert.That(Find(SettingsSchema.Build(off), SettingKeys.AssetSync).Value, Is.EqualTo("false"));
+        }
+
+        [Test]
+        public void XrAssetSyncNoteSaysItAppliesOnTheNextLaunch()
+        {
+            var spec = Find(SettingsSchema.Build(XrContext()), SettingKeys.AssetSync);
+            Assert.That(spec.Note, Does.Contain("次回の起動"));
+        }
+
+        /// <summary>★ ラベルは aim レイ向けの言い回しに変わるが、キーは Desktop と同じ</summary>
+        [Test]
+        public void XrCursorGazeUsesTheAimRayWording()
+        {
+            var spec = Find(SettingsSchema.Build(XrContext()), SettingKeys.CursorGaze);
+            Assert.That(spec.Label, Is.EqualTo("指している先を目で追う"));
+        }
+
+        [Test]
+        public void XrResetPositionDoesNotMentionTheSize()
+        {
+            var spec = Find(SettingsSchema.Build(XrContext()), SettingKeys.ResetPosition);
+            Assert.That(spec.Label, Is.EqualTo("キャラクターの位置をリセット"));
+        }
+
+        /// <summary>★ モデルファイルは消さない。note で接続先が残ることだけ伝える</summary>
+        [Test]
+        public void XrResetAllKeepsTheConnectionNote()
+        {
+            var spec = Find(SettingsSchema.Build(XrContext()), SettingKeys.ResetAll);
+            Assert.That(spec.Note, Does.Contain("接続先"));
+        }
+
+        /// <summary>★ 「モーションを確認」は Desktop と同じ enabled 判定を共有する</summary>
+        [Test]
+        public void XrSharesTheMotionPreviewEnabledRuleWithDesktop()
+        {
+            var context = XrContext();
+            context.MotionClips = null; // 読み込み中
+
+            var choice = Find(SettingsSchema.Build(context), SettingKeys.MotionPreview);
+            var button = Find(SettingsSchema.Build(context), SettingKeys.MotionPreviewPlay);
+
+            Assert.That(choice.Enabled, Is.False);
+            Assert.That(choice.Note, Does.Contain("読み込み中"));
+            Assert.That(button.Enabled, Is.False);
+        }
+
+        /// <summary>★ Desktop の見た目は変えない（項目単体のラベルも）</summary>
+        [Test]
+        public void KeepsTheMotionPreviewLabelOnDesktop()
+        {
+            var spec = Find(SettingsSchema.Build(Context()), SettingKeys.MotionPreview);
+            Assert.That(spec.Label, Is.EqualTo("モーションを確認"));
+        }
+
+        /// <summary>★ 見出し「モーション」の直下に置くので、ラベルが無くても何の行か分かる</summary>
+        [Test]
+        public void XrMotionPreviewHasNoLabel()
+        {
+            var spec = Find(SettingsSchema.Build(XrContext()), SettingKeys.MotionPreview);
+            Assert.That(spec.Label, Is.Empty);
+        }
+
+        [Test]
+        public void XrChoiceValuesExistInTheirChoices()
+        {
+            var context = XrContext();
+            context.Settings = MascotSettings.Defaults.WithXrHeight(999f); // 実寸へクランプされる側
+
+            foreach (var spec in SettingsSchema.Build(context).Where(s => s.Kind == SettingKind.Choice))
+            {
+                if (spec.Choices.Count == 0) continue;
+                Assert.That(spec.Choices.Select(c => c.Value), Contains.Item(spec.Value), spec.Key);
+            }
+        }
+
         /// <summary>
-        /// ★★ #70 レビュー #5。<c>MotionPlayResult</c> の6分岐すべてに文言が割り当たっていること
+        /// <c>MotionPlayResult</c> の6分岐すべてに文言が割り当たっていること
         /// （<c>VrmMotionPlayer.Play</c> の拒否条件と1対1）。
         /// </summary>
         [Test]

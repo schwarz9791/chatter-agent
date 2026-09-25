@@ -125,9 +125,9 @@ namespace ChatterMascot.Vrm
         /// ★ <b>対象が居なくても警告しないこと。</b> <c>TransparencyProbe</c> のような
         ///   VRM を出さないシーンでも同じ常駐物が動く。
         ///
-        /// ★ Android では視線（<c>CursorGazeEnabled</c>）の注入元（<c>CursorProvider</c>）が
-        ///   存在しないので自律的な漂いに倒れるだけで、fps を除けばこの反映自体は
-        ///   デスクトップと同じでよい（→ <c>SettingsMapping.AppliesFrameRate</c>）。
+        /// ★ Android では視線（<c>CursorGazeEnabled</c>）は手を追跡できている間だけ追従し、
+        ///   それ以外は自律的な漂いに倒れる。fps を除けばこの反映自体はデスクトップと同じでよい
+        ///   （→ <c>SettingsMapping.AppliesFrameRate</c>）。
         /// </summary>
         private void ApplySettingsToScene()
         {

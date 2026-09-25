@@ -131,6 +131,17 @@ namespace ChatterMascot.Vrm
         }
 
         /// <summary>
+        /// <see cref="OfBones"/> の高さ（メートル、余白込み・その時の縮尺込み）から実寸（cm、縮尺 1
+        /// のときの値）を求める。<b>純粋関数。</b>
+        ///
+        /// ★ <b>余白は頭頂側の分だけ数える。</b> <see cref="OfBones"/> は上下に同じ余白を足すが、
+        ///   下側は足元のボーンより下（靴底や接地面の推定）のぶんで身長には当たらない。
+        ///   同じ余白を1回だけ引けば、頭頂側の余白（髪の分）だけが残る。
+        /// </summary>
+        public static float RealHeightCm(float boneBoundsHeightMeters, float scale, float marginMeters) =>
+            scale > 0f ? (boneBoundsHeightMeters / scale - marginMeters) * 100f : 0f;
+
+        /// <summary>
         /// 自動フレーミングの箱に入れてよいボーンか。<b>純粋関数。</b>
         ///
         /// ★ <b>腕（<c>UpperArm</c> / <c>LowerArm</c> / <c>Hand</c> と指）を外す。</b>

@@ -100,6 +100,7 @@ Assets/ChatterMascot/
                 VrmFraming.cs       画面に収まるカメラ距離（純粋）
     Xr/         XrPlacement.cs      起動時の頭の姿勢 → XR Origin の配置（純粋）
                 XrGrabRules.cs      つまみのヒステリシスと、離したときの向き（純粋）
+                XrMenuRules.cs      設定パネルの呼び出し口（歯車／手のひらボタン）を出すかの判定（純粋）
     CommandLine.cs                  起動引数（-serverUrl / -vrm / -buildScene が共有）
     FrameRateBudget.cs              フレームレート上限の「戻す先」と「一時的に借りる」
     MascotRunner.cs                 ドライバ。コマンドを実行して結果をイベントで戻す
@@ -111,6 +112,10 @@ Assets/ChatterMascot/
   Xr/                               ChatterMascot.Xr — Editor + Android のみ
     XrStage.cs                      XR が起動したときだけ XR Origin を組んで空間固定する（シーンに置かない）
     XrGrab.cs                       手でつまんで置き直す。配置の直後に生やす（シーンに置かない）
+    XrSettingsPanel.cs              設定パネルのレンダラ（world-space uGUI）。キーを1つも書かない
+    XrSettingsBridge.cs             設定パネルのキーの意味を知る唯一の場所。呼び出し口（歯車／手のひらボタン）も持つ
+    XrHandTracking.cs               XRHandSubsystem から手のひらの向きを読む唯一の場所（つまみ判定には使わない）
+    XrCursorGazeSource.cs           aim レイ → 「目で追う」の入力（XrGrab のレイを流用）
   Desktop/                          ChatterMascot.Desktop — Editor + macOS/Windows のみ
     DragHandles.cs                  「Collider を持つものに UniWindowMoveHandle」
     VrmDragHandleBinder.cs          MonoBehaviour にしない
@@ -326,10 +331,10 @@ cd chatter-mascot
   "version": 1,
   "audio": { "mute": false, "muteHotKey": "ctrl+opt+m", "volume": 1.0 },
   "ui": { "hideHotKey": "ctrl+opt+h" },
-  "character": { "idleMotion": true, "cursorGaze": true, "blink": true, "vrm": "" },
+  "character": { "idleMotion": true, "cursorGaze": true, "blink": true, "vrm": "", "walk": true },
   "display": { "frameRate": 30 },
   "connection": { "serverUrl": "", "token": "", "assetSync": "auto" },
-  "xr": { "scale": 0.18, "distance": 0.6, "azimuth": 20, "feetBelowEye": 0.2 }
+  "xr": { "height": 25, "distance": 0.6, "azimuth": 20, "feetBelowEye": 0.2 }
 }
 ```
 
@@ -337,10 +342,18 @@ cd chatter-mascot
 ——サーバーと同じファイルシステムを直接読んでいるので同期の意味が無い。効くのは Android / XR
 だけ（→ 下の「Android / XR」の「モデルとモーションを入れる」）。
 
+`character.walk`（既定 `true`）も**デスクトップでは何もしない**——歩くのは Android XR だけ。
+XR の設定パネルの「歩く」からその場で切り替えられる（→ 下の「設定パネル」）。
+
+`xr.height` は Android XR でのキャラクターの大きさ（cm。既定 `25`）。15cm〜読み込んだモデルの
+実寸を**等比で6段**に刻み、途中の段は5cm単位に丸める（実寸を超える値は実寸へ寄る）。
+`xr.scale`（倍率）しか持たない古いファイルは、モデルを読み込んで実寸が分かった時点で cm へ
+換算し、一番近い段を `height` として書き直す（`scale` は消える）。
+
 `display.frameRate` は `30` か `60` のみ（既定 `30`。それ以外は既定へフォールバック）。設定
 パネルの「モーション」→「フレームレート」から変えられ、反映はデスクトップ限定——Android は
 このキーを読むだけで反映しない（XR ではランタイムがフレームペーシングを握る）。`connection`
-（`serverUrl` / `token`）と `xr`（`scale` / `distance` / `azimuth` / `feetBelowEye`）はデスクトップの
+（`serverUrl` / `token`）と `xr`（`height` / `distance` / `azimuth` / `feetBelowEye`）はデスクトップの
 パネルには出さないが、往復や「すべての設定をリセット」でも落とさない（`MascotSettings.ResetKeepingConnection`）。「大きさ」はここに無く
 `window.json` が権威を持つ（スライダーは現在の高さ ÷ 540 の写し）。音声スタイル・話す速さ・
 要約の ON/OFF は core の `~/.config/chatter-agent/config.json` が持ち、設定パネルは
@@ -460,23 +473,57 @@ $ADB shell chmod -R 777 $D/animations
 ★ **`files/` の直下に置く旧レイアウト（`model.vrm` / `idle.vrma`）はもう読まない。** 残っていても
 警告は出ず、同梱のモデルとモーションで起動する。
 
-### キャラクターの大きさと置き場所（`xr`）
+### 設定パネル
 
-Android に設定 UI は無いので、端末の `settings.json` を直接書き換える。
+視線の正面に**空間に浮かぶ設定パネル**を出せる。呼び出し方は2通り。
+
+- **キャラクターをつまむ（離す）**: 頭上に歯車が少しの間（既定 5 秒）出る。歯車をつまむと開く。
+  いつでも使える
+- **手のひらを自分（頭）の方へ向ける**: 手の関節が取れていれば、その手のひらの上にボタンが出る。
+  もう片方の手でつまむと開く（関節が取れるかは機種名ではなく、毎フレームの状態で見る）
+
+パネルはレイを向けた行をハイライトし、つまんで操作する（EventSystem や XR Interaction Toolkit は
+使わない）。Bool は ON/OFF を切り替え、Choice は ‹ › で隣の値へ送り、Button はその場で実行する。
+一番上の「閉じる」で閉じる。視線から外れると正面へ戻ってくる。
+
+出す項目は、常駐トレイと同じ数を持たせる理由が無いので、デスクトップの設定パネルより絞ってある。
+
+| 項目 | 備考 |
+|---|---|
+| 大きさ | 下の「置き場所と大きさ」。**その場で反映**される |
+| モデルとモーションを同期 | ON/OFF。**次回の起動から反映**（→ 上「モデルとモーションを入れる」） |
+| モーションを確認 / 再生 | デスクトップと同じ、保存しない一時的な選択 |
+| 歩く | ON/OFF。**その場で反映**される。OFF の間は歩行範囲の円を出さず、歩いている最中なら止める。ON に戻すとその場から歩く。キャラクターの置き直し自体はできる |
+| 指している先を目で追う | ON = aim レイの指す先 / OFF = ユーザーの頭（今までの挙動） |
+| まばたき | |
+| 位置をリセット | `ModelAnchor` を起動時の位置・向きへ戻し、歩行範囲の半径も既定（20cm）へ戻す |
+| すべての設定をリセット | 接続先は残し、同期済みのモデルファイルも消さない（`ResetKeepingConnection`）。位置と大きさも既定へ戻る。**もう一度押すと確定**——XR にはネイティブの確認ダイアログが無いため |
+
+出さない項目: 音声スタイル・話す速さ・AI要約（core の書き込み口はループバック限定なので XR からは
+変えられない）、音量（端末の音量で足りる）、接続先とトークン。
+
+### 置き場所と大きさ（`xr`）
+
+起動時の配置（`distance` / `azimuth` / `feetBelowEye`）はパネルに項目が無く、変えるには端末の
+`settings.json` を直接書き換える。
 
 ```bash
 ADB=~/Library/Android/sdk/platform-tools/adb
 F=/sdcard/Android/data/tech.sukima.chattermascot/files/settings.json
 $ADB pull $F settings.json        # 無ければ {} から書く。ほかのキー（connection など）は残す
-# "xr": { "scale": 1.0, "distance": 2.0, "azimuth": 20, "feetBelowEye": 1.2 }
+# "xr": { "height": 25, "distance": 2.0, "azimuth": 20, "feetBelowEye": 1.2 }
 $ADB push settings.json $F
 $ADB shell am force-stop tech.sukima.chattermascot   # 起動時に1回だけ読むので起動し直す
 ```
 
-`scale` は身長の倍率（0.05〜1.0）、`distance` は目からの水平距離（m）、`azimuth` は起動時の
-正面から右回りの角度（度）、`feetBelowEye` は足元が目より何 m 下か。範囲外は警告して既定に
-戻る。頭を水平にして起動した場合の値で、上下を向いて起動すると目から足元へのずれをその
-傾きぶん回した位置に出る。起動時の配置だけに効き、手でつまんで置き直した位置は再起動で戻る。
+`distance` は目からの水平距離（m）、`azimuth` は起動時の正面から右回りの角度（度）、
+`feetBelowEye` は足元が目より何 m 下か。範囲外は警告して既定に戻る。頭を水平にして起動した
+場合の値で、上下を向いて起動すると目から足元へのずれをその傾きぶん回した位置に出る。この3つは
+起動時の配置だけに効き、手でつまんで置き直した位置は再起動で戻る（パネルの「位置をリセット」は
+再起動せずに同じ状態へ戻す）。
+
+`height`（大きさ、cm）もここで書けるが、通常はパネルの「大きさ」で足りる——大きさの上限は
+読み込んだモデルの実寸で、モデルを差し替えても破綻しない。
 
 ### つまんで置き直す／歩く範囲を決める
 
@@ -490,7 +537,8 @@ $ADB shell am force-stop tech.sukima.chattermascot   # 起動時に1回だけ読
 - 歩くには `animations/walk/` に `.vrma` が要る（→ 上「感情モーションと小ネタの素材」）。無ければ歩かない
 - **平面に置き直すまでは歩かない**（起動直後は床が分からないため）。平面の無い所で離したときも、次に平面へ置くまで歩かない
 - 発話中・つまんでいる間は歩かない
-- 半径と置いた位置は覚えない。再起動すると起動時の配置と 20cm に戻る
+- **つまんで置き直しても、変えた半径は保たれる。** 既定（20cm）へ戻すのはパネルの「位置をリセット」だけ
+- 半径と置いた位置は保存されない。再起動すると起動時の配置と既定半径に戻る
 
 ### 接続
 
@@ -611,4 +659,4 @@ B・C どちらの経路でもこのポートへ向ける。C（`configure-andro
 | 設定パネルが出ない・作り直される / 右クリックが取れない / 値が保存されない・戻る / スライダーやポップアップの挙動 / ファイル選択 / サーバーに繋がらないときの表示 | [`mascot-settings.md`](./knowledge/mascot-settings.md) |
 | モデルが映らない・背中が映る・小さい / 表情が変わらない / まばたき / 視線が合わない / モーションが T ポーズになる・固まる / 髪が流れる | [`mascot-vrm.md`](./knowledge/mascot-vrm.md) |
 | 音が出ない・途切れる / 口が合わない / オーディオデバイスを掴んだまま / 接続が切れる / ack が届かない / 終了時に取りこぼす / JSON のパースがおかしい | [`mascot-speech.md`](./knowledge/mascot-speech.md) |
-| Android でビルドが通らない / 白飛びする / LAN で繋がらない / XR で何も映らない・位置がおかしい / 背景が黒い / つまめない / 歩かない・歩行範囲の円が出ない | [`mascot-android-xr.md`](./knowledge/mascot-android-xr.md) |
+| Android でビルドが通らない / 白飛びする / LAN で繋がらない / XR で何も映らない・位置がおかしい / 背景が黒い / つまめない / 歩かない・歩行範囲の円が出ない / 設定パネルが開かない・行が見えない・呼び出し口が出ない・消えない / 手のひらメニューが向きを拾わない / 髪が固まる（大きさの変更） | [`mascot-android-xr.md`](./knowledge/mascot-android-xr.md) |

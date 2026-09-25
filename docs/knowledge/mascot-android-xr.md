@@ -244,9 +244,12 @@ Android で共通。1秒ポーリングで外部変更も拾う。
 |---|---|
 | `audio.mute` / `audio.volume` | 効く |
 | `display.frameRate` | **効かない。** XR ではランタイムがフレームペーシングを握り、XR が起動しなかったときはシーンの `targetFrameRate`（`[SerializeField]`）が権威 |
-| `xr.scale` / `xr.distance` / `xr.azimuth` / `xr.feetBelowEye` | 効く（XR が起動したときだけ。起動時に1回だけ読む。→「XR（Full Space）」） |
-| `character.idleMotion` / `character.cursorGaze` / `character.blink` | 効く（視線は `CursorProvider` が無いので自律的な漂いになる） |
+| `xr.distance` / `xr.azimuth` / `xr.feetBelowEye` | 効く（XR が起動したときだけ。起動時に1回だけ読む。→「XR（Full Space）」） |
+| `xr.height` | 効く（XR が起動したときだけ）。他の `xr.*` と違い**設定パネルの「大きさ」からその場で変えられる**——起動時の読み込みだけに限らない |
+| `character.idleMotion` / `character.cursorGaze` / `character.blink` | 効く（視線は手を追跡できている間だけ追従し、それ以外は自律的な漂いになる） |
+| `character.walk`（既定 `true`） | 効く。設定パネルの「歩く」からその場で切り替えられる。デスクトップでは何もしない（歩かないため） |
 | `connection.serverUrl` / `connection.token` | 効く（起動時に1回だけ） |
+| `connection.assetSync` | 効く（設定パネルの「モデルとモーションを同期」からも変えられるが、**次回の起動から**——読むのは起動時の1回だけ） |
 | `character.vrm` | **効かない。** VRM の探索は `AssetEnv.HasUserConfigDirectory` のときだけユーザー段を見るが、Android はこれが `false`（共有ファイルシステムが無い） |
 | `audio.muteHotKey` / `ui.hideHotKey` | **効かない。** グローバルショートカットはデスクトップ固有のネイティブプラグイン（`StatusItemBridge`）にしか無い |
 
@@ -446,23 +449,33 @@ Android XR Extensions for Unity（`com.google.xr.extensions`）は入れない�
    「遠くの等身大」に見える（エミュレータの画像では判別できない）。`MeasureBounds` はワールド座標で
    測るので追従する。`FitCollider` は `UniformedLossyScale()` で割ってワールド寸法のまま当たり判定を
    保つ（つまむ判定がこの Collider を読むため。等倍のデスクトップでは割っても値は変わらない）。
-   spring bone は追従しないので、読み込み時に縮尺を焼き込む（→ 下）
-4. **配置は `settings.json` の `xr`（`scale` / `distance` / `azimuth` / `feetBelowEye`）で変える。**
-   これが効くのは**起動時の配置だけ**。既定は「机の上のミニチュアを、正面の画面を避けた右側に」。
-   Android には設定 UI が無いので、端末のファイルを書き換える（→ [`../mascot.md`](../mascot.md)）。デスクトップの
-   パネルには出さないが、往復で落とさない（`connection` と同じ扱い）。**手で置き直した位置は
-   再起動で戻る**（永続化は [#122](https://github.com/schwarz9791/chatter-agent/issues/122)）
-5. **視線と首はカメラ＝頭を見る。** `gazeTarget` は `Main Camera` の子で、`VrmPoseAccent` の
+   spring bone は追従しないので、読み込み時に縮尺を焼き込む（→ 下）。**実寸（cm）は読み込み直後、
+   モーション（VRMA）が乗る前のボーン bounds から1回だけ測る**（`VrmStage.RealHeightCm`）——ポーズで
+   身長が動いて見えると「大きさ」の段がぐらつく。余白は頭頂側の分だけ数える
+   （`VrmBounds.RealHeightCm`。`OfBones` の余白は上下同じだが、下側は接地面の推定で身長に当たらない
+   ので、同じ余白を1回引けば頭頂側の余白＝髪の分だけが残る）
+4. **設定パネルの「大きさ」（`xr.height`、cm）はその場で変わる。** `VrmStage.Rescale` が
+   `localScale` の差し替えと spring bone の焼き直しを1経路にまとめている——**焼き込みは乗算で
+   積み重なる**ので、渡すのは絶対値ではなく**変化の比**（新縮尺 ÷ 旧縮尺）。起動時の初期化
+   （legacy scale からの見積もり、または実寸が分かってからの合わせ直し）もこの経路を通る
+5. **配置（`distance` / `azimuth` / `feetBelowEye`）は `settings.json` の `xr` を直接書き換えて変える。**
+   これが効くのは**起動時の配置だけ**——大きさと違い、設定パネルに項目が無い。既定は
+   「机の上のミニチュアを、正面の画面を避けた右側に」。デスクトップのパネルには出さないが、往復で
+   落とさない（`connection` と同じ扱い）。**手で置き直した位置は再起動で戻る**（永続化は
+   [#122](https://github.com/schwarz9791/chatter-agent/issues/122)。設定パネルの「位置をリセット」は
+   再起動せずに同じ状態へ戻す）
+6. **視線と首はカメラ＝頭を見る。** `gazeTarget` は `Main Camera` の子で、`VrmPoseAccent` の
    基準の下向き（縦）と左右の基準（`GazeAim.NeutralYawDegrees`。
    [#121](https://github.com/schwarz9791/chatter-agent/issues/121)）は目とカメラのワールド座標の差から
    出すので、カメラ＝頭になれば「ユーザーの頭を見る」になり、横へ回り込んでも首が追う。左右の基準は
    モデルの正面（VRM ルートの forward ではなく、`FaceCamera` が −Z へ向けた時点の向き）から測る。
-   デスクトップはカメラが正面にあるのでほぼ 0。Android には `CursorProvider` が無いので目は漂いのまま
-6. **フレームレートはコードを変えていない。** XR ではランタイムがフレームペーシングを握り、
+   デスクトップはカメラが正面にあるのでほぼ 0。Android は aim レイが追跡できている間だけ
+   `CursorProvider`（`XrCursorGazeSource`）が値を返し、それ以外は漂いのまま
+7. **フレームレートはコードを変えていない。** XR ではランタイムがフレームペーシングを握り、
    `Application.targetFrameRate` は効かない。XR が起動しなかったときは今までどおり `MascotRunner` の値
-7. **XR かどうかは `XRGeneralSettings.Instance.Manager.activeLoader` で判定する。** `Application.platform` は
+8. **XR かどうかは `XRGeneralSettings.Instance.Manager.activeLoader` で判定する。** `Application.platform` は
    XR でも `Android` のままなので使えない。起動していなければ `XrStage` は何もせず、#97 と同じ平面表示になる
-8. **シーンは変えていない。** XR Origin と `TrackedPoseDriver` は `XrStage` が XR の起動時だけ実行時に組む。
+9. **シーンは変えていない。** XR Origin と `TrackedPoseDriver` は `XrStage` が XR の起動時だけ実行時に組む。
    `ChatterMascot.Xr` は Editor と Android に限ったアセンブリで、`CursorGazeSource` と同じ「シーンに置かない注入」
 
 ★ **UniUnlit への差し替え（#110）は XR でもそのまま効く**（`UnlitFallbackPolicy` は `Application.platform` で判定する）。
@@ -510,14 +523,29 @@ Hand Interaction Profile（OpenXR の `XR_EXT_hand_interaction`）の aim レイ
 ★ **足元ではなく、当たり判定の上端から探す。** 足元は下ろすと天板に潜り、掴んだ点も足元の近くだと
 天板より下になる。上端からならどこをつまんでも体の下の面が取れる。
 
-★ **XR Hands（Hand Tracking Subsystem の feature・手の関節）は使わない。** エミュレータの手
+★ **XR Hands（`XRHandSubsystem`）はつまみ判定には使わない。** エミュレータの手
 （Hand tracking モード）は体の前に固定でマウスへ aim を向けるだけなので「キャラの近くでつまむ」判定が
 成立しない。関節の親指–人差し指の距離も、つまんでも入りの閾値ちょうどの値で判定が揺れる。
-`pinchValue` はランタイムが出すつまみの値をそのまま使う。将来 XR Hands の subsystem を使うなら:
-権限が無い間はランタイムが毎フレームエラーを出し、
-`Stop()` では止まらない（OpenXR のローダーがセッションの READY のたびに Start し直す）。
-`SubsystemRegistration` で `HandTracking.automaticallyInitializeSubsystem = false` を立て、
-許可後に `EnsureSubsystemInitialized()` する。
+`pinchValue` はランタイムが出すつまみの値をそのまま使う——この理由は変わっていない。
+
+**手のひらメニュー（#143）の向き判定だけには使う。** `XrHandTracking` が唯一の読み取り口で、
+Palm（取れなければ Wrist）の関節姿勢から「手のひらが自分（頭）の方を向いているか」を毎フレーム
+判定する。つまみには関与しない——`XrGrab` の aim レイ・`pinchValue` はそのまま。
+
+- **手のひらの法線はローカル `-Y` で、左右で符号を変えない。** `com.unity.xr.hands` の
+  `Gestures.XRHandOrientationUtility.GetHandAxisDirection` が Palm Direction を
+  `rootRotation * (0,-1,0)` として求めており（Thumb Direction と違って左右非対称の補正を
+  入れていない）、プロバイダが関節姿勢もこの規約へ揃えて返すので、Palm / Wrist の姿勢にも
+  そのまま使える
+- **subsystem は許可が下りるまで走らせない。** `SubsystemRegistration` の時点で
+  `HandTracking.automaticallyInitializeSubsystem = false` を立て、`HAND_TRACKING` の許可
+  （`XrGrab` が起動時にまとめて要求する）が下りてから `EnsureSubsystemInitialized()` を呼ぶ
+  （docs の既定パターン）。未許可のまま走らせるとランタイムが毎フレームエラーを出す
+- **OpenXR の設定で HandTracking（Android）feature を有効にしてある。** つまみ（Hand Interaction
+  Profile）はこの feature が無くても動くが、関節姿勢の読み取りには要る
+- **左右を別々に判定する。** 片手の手のひらを自分へ向け、もう片方の手でつまんで押すのが本来の
+  使い方なので、どちらかを優先すると向けた側を見落とす。見失い（関節が一瞬取れない）も手ごとに
+  見る——もう片方の手が見えているだけで、消えた手の「向けている」が残り続けないようにする
 
 **権限は `HAND_TRACKING` と `SCENE_UNDERSTANDING_COARSE`。** `XrGrab` が起動時に**未許可のものだけ**
 まとめて要求する（許可済みまで含めて要求すると、権限 Activity が一瞬起動して pause/resume する）。
@@ -559,6 +587,11 @@ feature が有効なときにしかマニフェストへ書かない。
 **平面へ置き直した後だけ歩く。** 起動直後（#99 の配置のまま）は床が分からないので歩かない。
 `XrGrab.Release` が平面を見つけたときだけ `XrWalk.PlaceAt` を呼び、そこが円の中心になる。
 歩行モーション（`animations/walk/`）が1本も読めていなければ、円は出ても歩かない。
+
+★ **設定（`character.walk`）で歩行そのものを止められる。** OFF の間は円が出ない・歩き出さない
+——キャラクターの置き直し自体（`XrGrab`）は止めない。**OFF でも歩行範囲（置いた位置・半径）は
+捨てない。** 「置いたか」と「歩いてよいか」を別の状態で持ち（`XrWalk.Active`）、ON に戻したら
+その場から歩き出して円を短く見せる。捨てると、ON に戻しても置き直すまで歩かず、壊れて見える。
 
 **範囲はユーザーが目で見て決める。** 置き直した直後（とハンドルを操作した後）に、足元へ
 半透明の円とフチ・ハンドルを 15 秒だけ出す。ハンドルをつまんで前後に動かすと半径が
@@ -637,6 +670,78 @@ feature が有効なときにしかマニフェストへ書かない。
 hips の平行移動は 1cm 未満で、**root motion は焼かれていない**（その場歩き）。末尾に重複キーが
 あるので #103 の終端ガードが要る素材でもある。
 
+### 空間に浮かぶ設定パネル（[#143](https://github.com/schwarz9791/chatter-agent/issues/143)）
+
+**呼び出し口（頭上の歯車／手のひらのボタン）とパネルの入力は `XrGrab` に一本化する。** 掴む対象を
+増やすのであって、手の入力を増やすのではない——`XrGrab.TryGrab` の先頭で aim レイをまず
+`XrSettingsBridge` へ渡し、パネル・手のひらボタン・歯車のどれかに当たっていればそちらを押して、
+キャラ・歩行範囲の掴みへは進まない。優先順は **パネル → 手のひらボタン → 歯車 → 歩行範囲の
+ハンドル → キャラ**。別のコンポーネントで pinch を読むと、同じつまみで2つが反応する
+（歩行範囲のハンドルと同じ理由。→ 上「掴む対象を増やすのであって〜」）。
+
+★★ **レンダラ（`XrSettingsPanel`）に設定のキーを1つも書かない。** デスクトップの
+`CMSettingsPanel.m` と同じ規律（→ [`mascot-settings.md`](./mascot-settings.md)）——`SettingSpec.Kind`
+だけを見て行を組み、押されたキーは不透明な文字列のまま `XrSettingsBridge` へ返す。キーの意味を
+知るのは `XrSettingsBridge` だけ。レビューでは `XrSettingsPanel.cs` に `SettingKeys.` が出てこない
+ことを見る。
+
+★ **入力は `EventSystem` を使わず、レイとパネル平面の交点を自前で判定する。** world-space
+`Canvas` はあるが `GraphicRaycaster` は乗せない——`XRI`（XR Interaction Toolkit）も
+`TrackedDeviceRaycaster` も要らない。パネルの `Transform` を平面としてレイと交わる点を求め、
+行ごとの `RectTransform.Contains` で当たりを見る（`TryHover` / `TryPress`）。ワールド座標の
+往復（`TransformPoint` / `InverseTransformPoint`）で求めるので、pivot・anchor の解釈を自分で
+追わなくても実際の Transform 階層がそのまま答えになる。
+
+★ **同じ項目構成（キーの並び）での更新は行を作り直さない。** 値・有効/無効・note だけ差し替える
+（→ [`mascot-settings.md`](./mascot-settings.md)「自分起点の変更でパネルを作り直さない」と同じ
+教訓）。構成そのもの（キーと種類の並び）が変わったときだけ作り直す。
+
+★ **Choice の ‹ › は見た目の位置と押す判定の位置をそろえる。** ‹ を値欄の左端、› を値欄の右端に
+別々の `Text` として置き、押す判定も同じ境界（値欄の左半分 / 右半分）で分ける——1つの `Text` に
+「‹ 値 ›」とまとめて描き、判定だけ行の中央で分けると、見た目の記号と押した結果がずれる。ラベルが
+空の Choice は値欄を行の全幅にする（レンダラはラベルの有無だけを見て、キーでは分岐しない）。
+
+★ **「すべての設定をリセット」の確認はダイアログではなく「もう一度押す」。** XR にはネイティブの
+確認ダイアログが無い——デスクトップの `NSAlert` に相当するものが無いので、1回目は確認待ちの note
+に差し替えるだけにし、既定値の猶予以内の2回目で確定する。パネル側にキーは増やさない
+（`XrSettingsBridge` が出来上がった並びの該当行だけ note を差し替える）。
+
+**「すべての設定をリセット」は `ResetKeepingConnection`（接続先を残す）に、位置と大きさのリセットを
+重ねたもの。** 同期して取得済みのモデルファイル（`persistentDataPath/synced/`）は消さない——次の
+起動でまた同じものを取りに行けばよいので消す必要が無い（デスクトップ版の「すべての設定をリセット」
+との違い）。位置は「位置をリセット」と同じ経路（`XrGrab.ResetPosition` + `XrWalk.ResetArea`）を
+そのまま呼ぶ。
+
+大きさ（実寸の測り方、比での焼き直し）は上「空間配置の決めごと」3・4。
+
+★ **パネルは視線の正面に中心を合わせ、高さに上限を持たせて縮めて収める。** 目線より下へ
+伸ばすと、グラスの狭い視野から外れるうえ、机などの面の奥に隠れる（エミュレータでは仮想の
+部屋のテーブルに下半分が隠れ、「閉じる」しか見えなかった）。開いた後は固定し、視線から大きく
+外れたときだけ正面へ寄せて戻す（`XrMenuRules.ShouldFollowPanel`。ヒステリシス付き）——常に
+追従させると、読んでいる行や指そうとした行が逃げる。
+
+★ **暗い色は透ける。** グラスは加算合成（→ 下「背景に部屋を透かす」）なので、パネルの暗い
+背景はほぼ見えない。文字と明るい行の背景だけが見える前提で作る。
+
+★ **長いラベル・値は縮めて収める**（uGUI の best fit）。枠は項目によらず一定なので、どの項目が
+長いかをレンダラが知らずに済む。Choice の `‹` `›` は値欄の両端に置き、押す判定も値欄の左半分＝前・
+右半分＝次にそろえる（見た目と押す位置がずれると違和感が強い）。ラベルが空の Choice は値欄を全幅にする。
+
+**`XR_Glasses` エミュレータで分かったこと**
+
+- **`XRHandSubsystem` は関節を返す。** ただし**手のひらを自分へ向けられない**（向きが固定）ので、
+  手のひらボタンは出せない
+- **つまんでいない間、aim レイは動かない**（マウスを動かしても固定のまま。つまむとその位置へ飛ぶ）
+- `⚙` は `LegacyRuntime.ttf` のフォールバックで描ける
+
+★ **歯車は「キャラクターをつまんだ・離した後の一定時間」だけ出す。aim レイのホバーでは出さない。**
+つまんでいない間 aim が動かない環境があり、ホバーでは出せないことがある。つまむのは明示的な操作
+なので、手のひらモードでも出して邪魔にならない——手のひらを向けられない環境でもパネルを開ける。
+歯車にレイが当たっている間は出し続ける（押しに行く途中で消えない）。
+
+★ **未確認（実機）。** 手のひらを自分へ向けたときにボタンが出るか、パネルの読みやすさ
+（文字サイズ・行間・距離）。
+
 ### 背景に部屋を透かす（environment blend mode。[#119](https://github.com/schwarz9791/chatter-agent/issues/119)）
 
 **グラスでは environment blend mode を ADDITIVE にする。** 描かなかった所（カメラの背景はアルファ 0 の黒）から
@@ -702,6 +807,9 @@ UniVRM の spring bone は、**コライダーの半径は毎フレーム `lossy
 
 ★ **拡縮は VRM の読み込みより前に済ませること。** `XrStage` は `AfterSceneLoad` で拡縮し、読み込みは
 `VrmStage.Start` から始まるので間に合う。
+
+読み込み後に大きさを変える経路（設定パネル。→ 上「空間に浮かぶ設定パネル」）も同じ
+`BakeSpringBoneScale` を通る——渡す縮尺が「等倍からいまの縮尺へ」ではなく「変化の比」になる点だけが違う。
 
 ### ★ XR Origin に `HideFlags.HideAndDontSave` を付けない
 

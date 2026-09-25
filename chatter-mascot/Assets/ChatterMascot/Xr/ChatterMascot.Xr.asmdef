@@ -9,7 +9,9 @@
         "Unity.InputSystem",
         "Unity.XR.ARFoundation",
         "Unity.XR.ARSubsystems",
-        "Unity.XR.OpenXR"
+        "Unity.XR.OpenXR",
+        "Unity.XR.Hands",
+        "UnityEngine.UI"
     ],
     "includePlatforms": ["Editor", "Android"],
     "excludePlatforms": [],

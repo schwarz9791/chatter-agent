@@ -264,10 +264,11 @@ namespace ChatterMascot.Vrm
         }
 
         /// <summary>
-        /// Desktop 側（<c>CursorGazeSource</c>）が刺す。<c>null</c> なら自律的な漂いに倒れる。
+        /// Desktop 側（<c>CursorGazeSource</c>）または XR 側（<c>XrCursorGazeSource</c>）が刺す。
+        /// <c>null</c>、または呼び出しが <c>null</c> を返せば自律的な漂いに倒れる。
         ///
-        /// ★ <b>Android にはこの注入元が存在しない</b>（<c>ChatterMascot.Desktop</c> アセンブリごと
-        ///   コンパイルされない）ので、常に <c>null</c> のまま＝漂いへ自動的に倒れる。
+        /// ★ <b>XR は手を追跡できている間だけ値を返す。</b> 手を見失えば呼び出し元が <c>null</c> を
+        ///   返すので、漂いへ自動的に倒れる。
         /// </summary>
         public Func<Vector2?> CursorProvider { get; set; }
 
@@ -317,6 +318,15 @@ namespace ChatterMascot.Vrm
         ///   （実機で「顔の横にカーソルを置いてもやや上目線」として発覚）。
         /// </summary>
         public float GazeOriginViewportY { get; private set; } = 0.5f;
+
+        /// <summary>
+        /// 視線の原点の<b>ビューポート X</b>（0..1、右が 1）。取れなければ 0.5。
+        ///
+        /// ★ <c>XrCursorGazeSource</c> が横の基準に使う。XR では
+        ///   デスクトップと違ってキャラがビューポート中心にいるとは限らないので、
+        ///   <see cref="GazeOriginViewportY"/> と同じく「顔の位置」を基準にする。
+        /// </summary>
+        public float GazeOriginViewportX { get; private set; } = 0.5f;
 
         /// <summary>
         /// <see cref="GazeOriginViewportY"/> が実測で埋まったか。
@@ -864,12 +874,15 @@ namespace ChatterMascot.Vrm
 
             if (_gazeOriginValid)
             {
-                GazeOriginViewportY = _camera.WorldToViewportPoint(_gazeOriginWorld).y;
+                var gazeOriginViewport = _camera.WorldToViewportPoint(_gazeOriginWorld);
+                GazeOriginViewportY = gazeOriginViewport.y;
+                GazeOriginViewportX = gazeOriginViewport.x;
                 HasGazeOrigin = true;
             }
             else
             {
                 GazeOriginViewportY = 0.5f;
+                GazeOriginViewportX = 0.5f;
                 HasGazeOrigin = false;
                 // ★ _instance が入る（OnLoaded を通る）まではここを毎フレーム必ず通る
                 //   （LateUpdate はフレーム1から走るが、VRM の読み込みは実測で約1.6秒かかる）。

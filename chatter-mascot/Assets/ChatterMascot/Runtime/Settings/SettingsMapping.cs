@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using UnityEngine;
 
@@ -45,7 +46,7 @@ namespace ChatterMascot.Settings
         public const float SpeedStep = 0.1f;
 
         /// <summary>
-        /// Android XR の空間固定パラメータの範囲と既定値（→ <see cref="MascotSettings.XrScale"/> ほかの doc）。
+        /// Android XR の空間固定パラメータの範囲と既定値（→ <see cref="MascotSettings.XrDistance"/> ほかの doc）。
         ///
         /// ★★ <b><see cref="ScaleMin"/> / <see cref="ScaleMax"/>（デスクトップのウィンドウ倍率）とは
         ///   別物。</b> 混同しないよう、こちらは必ず <c>Xr</c> を頭に付けて区別する。
@@ -55,10 +56,6 @@ namespace ChatterMascot.Settings
         ///   ヘッドセットより狭いので、方位と足元の深さは<b>起動時の正面を向いたまま全身が視野に
         ///   収まる</b>範囲に留める（外すと、描けているのに視野の縁で切れて見えない）。
         /// </summary>
-        public const float XrScaleMin = 0.05f;
-        public const float XrScaleMax = 1.0f;
-        public const float XrDefaultScale = 0.18f;
-
         public const float XrDistanceMin = 0.2f;
         public const float XrDistanceMax = 5.0f;
         public const float XrDefaultDistance = 0.6f;
@@ -70,6 +67,148 @@ namespace ChatterMascot.Settings
         public const float XrFeetBelowEyeMin = -1.0f;
         public const float XrFeetBelowEyeMax = 2.0f;
         public const float XrDefaultFeetBelowEye = 0.2f;
+
+        /// <summary>
+        /// 古い書式の <c>xr.scale</c> を <see cref="MascotSettings.XrLegacyScale"/> として
+        /// 読むときの範囲。値の意味は「モデルの一様倍率」——単位も意味も <see cref="XrHeightMin"/>
+        /// （cm）とは違うので、そのまま変換には使えない。
+        /// </summary>
+        public const float XrScaleMin = 0.05f;
+        public const float XrScaleMax = 1.0f;
+
+        /// <summary>
+        /// ★ <b>古い書式での既定値。</b> <see cref="MascotSettings.XrLegacyScale"/> を実寸へ
+        ///   換算できないとき（モデルの高さが取れないなど）のフォールバックにだけ残す。
+        ///   新規の既定は <see cref="XrDefaultHeight"/>。
+        /// </summary>
+        public const float XrDefaultScale = 0.18f;
+
+        /// <summary>
+        /// XR の「大きさ」の段の下限（cm）と既定値。
+        ///
+        /// ★ <b>上限は持たない。</b> 選べる最大は<b>読み込んだモデルの実寸</b>で、モデルごとに
+        ///   違う（→ <see cref="XrHeightSteps"/>）。<c>settings.json</c> の健全性検査の範囲は
+        ///   別に持つ（→ <see cref="XrHeightReadMin"/> / <see cref="XrHeightReadMax"/>）。
+        /// </summary>
+        public const float XrHeightMin = 15f;
+        public const float XrDefaultHeight = 25f;
+
+        /// <summary>
+        /// <c>settings.json</c> の <c>xr.height</c> を読むときの健全性検査の範囲。
+        ///
+        /// ★ <b>選べる範囲（<see cref="XrHeightMin"/>〜モデルの実寸）とは別物。</b> ここは
+        ///   「数値として壊れていないか」だけを見る広い枠——実寸がモデルによって
+        ///   <see cref="XrHeightMin"/> を下回ったり大きく超えたりしても、その値を
+        ///   既定へ巻き戻さずに読み戻せるようにする。
+        /// </summary>
+        public const float XrHeightReadMin = 1f;
+        public const float XrHeightReadMax = 1000f;
+
+        /// <summary>
+        /// XR の「大きさ」の段数。<see cref="XrHeightSteps"/> が返す配列の長さと一致する。
+        /// </summary>
+        private const int XrHeightStepCount = 6;
+
+        /// <summary>
+        /// XR の「大きさ」の段。<see cref="XrHeightMin"/>（15cm）から実寸
+        /// <paramref name="realCm"/> までを<b>等比で <see cref="XrHeightStepCount"/> 段</b>に割る。
+        /// 先頭は 15cm 固定、末尾は実寸固定、途中の段は 5cm 単位に丸める
+        /// （例: 実寸 160cm → 15 / 25 / 40 / 60 / 100 / 160）。
+        ///
+        /// ★ <b>丸めで隣り合う段が同じ値になることがある。</b> 詰めて別の値へ散らそうとしない
+        ///   こと——先頭が 15cm ちょうど・末尾が実寸ちょうど、という意味が壊れる。並びは
+        ///   単調増加のまま保たれる（同じ値が続くことはあっても逆転はしない）。
+        /// ★ <paramref name="realCm"/> が <see cref="XrHeightMin"/> 以下（壊れた入力）なら、
+        ///   段を刻む余地が無いので実寸1点だけを返す。
+        /// </summary>
+        public static IReadOnlyList<float> XrHeightSteps(float realCm)
+        {
+            if (!(realCm > XrHeightMin))
+            {
+                return new[] { realCm > 0f ? realCm : XrHeightMin };
+            }
+
+            var ratio = Math.Pow(realCm / (double)XrHeightMin, 1.0 / (XrHeightStepCount - 1));
+            var steps = new float[XrHeightStepCount];
+            steps[0] = XrHeightMin;
+            for (var i = 1; i < XrHeightStepCount - 1; i++)
+            {
+                var raw = XrHeightMin * Math.Pow(ratio, i);
+                var rounded = Math.Round(raw / 5.0, MidpointRounding.AwayFromZero) * 5.0;
+                // ★ 実寸が5の倍数から遠いと、丸めが末尾（実寸ちょうど）を追い越すことがある
+                //   （例: 実寸 18.2cm の手前の段が 5cm 刻みで 20 に丸まる）。実寸は動かせないので、
+                //   丸めた側を実寸で頭打ちにして単調増加を保つ
+                steps[i] = (float)Math.Min(rounded, realCm);
+            }
+            steps[XrHeightStepCount - 1] = realCm;
+            return steps;
+        }
+
+        /// <summary>
+        /// <paramref name="cm"/> に一番近い段。実寸（<paramref name="steps"/> の末尾）を超える値は
+        /// 実寸へクランプする——モデルを差し替えて実寸が縮んでも破綻しない。
+        /// </summary>
+        public static float NearestXrHeight(float cm, IReadOnlyList<float> steps)
+        {
+            if (steps == null || steps.Count == 0) return cm;
+
+            var max = steps[steps.Count - 1];
+            if (cm > max) return max;
+
+            var nearest = steps[0];
+            var nearestDiff = Math.Abs(cm - nearest);
+            for (var i = 1; i < steps.Count; i++)
+            {
+                var diff = Math.Abs(cm - steps[i]);
+                if (diff < nearestDiff)
+                {
+                    nearest = steps[i];
+                    nearestDiff = diff;
+                }
+            }
+            return nearest;
+        }
+
+        /// <summary>
+        /// <see cref="XrHeightSteps"/> の結果を選択肢に変える。<c>Value</c> は <see cref="Format"/> と
+        /// 同じ不変文化の数値文字列、<c>Label</c> は末尾だけ「実寸（160 cm）」、それ以外は「15 cm」。
+        ///
+        /// ★ <b>表示は cm 単位の整数に丸めること。</b> 実寸はモデルの実測値なのでちょうどの
+        ///   整数とは限らないが、小数まで見せても段を選ぶ判断の役には立たない。
+        /// ★ <b>同じ値が続く段は1つにまとめる</b>（→ <see cref="XrHeightSteps"/> の丸めの doc）。
+        ///   同じ値の選択肢が並ぶと ‹ › を押しても表示が変わらず、進めなくなる。
+        /// </summary>
+        public static IReadOnlyList<SettingChoice> XrHeightChoices(IReadOnlyList<float> steps)
+        {
+            if (steps == null) return null;
+
+            var choices = new List<SettingChoice>(steps.Count);
+            for (var i = 0; i < steps.Count; i++)
+            {
+                // ★ 後ろ側を残す（末尾の「実寸」を消さない）
+                if (i < steps.Count - 1 && steps[i] == steps[i + 1]) continue;
+
+                var value = Format(steps[i]);
+                var cm = ((int)Math.Round(steps[i])).ToString(CultureInfo.InvariantCulture);
+                var label = i == steps.Count - 1 ? $"実寸（{cm} cm）" : $"{cm} cm";
+                choices.Add(new SettingChoice(value, label));
+            }
+            return choices;
+        }
+
+        /// <summary>
+        /// 旧書式の <c>xr.scale</c>（モデルの一様倍率）を、実寸から cm へ換算する。<b>純粋関数。</b>
+        /// </summary>
+        public static float XrLegacyScaleToCm(float legacyScale, float realCm) => legacyScale * realCm;
+
+        /// <summary>
+        /// 実寸がまだ分からない（モデル読み込み前）ときの、目標 cm からの縮尺の見積もり。<b>純粋関数。</b>
+        ///
+        /// ★ <see cref="XrDefaultScale"/>（旧既定の倍率）が <see cref="XrDefaultHeight"/> 相当を
+        ///   想定していたとみなし、その比で概算する。実寸が分かり次第「目標cm ÷ 実寸」の正確な
+        ///   縮尺に置き換わるので、ここでの誤差は読み込みが終わるまでの一時的な見た目の差でしかない。
+        /// </summary>
+        public static float XrEstimatedScale(float targetCm) => targetCm * XrDefaultScale / XrDefaultHeight;
 
         /// <summary>
         /// UI の「大きさ」→ <b>ウィンドウの大きさ</b>（ポイント）。

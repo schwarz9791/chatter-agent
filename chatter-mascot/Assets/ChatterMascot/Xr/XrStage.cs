@@ -62,9 +62,16 @@ namespace ChatterMascot.Xr
 
             // デスクトップ向けのオートフレーミングはカメラを動かすので、頭部トラッキングと競合する
             stage.AutoFrame = false;
+
             // ★ VRM の読み込み（VrmStage.Start から）より前に拡縮しておくこと。読み込み時に
-            //   VrmStage が spring bone へ縮尺を焼き込む（→ VrmStage.BakeSpringBoneScale）
-            stage.ModelAnchor.localScale = Vector3.one * settings.XrScale;
+            //   VrmStage が spring bone へ縮尺を焼き込む（→ VrmStage.BakeSpringBoneScale）。
+            //   実寸はまだ分からないので、legacy scale があればそれ、無ければ目標 cm からの
+            //   見積もりで置く。モデルが読めたら OnModelLoaded が実寸から縮尺を出し直す
+            var guessScale = settings.XrLegacyScale != 0f
+                ? settings.XrLegacyScale
+                : SettingsMapping.XrEstimatedScale(settings.XrHeight);
+            stage.Rescale(guessScale);
+            stage.AddLoadedHandler(_ => OnModelLoaded(stage, settings));
 
             var origin = BuildOrigin(camera);
 
@@ -72,6 +79,41 @@ namespace ChatterMascot.Xr
             // ここだけ動的に生やす内部 MonoBehaviour でコルーチンを回す
             var runner = origin.gameObject.AddComponent<TrackingWaiter>();
             runner.Begin(origin, stage, settings);
+        }
+
+        /// <summary>
+        /// モデルが読み込めた（実寸が測れた）ときに、目標の cm へ縮尺を合わせ直す。
+        ///
+        /// ★ <c>xr.scale</c> しか無い（<see cref="MascotSettings.XrLegacyScale"/> が非0）ときは、
+        ///   ここで初めて実寸が分かるので cm へ換算して確定させ、保存して移行を終える。
+        /// </summary>
+        private static void OnModelLoaded(VrmStage stage, MascotSettings settings)
+        {
+            var realCm = stage.RealHeightCm;
+            if (!realCm.HasValue || !(realCm.Value > 0f))
+            {
+                Debug.LogWarning("[Mascot] XR: モデルの実寸を測れなかったので大きさの調整を見送ります");
+                return;
+            }
+
+            var steps = SettingsMapping.XrHeightSteps(realCm.Value);
+            float targetCm;
+            if (settings.XrLegacyScale != 0f)
+            {
+                targetCm = SettingsMapping.NearestXrHeight(
+                    SettingsMapping.XrLegacyScaleToCm(settings.XrLegacyScale, realCm.Value), steps);
+                // ★ 起動時に読んだ settings ではなく Host の現在値に重ねる。読み込みまでの間に
+                //   変わった設定を古い値で上書きしないため
+                var host = MascotSettingsHost.Instance;
+                if (host != null) host.Apply(host.Current.WithXrHeight(targetCm).WithXrLegacyScale(0f));
+            }
+            else
+            {
+                targetCm = SettingsMapping.NearestXrHeight(settings.XrHeight, steps);
+            }
+
+            stage.Rescale(targetCm / realCm.Value);
+            Debug.Log($"[Mascot] XR: 実寸 {realCm.Value:F1}cm → 目標 {targetCm:F0}cm へ縮尺を合わせました");
         }
 
         /// <summary>
@@ -244,7 +286,25 @@ namespace ChatterMascot.Xr
                 //   （まだ正しくない）アンカーを掴ませてしまう
                 var walk = _origin.gameObject.AddComponent<XrWalk>();
                 walk.Begin(_origin, _stage);
-                _origin.gameObject.AddComponent<XrGrab>().Begin(_origin, _stage, walk);
+                var grab = _origin.gameObject.AddComponent<XrGrab>();
+                var settings = _origin.gameObject.AddComponent<XrSettingsBridge>();
+                settings.Begin(_stage, _origin, grab, walk);
+                grab.Begin(_origin, _stage, walk, settings);
+
+                // ★ 目で追う（XR 版）。CursorProvider は Desktop 側と同じ注入の形——
+                //   手を追跡できていなければ null を返すだけで、ON/OFF の分岐はここに書かない
+                //   （VrmCharacter.UpdateGaze が character.cursorGaze を見て判断する）
+                var character = _stage.ModelAnchor.GetComponent<VrmCharacter>();
+                if (character != null)
+                {
+                    var origin = _origin;
+                    var stage = _stage;
+                    character.CursorProvider = () => XrCursorGazeSource.TryRead(grab, origin, stage, character);
+                }
+                else
+                {
+                    Debug.LogWarning("[Mascot] XR: ModelAnchor に VrmCharacter が無いので目で追うを組めません");
+                }
             }
         }
     }

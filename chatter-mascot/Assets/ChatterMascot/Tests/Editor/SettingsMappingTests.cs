@@ -1,3 +1,4 @@
+using System;
 using System.Globalization;
 using System.Threading;
 using ChatterMascot.Settings;
@@ -226,6 +227,148 @@ namespace ChatterMascot.Tests
             Assert.That(SettingsMapping.AppliesFrameRate(RuntimePlatform.LinuxPlayer), Is.True);
             Assert.That(SettingsMapping.AppliesFrameRate(RuntimePlatform.LinuxEditor), Is.True);
             Assert.That(SettingsMapping.AppliesFrameRate(RuntimePlatform.Android), Is.False);
+        }
+
+        // ── XR の「大きさ」 ─────────────────────────────
+
+        /// <summary>★ 先頭 15・末尾 実寸・途中は5cm単位</summary>
+        [Test]
+        public void XrHeightStepsMatchesTheWorkedExample()
+        {
+            var steps = SettingsMapping.XrHeightSteps(160f);
+
+            Assert.That(steps, Is.EqualTo(new float[] { 15f, 25f, 40f, 60f, 100f, 160f }));
+        }
+
+        [Test]
+        public void XrHeightStepsStartsAt15AndEndsAtTheRealHeight()
+        {
+            foreach (var realCm in new[] { 20f, 50f, 100f, 160f, 200f })
+            {
+                var steps = SettingsMapping.XrHeightSteps(realCm);
+
+                Assert.That(steps[0], Is.EqualTo(SettingsMapping.XrHeightMin), $"realCm={realCm}");
+                Assert.That(steps[steps.Count - 1], Is.EqualTo(realCm), $"realCm={realCm}");
+            }
+        }
+
+        /// <summary>
+        /// ★ 丸めで隣り合う段が同じ値になっても、逆転はしない（→ <c>SettingsMapping.XrHeightSteps</c> の doc）。
+        ///
+        /// ★★ <c>18.2</c> / <c>24.95</c> は、実寸が5の倍数から遠く、丸めた段が末尾（実寸ちょうど）
+        ///   を追い越しうる値。
+        /// </summary>
+        [Test]
+        public void XrHeightStepsNeverDecreases()
+        {
+            foreach (var realCm in new[] { 15.5f, 16f, 18.2f, 20f, 24.95f, 30f, 60f, 100f, 160f, 300f })
+            {
+                var steps = SettingsMapping.XrHeightSteps(realCm);
+
+                for (var i = 1; i < steps.Count; i++)
+                {
+                    Assert.That(steps[i], Is.GreaterThanOrEqualTo(steps[i - 1]), $"realCm={realCm} index={i}");
+                }
+            }
+        }
+
+        [Test]
+        public void XrHeightStepsHasSixSteps()
+        {
+            Assert.That(SettingsMapping.XrHeightSteps(160f).Count, Is.EqualTo(6));
+        }
+
+        /// <summary>★ 実寸が下限（15cm）以下は壊れた入力。段を刻む余地が無いので1点だけ返す</summary>
+        [Test]
+        public void XrHeightStepsFallsBackToASinglePointForBrokenInput()
+        {
+            Assert.That(SettingsMapping.XrHeightSteps(SettingsMapping.XrHeightMin), Is.EqualTo(new[] { 15f }));
+            Assert.That(SettingsMapping.XrHeightSteps(10f), Is.EqualTo(new[] { 10f }));
+            Assert.That(SettingsMapping.XrHeightSteps(0f), Is.EqualTo(new[] { SettingsMapping.XrHeightMin }));
+            Assert.That(SettingsMapping.XrHeightSteps(-5f), Is.EqualTo(new[] { SettingsMapping.XrHeightMin }));
+        }
+
+        [Test]
+        public void NearestXrHeightPicksTheClosestStep()
+        {
+            var steps = SettingsMapping.XrHeightSteps(160f); // 15/25/40/60/100/160
+
+            Assert.That(SettingsMapping.NearestXrHeight(15f, steps), Is.EqualTo(15f));
+            Assert.That(SettingsMapping.NearestXrHeight(18f, steps), Is.EqualTo(15f));
+            Assert.That(SettingsMapping.NearestXrHeight(33f, steps), Is.EqualTo(40f));
+            Assert.That(SettingsMapping.NearestXrHeight(160f, steps), Is.EqualTo(160f));
+        }
+
+        /// <summary>★ 実寸を超える値はモデルを差し替えても破綻しないよう実寸へクランプする</summary>
+        [Test]
+        public void NearestXrHeightClampsAboveTheRealHeight()
+        {
+            var steps = SettingsMapping.XrHeightSteps(160f);
+
+            Assert.That(SettingsMapping.NearestXrHeight(999f, steps), Is.EqualTo(160f));
+        }
+
+        [Test]
+        public void NearestXrHeightFallsBackToTheInputForEmptySteps()
+        {
+            Assert.That(SettingsMapping.NearestXrHeight(42f, null), Is.EqualTo(42f));
+            Assert.That(SettingsMapping.NearestXrHeight(42f, Array.Empty<float>()), Is.EqualTo(42f));
+        }
+
+        [Test]
+        public void XrHeightChoicesLabelsTheLastStepAsTheRealHeight()
+        {
+            var choices = SettingsMapping.XrHeightChoices(SettingsMapping.XrHeightSteps(160f));
+
+            Assert.That(choices.Count, Is.EqualTo(6));
+            Assert.That(choices[0].Value, Is.EqualTo("15"));
+            Assert.That(choices[0].Label, Is.EqualTo("15 cm"));
+            Assert.That(choices[5].Value, Is.EqualTo("160"));
+            Assert.That(choices[5].Label, Is.EqualTo("実寸（160 cm）"));
+        }
+
+        [Test]
+        public void XrHeightChoicesKeepsNullForALoadingModel()
+        {
+            Assert.That(SettingsMapping.XrHeightChoices(null), Is.Null);
+        }
+
+        /// <summary>★ 同じ値の選択肢が並ぶと ‹ › を押しても表示が変わらず進めなくなる</summary>
+        [Test]
+        public void XrHeightChoicesHasNoDuplicateValues()
+        {
+            var choices = SettingsMapping.XrHeightChoices(SettingsMapping.XrHeightSteps(30f));
+
+            for (var i = 0; i < choices.Count; i++)
+            {
+                for (var j = i + 1; j < choices.Count; j++)
+                {
+                    Assert.That(choices[j].Value, Is.Not.EqualTo(choices[i].Value), $"i={i} j={j}");
+                }
+            }
+        }
+
+        /// <summary>重複が末尾（実寸）と同じ値でも、残るのは「実寸」の選択肢。</summary>
+        [Test]
+        public void XrHeightChoicesKeepsTheRealHeightLabelWhenDeduplicating()
+        {
+            var choices = SettingsMapping.XrHeightChoices(SettingsMapping.XrHeightSteps(18.2f));
+
+            Assert.That(choices[choices.Count - 1].Label, Does.StartWith("実寸"));
+        }
+
+        [Test]
+        public void XrLegacyScaleToCmMultipliesByTheRealHeight()
+        {
+            Assert.That(SettingsMapping.XrLegacyScaleToCm(0.18f, 150f), Is.EqualTo(27f).Within(1e-4f));
+        }
+
+        /// <summary>★ 旧既定（0.18 倍）は、新既定（25cm）を想定していたとみなして見積もる</summary>
+        [Test]
+        public void XrEstimatedScaleReproducesTheLegacyDefaultAtTheDefaultHeight()
+        {
+            Assert.That(SettingsMapping.XrEstimatedScale(SettingsMapping.XrDefaultHeight),
+                Is.EqualTo(SettingsMapping.XrDefaultScale).Within(1e-4f));
         }
     }
 }

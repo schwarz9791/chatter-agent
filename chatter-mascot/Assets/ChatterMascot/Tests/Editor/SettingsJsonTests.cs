@@ -172,12 +172,31 @@ namespace ChatterMascot.Tests
                 .WithIdleMotion(false)
                 .WithCursorGaze(false)
                 .WithBlink(false)
-                .WithVrmFileName("foo.vrm");
+                .WithVrmFileName("foo.vrm")
+                .WithWalk(false);
 
             MascotSettings parsed;
             string error;
             Assert.That(SettingsJson.TryParse(SettingsJson.Write(source), out parsed, out error, null), Is.True, error);
             Assert.That(parsed, Is.EqualTo(source));
+        }
+
+        /// <summary>★ character.idleMotion / cursorGaze / blink と同じ流儀で読み書きする</summary>
+        [Test]
+        public void RoundTripsTheWalkFlag()
+        {
+            var written = SettingsJson.Write(MascotSettings.Defaults.WithWalk(false));
+            var parsed = Parse(written);
+
+            Assert.That(parsed.Walk, Is.False);
+            Assert.That(_warnings, Is.Empty);
+        }
+
+        [Test]
+        public void DefaultsWalkToTrueWhenMissing()
+        {
+            var parsed = Parse("{\"character\":{\"idleMotion\":true}}");
+            Assert.That(parsed.Walk, Is.True);
         }
 
         /// <summary>★ スライダー由来の 0.7000000119 をそのまま残さない</summary>
@@ -210,8 +229,8 @@ namespace ChatterMascot.Tests
         ///   ここに書くと権威が2つになるので、<c>character</c> には**書かないし読まない**
         ///   （前の版が書いた <c>character.scale</c> は未知キーとして警告して無視する）。
         ///
-        /// ★ <b><c>character</c> セクションに絞って見ること。</b> <c>xr.scale</c>
-        ///   （→ <see cref="MascotSettings.XrScale"/>）は別概念で、こちらは正当に書く。
+        /// ★ <b><c>character</c> セクションに絞って見ること。</b> <c>xr.height</c>
+        ///   （→ <see cref="MascotSettings.XrHeight"/>）は別概念で、こちらは正当に書く。
         /// </summary>
         [Test]
         public void DoesNotStoreTheCharacterSize()
@@ -508,10 +527,10 @@ namespace ChatterMascot.Tests
         public void RoundTripsTheXrSection()
         {
             var written = SettingsJson.Write(MascotSettings.Defaults
-                .WithXrScale(0.3f).WithXrDistance(1.2f).WithXrAzimuth(-90f).WithXrFeetBelowEye(0.8f));
+                .WithXrHeight(60f).WithXrDistance(1.2f).WithXrAzimuth(-90f).WithXrFeetBelowEye(0.8f));
             var parsed = Parse(written);
 
-            Assert.That(parsed.XrScale, Is.EqualTo(0.3f));
+            Assert.That(parsed.XrHeight, Is.EqualTo(60f));
             Assert.That(parsed.XrDistance, Is.EqualTo(1.2f));
             Assert.That(parsed.XrAzimuth, Is.EqualTo(-90f));
             Assert.That(parsed.XrFeetBelowEye, Is.EqualTo(0.8f));
@@ -525,38 +544,54 @@ namespace ChatterMascot.Tests
             var written = SettingsJson.Write(MascotSettings.Defaults);
 
             Assert.That(written, Does.Contain("\"xr\""));
-            Assert.That(written, Does.Contain("\"scale\""));
+            Assert.That(written, Does.Contain("\"height\""));
             Assert.That(written, Does.Contain("\"distance\""));
             Assert.That(written, Does.Contain("\"azimuth\""));
             Assert.That(written, Does.Contain("\"feetBelowEye\""));
+            // ★ 未換算の倍率が無い（既定）間は scale を書かない——
+            //   両方書き続けると、手で height を直しても scale が優先されるように見えかねない
+            Assert.That(written, Does.Not.Contain("\"scale\""));
         }
 
         [Test]
-        public void FallsBackToTheDefaultWhenScaleIsAString()
+        public void FallsBackToTheDefaultWhenHeightIsAString()
         {
-            var parsed = Parse("{\"xr\":{\"scale\":\"0.3\"}}");
+            var parsed = Parse("{\"xr\":{\"height\":\"60\"}}");
 
-            Assert.That(parsed.XrScale, Is.EqualTo(SettingsMapping.XrDefaultScale));
+            Assert.That(parsed.XrHeight, Is.EqualTo(SettingsMapping.XrDefaultHeight));
             Assert.That(_warnings, Has.Count.EqualTo(1));
         }
 
         [Test]
-        public void FallsBackToTheDefaultWhenScaleIsNotFinite()
+        public void FallsBackToTheDefaultWhenHeightIsNotFinite()
         {
-            var parsed = Parse("{\"xr\":{\"scale\":NaN}}");
+            var parsed = Parse("{\"xr\":{\"height\":NaN}}");
 
-            Assert.That(parsed.XrScale, Is.EqualTo(SettingsMapping.XrDefaultScale));
+            Assert.That(parsed.XrHeight, Is.EqualTo(SettingsMapping.XrDefaultHeight));
             Assert.That(_warnings, Has.Count.EqualTo(1));
         }
 
         /// <summary>★ <see cref="SettingsJson"/> の <c>xr</c> はクランプしない。範囲外はそのまま既定へ倒す</summary>
         [Test]
-        public void FallsBackToTheDefaultWhenScaleIsOutOfRange()
+        public void FallsBackToTheDefaultWhenHeightIsOutOfRange()
         {
-            var parsed = Parse("{\"xr\":{\"scale\":1.5}}");
+            var parsed = Parse("{\"xr\":{\"height\":2000}}");
 
-            Assert.That(parsed.XrScale, Is.EqualTo(SettingsMapping.XrDefaultScale));
+            Assert.That(parsed.XrHeight, Is.EqualTo(SettingsMapping.XrDefaultHeight));
             Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        /// <summary>
+        /// ★ <c>xr.height</c> の読み取り範囲は健全性検査だけ（→ <see cref="SettingsMapping.XrHeightReadMin"/> /
+        ///   <see cref="SettingsMapping.XrHeightReadMax"/>）。選べる範囲（<see cref="SettingsMapping.XrHeightMin"/>〜
+        ///   実寸）の外でも、数値として壊れていなければそのまま読み戻す。
+        /// </summary>
+        [Test]
+        public void ReadsHeightAsIsWithinTheSanityRange()
+        {
+            Assert.That(Parse("{\"xr\":{\"height\":10}}").XrHeight, Is.EqualTo(10f));
+            Assert.That(Parse("{\"xr\":{\"height\":500}}").XrHeight, Is.EqualTo(500f));
+            Assert.That(_warnings, Is.Empty);
         }
 
         [Test]
@@ -590,9 +625,9 @@ namespace ChatterMascot.Tests
         public void AcceptsTheXrRangeBoundaries()
         {
             var parsed = Parse(
-                "{\"xr\":{\"scale\":0.05,\"distance\":5.0,\"azimuth\":-180,\"feetBelowEye\":2.0}}");
+                "{\"xr\":{\"height\":15,\"distance\":5.0,\"azimuth\":-180,\"feetBelowEye\":2.0}}");
 
-            Assert.That(parsed.XrScale, Is.EqualTo(SettingsMapping.XrScaleMin));
+            Assert.That(parsed.XrHeight, Is.EqualTo(SettingsMapping.XrHeightMin));
             Assert.That(parsed.XrDistance, Is.EqualTo(SettingsMapping.XrDistanceMax));
             Assert.That(parsed.XrAzimuth, Is.EqualTo(SettingsMapping.XrAzimuthMin));
             Assert.That(parsed.XrFeetBelowEye, Is.EqualTo(SettingsMapping.XrFeetBelowEyeMax));
@@ -611,8 +646,50 @@ namespace ChatterMascot.Tests
         {
             var parsed = Parse("{\"xr\": 1}");
 
-            Assert.That(parsed.XrScale, Is.EqualTo(SettingsMapping.XrDefaultScale));
+            Assert.That(parsed.XrHeight, Is.EqualTo(SettingsMapping.XrDefaultHeight));
             Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        // ── xr.scale（古い書式。未換算の倍率として読む） ─────────
+
+        /// <summary>★ height が無い間、実寸への換算は Runtime の外（XR 側）が行う</summary>
+        [Test]
+        public void ReadsLegacyScaleAsUnconvertedWhenHeightIsMissing()
+        {
+            var parsed = Parse("{\"xr\":{\"scale\":0.3}}");
+
+            Assert.That(parsed.XrLegacyScale, Is.EqualTo(0.3f));
+            Assert.That(parsed.XrHeight, Is.EqualTo(SettingsMapping.XrDefaultHeight), "換算前は既定のまま");
+            Assert.That(_warnings, Is.Empty);
+        }
+
+        [Test]
+        public void WritesBackTheLegacyScaleUntilItIsResolved()
+        {
+            var pending = SettingsJson.Write(MascotSettings.Defaults.WithXrLegacyScale(0.3f));
+            Assert.That(pending, Does.Contain("\"scale\": 0.3"), "情報を失わないよう書き戻す");
+
+            var resolved = SettingsJson.Write(
+                MascotSettings.Defaults.WithXrHeight(60f).WithXrLegacyScale(0f));
+            Assert.That(resolved, Does.Not.Contain("\"scale\""), "確定したら書かない");
+        }
+
+        [Test]
+        public void FallsBackToNoLegacyScaleWhenOutOfRange()
+        {
+            var parsed = Parse("{\"xr\":{\"scale\":1.5}}");
+
+            Assert.That(parsed.XrLegacyScale, Is.EqualTo(0f));
+            Assert.That(_warnings, Has.Count.EqualTo(1));
+        }
+
+        [Test]
+        public void AcceptsTheLegacyScaleRangeBoundaries()
+        {
+            var parsed = Parse("{\"xr\":{\"scale\":0.05}}");
+
+            Assert.That(parsed.XrLegacyScale, Is.EqualTo(SettingsMapping.XrScaleMin));
+            Assert.That(_warnings, Is.Empty);
         }
 
         // ── long を超える整数（Newtonsoft は BigInteger で持つ） ───────────────────
@@ -629,7 +706,7 @@ namespace ChatterMascot.Tests
                 "\"xr\":{\"scale\":100000000000000000000}}");
 
             Assert.That(parsed.Volume, Is.EqualTo(MascotSettings.Defaults.Volume));
-            Assert.That(parsed.XrScale, Is.EqualTo(SettingsMapping.XrDefaultScale));
+            Assert.That(parsed.XrLegacyScale, Is.EqualTo(0f));
             Assert.That(_warnings, Has.Count.EqualTo(2));
         }
 

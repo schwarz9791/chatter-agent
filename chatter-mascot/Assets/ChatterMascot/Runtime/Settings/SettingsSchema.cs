@@ -25,6 +25,15 @@ namespace ChatterMascot.Settings
         public const string VrmChosen = "vrmChosen";
         public const string Scale = "scale";
 
+        /// <summary>XR の「大きさ」（cm）。デスクトップの <see cref="Scale"/>（窓の倍率）とは別項目</summary>
+        public const string XrHeight = "xrHeight";
+
+        /// <summary>
+        /// モデルとモーションをサーバーから受け取るか（→ <see cref="MascotSettings.AssetSync"/>）。
+        /// XR の設定パネルだけに出す（デスクトップは同期しない）。
+        /// </summary>
+        public const string AssetSync = "assetSync";
+
         public const string Speaker = "speaker";
         public const string Volume = "volume";
         public const string Speed = "speed";
@@ -44,6 +53,9 @@ namespace ChatterMascot.Settings
         public const string CursorGaze = "cursorGaze";
         public const string Blink = "blink";
         public const string FrameRate = "frameRate";
+
+        /// <summary>XR で歩行範囲の円を出し、指した先へ歩かせるか。XR の設定パネルだけに出す</summary>
+        public const string Walk = "walk";
 
         public const string SummaryEnabled = "summaryEnabled";
 
@@ -121,9 +133,20 @@ namespace ChatterMascot.Settings
             };
         }
 
+        /// <summary>
+        /// 設定パネルの並びを組む唯一の入口。<see cref="SettingsContext.Platform"/> で出し分ける
+        /// （→ <see cref="BuildDesktop"/> / <see cref="BuildXr"/>）。
+        ///
+        /// ★★ <b>XR 側の変更で Desktop の出力を変えないこと。</b>
+        /// </summary>
         public static IReadOnlyList<SettingSpec> Build(SettingsContext context)
         {
             var c = context ?? new SettingsContext();
+            return c.Platform == SettingsPlatform.Xr ? BuildXr(c) : BuildDesktop(c);
+        }
+
+        private static IReadOnlyList<SettingSpec> BuildDesktop(SettingsContext c)
+        {
             var settings = c.Settings;
             var items = new List<SettingSpec>();
 
@@ -172,18 +195,7 @@ namespace ChatterMascot.Settings
             items.Add(SettingSpec.Section("モーション"));
             items.Add(SettingSpec.Bool(SettingKeys.IdleMotion, "待機モーション", settings.IdleMotion));
 
-            // ★ #70 派生。ファイル名と実際に再生されるモーションが一致しているかを、
-            //   本番と同じ経路（VrmMotionPlayer.Play）で確かめられるようにする。
-            //   ★★ 保存しない。settings.json にも core にも書かない
-            //   （→ SettingsContext.MotionPreview の doc）——本番の発話に連動する再生と
-            //   混同しないため、確認用の選択はパネルを閉じたら忘れてよい
-            var motionClips = c.MotionClips;
-            var motionEnabled = settings.IdleMotion && motionClips != null && motionClips.Count > 0;
-            var motionValue = EffectiveMotionPreview(motionClips, c.MotionPreview);
-            items.Add(SettingSpec.Choice(
-                SettingKeys.MotionPreview, "モーションを確認", motionValue, motionClips,
-                enabled: motionEnabled, note: MotionPreviewNote(motionClips, settings.IdleMotion)));
-            items.Add(SettingSpec.Button(SettingKeys.MotionPreviewPlay, "再生", enabled: motionEnabled));
+            AddMotionPreview(items, c, settings);
 
             items.Add(SettingSpec.Bool(SettingKeys.CursorGaze, "カーソルを目で追う", settings.CursorGaze));
             items.Add(SettingSpec.Bool(SettingKeys.Blink, "まばたき", settings.Blink));
@@ -263,6 +275,113 @@ namespace ChatterMascot.Settings
             items.Add(SettingSpec.Button(SettingKeys.Quit, "終了"));
 
             return items;
+        }
+
+        /// <summary>
+        /// XR の設定パネル（<c>Xr/XrSettingsPanel</c>）向けの並び。Desktop（<see cref="BuildDesktop"/>）と
+        /// 項目が大きく違うので別関数にしてある——共通なのは「モーションを確認」まわりだけ
+        /// （→ <see cref="AddMotionPreview"/>）。
+        ///
+        /// ★ <b>ここに出さないもの</b>: 待機モーションの ON/OFF・フレームレート・ショートカット・
+        ///   音声系・AI要約・終了。手のひらメニュー／歯車から開く前提で、常駐トレイと同じ
+        ///   項目数を持たせる理由が無い。
+        /// </summary>
+        private static IReadOnlyList<SettingSpec> BuildXr(SettingsContext c)
+        {
+            var settings = c.Settings;
+            var items = new List<SettingSpec>();
+
+            // ── キャラクター ─────────────────────────────────
+            items.Add(SettingSpec.Section("キャラクター"));
+            items.Add(BuildXrHeightChoice(c, settings));
+            items.Add(SettingSpec.Bool(
+                SettingKeys.AssetSync, "モデルとモーションを同期",
+                settings.AssetSync != SettingsMapping.AssetSyncOff,
+                note: "次回の起動から反映されます"));
+
+            // ── モーション ───────────────────────────────────
+            items.Add(SettingSpec.Section("モーション"));
+            AddMotionPreview(items, c, settings);
+            items.Add(SettingSpec.Bool(SettingKeys.Walk, "歩く", settings.Walk));
+            items.Add(SettingSpec.Bool(SettingKeys.CursorGaze, "指している先を目で追う", settings.CursorGaze));
+            items.Add(SettingSpec.Bool(SettingKeys.Blink, "まばたき", settings.Blink));
+
+            // ── リセット ─────────────────────────────────────
+            items.Add(SettingSpec.Section("リセット"));
+            items.Add(SettingSpec.Button(SettingKeys.ResetPosition, "キャラクターの位置をリセット"));
+            // ★ モデルファイルは消さない（→ SettingKeys.ResetAll の Desktop 版との違い）。
+            //   同期して取ってきたものを次の起動でまた取りに行けばよいので、消す必要が無い
+            items.Add(SettingSpec.Button(
+                SettingKeys.ResetAll, "すべての設定をリセット", note: "接続先は残します"));
+
+            return items;
+        }
+
+        /// <summary>
+        /// 「大きさ」の行。<see cref="SettingsContext.XrHeightChoices"/> が <c>null</c>
+        /// （モデルの実寸がまだ分からない）間は選べない——段を実寸から作る
+        /// <see cref="SettingsMapping.XrHeightSteps"/> はモデルを読み込んでからでないと呼べない。
+        /// </summary>
+        private static SettingSpec BuildXrHeightChoice(SettingsContext c, MascotSettings settings)
+        {
+            var choices = c.XrHeightChoices;
+            if (choices == null)
+            {
+                return SettingSpec.Choice(
+                    SettingKeys.XrHeight, "大きさ", "", null,
+                    enabled: false, note: "モデルを読み込んでいます");
+            }
+
+            return SettingSpec.Choice(
+                SettingKeys.XrHeight, "大きさ", SnappedXrHeightValue(choices, settings.XrHeight), choices);
+        }
+
+        /// <summary>
+        /// 現在の cm（<see cref="MascotSettings.XrHeight"/>）に一番近い選択肢の <c>Value</c>。
+        ///
+        /// ★ <see cref="SettingsMapping.NearestXrHeight"/> が返す <c>float</c> をそのまま
+        ///   フォーマットし直すのではなく、<paramref name="choices"/> 側の文字列を返すこと——
+        ///   <c>ChoiceValuesExistInTheirChoices</c> が守る不変条件（選択中の値は選択肢の中に
+        ///   あること）を、書式の丸め誤差に左右されずに満たすため。
+        /// </summary>
+        private static string SnappedXrHeightValue(IReadOnlyList<SettingChoice> choices, float currentCm)
+        {
+            if (choices.Count == 0) return "";
+
+            var steps = new float[choices.Count];
+            for (var i = 0; i < steps.Length; i++) steps[i] = SettingsMapping.Parse(choices[i].Value, 0f);
+
+            var nearest = SettingsMapping.NearestXrHeight(currentCm, steps);
+            for (var i = 0; i < steps.Length; i++)
+            {
+                if (steps[i] == nearest) return choices[i].Value;
+            }
+            return choices[0].Value;
+        }
+
+        /// <summary>
+        /// 「モーションを確認」の Choice + 「再生」Button。Desktop と XR の両方が同じ作り・
+        /// 同じ enabled 判定で出す（→ <see cref="BuildDesktop"/> / <see cref="BuildXr"/>）。
+        ///
+        /// ★★ 保存しない。settings.json にも core にも書かない
+        ///   （→ SettingsContext.MotionPreview の doc）——本番の発話に連動する再生と
+        ///   混同しないため、確認用の選択はパネルを閉じたら忘れてよい。
+        ///
+        /// ★ XR ではラベルを出さない。見出し「モーション」の直下に置くので、
+        ///   何の行かは見出しで分かる。
+        /// </summary>
+        private static void AddMotionPreview(List<SettingSpec> items, SettingsContext c, MascotSettings settings)
+        {
+            // ★ #70 派生。ファイル名と実際に再生されるモーションが一致しているかを、
+            //   本番と同じ経路（VrmMotionPlayer.Play）で確かめられるようにする。
+            var motionClips = c.MotionClips;
+            var motionEnabled = settings.IdleMotion && motionClips != null && motionClips.Count > 0;
+            var motionValue = EffectiveMotionPreview(motionClips, c.MotionPreview);
+            var label = c.Platform == SettingsPlatform.Xr ? "" : "モーションを確認";
+            items.Add(SettingSpec.Choice(
+                SettingKeys.MotionPreview, label, motionValue, motionClips,
+                enabled: motionEnabled, note: MotionPreviewNote(motionClips, settings.IdleMotion)));
+            items.Add(SettingSpec.Button(SettingKeys.MotionPreviewPlay, "再生", enabled: motionEnabled));
         }
 
         /// <summary>

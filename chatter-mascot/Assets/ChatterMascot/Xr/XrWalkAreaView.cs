@@ -49,8 +49,9 @@ namespace ChatterMascot.Xr
         /// 円・フチ・ハンドルを、渡された値どおりに置く。<paramref name="handleAngleDegrees"/> は
         /// キャラクターのヨーと同じ約束（ローカル −Z が正面）で測ったハンドルの方角。
         /// <paramref name="radius"/> は既にキャラクターの大きさぶん伸び縮みさせた実寸（円はこれで
-        /// 拡大縮尺する）。<paramref name="scale"/> は同じ倍率で、ハンドルの見た目と当たり判定を
-        /// 円と同じ調子で伸び縮みさせる（歯車と同じ理由——大きいキャラほど的も大きくする）。
+        /// 拡大縮尺する）。<paramref name="scale"/> はハンドルの見た目と当たり判定だけの倍率——
+        /// 歯車と同じ「押しやすさ」の倍率で、円の拡大縮尺とは別に伸び縮みさせる（大きいキャラほど
+        /// 的も大きくする）。
         ///
         /// ★ <paramref name="visible"/> は即座の on/off ではなく、不透明度を <see cref="FadeSeconds"/>
         ///   かけて 0↔1 へ動かす目標。<b>消える側の呼び出しでも毎フレーム呼び続けること</b>
@@ -136,7 +137,6 @@ namespace ChatterMascot.Xr
         private GameObject BuildHandle()
         {
             var go = BuildRing("Handle", 0f, 1f, _rimMaterial);
-            go.transform.localScale = Vector3.one * HandleRadiusMeters;
 
             // ★ 当たり判定は見た目より大きく取る。腕を伸ばした先の数 cm の的を、
             //   手の震えぶんだけ外し続けることになる

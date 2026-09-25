@@ -323,9 +323,9 @@ namespace ChatterMascot.Xr
 
             switch (key)
             {
-                // ★ SetMuted 自身が Refresh まで済ませる（→ あちらの doc）
                 case SettingKeys.Mute:
-                    SetMuted(SettingsPanelJson.ParseBool(value, host.Current.Muted));
+                    host.Apply(host.Current.WithMuted(SettingsPanelJson.ParseBool(value, host.Current.Muted)));
+                    Refresh();
                     return;
 
                 case SettingKeys.XrHeight:
@@ -384,19 +384,6 @@ namespace ChatterMascot.Xr
                     Debug.LogWarning($"[Mascot] XR settings: 知らない設定のキーです: \"{key}\"");
                     return;
             }
-        }
-
-        /// <summary>
-        /// ミュートを切り替える唯一の入口。<b>パネル以外（将来の手のジェスチャーなど）から
-        /// 切り替える場合もここを通すこと</b> —— 保存とパネルの表示が食い違わずに済む。
-        /// </summary>
-        public void SetMuted(bool muted)
-        {
-            var host = MascotSettingsHost.Instance;
-            if (host == null) return;
-
-            host.Apply(host.Current.WithMuted(muted));
-            Refresh();
         }
 
         /// <summary>

@@ -308,7 +308,7 @@ namespace ChatterMascot.Tests
         {
             var keys = SettingsSchema.Build(Context()).Select(s => s.Key).ToList();
 
-            Assert.That(keys, Has.None.EqualTo("mute"));
+            Assert.That(keys, Has.None.EqualTo(SettingKeys.Mute));
             Assert.That(keys, Has.None.EqualTo("summaryPreview"));
         }
 
@@ -552,14 +552,6 @@ namespace ChatterMascot.Tests
                 SettingKeys.Walk, SettingKeys.CursorGaze, SettingKeys.Blink,
                 null, SettingKeys.ResetPosition, SettingKeys.ResetAll,
             }));
-        }
-
-        /// <summary>★ ミュートは XR だけの項目（デスクトップはメニューバーとショートカットで操作する）</summary>
-        [Test]
-        public void XrOffersMuteButDesktopDoesNot()
-        {
-            Assert.That(SettingsSchema.Build(XrContext()).Select(s => s.Key), Has.Some.EqualTo(SettingKeys.Mute));
-            Assert.That(SettingsSchema.Build(Context()).Select(s => s.Key), Has.None.EqualTo(SettingKeys.Mute));
         }
 
         /// <summary>★ Desktop 専用の項目は1つも出ない</summary>

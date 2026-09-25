@@ -48,6 +48,11 @@ namespace ChatterMascot.Xr
 
         private ARPlaneManager _planeManager;
 
+        /// <summary>
+        /// 並びの後ろほど優先する（マウス＞右手＞左手。簡単で説明できる決め打ち）。<see cref="TryGetAimRay"/>
+        /// が読む代表レイと、<see cref="Update"/> が手を回す順（＝設定パネルのホバーの先勝ち）は
+        /// どちらもこの並びを後ろから読むことで揃える。
+        /// </summary>
         private readonly Hand[] _hands =
         {
             new Hand("LeftHand", "<HandInteraction>{LeftHand}", "pointerPosition", "pointerRotation", "pinchValue", "isTracked"),
@@ -138,8 +143,7 @@ namespace ChatterMascot.Xr
         /// 「目で追う」の入力に使う——<b>入力の読み取りはここに一本化したまま</b>、新しく
         /// Input System のバインドを増やさない。
         ///
-        /// ★ 複数追跡されているときは <see cref="_hands"/> の並びの後ろほど優先する（マウス &gt;
-        ///   右手 &gt; 左手。簡単で説明できる決め打ち）。どれも追跡されていなければ <c>false</c>。
+        /// ★ 優先順は <see cref="_hands"/> の doc 参照。どれも追跡されていなければ <c>false</c>。
         /// </summary>
         public bool TryGetAimRay(out Ray ray)
         {
@@ -197,8 +201,10 @@ namespace ChatterMascot.Xr
 
             if (_origin == null || _stage == null || _stage.Model == null) return;
 
+            // ★ 優先順は _hands の doc 参照。先勝ちのホバー（XrSettingsBridge.UpdateHover）が
+            //   同じ順になるよう、優先の高い手から回す
             var offset = _origin.CameraFloorOffsetObject.transform;
-            foreach (var hand in _hands) UpdateHand(hand, offset);
+            for (var i = _hands.Length - 1; i >= 0; i--) UpdateHand(_hands[i], offset);
         }
 
         private void EnsurePlaneManager()

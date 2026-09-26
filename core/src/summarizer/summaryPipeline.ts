@@ -17,7 +17,8 @@ import { randomUUID } from "crypto";
 import * as fs from "fs";
 import { toSpeechSentences } from "../text/speechText";
 import { findCommandPath } from "../core/commandPath";
-import { buildSummaryArgs, runClaudeCli } from "./claudeCli";
+import type { AiSummaryBackend } from "../core/config";
+import { buildFmSummaryArgs, buildSummaryArgs, resolveFmCommandPath, runClaudeCli } from "./claudeCli";
 import { SUMMARY_INSTRUCTION, SUMMARY_MAX_CHARS } from "./prompt";
 import type { Summarize, SummaryOutcome } from "./types";
 
@@ -42,16 +43,31 @@ export function isAcceptableSummary(spoken: string, originalLength: number): boo
 export interface SummaryPipelineDeps {
   /** 機能が有効か */
   isEnabled: () => boolean;
+  /**
+   * 要約バックエンド。`"fm"` なら固定パス（`FM_COMMAND_PATH`）で解決し
+   * `buildFmSummaryArgs`（claude 専用の `--session-id` 等を持たない）で引数を組む。
+   * `"claude"` なら `getCommand`（`aiSummaryCommand`）で解決し `buildSummaryArgs` を使う。
+   *
+   * ★ **本体では1回だけ読むこと。** コマンド解決と引数組み立てをそれぞれ別に読むと、
+   *   その間に設定パネルでバックエンドが切り替わったときに、片方は旧バックエンドの
+   *   コマンドで・もう片方は新バックエンドの引数で実行される組み合わせのズレが起きる。
+   */
+  getBackend: () => AiSummaryBackend;
   /** 長文判定の閾値（文字数） */
   getThreshold: () => number;
   /** 要約1回の上限。超えたら要約を諦めて原文を返す */
   getTimeoutMs: () => number;
   /** 1回のドレインで要約してよい回数の上限（上のヘッダ参照） */
   getMaxPerDrain: () => number;
-  /** 要約に使う CLI。絶対パスも可 */
+  /**
+   * 要約に使う CLI（`aiSummaryCommand`）。絶対パスも可。**`"fm"` バックエンドでは見ない**
+   * （固定パス `FM_COMMAND_PATH` で解決する。→ 下の本体の `getBackend` の読み方を参照）。
+   */
   getCommand: () => string;
-  /** `--model` に渡す値。空文字なら渡さない */
+  /** `--model` に渡す値。空文字なら渡さない。`"fm"` バックエンドでは見ない */
   getModel: () => string;
+  /** テスト用。既定 `FM_COMMAND_PATH`（`/usr/bin/fm`） */
+  fmCommandPath?: string;
   /**
    * 要約 CLI の cwd（隔離ディレクトリ）。
    * ★ `config.ts` は参照のたびに mtime を見て読み直す作りなので、上の6つは**値ではなく
@@ -84,11 +100,11 @@ export function createSummaryPipeline(deps: SummaryPipelineDeps): Summarize {
    *
    * ★ ログの書き込み失敗で発話を止めないこと。要約の判定結果は既に確定しているので、
    *   実測用の窓が壊れているだけで発話そのものには影響させない。
-   * ★ ここに来る（＝呼ばれる）のは `isEnabled()` が true かつ閾値を超えたときだけなので、
-   *   要約が既定 OFF のままなら `logPath` は1バイトも増えない。
-   * ★ このログは issue #31 の完了条件（要約 ON のときの実際の遅延を実測して記録する）のための
-   *   窓であり、hook 経路では `console.warn` が `/dev/null` に消えるのでここしか実測の術が無い。
-   *   実測が終わったら消してよい（ローテートは持たせていない）。
+   * ★ ここに来る（＝呼ばれる）のは `isEnabled()` が true かつ閾値を超えたときだけ。
+   *   **コマンドが解決できなかった（`no-command`）ときはここを呼ばない**（呼び出し側を参照） ——
+   *   CLI を1回も起動していない環境では行数が伸び続けない。実際に起動した行だけが増えるので、
+   *   伸びは要約1回に1行のペースに留まる。
+   * ★ このログは hook 経路では `console.warn` が `/dev/null` に消えるので、実測の窓がここしか無い。
    * ★ D1(b)（issue #38 レビュー）: 6列目 `detail` を追加した。`claudeCli.ts` が拾った stderr の
    *   抜粋（timeout/overflow/error のときだけ持つ）を渡す。ここが空のままだと、本物の CLI 失敗
    *   （OAuth トークン切れ、フラグ拒否）の原因が「1行のログ」から追えなくなる（上の★のとおり、
@@ -135,12 +151,15 @@ export function createSummaryPipeline(deps: SummaryPipelineDeps): Summarize {
         return text;
       }
 
-      // 4. コマンドが見つからない → 原文
-      const commandPath = findCommandPath(deps.getCommand());
-      if (!commandPath) {
-        log("no-command", startedAt, text.length, 0);
-        return text;
-      }
+      // ★ 1回だけ読む。コマンド解決と引数組み立てを別々に読むと、その間に設定パネルで
+      //   バックエンドが切り替わったとき、片方が旧バックエンド・もう片方が新バックエンドの
+      //   組み合わせで実行されうる（→ 上の `getBackend` の docstring）
+      const backend = deps.getBackend();
+
+      // 4. コマンドが見つからない → 原文（no-command はログしない。下の log() の docstring 参照）
+      const commandPath =
+        backend === "fm" ? resolveFmCommandPath(deps.fmCommandPath) : findCommandPath(deps.getCommand());
+      if (!commandPath) return text;
 
       // ここから実際に CLI を起動する。起動を決めた時点でカウントする
       // （タイムアウトや失敗に終わっても、時間を消費した実行として上限に数える）
@@ -151,7 +170,10 @@ export function createSummaryPipeline(deps: SummaryPipelineDeps): Summarize {
       const sessionId = randomUUID();
       registerSessionId(sessionId);
 
-      const args = buildSummaryArgs(SUMMARY_INSTRUCTION, { sessionId, model: deps.getModel() });
+      const args =
+        backend === "fm"
+          ? buildFmSummaryArgs(SUMMARY_INSTRUCTION)
+          : buildSummaryArgs(SUMMARY_INSTRUCTION, { sessionId, model: deps.getModel() });
       const result = runClaudeCli({
         commandPath,
         args,

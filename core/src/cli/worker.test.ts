@@ -73,7 +73,7 @@ function drain(overrides: Partial<DrainDeps> = {}) {
     summarizerSessionsPath: path.join(dir, "summarizer-sessions.json"),
     speakPrompts: true,
     spoolMaxAgeMs: 6 * HOUR,
-    classify: () => "neutral",
+    classify: (texts) => texts.map(() => "neutral"),
     // 既定は素通し（要約しない）。要約の挙動そのものを見るテストだけ個別に差し替える
     summarize: (text) => text,
     now: () => clock,
@@ -188,7 +188,7 @@ describe("メッセージの処理", () => {
 
   it("契約どおりのフィールドで書く", () => {
     appendDelta("m1", 0, "確認します。", true);
-    drain({ classify: () => "happy" });
+    drain({ classify: (texts) => texts.map(() => "happy") });
     expect(records()[0]).toMatchObject({
       seq: 1,
       source: "claude-code",
@@ -456,6 +456,36 @@ describe("応答待ち通知", () => {
       questions: [{ question: "次は何をしますか？", options: [{ label: "進める" }, { label: "やめる" }] }],
     },
   };
+
+  /**
+   * ★ classify は「応答待ち通知1件につき1回」だけ呼ぶ契約（バックエンドによっては1回の
+   *   呼び出しが重いため、文の数だけ呼ぶと通知の発話が大きく遅れる）。質問が複数あると
+   *   `formatPromptEvent` は message を複数返すので、それを跨いで1回にまとまっていることを見る。
+   */
+  it("★ 複数の質問（＝複数 message）でも classify は1回だけ、全文をまとめて呼ばれる", () => {
+    const calls: string[][] = [];
+    writePrompt("q2", {
+      session_id: "sess-1",
+      prompt_id: "p10",
+      hook_event_name: "PreToolUse",
+      tool_name: "AskUserQuestion",
+      tool_input: {
+        questions: [
+          { question: "続けますか？", options: [{ label: "はい" }, { label: "いいえ" }] },
+          { question: "やり直しますか？" },
+        ],
+      },
+    });
+    drain({
+      classify: (texts) => {
+        calls.push(texts);
+        return texts.map(() => "neutral");
+      },
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual(["続けますか？", "選択肢は、はい、いいえ。", "やり直しますか？"]);
+  });
 
   it("質問と選択肢を1文1行で書く", () => {
     writePrompt("q", question);
@@ -1144,42 +1174,75 @@ describe("state の永続化が失敗したときの安全側の挙動（A4）",
  * 文ごとに判定する。
  */
 describe("感情判定", () => {
-  it("★ 要約が効いても、文自体で判定できる emotion は原文由来の判定に塗り潰されない", () => {
+  it("★ 要約が効いても、文自体で判定できる emotion は原文由来の判定に塗り潰されない。classify は1回だけ", () => {
     appendDelta("m1", 0, "驚きの出来事がありました。", true);
+    const calls: string[][] = [];
     drain({
       summarize: () => "順調です。バグが直りました！",
       // 原文は surprised に判定されるが、要約後の各文はそれ自体で別の emotion になる
-      classify: (text) => {
-        if (text.includes("順調")) return "relaxed";
-        if (text.includes("バグ")) return "happy";
-        return "surprised"; // 原文（sentences.join）向け
+      classify: (texts) => {
+        calls.push(texts);
+        return texts.map((text) => {
+          if (text.includes("順調")) return "relaxed";
+          if (text.includes("バグ")) return "happy";
+          return "surprised"; // 原文（sentences.join）向け
+        });
       },
     });
 
     const rows = records();
     expect(rows.map((r) => r.text)).toEqual(["順調です。", "バグが直りました！"]);
     expect(rows.map((r) => r.emotion)).toEqual(["relaxed", "happy"]);
+    // ★ 全部の文が自力で判定できているので、原文（sentences.join）はもう一度 classify しない
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual(["順調です。", "バグが直りました！"]);
   });
 
-  it("★ 要約が効いたとき、文自体では neutral にしかならない文は原文由来の emotion を受け取る", () => {
+  it("★ 要約が効いたとき、文自体では neutral にしかならない文は原文由来の emotion を受け取る。neutral が混ざるときだけ原文をもう1回 classify する", () => {
     appendDelta("m1", 0, "元のメッセージです。", true);
+    const calls: string[][] = [];
     drain({
       summarize: () => "要約その1！要約その2？要約その3。",
       // 要約後の文には「元の」が含まれない。文ごとに判定すると全部 neutral になる
-      classify: (text) => (text.includes("元の") ? "happy" : "neutral"),
+      classify: (texts) => {
+        calls.push(texts);
+        return texts.map((text) => (text.includes("元の") ? "happy" : "neutral"));
+      },
     });
 
     const rows = records();
     expect(rows.map((r) => r.text)).toEqual(["要約その1！", "要約その2？", "要約その3。"]);
     // 自力では neutral にしかならないので、原文（sentences.join）由来の happy を借りる
     expect(rows.map((r) => r.emotion)).toEqual(["happy", "happy", "happy"]);
+    // ★ neutral が混ざったので、原文をもう一度 classify する（合計2回）
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toEqual(["要約その1！", "要約その2？", "要約その3。"]);
+    expect(calls[1]).toEqual(["元のメッセージです。"]);
+  });
+
+  /**
+   * ★ classify は「メッセージ1件につき1回」だけ呼ぶ契約。文の数だけ呼ぶと、1回の呼び出しが
+   *   重いバックエンドで発話が大きく遅れる。
+   */
+  it("★ 複数文のメッセージでも classify は1回だけ、全文をまとめて呼ばれる", () => {
+    appendDelta("m1", 0, "確認します。ログを見ます。完了しました。", true);
+    const calls: string[][] = [];
+    drain({
+      classify: (texts) => {
+        calls.push(texts);
+        return texts.map(() => "neutral");
+      },
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual(["確認します。", "ログを見ます。", "完了しました。"]);
   });
 
   it("要約が効かなかったとき（原文フォールバック）は、従来どおり文ごとに emotion が判定される", () => {
     appendDelta("m1", 0, "うれしいです。むずかしいです。", true);
     drain({
       summarize: (text) => text, // 要約が効かない
-      classify: (text) => (text.includes("うれしい") ? "happy" : "neutral"),
+      classify: (texts) => texts.map((text) => (text.includes("うれしい") ? "happy" : "neutral")),
     });
 
     const rows = records();

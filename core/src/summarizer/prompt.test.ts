@@ -18,4 +18,38 @@ describe("SUMMARY_INSTRUCTION", () => {
     if (!negativeLine) return;
     expect(negativeLine).not.toContain("記号");
   });
+
+  it("原文に近い口語調を求め、です・ます調を固定しない", () => {
+    expect(SUMMARY_INSTRUCTION).toContain("原文に近い口語調");
+    expect(SUMMARY_INSTRUCTION).not.toContain("です・ます調");
+  });
+
+  /**
+   * ★ 「口語調で書く」ルールと矛盾する丁寧語の例示を残さない。CLAUDE.md で砕けた口調を
+   *   指示しているセッションでは、例示につられて要約だけ丁寧語になりうる。
+   */
+  it("★ 口調の例示に丁寧語（言い切りの「〜できました！」「すみません、〜」）を含まない", () => {
+    expect(SUMMARY_INSTRUCTION).not.toContain("できました！");
+    expect(SUMMARY_INSTRUCTION).not.toContain("すみません、");
+  });
+
+  it("発言の主体と依頼の向きを原文のまま保つことを含む", () => {
+    expect(SUMMARY_INSTRUCTION).toContain("発言の主体（誰が）と依頼の向き（誰に）を原文のまま保つ");
+  });
+
+  it("肯定・否定の反転を禁じる", () => {
+    expect(SUMMARY_INSTRUCTION).toContain("原文の肯定・否定を反転させない");
+  });
+
+  it("数字はぼかすのは可だが、原文と違う数字の言い切りは禁じる", () => {
+    const line = SUMMARY_INSTRUCTION.split("\n").find((l) => l.includes("数字"));
+    expect(line).toBeDefined();
+    expect(line).toContain("ぼかしてよい");
+    expect(line).toContain("原文と違う数字を言い切らない");
+  });
+
+  it("原文に無い内容を足すことと、いちばん伝えたい内容を落とすことを禁じる", () => {
+    expect(SUMMARY_INSTRUCTION).toContain("原文に書かれていない内容を付け加えないこと");
+    expect(SUMMARY_INSTRUCTION).toContain("原文でいちばん伝えたい内容を省略しないこと");
+  });
 });

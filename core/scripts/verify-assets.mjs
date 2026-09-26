@@ -46,6 +46,9 @@ const env = {
   CHATTER_AGENT_HOST: "127.0.0.1",
   CHATTER_AGENT_PORT: String(PORT),
   CHATTER_AGENT_TTS_SPAWN: "0",
+  // ★ 感情判定は見ないシナリオなので固定する。既定（ollaya・spawn=true）のままだと、
+  //   開発機に ollaya が入っていれば本物の `ollaya serve` が起動されうる
+  CHATTER_AGENT_EMOTION_CLASSIFIER: "dictionary",
 };
 
 let server = null;

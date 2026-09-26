@@ -113,6 +113,8 @@ cd chatter-mascot
 - **Claude Code**
 - **[AivisSpeech](https://aivis-project.com/)** — **just having it installed is enough.** If the synthesis engine isn't running, the server wakes it up, and stopping the server takes it down too. You only need to start it by hand to connect to an engine on a different host, or **to add a speaker** (adding a voice model needs the GUI). To turn the auto-start off entirely, set `CHATTER_AGENT_TTS_SPAWN=0`
 - **macOS** — the display apps target macOS and Android XR, the playback command defaults to `afplay`, and the engine is auto-discovered only at macOS paths. On Linux / Windows, point the CLI player at a playback command with `CHATTER_AGENT_PLAYER_COMMAND`
+- **Summarization (optional)** — shortens long messages before reading them aloud. The default backend is `fm` (the Apple Foundation Models CLI, macOS 27+). Where it's unavailable (pre-macOS 27, Linux, Windows), the original text is read as-is. `aiSummaryBackend` can be switched to `claude` (`claude -p`) instead
+- **Emotion classification (optional)** — picks an expression for each utterance. The default is **[Ollaya](https://ollaya.dev/)** (a local decision model). Run `ollaya pull laya:multilingual` once to fetch the model; after that the server wakes it up whenever it isn't running, the same way it does for AivisSpeech. Where it's not installed or unreachable, classification falls back to the dictionary-based classifier, so speech never stops. `emotionClassifier` can also be switched to `fm` or `dictionary` (the original rule-based classifier)
 
 ### Installing the Claude Code plugin
 

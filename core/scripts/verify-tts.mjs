@@ -137,6 +137,10 @@ function serverEnv(overrides = {}) {
     CHATTER_AGENT_TTS_URL: `http://127.0.0.1:${engine.address().port}`,
     CHATTER_AGENT_TTS_SPEAKER_ID: String(SPEAKER_ID),
     CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS: "3000",
+    // ★ 感情判定は見ないシナリオなので固定する。既定（ollaya・spawn=true）のままだと、
+    //   開発機に ollaya が入っていれば本物の `ollaya serve` が起動され、[Engine] 起動ログの
+    //   検査（「1度も出ていない」）や pid の正規表現に Ollaya 側の pid が混ざりうる
+    CHATTER_AGENT_EMOTION_CLASSIFIER: "dictionary",
     ...overrides,
   };
 }
@@ -427,7 +431,13 @@ try {
         CHATTER_AGENT_TTS_SPAWN_COMMAND: "chatter-agent-no-such-engine-xyz",
       }),
     );
-    await until(() => (server?.log ?? "").includes("合成エンジンが見つかりません"), 5000);
+    // ★ 子プロセスの stdout/stderr は POSIX ではパイプ＝非同期フラッシュ（Node の仕様）。
+    //   `describeEngineSkip` の複数行 console.warn は同一 tick の同期呼び出しでも、
+    //   親側には別々のタイミングで届きうる。**最後の行**（帰結の503）が届くのを待つことで、
+    //   同じストリーム（stderr）上で先に書かれた行がすべて届いていることを保証する
+    //   （単一の書き手の単一パイプは順序を保つ）。先頭の行で待つと、サーバー起動時に走る
+    //   他の非同期処理と競合して手前で止まったスナップショットを掴みうる。
+    await until(() => (server?.log ?? "").includes("音声の GET は 503 を返します"), 5000);
 
     const missLog = server?.log ?? "";
     check(

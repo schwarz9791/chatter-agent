@@ -44,6 +44,7 @@ function api(overrides: Partial<ControlApiDeps> = {}) {
     listSpeakers: () => Promise.resolve([{ id: 1, label: "話者（ノーマル）" }]),
     synthesizePreview: () => Promise.resolve(new ArrayBuffer(44)),
     summaryPreview: {
+      getBackend: () => "claude",
       getCommand: () => "chatter-agent-no-such-command",
       getModel: () => "",
       getTimeoutMs: () => 1000,
@@ -230,6 +231,24 @@ describe("PATCH /v1/config", () => {
     const res = api().patchConfig({ ttsSpeakerId: 2, playerCommand: "/bin/sh" });
     expect(res.status).toBe(403);
     expect(readFile().ttsSpeakerId).toBe(1);
+  });
+
+  /**
+   * ★ Ollaya の spawn 判定を、起動時の1回だけでなく設定変更の直後にも効かせるためのフック
+   *   （→ `server/index.ts`）。実際に書き込んだキーの一覧が渡ること、書けなかったときは
+   *   呼ばれないことを見る。
+   */
+  it("★ 書き込みが成功すると、変わったキーの一覧で onConfigPatched を呼ぶ", () => {
+    const calls: string[][] = [];
+    const res = api({ onConfigPatched: (keys) => calls.push(keys) }).patchConfig({ emotionClassifier: "dictionary" });
+    expect(res.status).toBe(200);
+    expect(calls).toEqual([["emotionClassifier"]]);
+  });
+
+  it("★ 弾かれた PATCH では onConfigPatched を呼ばない", () => {
+    const calls: string[][] = [];
+    api({ onConfigPatched: (keys) => calls.push(keys) }).patchConfig({ playerCommand: "/bin/sh" });
+    expect(calls).toHaveLength(0);
   });
 });
 

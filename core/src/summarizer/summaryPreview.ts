@@ -22,27 +22,35 @@
  *   通るのに本番では原文が読み上げられる、という一番切り分けにくいズレを作らないため。
  *
  * ★ 逆に、ここが**わざと通らない**のは `isEnabled` / `aiSummaryThreshold` /
- *   `aiSummaryMaxPerDrain` の3つ。要約が既定 OFF のままでも、短い文でも、
+ *   `aiSummaryMaxPerDrain` の3つ。要約が無効でも、短い文でも、
  *   「CLI が動くか」を試せることがこのボタンの目的なので、そこは飛ばすのが正しい。
  */
 
 import { randomUUID } from "crypto";
 import { toSpeechSentences } from "../text/speechText";
 import { findCommandPath } from "../core/commandPath";
-import { buildSummaryArgs, runClaudeCliAsync } from "./claudeCli";
+import type { AiSummaryBackend } from "../core/config";
+import { buildFmSummaryArgs, buildSummaryArgs, resolveFmCommandPath, runClaudeCliAsync } from "./claudeCli";
 import { SUMMARY_INSTRUCTION } from "./prompt";
 import { isAcceptableSummary } from "./summaryPipeline";
 import type { SummaryOutcome } from "./types";
 
 export interface SummaryPreviewDeps {
-  /** 要約に使う CLI（`aiSummaryCommand`） */
+  /**
+   * 要約バックエンド（`summaryPipeline.ts` の `SummaryPipelineDeps.getBackend` と同じ規則）。
+   * **本体で1回だけ読む**（→ 下の本体のコメント参照）。
+   */
+  getBackend: () => AiSummaryBackend;
+  /** 要約に使う CLI（`aiSummaryCommand`）。**`"fm"` バックエンドでは見ない**（固定パスで解決する） */
   getCommand: () => string;
-  /** `--model` に渡す値（`aiSummaryModel`）。空文字なら渡さない */
+  /** `--model` に渡す値（`aiSummaryModel`）。空文字なら渡さない。`"fm"` バックエンドでは見ない */
   getModel: () => string;
   /** 要約1回の上限（`aiSummaryTimeoutMs`） */
   getTimeoutMs: () => number;
   /** 要約 CLI の cwd（隔離ディレクトリ。`getSummarizerHomeDir()`） */
   homeDir: string;
+  /** テスト用。既定 `FM_COMMAND_PATH`（`/usr/bin/fm`） */
+  fmCommandPath?: string;
   /**
    * `--session-id` を、CLI を起こす**前に**永続化する（無限ループ防止の第2層）。
    *
@@ -78,9 +86,13 @@ export async function runSummaryPreview(text: string, deps: SummaryPreviewDeps):
     detail,
   });
 
+  // ★ 1回だけ読む（→ `getBackend` の docstring）。コマンド解決と引数組み立てを別々に読むと、
+  //   その間にパネルでバックエンドが切り替わったとき、ズレた組み合わせで実行されうる
+  const backend = deps.getBackend();
+
   let commandPath: string | undefined;
   try {
-    commandPath = findCommandPath(deps.getCommand());
+    commandPath = backend === "fm" ? resolveFmCommandPath(deps.fmCommandPath) : findCommandPath(deps.getCommand());
   } catch (err) {
     return done("internal", null, err instanceof Error ? err.message : String(err));
   }
@@ -95,9 +107,14 @@ export async function runSummaryPreview(text: string, deps: SummaryPreviewDeps):
     return done("internal", null, err instanceof Error ? err.message : String(err));
   }
 
+  const args =
+    backend === "fm"
+      ? buildFmSummaryArgs(SUMMARY_INSTRUCTION)
+      : buildSummaryArgs(SUMMARY_INSTRUCTION, { sessionId, model: deps.getModel() });
+
   const result = await runClaudeCliAsync({
     commandPath,
-    args: buildSummaryArgs(SUMMARY_INSTRUCTION, { sessionId, model: deps.getModel() }),
+    args,
     text,
     homeDir: deps.homeDir,
     timeoutMs: deps.getTimeoutMs(),

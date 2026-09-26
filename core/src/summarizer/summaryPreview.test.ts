@@ -65,6 +65,7 @@ const LONG_TEXT =
 
 function makeDeps(overrides: Partial<SummaryPreviewDeps> = {}): SummaryPreviewDeps {
   return {
+    getBackend: () => "claude",
     getCommand: () => writeRecorderScript(),
     getModel: () => "",
     getTimeoutMs: () => 5000,
@@ -199,5 +200,43 @@ describe("runSummaryPreview", () => {
     process.env.RECORDER_MODE = "fail";
     const result = await runSummaryPreview(LONG_TEXT, makeDeps());
     expect(result.summary).toBeNull();
+  });
+
+  it("★ backend が fm のときは claude 専用引数（--session-id 等）を渡さない", async () => {
+    const recordLog = path.join(dir, "record.jsonl");
+    process.env.RECORD_LOG = recordLog;
+    process.env.RECORDER_REPLY = "短い要約です。";
+
+    // ★ fm バックエンドは固定パス（FM_COMMAND_PATH）で解決するので、テストでは
+    //   fmCommandPath でフェイク CLI に差し替える（getCommand は claude 専用なので見ない）
+    const result = await runSummaryPreview(
+      LONG_TEXT,
+      makeDeps({ getBackend: () => "fm", fmCommandPath: writeRecorderScript() }),
+    );
+    expect(result.outcome).toBe("ok");
+
+    const line = JSON.parse(fs.readFileSync(recordLog, "utf-8").trim()) as { sessionId: string | null };
+    expect(line.sessionId).toBeNull();
+  });
+
+  /**
+   * ★ コマンド解決と引数組み立てを別々に `getBackend()` で読むと、その間の設定変更で
+   *   ズレた組み合わせで実行されうる（→ summaryPipeline.test.ts の同名テスト）。
+   */
+  it("★ getBackend は1回だけ読む", async () => {
+    process.env.RECORDER_REPLY = "短い要約です。";
+    let calls = 0;
+    const result = await runSummaryPreview(
+      LONG_TEXT,
+      makeDeps({
+        getBackend: () => {
+          calls++;
+          return "claude";
+        },
+      }),
+    );
+
+    expect(calls).toBe(1);
+    expect(result.outcome).toBe("ok");
   });
 });

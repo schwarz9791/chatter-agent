@@ -57,6 +57,9 @@ const env = {
   //   `CHATTER_AGENT_TTS_ENABLED=false` では逃げられない —— 下の「音声の相対パスが
   //   載っている」がフレームの audio を検査しているため
   CHATTER_AGENT_TTS_SPAWN: "0",
+  // ★ 感情判定は見ないシナリオなので固定する。既定（ollaya・spawn=true）のままだと、
+  //   開発機に ollaya が入っていれば本物の `ollaya serve` が起動されうる
+  CHATTER_AGENT_EMOTION_CLASSIFIER: "dictionary",
 };
 
 const queueSize = () => fs.readdirSync(queueDir).filter((f) => f.endsWith(".json")).length;

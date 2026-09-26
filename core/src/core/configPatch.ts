@@ -59,13 +59,16 @@ const READONLY_UNTIL_RESTART: readonly ConfigKey[] = ["host", "port", "allowedOr
  * しかも音が鳴らなくなるだけなので、**利用者から見た症状は「無音」だけ**で、本文が
  * 出ていることには気付けない。(a) と同じ「設定を1行書き換えるだけ」の壊れ方。
  *
- * ★ 設定パネルはこのキーを一度も書かない（書くのは `ttsSpeakerId` / `ttsSpeedScale` /
- *   `aiSummaryEnabled` の3つだけ）。塞いでも UI は何も失わない。
+ * `ollayaBaseUrl` も同じ理由。感情判定が `"ollaya"` のとき、以後の全メッセージ本文が
+ * そのホストの `/v1/systemone` へ POST される。
+ *
+ * ★ 設定パネルはこれらのキーを一度も書かない（書くのは `ttsSpeakerId` / `ttsSpeedScale` /
+ *   `aiSummaryEnabled` / `aiSummaryBackend` / `emotionClassifier` など）。塞いでも UI は何も失わない。
  *
  * ★ `playerServerUrl` は載せない。player は**受け手**なので、向き先を変えても
  *   本文が外へ出ることはない（別のサーバーの音声を再生させられるだけ）。
  */
-const READONLY_EXFILTRATION: readonly ConfigKey[] = ["ttsBaseUrl"];
+const READONLY_EXFILTRATION: readonly ConfigKey[] = ["ttsBaseUrl", "ollayaBaseUrl"];
 
 const READONLY_KEYS: readonly ConfigKey[] = [
   ...READONLY_EXECUTABLE,

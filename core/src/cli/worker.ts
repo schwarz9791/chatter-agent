@@ -216,7 +216,18 @@ export interface DrainDeps {
   speakPrompts: boolean;
   /** これより無活動な spool は孤児として掃除する */
   spoolMaxAgeMs: number;
-  classify: (text: string) => Emotion;
+  /**
+   * 感情判定。**メッセージ（または応答待ち通知）単位で1回だけ呼ぶ**契約。
+   * 戻り値は `texts` と同じ長さ・同じ順序で、`texts[i]` の感情が `result[i]`。
+   *
+   * ★ throw しない契約（`Summarize` と同じ考え方）。バックエンド側で接続不可・タイムアウト・
+   *   壊れた応答を辞書式へ落としてから返す（→ `emotion/ollayaClassifier.ts` /
+   *   `emotion/fmClassifier.ts`）。
+   * ★ 「メッセージ単位で1回」の意味はバックエンドによって違う。辞書式・Ollaya は `texts` を
+   *   1文ずつ独立に判定して返す（呼び出し回数だけが1回にまとまる）。fm はメッセージ全文を
+   *   1回だけ判定し、同じ感情を `texts` の全要素に適用する。
+   */
+  classify: (texts: string[]) => Emotion[];
   /**
    * 長いメッセージを要約する。**throw しない**（→ summarizer/types.ts の Summarize）。
    *
@@ -759,9 +770,17 @@ function processMessage(
     ? summarizeSentences(sentences, deps, state, messageId)
     : { spoken: sentences, summarized: false };
 
+  // ★ spoken 全体をまとめて1回だけ classify する（1文ずつ呼ばない）。fm バックエンドは
+  //   1回の呼び出しが数秒かかるため、文の数だけ呼ぶと発話が文の数×数秒遅れてしまう
+  const ownEmotions = spoken.length > 0 ? deps.classify(spoken) : [];
+
   // 要約で記号が落ちると文単位の判定は neutral に潰れやすい。原文全体の判定を
-  // 保険として持っておき、文単体で判定できなかったときだけ借りる。
-  const sharedEmotion = summarized ? deps.classify(sentences.join("\n")) : null;
+  // 保険として持っておきたいが、classify はメッセージ単位で1回だけ呼ぶ契約なので
+  // 無条件には呼ばない。★ 要約が効いていて、かつ文単位の判定が1つでも neutral に
+  // 落ちたときだけ、原文をもう一度 classify する（要素数1の配列で呼んで先頭を取る）。
+  // 全部の文が自力で判定できていれば呼ばない —— 要約が効いたメッセージでも
+  // 呼び出し回数を1回に抑えられる
+  const sharedEmotion = summarized && ownEmotions.includes("neutral") ? deps.classify([sentences.join("\n")])[0] : null;
 
   // ★ メッセージ1つ分をまとめて1回だけ publish すること。分けて呼ぶと `ts` が割れる
   //   （`speechLog.append` は呼び出しごとに1回だけ時刻を取る）。1メッセージ内で
@@ -769,10 +788,10 @@ function processMessage(
   //   重複排除のキーは `(epoch, seq)` で、`ts` はそこには使わない
   if (spoken.length > 0) {
     deps.publish(
-      spoken.map((text): SpeechEntry => {
+      spoken.map((text, i): SpeechEntry => {
         // 文単体で判定できたならそれを使う。neutral にしか落ちなかったときだけ、
         // 原文由来の感情（sharedEmotion）で補う。
-        const ownEmotion = deps.classify(text);
+        const ownEmotion = ownEmotions[i] ?? "neutral";
         return {
           source: "claude-code",
           sessionId: content.sessionId,
@@ -860,8 +879,11 @@ function processPrompt(
     return { written: 0, changed: true, stateDirty: true };
   }
 
-  const records: SpeechEntry[] = [];
   const sessionId = getEventSessionId(payload);
+
+  // ★ classify はここでも「呼ぶのは1回」の契約に合わせる。この応答待ち通知に含まれる
+  //   全メッセージの全文をまず集め、最後にまとめて1回だけ判定する
+  const sentences: string[] = [];
 
   for (const message of messages) {
     const cleaned = cleanTextForSpeech(message.text);
@@ -873,19 +895,19 @@ function processPrompt(
     state.lastTextAt = at;
     stateDirty = true;
 
-    for (const sentence of splitIntoSentences(cleaned)) {
-      if (!sentence) continue;
-      records.push({
-        source: "claude-code",
-        sessionId,
-        turnId: null,
-        messageId: null,
-        kind: "prompt",
-        text: sentence,
-        emotion: deps.classify(sentence),
-      });
-    }
+    sentences.push(...splitIntoSentences(cleaned).filter((s) => s.length > 0));
   }
+
+  const emotions = sentences.length > 0 ? deps.classify(sentences) : [];
+  const records: SpeechEntry[] = sentences.map((sentence, i) => ({
+    source: "claude-code",
+    sessionId,
+    turnId: null,
+    messageId: null,
+    kind: "prompt",
+    text: sentence,
+    emotion: emotions[i] ?? "neutral",
+  }));
 
   // ★ 書き込みが成功してから消す（processMessage と同じ順序）。
   //   先に消すと、append が失敗したときにイベントが復旧不能に失われる

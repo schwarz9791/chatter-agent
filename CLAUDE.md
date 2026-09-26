@@ -19,7 +19,7 @@ Android XR）が鳴らして VRM に反映する。
 | `core/src/server/` | `chatter-agent-server`。WebSocket 配信 + 音声の HTTP 配布 + 制御 API |
 | `core/src/player/` | `chatter-agent-player`。発話 CLI。**プロトコルの参照実装。捨てない** |
 | `core/src/core/` | 契約と基盤（型・パス・設定・ロック・キュー） |
-| `core/src/text/` `emotion/` `prompt/` `summarizer/` `tts/` | 整形・感情判定・応答待ち通知・AI要約（既定OFF）・合成クライアント |
+| `core/src/text/` `emotion/` `prompt/` `summarizer/` `tts/` | 整形・感情判定・応答待ち通知・AI要約（既定ON）・合成クライアント |
 | `chatter-mascot/` | 表示側アプリ（Unity + UniVRM）。macOS と Android XR を1プロジェクトから |
 | `docs/` | 基本設計・ファイル構成・コマンド |
 | `docs/knowledge/` | 実装で踏んだこと・なぜそうしたか・実測値 |
@@ -35,7 +35,7 @@ plugin/scripts/*.sh          bash。payload を spool/<message_id>.<index>.json 
   ▼
 chatter-agent-speak (CLI)    ロックを取れた1プロセスだけが spool を順に処理
   │                          final:true を待つ（非 final では何もせず終わる）
-  │                          delta 結合 → Markdown除去 → 文分割 → 要約（既定OFF） → 感情判定 → epoch/seq 採番
+  │                          delta 結合 → Markdown除去 → 文分割 → 要約（既定ON） → 感情判定 → epoch/seq 採番
   ├──▶ speech.jsonl          記録。1文1行で残す。配信は読まない
   ▼
 speech/<seq>.json            配信キュー。1文1ファイル

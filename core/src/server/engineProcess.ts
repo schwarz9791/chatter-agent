@@ -40,6 +40,15 @@ export interface EngineSpawnPlan {
    *   （→ PR #52 のレビュー）。
    */
   resolvedFrom?: string;
+  /**
+   * 追加で渡す環境変数（`process.env` に**上書き**で重ねる）。
+   *
+   * ★ Ollaya 用（`resolveOllayaSpawn`）。`ollaya serve` は `--host` / `--port` を持たず、
+   *   `OLLAYA_HOST`（`host:port` 形式）でしか bind 先を指定できない。AivisSpeech
+   *   （`args` で `--host`/`--port` を渡す）とは起こし方が違うので、`args` を汚さずここで
+   *   分けて持つ。
+   */
+  env?: Record<string, string>;
 }
 
 /**
@@ -148,6 +157,52 @@ export function resolveEngineSpawn(deps: ResolveEngineSpawnDeps): EngineSpawnRes
   return { command: found, args: buildArgs(deps.args, url) };
 }
 
+/** Ollaya のコマンド名。`ttsSpawnCommand` と違い設定で差し替えられない（固定名で解決する） */
+const OLLAYA_COMMAND = "ollaya";
+
+/**
+ * ★ `run`（AivisSpeech-Engine）と違い `ollaya` は**サブコマンド式の CLI**。
+ *   サーバーとして起こすには常に `serve` を渡す必要がある。
+ */
+const OLLAYA_ARGS = ["serve"];
+
+export interface ResolveOllayaSpawnDeps {
+  /** `ollayaBaseUrl`。`makeUrlParser` を通っているので必ず妥当な絶対 URL */
+  baseUrl: string;
+  /** テスト用。既定 `os.homedir()` */
+  homeDir?: string;
+  /** テスト用。既定 `process.env` */
+  env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * Ollaya を起こすプランを決める**純関数**（`resolveEngineSpawn` の Ollaya 版）。
+ *
+ * ★ **コマンドは固定名 `"ollaya"` で解決する。** `ttsSpawnCommand` のような差し替えの口は
+ *   無い（`emotionClassifier` / `aiSummaryBackend` と同じ「書き込み可だが任意のコマンドには
+ *   変えられない」方針）。
+ * ★ **`args` は常に `["serve"]`。** bind 先は引数ではなく `env.OLLAYA_HOST` で渡す
+ *   （`EngineSpawnPlan.env` の docstring参照）。
+ */
+export function resolveOllayaSpawn(deps: ResolveOllayaSpawnDeps): EngineSpawnResolution {
+  const homeDir = deps.homeDir ?? os.homedir();
+  const env = deps.env ?? process.env;
+
+  const url = new URL(deps.baseUrl);
+  if (!isLoopback(url.hostname)) return { skip: "not-loopback", host: url.hostname };
+  if (url.protocol !== "http:") return { skip: "not-http", protocol: url.protocol };
+
+  const resolved = findCommandPath(OLLAYA_COMMAND, { homeDir, env });
+  if (resolved === undefined) return { skip: "not-found", tried: searchedPaths(OLLAYA_COMMAND, env) };
+
+  // ★ **角括弧は外さない。** `buildArgs` が `--host` 引数向けに外すのとは事情が違う——
+  //   `env.OLLAYA_HOST` は `host:port` を丸ごと1つの文字列として渡す形なので、IPv6 は
+  //   `[::1]:port` のまま渡さないと `::1:port` になって host:port として解釈できない。
+  //   `url.hostname` は IPv6 を角括弧付き（`"[::1]"`）で返すので、そのまま使う。
+  const port = url.port || DEFAULT_HTTP_PORT;
+  return { command: resolved, args: OLLAYA_ARGS, env: { OLLAYA_HOST: `${url.hostname}:${port}` } };
+}
+
 /**
  * `not-found` のときに「どこを探したか」を返す。
  *
@@ -201,20 +256,23 @@ const TRIED_HINT_LIMIT = 12;
  *
  * ★ **帰結（音声が 503 になる）はここに書かない。** それを知っているのは呼び出し側だけ
  *   （→ `index.ts` の `warnAudioUnavailable`）。
+ *
+ * @param subject 文中で名指しする対象。既定は合成エンジン向けの文言（呼び出し側を変えずに
+ *   済ませるため）。Ollaya には `"Ollaya"` を渡す（→ `resolveOllayaSpawn` の呼び出し側）。
  */
-export function describeEngineSkip(skip: EngineSpawnSkip): string[] {
+export function describeEngineSkip(skip: EngineSpawnSkip, subject = "合成エンジン"): string[] {
   switch (skip.skip) {
     case "not-loopback":
-      return [`${LOG_PREFIX} ${skip.host} はループバックではないので合成エンジンを起こせません`];
+      return [`${LOG_PREFIX} ${skip.host} はループバックではないので${subject}を起こせません`];
 
     case "not-http":
-      return [`${LOG_PREFIX} ${skip.protocol} のエンジンは起こせません（起こせるのは平文の http: だけ）`];
+      return [`${LOG_PREFIX} ${skip.protocol} の${subject}は起こせません（起こせるのは平文の http: だけ）`];
 
     case "not-found": {
       const shown = skip.tried.slice(0, TRIED_HINT_LIMIT);
       const rest = skip.tried.length - shown.length;
       return [
-        `${LOG_PREFIX} 合成エンジンが見つかりません。探した場所:`,
+        `${LOG_PREFIX} ${subject}が見つかりません。探した場所:`,
         ...shown.map((candidate) => `${LOG_PREFIX}${ITEM_INDENT}${candidate}`),
         ...(rest > 0 ? [`${LOG_PREFIX}${ITEM_INDENT}…ほか ${rest} 件`] : []),
         // ★ 実行ビットまで見ていることを言う。`ls` で見えるファイルが「探した場所」に並ぶので、
@@ -255,6 +313,13 @@ export interface StartEngineDeps {
   killWaitMs?: number;
   log?: (message: string) => void;
   warn?: (message: string) => void;
+  /** ログの主語。既定 `"[Engine]"`（合成エンジン）。Ollaya には `"[Ollaya]"` を渡す */
+  label?: string;
+  /**
+   * 起こせなかった／落ちたときの帰結を1行で言い切る文言。既定は合成エンジン向け
+   * （`"音声は 503 になります"`）。Ollaya には `"感情判定は辞書式になります"` を渡す。
+   */
+  unavailableNote?: string;
 }
 
 /** 落ちた理由を残すのに要る量。数 KB あれば足りる。stdout / stderr がそれぞれ持つ */
@@ -277,6 +342,8 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
   const killWaitMs = deps.killWaitMs ?? KILL_WAIT_MS;
   const log = deps.log ?? ((m: string) => console.log(m));
   const warn = deps.warn ?? ((m: string) => console.warn(m));
+  const label = deps.label ?? "[Engine]";
+  const unavailableNote = deps.unavailableNote ?? "音声は 503 になります";
 
   const child = spawnFn(plan.command, plan.args, {
     // ★ shell は噛ませない。パスに空白が入るだけで壊れるし、設定ファイル経由の
@@ -291,6 +358,10 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
     //   `run` は PyInstaller のバイナリで**自分の子を持つ**ので、`child.kill()`（自分だけ）では
     //   孫が残り、ポートを掴んだままになる
     detached: true,
+    // ★ `plan.env` が無ければ `undefined` のまま渡す。Node は `options.env` を省略すると
+    //   `process.env` をそのまま継承するので、AivisSpeech（env を持たない）の挙動は変わらない。
+    //   Ollaya（`OLLAYA_HOST` を渡す必要がある）だけがここで `process.env` に重ねる
+    env: plan.env ? { ...process.env, ...plan.env } : undefined,
   });
 
   let exited = false;
@@ -317,7 +388,7 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
     stderrTail = (stderrTail + chunk).slice(-OUTPUT_TAIL_CHARS);
   });
 
-  log(`[Engine] 起動しました (pid=${child.pid ?? "?"}): ${plan.command} ${plan.args.join(" ")}`);
+  log(`${label} 起動しました (pid=${child.pid ?? "?"}): ${plan.command} ${plan.args.join(" ")}`);
 
   // ★ spawn の失敗（ENOENT / EACCES）は `exit` ではなく `error` で来る。`exit` だけを見る実装は
   //   「起動したつもりで永久に繋がらない」状態になる（→ `player/audioPlayer.ts`）
@@ -326,7 +397,7 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
     // ★ 帰結までここで言い切る。`index.ts` の `warnAudioUnavailable` は「起こさないと決めた」
     //   経路の行なので、**起こしてから失敗した**この経路には届かない。
     //   ENOENT / EACCES は `ttsSpawnCommand` を書き間違えた人が最も踏む経路
-    warn(`[Engine] 起動できません (${plan.command}): ${String(err)}。音声は 503 になります`);
+    warn(`${label} 起動できません (${plan.command}): ${String(err)}。${unavailableNote}`);
   });
 
   child.on("exit", (code, signal) => {
@@ -334,15 +405,15 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
     // ★ 自分で止めたときに stderr を出さないこと。SIGTERM で殺すと `code` は `null` になり、
     //   `code !== 0` の条件に引っかかるので、**終了のたびに 2KB のログが落ちる**
     if (stopRequested) {
-      log(`[Engine] 停止しました (signal=${signal})`);
+      log(`${label} 停止しました (signal=${signal})`);
       return;
     }
-    warn(`[Engine] 終了しました (code=${code} signal=${signal})。再起動はしません（音声は 503 になります）`);
+    warn(`${label} 終了しました (code=${code} signal=${signal})。再起動はしません（${unavailableNote}）`);
     // ★ これが無いと「起動したはずなのに繋がらない」の原因が1文字も残らない
     if (code === 0) return;
     // stderr を優先。エンジンによっては全部 stdout に出す（uvicorn がそう）ので、その場合は stdout
     const tail = stderrTail.trim() || stdoutTail.trim();
-    if (tail) warn(`[Engine] 出力(末尾):\n${tail}`);
+    if (tail) warn(`${label} 出力(末尾):\n${tail}`);
   });
 
   const waitExit = (ms: number): Promise<boolean> =>
@@ -372,7 +443,7 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
     } catch (err) {
       // ESRCH = そのグループはもう居ない。止めるという目的は達している
       if ((err as NodeJS.ErrnoException).code === "ESRCH") return "gone";
-      warn(`[Engine] ${signal} を送れませんでした (pid=${pid}): ${String(err)}`);
+      warn(`${label} ${signal} を送れませんでした (pid=${pid}): ${String(err)}`);
       return "failed";
     }
   };
@@ -399,7 +470,7 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
     //     **既存の入口ガードと区別できる単体テストは書けない**ので、意図をここに残す
     if (exited) return;
 
-    warn(`[Engine] SIGTERM で終わらないので SIGKILL します (pid=${child.pid})`);
+    warn(`${label} SIGTERM で終わらないので SIGKILL します (pid=${child.pid})`);
     signalGroup("SIGKILL");
     await waitExit(killWaitMs);
   };

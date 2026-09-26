@@ -113,6 +113,8 @@ cd chatter-mascot
 - **Claude Code**
 - **[AivisSpeech](https://aivis-project.com/)** —— **インストールだけしておけば十分です。** 合成エンジンが動いていなければサーバーが起こし、サーバーを止めれば一緒に落ちます。手で起こすのは、別ホストのエンジンに繋ぐときと、**話者を増やすとき**（音声モデルの追加には GUI が要ります）。自動起動そのものを止めるなら `CHATTER_AGENT_TTS_SPAWN=0`
 - **macOS** —— 表示側アプリは macOS と Android XR 向けで、再生コマンドの既定は `afplay`、合成エンジンの自動探索も macOS のパスしか見ません。Linux / Windows では、CLI プレーヤーに `CHATTER_AGENT_PLAYER_COMMAND` で再生コマンドを指定してください
+- **要約（任意）** —— 長い発言を短く整えてから読み上げます。既定は `fm`（macOS 27 以降に入っている Apple Foundation Models CLI）。使えない環境（macOS 27 未満・Linux・Windows）では原文がそのまま読み上げられます。`aiSummaryBackend` を `claude`（`claude -p`）に切り替えることもできます
+- **感情判定（任意）** —— 発話ごとに表情を選びます。既定は **[Ollaya](https://ollaya.dev/)**（ローカルで動く decision model）で、`ollaya pull laya:multilingual` で一度モデルを取得しておけば、以後は AivisSpeech と同じく居なければサーバーが起こします。導入していない・繋がらないときは辞書式の判定にフォールバックするので、無くても発話は止まりません。`emotionClassifier` で `fm` や `dictionary`（従来の辞書式）にも切り替えられます
 
 ### Claude Code プラグインの導入
 

@@ -120,6 +120,14 @@ export interface ControlApiDeps {
   summaryPreview: Omit<SummaryPreviewDeps, "now">;
   /** 配布する VRM / VRMA のカタログ（→ `server/assetCatalog.ts`） */
   assetCatalog: AssetCatalog;
+  /**
+   * `PATCH /v1/config` が書き込みに成功した直後に、実際に変わったキーの一覧で呼ばれる。
+   *
+   * ★ 「起こすかどうか」のような起動時の1回きりの判断を、設定パネルからの変更にも
+   *   効かせるためのフック（Ollaya の spawn 判定。→ `server/index.ts`）。呼び出し側が
+   *   関心のあるキーだけを見て判断する。
+   */
+  onConfigPatched?: (keys: ConfigKey[]) => void;
   now?: () => number;
 }
 
@@ -209,6 +217,9 @@ export function createControlApi(deps: ControlApiDeps): ControlApi {
       } catch (err) {
         return fail(500, "config_unwritable", { detail: err instanceof Error ? err.message : String(err) });
       }
+
+      // ★ 書き込みが確定してから呼ぶ（失敗した書き込みで副作用を起こさない）
+      deps.onConfigPatched?.(result.changed);
 
       // ★ **書いた後に読み直した値を返す。** これが「本当に効いた値」になる
       //   （上で `invalidate()` しているので、必ず今書いたファイルを読む）

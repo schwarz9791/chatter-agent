@@ -60,7 +60,7 @@ core/src/
 │   └── speakable.ts         合成に出す意味のあるテキストか。**合成する側が持つ判定**（issue #29 で player/ から移設）
 ├── emotion/      ルールベース感情判定        ← cc-mascot 由来
 ├── prompt/       応答待ち通知の整形
-└── summarizer/   AI要約（既定OFF。issue #31）
+└── summarizer/   AI要約（既定ON。issue #31）
     ├── types.ts             Summarize / SummaryOutcome / ClaudeCliResult の型定義
     ├── prompt.ts            要約 CLI に渡す指示文（SUMMARY_INSTRUCTION）
     ├── claudeCli.ts         引数組み立て / 実行（同期版と**非同期版**。コマンド解決は `core/commandPath.ts`）
@@ -279,7 +279,8 @@ cc-mascot から移植したコードを oxfmt で整形すると、上流との
 | 抑制の state | `{root}/speak.state.json` | CLI |
 | 要約セッションの共有レジストリ | `{root}/summarizer-sessions.json` | **server**（`POST /v1/summary/preview` が起こした要約の `--session-id`。読むのは CLI） |
 | 要約 CLI の cwd | `{root}/summarizer-home/` | CLI（要約 CLI を隔離実行する作業ディレクトリ。プロジェクトの `CLAUDE.md` を読ませないため） |
-| 要約の実測ログ | `{root}/summarizer.log` | CLI（要約が有効なときだけ書く。既定 OFF なら1バイトも増えない） |
+| 要約の実測ログ | `{root}/summarizer.log` | CLI（要約 CLI を実際に起動したときだけ1行増える。コマンドが無い環境では増えない） |
+| 感情判定スキーマ（fm 用） | `{root}/emotion-schema.json` | CLI（内容が変わったときだけ書き直す） |
 | CLI のロック | `{root}/speak.lock/`（ディレクトリ） | CLI |
 | サーバーのロック | `{root}/server.lock/`（ディレクトリ） | **server**（bind の前に取る。2台目は起動に失敗する） |
 | player のロック | `{root}/player.lock/`（ディレクトリ） | **player**（接続の前に取る。2台目は起動に失敗する） |
@@ -417,20 +418,55 @@ server / player はこのファイルを読みも書きもしない（読むの�
 
 | キー | 既定値 | 環境変数 |
 |---|---|---|
-| `aiSummaryEnabled` | `false` | `CHATTER_AGENT_AI_SUMMARY_ENABLED` |
+| `aiSummaryEnabled` | `true` | `CHATTER_AGENT_AI_SUMMARY_ENABLED` |
+| `aiSummaryBackend` | `"fm"`（`"fm" \| "claude"`） | `CHATTER_AGENT_AI_SUMMARY_BACKEND` |
 | `aiSummaryThreshold` | `200` | `CHATTER_AGENT_AI_SUMMARY_THRESHOLD` |
-| `aiSummaryCommand` | `"claude"` | `CHATTER_AGENT_AI_SUMMARY_COMMAND` |
-| `aiSummaryModel` | `"haiku"`（空文字なら `--model` を渡さない） | `CHATTER_AGENT_AI_SUMMARY_MODEL` |
+| `aiSummaryCommand` | `"claude"`（`aiSummaryBackend: "claude"` のときだけ見る） | `CHATTER_AGENT_AI_SUMMARY_COMMAND` |
+| `aiSummaryModel` | `"haiku"`（空文字なら `--model` を渡さない。同上） | `CHATTER_AGENT_AI_SUMMARY_MODEL` |
 | `aiSummaryTimeoutMs` | `60000` | `CHATTER_AGENT_AI_SUMMARY_TIMEOUT_MS` |
 | `aiSummaryMaxPerDrain` | `3`（上限8。`parseAiSummaryMaxPerDrain`） | `CHATTER_AGENT_AI_SUMMARY_MAX_PER_DRAIN` |
 
-- `aiSummaryEnabled` は既定 OFF。有効にすると `aiSummaryThreshold` を超えたメッセージの
-  たびに `claude -p` が走り、ユーザーの課金を消費する。要約は AI の生成そのものなので
-  所要時間は入力の長さから予測できず、その遅れは丸ごと発話の遅延として乗る
-  （→ `CLAUDE.md`「絶対に守ること」1）
+- `aiSummaryEnabled` は既定 ON（issue #107 で反転）。有効な間、`aiSummaryThreshold` を超えた
+  メッセージのたびに要約 CLI が走る。要約は AI の生成そのものなので所要時間は入力の長さから
+  予測できず、その遅れは丸ごと発話の遅延として乗る（→ `CLAUDE.md`「絶対に守ること」1）
+- `aiSummaryBackend: "fm"` は macOS 27 以降の Apple Foundation Models CLI を**固定名 `"fm"`**
+  で解決する（`aiSummaryCommand` は見ない）。無い環境では `no-command` の経路に落ち、原文が
+  そのまま読み上げられる。`"claude"` にすると従来どおり `aiSummaryCommand` / `aiSummaryModel`
+  （`claude -p`）を使う
 - `aiSummaryMaxPerDrain` は「1回のドレインで要約してよい回数」の上限（既定3、上限8）
 
 ★ 実測とばらつきの詳細は [`knowledge/core.md`](./knowledge/core.md)「設定キーと環境変数の経緯」。
+★ バックエンドの選定根拠（fm と claude の速度・失敗の種類の比較）は
+[`knowledge/core.md`](./knowledge/core.md)「要約と感情判定のバックエンド選定（issue #107）」。
+
+### 感情判定のバックエンド（`emotionClassifier` 等。`chatter-agent-speak` が読む。`emotionClassifier` / `ollayaBaseUrl` / `ollayaSpawn` / `emotionTimeoutMs` は server も読む）
+
+| キー | 既定値 | 環境変数 |
+|---|---|---|
+| `emotionClassifier` | `"ollaya"`（`"ollaya" \| "fm" \| "dictionary"`） | `CHATTER_AGENT_EMOTION_CLASSIFIER` |
+| `ollayaBaseUrl` | `"http://127.0.0.1:11435"`（制御 API から書けない。(c) 区分） | `CHATTER_AGENT_OLLAYA_URL` |
+| `ollayaModel` | `"laya:multilingual"` | `CHATTER_AGENT_OLLAYA_MODEL` |
+| `ollayaSpawn` | `true` | `CHATTER_AGENT_OLLAYA_SPAWN` |
+| `emotionTimeoutMs` | `10000` | `CHATTER_AGENT_EMOTION_TIMEOUT_MS` |
+
+- `emotionClassifier` は `classify: (texts: string[]) => Emotion[]`（メッセージ単位で1回だけ
+  呼ぶ契約。→ `cli/worker.ts` の `DrainDeps.classify`）を組み立てる分岐。どの方式でも
+  接続不可・タイムアウト・壊れた応答は**辞書式に落ちる**（throw しない）
+  - `"ollaya"`: ローカルの Jev 互換ランタイム（[ollaya.dev](https://ollaya.dev/)）へ1文ずつ
+    `/v1/systemone` の score で問い合わせる。CLI は同期実行なので、`spawnSync` の子プロセス1個に
+    メッセージぶんの文をまとめて渡す（→ `emotion/ollayaClassifier.ts`）
+  - `"fm"`: macOS 27 以降の Apple Foundation Models CLI。メッセージ全体を1回だけ `--schema` 付きで
+    判定し、同じ感情を全部の文に適用する（→ `emotion/fmClassifier.ts`）
+  - `"dictionary"`: 既存のルールベース（`emotion/ruleBasedEmotionClassifier.ts`）をそのまま使う
+- `ollayaBaseUrl` は `ttsBaseUrl` と同じ理由（本文の外部送信路になる）で制御 API から書けない
+- `ollayaSpawn` は Ollaya が居なければ `chatter-agent-server` が起こすか（`ttsSpawn` と同じ役回り。
+  → `server/engineProcess.ts` の `resolveOllayaSpawn`）。`ollaya serve` は `--host`/`--port` を
+  持たないので、`OLLAYA_HOST`（`host:port` 形式の環境変数）で bind 先を渡す
+- `emotionTimeoutMs` は判定1回（メッセージ単位）の上限。超えたら辞書式に落ちる。要約
+  （既定60秒）と違って「無くても発話は止まらない」保険的な機能なので、短めに倒してある
+
+★ バックエンドの選定根拠（精度・遅延の比較表）は
+[`knowledge/core.md`](./knowledge/core.md)「要約と感情判定のバックエンド選定（issue #107）」。
 
 ## 感情判定は「文が感情的か」ではなく「作業で何が起きているか」で決める
 

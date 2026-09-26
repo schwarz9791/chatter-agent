@@ -73,6 +73,43 @@ export function buildSummaryArgs(instruction: string, opts: BuildSummaryArgsOpti
 }
 
 /**
+ * `fm`（Apple Foundation Models CLI、macOS 27 以降）向けの引数組み立て。
+ *
+ * ★ `fm` は `claude` と別物の CLI なので、`--session-id` / `--no-session-persistence` /
+ *   `--strict-mcp-config` / `--disallowedTools` / `--model` はどれも存在しない
+ *   （そもそも hook を持たないので無限ループの心配も無い）。**渡さないのが正しい**。
+ * ★ `--guardrails permissive-content-transformations` が要る。既定のガードレールは
+ *   「殺す」「孤児」等の普通の技術用語を誤検知して拒否することがある。
+ */
+export function buildFmSummaryArgs(instruction: string): string[] {
+  return ["respond", "-i", instruction, "--no-stream", "--guardrails", "permissive-content-transformations"];
+}
+
+/**
+ * `fm` の固定の実行パス。Apple 標準の配置場所（SIP で保護される）を直接指す。
+ *
+ * ★ 名前解決（`findCommandPath("fm")`）をしないこと。PATH や既知の bin ディレクトリに
+ *   同名の別バイナリがあると、それに化ける。要約（`summaryPipeline.ts` / `summaryPreview.ts`）と
+ *   感情判定（`emotion/fmClassifier.ts`）の両方がここを参照する。
+ */
+export const FM_COMMAND_PATH = "/usr/bin/fm";
+
+/**
+ * `commandPath`（既定 `FM_COMMAND_PATH`）が実行できるかを確かめる。
+ *
+ * ★ `findCommandPath` は使わない。絶対パスは無条件でそのまま返す仕様（存在確認をしない）なので、
+ *   `fm` が居ない環境の検出にならない。実行ビットが立っているかで判定する。
+ */
+export function resolveFmCommandPath(commandPath: string = FM_COMMAND_PATH): string | undefined {
+  try {
+    fs.accessSync(commandPath, fs.constants.X_OK);
+    return commandPath;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * 子（要約 CLI）に渡さない環境変数の denylist。**完全一致のみ**（プレフィックス一括除去はしない）。
  *
  * ★ denylist を選んだ理由: allowlist にすると、こちらが知らない認証構成

@@ -323,6 +323,11 @@ namespace ChatterMascot.Xr
 
             switch (key)
             {
+                case SettingKeys.Mute:
+                    host.Apply(host.Current.WithMuted(SettingsPanelJson.ParseBool(value, host.Current.Muted)));
+                    Refresh();
+                    return;
+
                 case SettingKeys.XrHeight:
                     SetHeightCm(SettingsMapping.Parse(value, host.Current.XrHeight));
                     Refresh();
@@ -528,7 +533,8 @@ namespace ChatterMascot.Xr
         }
 
         /// <summary>
-        /// 呼び出し口そのもの（歯車・手のひらボタンで共用）。uGUI の <c>Text</c> 1文字。ここで作る
+        /// 呼び出し口そのもの（歯車・手のひらボタンで共用）。<c>Resources/SettingsIcon</c> を
+        /// uGUI の <c>Image</c> で出す —— 読めなければ <c>Text</c> の ⚙ で代用する。ここで作る
         /// 基本の大きさはキャラの縮尺に連動しない——世界に直接置く（<c>ModelAnchor</c> の子にしない）
         /// ので、<c>ModelAnchor.localScale</c> を変えても大きさは変わらない。
         ///
@@ -555,13 +561,26 @@ namespace ChatterMascot.Xr
             iconRect.offsetMin = Vector2.zero;
             iconRect.offsetMax = Vector2.zero;
 
-            var text = iconGo.AddComponent<Text>();
-            // ★ TMP は使わない（日本語フォントアセットが要る）
-            text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            text.text = "⚙";
-            text.alignment = TextAnchor.MiddleCenter;
-            text.fontSize = 72;
-            text.color = Color.white;
+            var sprite = Resources.Load<Sprite>("SettingsIcon");
+            if (sprite != null)
+            {
+                var image = iconGo.AddComponent<Image>();
+                image.sprite = sprite;
+                image.preserveAspect = true;
+                image.color = Color.white;
+            }
+            else
+            {
+                // ★ XrWalkAreaView が WalkArea マテリアルを読めないときと同じ扱い（画像が無くても壊さない）
+                Debug.LogWarning("[Mascot] XR settings: SettingsIcon を読めないので ⚙ で代用します");
+                var text = iconGo.AddComponent<Text>();
+                // ★ TMP は使わない（日本語フォントアセットが要る）
+                text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                text.text = "⚙";
+                text.alignment = TextAnchor.MiddleCenter;
+                text.fontSize = 72;
+                text.color = Color.white;
+            }
 
             // ★ 当たり判定は見た目より大きく取る（XrWalkAreaView のハンドルと同じ理由）
             var sphereCollider = go.AddComponent<SphereCollider>();

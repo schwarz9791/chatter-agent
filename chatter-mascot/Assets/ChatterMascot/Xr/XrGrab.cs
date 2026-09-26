@@ -48,7 +48,19 @@ namespace ChatterMascot.Xr
 
         private ARPlaneManager _planeManager;
 
-        private readonly Hand[] _hands = { new Hand("LeftHand"), new Hand("RightHand") };
+        /// <summary>
+        /// 並びの後ろほど優先する（マウス＞右手＞左手。簡単で説明できる決め打ち）。<see cref="TryGetAimRay"/>
+        /// が読む代表レイと、<see cref="Update"/> が手を回す順（＝設定パネルのホバーの先勝ち）は
+        /// どちらもこの並びを後ろから読むことで揃える。
+        /// </summary>
+        private readonly Hand[] _hands =
+        {
+            new Hand("LeftHand", "<HandInteraction>{LeftHand}", "pointerPosition", "pointerRotation", "pinchValue", "isTracked"),
+            new Hand("RightHand", "<HandInteraction>{RightHand}", "pointerPosition", "pointerRotation", "pinchValue", "isTracked"),
+            // ★ Android Mouse Interaction Profile（OpenXR）。click を pinchValue と同じ 0/1 として読み、
+            //   ヒステリシス（XrGrabRules.IsPinching）をそのまま流用する
+            new Hand("Mouse", "<AndroidMouseInteraction>", "aim/position", "aim/rotation", "click", "aim/isTracked"),
+        };
 
         /// <summary>掴んでいる手。掴んでいなければ null。</summary>
         private Hand _grabbedHand;
@@ -131,8 +143,7 @@ namespace ChatterMascot.Xr
         /// 「目で追う」の入力に使う——<b>入力の読み取りはここに一本化したまま</b>、新しく
         /// Input System のバインドを増やさない。
         ///
-        /// ★ 両手とも追跡されているときは右手を優先する（簡単で説明できる決め打ち）。
-        ///   どちらも追跡されていなければ <c>false</c>。
+        /// ★ 優先順は <see cref="_hands"/> の doc 参照。どれも追跡されていなければ <c>false</c>。
         /// </summary>
         public bool TryGetAimRay(out Ray ray)
         {
@@ -190,8 +201,10 @@ namespace ChatterMascot.Xr
 
             if (_origin == null || _stage == null || _stage.Model == null) return;
 
+            // ★ 優先順は _hands の doc 参照。先勝ちのホバー（XrSettingsBridge.UpdateHover）が
+            //   同じ順になるよう、優先の高い手から回す
             var offset = _origin.CameraFloorOffsetObject.transform;
-            foreach (var hand in _hands) UpdateHand(hand, offset);
+            for (var i = _hands.Length - 1; i >= 0; i--) UpdateHand(_hands[i], offset);
         }
 
         private void EnsurePlaneManager()
@@ -481,18 +494,20 @@ namespace ChatterMascot.Xr
         }
 
         /// <summary>
-        /// 片手ぶんの入力と、つまみの状態。
+        /// 片手（またはマウス）ぶんの入力と、つまみの状態。
         ///
-        /// ★ Hand Interaction Profile（OpenXR）のバインド。手の関節ではなく、aim レイと
-        ///   pinchValue だけを読む —— Mac のドラッグに相当する操作にするため（つまんだレイの先に
-        ///   追従、離したら平面へ）。奥行きは、水平面を指していればその点まで、指していなければ
-        ///   掴んだ距離とレイの俯角から決める（<see cref="XrGrabRules.HeldDistance"/>）。
-        /// ★ バインドが解決していない（手の入力が無い）ときは、どのアクションも既定値を返し
+        /// ★ Hand Interaction Profile / Android Mouse Interaction Profile（OpenXR）のバインド。
+        ///   手の関節ではなく、aim レイとつまみ相当の値だけを読む —— Mac のドラッグに相当する
+        ///   操作にするため（つまんだレイの先に追従、離したら平面へ）。マウスは click を
+        ///   pinchValue と同じ 0/1 として読み、つまみのヒステリシスをそのまま流用する。
+        ///   奥行きは、水平面を指していればその点まで、指していなければ掴んだ距離とレイの
+        ///   俯角から決める（<see cref="XrGrabRules.HeldDistance"/>）。
+        /// ★ バインドが解決していない（デバイスが無い）ときは、どのアクションも既定値を返し
         ///   <c>IsPressed()</c> は false になるので、追跡していない手として扱われる。
         /// </summary>
         private sealed class Hand
         {
-            /// <summary>バインドの usage 名（<c>LeftHand</c> / <c>RightHand</c>）。</summary>
+            /// <summary>ログに出す名前（<c>LeftHand</c> / <c>RightHand</c> / <c>Mouse</c>）。</summary>
             public readonly string Name;
 
             public readonly InputAction PointerPosition;
@@ -503,17 +518,23 @@ namespace ChatterMascot.Xr
             public bool Pinching;
             public float LastTrackedAt;
 
-            public Hand(string name)
+            /// <param name="devicePath">バインドのデバイス部分（<c>&lt;HandInteraction&gt;{LeftHand}</c> など）。</param>
+            /// <param name="positionControl">aim 位置のコントロール名。</param>
+            /// <param name="rotationControl">aim 向きのコントロール名。</param>
+            /// <param name="pinchControl">つまみ相当（0..1）のコントロール名。</param>
+            /// <param name="isTrackedControl">追跡状態のコントロール名。</param>
+            public Hand(string name, string devicePath, string positionControl, string rotationControl,
+                string pinchControl, string isTrackedControl)
             {
                 Name = name;
-                PointerPosition = Bind("pointerPosition");
-                PointerRotation = Bind("pointerRotation");
-                PinchValue = Bind("pinchValue");
-                IsTracked = Bind("isTracked");
+                PointerPosition = Bind(devicePath, positionControl);
+                PointerRotation = Bind(devicePath, rotationControl);
+                PinchValue = Bind(devicePath, pinchControl);
+                IsTracked = Bind(devicePath, isTrackedControl);
             }
 
-            private InputAction Bind(string control) =>
-                new InputAction(binding: $"<HandInteraction>{{{Name}}}/{control}");
+            private static InputAction Bind(string devicePath, string control) =>
+                new InputAction(binding: $"{devicePath}/{control}");
 
             public void Enable()
             {

@@ -242,7 +242,7 @@ Android で共通。1秒ポーリングで外部変更も拾う。
 
 | キー | Android で効くか |
 |---|---|
-| `audio.mute` / `audio.volume` | 効く |
+| `audio.mute` / `audio.volume` | 効く。XR は設定パネルの「ミュート」（`SettingKeys.Mute`）からも切り替えられる。デスクトップはメニューバーとショートカットで操作し、パネルには出さない |
 | `display.frameRate` | **効かない。** XR ではランタイムがフレームペーシングを握り、XR が起動しなかったときはシーンの `targetFrameRate`（`[SerializeField]`）が権威 |
 | `xr.distance` / `xr.azimuth` / `xr.feetBelowEye` | 効く（XR が起動したときだけ。起動時に1回だけ読む。→「XR（Full Space）」） |
 | `xr.height` | 効く（XR が起動したときだけ）。他の `xr.*` と違い**設定パネルの「大きさ」からその場で変えられる**——起動時の読み込みだけに限らない |
@@ -490,6 +490,14 @@ Hand Interaction Profile（OpenXR の `XR_EXT_hand_interaction`）の aim レイ
 つまみはヒステリシス（`XrGrabRules.IsPinching`。入り 0.9 / 抜け 0.6）。追跡を短く見失っても
 0.2 秒は保持する。
 
+★ **マウスも同じ「手」として読む。** Android Mouse Interaction Profile（OpenXR）の aim レイと
+`click` を、左右の手と同じ `pinchValue` のヒステリシスへそのまま流し込む——手の入力を読む経路は
+増やさず、`_hands` に3つ目として並べるだけ（左手・右手・マウス）。複数が同時に追跡されているときは
+マウス＞右手＞左手の順で優先する（`XrGrab.TryGetAimRay`。「目で追う」も、設定パネルのホバー
+（先に判定した手が勝つ `XrSettingsBridge.UpdateHover`）も、この優先順で手を回すことでハイライトと
+つまんで押す対象を一致させる）。
+★ **未確認（実機）。** マウスでの掴み・パネル操作の当たり心地。
+
 ★ **掴んだ距離を保ってレイに沿わせるだけでは、狙いより手前に着く。** 奥の床を指して手を下げても
 キャラは空中の手前に留まり、離すと真下へ落ちる。
 
@@ -598,6 +606,14 @@ feature が有効なときにしかマニフェストへ書かない。
 10〜60cm で伸び縮みする（既定 20cm）。★ **これで障害物回避が要らなくなる** —— 机の縁や壁を
 避けるのは「範囲を決める操作」そのもので、コードは円の外に出ないことだけを守ればよい。
 
+★ **半径は基準の身長（`XrMenuRules.GearReferenceHeightMeters`）で覚え、ワールドに出すときだけ
+キャラクターの表示身長に比例させて伸び縮みさせる**（`Wander.AreaScale`）。`Wander.Speed` の
+縮尺比例と揃えることで、**「大きさ」の設定を変えても、歩き回れる範囲がキャラクターの背丈に
+対して同じ広さに見える**。ハンドルをドラッグして決めた距離もこの倍率で割り戻してから
+10〜60cm にクランプする。ハンドルの見た目・当たり判定だけは、歯車と同じ「押しやすさ」の倍率
+（`XrMenuRules.GearScale`）で別に拡縮する（`XrWalkAreaView.Sync`）——つまみやすさは大きさに
+比例させる理由が無いため。
+
 ★ **掴む対象を増やすのであって、手の入力を増やすのではない。** aim レイ・`pinchValue` の
 ヒステリシス・掴みの排他は `XrGrab` に一本化したまま、`TryGrab` が先にハンドル、当たらなければ
 モデルを見る。別のコンポーネントで手の入力を読むと、同じつまみで両方が反応する。
@@ -678,6 +694,18 @@ hips の平行移動は 1cm 未満で、**root motion は焼かれていない**
 キャラ・歩行範囲の掴みへは進まない。優先順は **パネル → 手のひらボタン → 歯車 → 歩行範囲の
 ハンドル → キャラ**。別のコンポーネントで pinch を読むと、同じつまみで2つが反応する
 （歩行範囲のハンドルと同じ理由。→ 上「掴む対象を増やすのであって〜」）。
+
+★ **ミュートだけはパネルの先頭に出す**（`SettingsSchema.BuildXr`。デスクトップの
+`BuildDesktop` には出さない）。デスクトップと違い、XR にはメニューバーもショートカットも無く、
+パネル以外に切り替える手段が無いため。
+
+★ **`MascotSettingsHost.Apply` は `ChangedExternally` を出さない**（自分起点の変更として扱うため）。
+パネル以外の経路から設定を変えるなら、その呼び出し側がパネルの `Refresh` も直接呼ぶこと——
+怠ると、開いたままのパネルが古い値を表示し続ける。
+
+★ **呼び出し口（歯車・手のひらボタン）の絵は `Resources/SettingsIcon` のスプライトを使う。**
+読めなければ `⚙`（`LegacyRuntime.ttf`）の `Text` で代用する——`XrWalkAreaView` が `WalkArea`
+マテリアルを読めないときと同じ扱いで、画像が無くてもビルドを壊さない。
 
 ★★ **レンダラ（`XrSettingsPanel`）に設定のキーを1つも書かない。** デスクトップの
 `CMSettingsPanel.m` と同じ規律（→ [`mascot-settings.md`](./mascot-settings.md)）——`SettingSpec.Kind`
@@ -880,6 +908,9 @@ Android XR は Vulkan 必須なので、この機能を切って回避するこ�
 | XR Plug-in Management | **Android にだけ** OpenXR ローダー。feature は Android XR Support / Hand Interaction Profile / Android XR: Session / Android XR: Planes と、自前の Chatter Mascot: Additive Blend の5つ | Standalone に割り当てないので macOS ビルドは変わらない。Session は Planes の Project Validation が要求するので有効化する（有効にすると、パッケージが `OpenXRLifeCycleFeature` も連動して有効にする） |
 | Graphics API（Android） | **Vulkan 単独** | URP で Android XR を使うときの必須設定 |
 | `Mobile_Renderer` の Post Processing | **無効**（`postProcessData` を外す） | Project Validation の error。`PC_Renderer` は触らない |
+
+★ **`Android Mouse Interaction Profile` も `FixOpenXrFeature` で有効化する**（`XrGrab` の
+`AndroidMouseInteraction` バインドが要る）。無効のままだとマウスの入力が来ないだけでエラーは出ない。
 
 ★ **`Mobile_RPAsset` の `m_PrefilterXRKeywords` は、XR を有効にしたビルドで URP が `1 → 0` に書き換える。**
 戻さないこと（XR 用のシェーダーバリアントを削らせないための値）。

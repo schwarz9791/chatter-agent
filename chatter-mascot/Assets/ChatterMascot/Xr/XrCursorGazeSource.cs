@@ -5,9 +5,9 @@ using UnityEngine;
 namespace ChatterMascot.Xr
 {
     /// <summary>
-    /// 追跡されている手の aim レイ（<see cref="XrGrab"/> に一本化された入力）を、
+    /// 追跡されている手（またはマウス）の aim レイ（<see cref="XrGrab"/> に一本化された入力）を、
     /// <c>Desktop/CursorGazeSource</c> と同じ正規化にして <see cref="VrmCharacter.CursorProvider"/>
-    /// へ渡す。手が追跡されていなければ <c>null</c>（呼び出し側は自律的な漂いに倒れる）。
+    /// へ渡す。手もマウスも追跡されていなければ <c>null</c>（呼び出し側は自律的な漂いに倒れる）。
     ///
     /// ★ <b>新しい Input System のバインドを増やさない。</b> レイの読み取りは <see cref="XrGrab"/> に
     ///   一本化したまま、ここは公開されたレイを座標変換するだけ。

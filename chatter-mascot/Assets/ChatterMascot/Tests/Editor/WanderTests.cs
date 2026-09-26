@@ -81,6 +81,25 @@ namespace ChatterMascot.Tests
             Assert.That(Wander.Speed(0.5f, 2, cycleSeconds, 1f), Is.EqualTo(0f));
         }
 
+        // ---- 歩行範囲の半径の倍率 ----
+
+        [TestCase(0.25f, 1f)]
+        [TestCase(0.5f, 2f)]
+        [TestCase(1.6f, 6.4f)]
+        public void AreaScaleIsProportionalToHeight(float heightMeters, float expected)
+        {
+            Assert.That(Wander.AreaScale(heightMeters), Is.EqualTo(expected).Within(Tolerance));
+        }
+
+        [TestCase(float.NaN)]
+        [TestCase(float.PositiveInfinity)]
+        [TestCase(0f)]
+        [TestCase(-1f)]
+        public void AreaScaleIsOneForNonFiniteOrNonPositiveHeight(float heightMeters)
+        {
+            Assert.That(Wander.AreaScale(heightMeters), Is.EqualTo(1f));
+        }
+
         // ---- 目的地の抽選 ----
 
         [TestCase(0.0, 0.0)]

@@ -1716,7 +1716,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9f06e90513f934dc6891726a9f2a0444, type: 3}
   m_Name: AndroidMouseInteractionProfile Android
   m_EditorClassIdentifier: Unity.XR.OpenXR::UnityEngine.XR.OpenXR.Features.Interactions.AndroidMouseInteractionProfile
-  m_enabled: 0
+  m_enabled: 1
   nameUi: Android Mouse Interaction Profile
   version: 0.0.1
   featureIdInternal: com.unity.openxr.feature.input.androidmouse

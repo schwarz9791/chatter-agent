@@ -308,7 +308,7 @@ namespace ChatterMascot.Tests
         {
             var keys = SettingsSchema.Build(Context()).Select(s => s.Key).ToList();
 
-            Assert.That(keys, Has.None.EqualTo("mute"));
+            Assert.That(keys, Has.None.EqualTo(SettingKeys.Mute));
             Assert.That(keys, Has.None.EqualTo("summaryPreview"));
         }
 
@@ -546,6 +546,7 @@ namespace ChatterMascot.Tests
 
             Assert.That(keys, Is.EqualTo(new[]
             {
+                SettingKeys.Mute,
                 null, SettingKeys.XrHeight, SettingKeys.AssetSync,
                 null, SettingKeys.MotionPreview, SettingKeys.MotionPreviewPlay,
                 SettingKeys.Walk, SettingKeys.CursorGaze, SettingKeys.Blink,

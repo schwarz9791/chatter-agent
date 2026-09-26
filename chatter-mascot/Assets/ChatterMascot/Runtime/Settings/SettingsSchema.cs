@@ -14,6 +14,9 @@ namespace ChatterMascot.Settings
     /// </summary>
     public static class SettingKeys
     {
+        /// <summary>XR の設定パネルだけに出す（デスクトップはメニューバーとショートカットで操作する）</summary>
+        public const string Mute = "mute";
+
         public const string Vrm = "vrm";
 
         /// <summary>
@@ -283,13 +286,17 @@ namespace ChatterMascot.Settings
         /// （→ <see cref="AddMotionPreview"/>）。
         ///
         /// ★ <b>ここに出さないもの</b>: 待機モーションの ON/OFF・フレームレート・ショートカット・
-        ///   音声系・AI要約・終了。手のひらメニュー／歯車から開く前提で、常駐トレイと同じ
-        ///   項目数を持たせる理由が無い。
+        ///   音声系（ミュートを除く）・AI要約・終了。手のひらメニュー／歯車から開く前提で、
+        ///   常駐トレイと同じ項目数を持たせる理由が無い。
+        /// ★ <b>ミュートだけは出す。</b> デスクトップと違い、XR にはメニューバーもショートカットも
+        ///   無く、パネル以外に切り替える手段が無い。
         /// </summary>
         private static IReadOnlyList<SettingSpec> BuildXr(SettingsContext c)
         {
             var settings = c.Settings;
             var items = new List<SettingSpec>();
+
+            items.Add(SettingSpec.Bool(SettingKeys.Mute, "ミュート", settings.Muted));
 
             // ── キャラクター ─────────────────────────────────
             items.Add(SettingSpec.Section("キャラクター"));

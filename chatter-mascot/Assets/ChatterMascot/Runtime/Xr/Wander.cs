@@ -254,6 +254,15 @@ namespace ChatterMascot.Xr
             return strideMeters * stepsPerCycle * modelScale / cycleSeconds;
         }
 
+        /// <summary>歩行範囲の半径の倍率。キャラクターの表示身長に比例させ、<see cref="Speed"/> の
+        /// 縮尺比例と揃える——大きさを変えても、歩き回れる範囲が背丈に対して同じ広さに見える。
+        /// 非有限・0 以下は 1。</summary>
+        public static float AreaScale(float heightMeters)
+        {
+            if (!float.IsFinite(heightMeters) || heightMeters <= 0f) return 1f;
+            return heightMeters / XrMenuRules.GearReferenceHeightMeters;
+        }
+
         /// <summary>円内一様（角度一様、半径は <c>radius * sqrt(u)</c>）に目的地を1点選ぶ。
         /// 結果は必ず円内（境界を含む）。</summary>
         public static Vector2 PickDestination(Vector2 center, float radius, Func<double> random)

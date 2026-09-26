@@ -60,7 +60,7 @@ core/src/
 │   └── speakable.ts         合成に出す意味のあるテキストか。**合成する側が持つ判定**（issue #29 で player/ から移設）
 ├── emotion/      ルールベース感情判定        ← cc-mascot 由来
 ├── prompt/       応答待ち通知の整形
-└── summarizer/   AI要約（既定OFF。issue #31）
+└── summarizer/   AI要約（既定ON。issue #31）
     ├── types.ts             Summarize / SummaryOutcome / ClaudeCliResult の型定義
     ├── prompt.ts            要約 CLI に渡す指示文（SUMMARY_INSTRUCTION）
     ├── claudeCli.ts         引数組み立て / 実行（同期版と**非同期版**。コマンド解決は `core/commandPath.ts`）
@@ -279,7 +279,8 @@ cc-mascot から移植したコードを oxfmt で整形すると、上流との
 | 抑制の state | `{root}/speak.state.json` | CLI |
 | 要約セッションの共有レジストリ | `{root}/summarizer-sessions.json` | **server**（`POST /v1/summary/preview` が起こした要約の `--session-id`。読むのは CLI） |
 | 要約 CLI の cwd | `{root}/summarizer-home/` | CLI（要約 CLI を隔離実行する作業ディレクトリ。プロジェクトの `CLAUDE.md` を読ませないため） |
-| 要約の実測ログ | `{root}/summarizer.log` | CLI（要約が有効なときだけ書く。既定 OFF なら1バイトも増えない） |
+| 要約の実測ログ | `{root}/summarizer.log` | CLI（要約 CLI を実際に起動したときだけ1行増える。コマンドが無い環境では増えない） |
+| 感情判定スキーマ（fm 用） | `{root}/emotion-schema.json` | CLI（内容が変わったときだけ書き直す） |
 | CLI のロック | `{root}/speak.lock/`（ディレクトリ） | CLI |
 | サーバーのロック | `{root}/server.lock/`（ディレクトリ） | **server**（bind の前に取る。2台目は起動に失敗する） |
 | player のロック | `{root}/player.lock/`（ディレクトリ） | **player**（接続の前に取る。2台目は起動に失敗する） |
@@ -438,7 +439,7 @@ server / player はこのファイルを読みも書きもしない（読むの�
 ★ バックエンドの選定根拠（fm と claude の速度・失敗の種類の比較）は
 [`knowledge/core.md`](./knowledge/core.md)「要約と感情判定のバックエンド選定（issue #107）」。
 
-### 感情判定のバックエンド（`emotionClassifier` 等。`chatter-agent-speak` が読む。`ollayaSpawn` だけは server も読む）
+### 感情判定のバックエンド（`emotionClassifier` 等。`chatter-agent-speak` が読む。`emotionClassifier` / `ollayaBaseUrl` / `ollayaSpawn` / `emotionTimeoutMs` は server も読む）
 
 | キー | 既定値 | 環境変数 |
 |---|---|---|

@@ -86,6 +86,30 @@ export function buildFmSummaryArgs(instruction: string): string[] {
 }
 
 /**
+ * `fm` の固定の実行パス。Apple 標準の配置場所（SIP で保護される）を直接指す。
+ *
+ * ★ 名前解決（`findCommandPath("fm")`）をしないこと。PATH や既知の bin ディレクトリに
+ *   同名の別バイナリがあると、それに化ける。要約（`summaryPipeline.ts` / `summaryPreview.ts`）と
+ *   感情判定（`emotion/fmClassifier.ts`）の両方がここを参照する。
+ */
+export const FM_COMMAND_PATH = "/usr/bin/fm";
+
+/**
+ * `commandPath`（既定 `FM_COMMAND_PATH`）が実行できるかを確かめる。
+ *
+ * ★ `findCommandPath` は使わない。絶対パスは無条件でそのまま返す仕様（存在確認をしない）なので、
+ *   `fm` が居ない環境の検出にならない。実行ビットが立っているかで判定する。
+ */
+export function resolveFmCommandPath(commandPath: string = FM_COMMAND_PATH): string | undefined {
+  try {
+    fs.accessSync(commandPath, fs.constants.X_OK);
+    return commandPath;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * 子（要約 CLI）に渡さない環境変数の denylist。**完全一致のみ**（プレフィックス一括除去はしない）。
  *
  * ★ denylist を選んだ理由: allowlist にすると、こちらが知らない認証構成

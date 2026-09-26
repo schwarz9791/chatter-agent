@@ -394,7 +394,10 @@ async function main(): Promise<void> {
 
     // ★ この判定と spawn の間に await を挟まないこと（startEngineIfNeeded と同じ理由）
     if (stopping) return;
-    ollayaEngine = startEngine(plan);
+    // ★ 自分が起こしたものが生きていれば起こさない。listen 前は疎通確認を素通りするので、
+    //   設定の切り替えで呼び直されると二重に起こし、先の方を道連れにできなくなる
+    if (ollayaEngine !== null && !ollayaEngine.exited()) return;
+    ollayaEngine = startEngine(plan, { label: "[Ollaya]", unavailableNote: "感情判定は辞書式になります" });
   };
 
   const audioStore = createAudioStore({
@@ -422,8 +425,9 @@ async function main(): Promise<void> {
     synthesizePreview: (text) => ttsFor(currentVoice()).synthesize(text),
     summaryPreview: {
       getBackend: () => config.get("aiSummaryBackend"),
-      // ★ fm は固定名で解決するので aiSummaryCommand を見ない（cli/index.ts と同じ分岐）
-      getCommand: () => (config.get("aiSummaryBackend") === "fm" ? "fm" : config.get("aiSummaryCommand")),
+      // ★ fm は固定パスで解決するので aiSummaryCommand を見ない（summaryPreview.ts の中で
+      //   backend を1回だけ読んで分岐する。→ cli/index.ts と同じ理由）
+      getCommand: () => config.get("aiSummaryCommand"),
       getModel: () => config.get("aiSummaryModel"),
       getTimeoutMs: () => config.get("aiSummaryTimeoutMs"),
       homeDir: getSummarizerHomeDir(),
@@ -432,6 +436,13 @@ async function main(): Promise<void> {
       registerSessionId: (sessionId) => registerSummarizerSession(getSummarizerSessionsPath(), sessionId),
     },
     assetCatalog,
+    // ★ 起こすかどうかの判断は起動時の1回きりではない。設定パネルで `emotionClassifier` /
+    //   `ollayaSpawn` が変わったときも、そのつど判断し直す（他のキーの変更では何もしない）
+    onConfigPatched: (keys) => {
+      if (keys.includes("emotionClassifier") || keys.includes("ollayaSpawn")) {
+        void startOllayaIfNeeded().catch((err: unknown) => console.error("[Server] Ollaya の起動判定に失敗:", err));
+      }
+    },
   });
 
   const httpServer = createHttpServer({

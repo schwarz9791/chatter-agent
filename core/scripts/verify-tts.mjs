@@ -137,6 +137,10 @@ function serverEnv(overrides = {}) {
     CHATTER_AGENT_TTS_URL: `http://127.0.0.1:${engine.address().port}`,
     CHATTER_AGENT_TTS_SPEAKER_ID: String(SPEAKER_ID),
     CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS: "3000",
+    // ★ 感情判定は見ないシナリオなので固定する。既定（ollaya・spawn=true）のままだと、
+    //   開発機に ollaya が入っていれば本物の `ollaya serve` が起動され、[Engine] 起動ログの
+    //   検査（「1度も出ていない」）や pid の正規表現に Ollaya 側の pid が混ざりうる
+    CHATTER_AGENT_EMOTION_CLASSIFIER: "dictionary",
     ...overrides,
   };
 }

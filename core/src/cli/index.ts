@@ -101,9 +101,8 @@ function main(): void {
       getThreshold: () => config.get("aiSummaryThreshold"),
       getTimeoutMs: () => config.get("aiSummaryTimeoutMs"),
       getMaxPerDrain: () => config.get("aiSummaryMaxPerDrain"),
-      // ★ fm は固定名で解決するので aiSummaryCommand を見ない（バックエンドの分岐は
-      //   ここで出す。→ summaryPipeline.ts の SummaryPipelineDeps.getBackend の docstring）
-      getCommand: () => (config.get("aiSummaryBackend") === "fm" ? "fm" : config.get("aiSummaryCommand")),
+      // claude 用のコマンドだけを渡す。fm との出し分けは pipeline の中で行う
+      getCommand: () => config.get("aiSummaryCommand"),
       getModel: () => config.get("aiSummaryModel"),
       homeDir: getSummarizerHomeDir(),
       logPath: getSummarizerLogPath(),

@@ -193,8 +193,8 @@ export interface ChatterAgentConfig {
   /**
    * 長いメッセージを CLI エージェントで要約してから読み上げるか。
    *
-   * ★ 既定 OFF。有効にすると `aiSummaryThreshold` を超えたメッセージのたびに `claude -p` が
-   *   走るので、ユーザーの課金を消費する。
+   * ★ 既定 ON。有効な間、`aiSummaryThreshold` を超えたメッセージのたびに要約 CLI が走る
+   *   （`aiSummaryBackend` が `"claude"` ならユーザーの課金を消費する。`"fm"` はローカル実行）。
    * ★ **代償は遅延の方が大きい。** 要約1回の所要時間は**入力の長さから予測できない**
    *   （実測10件で相関が見られず、短い入力がタイムアウトし長い入力が10秒台で返ることがあった。
    *   → `aiSummaryTimeoutMs`）。ばらつきの支配要因は AI の生成時間で、環境（マシン・
@@ -259,8 +259,9 @@ export interface ChatterAgentConfig {
   aiSummaryMaxPerDrain: number;
 
   // ── 以下は感情判定（emotion）が読む ─────────────────────────────────
-  // ★ ここに置く理由は AI要約のキーと同じ（→上の註記）。`ollayaSpawn` だけは
-  //   chatter-agent-server も読む（Ollaya を起こすかどうかの判断に使うため）。
+  // ★ ここに置く理由は AI要約のキーと同じ（→上の註記）。`emotionClassifier` / `ollayaBaseUrl` /
+  //   `ollayaSpawn` / `emotionTimeoutMs` は chatter-agent-server も読む
+  //   （Ollaya を起こすかどうかの判断・疎通確認に使うため）。
 
   /**
    * 感情判定のバックエンド。

@@ -770,15 +770,17 @@ function processMessage(
     ? summarizeSentences(sentences, deps, state, messageId)
     : { spoken: sentences, summarized: false };
 
-  // 要約で記号が落ちると文単位の判定は neutral に潰れやすい。原文全体の判定を
-  // 保険として持っておき、文単体で判定できなかったときだけ借りる。
-  // ★ classify はメッセージ単位で1回だけ呼ぶ契約。sharedEmotion 用の呼び出しは
-  //   要約が効いたときだけ発生する副経路で、要素数1の配列で呼んで先頭を取る
-  const sharedEmotion = summarized ? deps.classify([sentences.join("\n")])[0] : null;
-
   // ★ spoken 全体をまとめて1回だけ classify する（1文ずつ呼ばない）。fm バックエンドは
   //   1回の呼び出しが数秒かかるため、文の数だけ呼ぶと発話が文の数×数秒遅れてしまう
   const ownEmotions = spoken.length > 0 ? deps.classify(spoken) : [];
+
+  // 要約で記号が落ちると文単位の判定は neutral に潰れやすい。原文全体の判定を
+  // 保険として持っておきたいが、classify はメッセージ単位で1回だけ呼ぶ契約なので
+  // 無条件には呼ばない。★ 要約が効いていて、かつ文単位の判定が1つでも neutral に
+  // 落ちたときだけ、原文をもう一度 classify する（要素数1の配列で呼んで先頭を取る）。
+  // 全部の文が自力で判定できていれば呼ばない —— 要約が効いたメッセージでも
+  // 呼び出し回数を1回に抑えられる
+  const sharedEmotion = summarized && ownEmotions.includes("neutral") ? deps.classify([sentences.join("\n")])[0] : null;
 
   // ★ メッセージ1つ分をまとめて1回だけ publish すること。分けて呼ぶと `ts` が割れる
   //   （`speechLog.append` は呼び出しごとに1回だけ時刻を取る）。1メッセージ内で

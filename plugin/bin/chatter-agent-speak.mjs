@@ -58,7 +58,7 @@ function getEmotionKeywordsPath(e = currentPathEnv()) {
 }
 /**
 * `emotionClassifier: "fm"` が使う構造化出力のスキーマ（`fm respond --schema`）。
-* CLI が初回だけ書き出す（`writeDefaultEmotionKeywordsIfAbsent` と同じ形。→ `emotion/fmClassifier.ts`）。
+* 人間が編集するファイルではない。CLI が内容の変わったときだけ書き直す（→ `emotion/fmClassifier.ts`）。
 */
 function getEmotionSchemaPath(e = currentPathEnv()) {
 	return e.env.CHATTER_AGENT_EMOTION_SCHEMA || path.join(getRuntimeDir(e), "emotion-schema.json");
@@ -133,7 +133,7 @@ function getSummarizerHomeDir(e = currentPathEnv()) {
 * 要約の所要時間を実測するための追記ログ。
 *
 * hook 経路では `console.warn` が `/dev/null` に消えるので、実測の窓がここしかない。
-* **要約が有効なときだけ書かれる**ので、既定 OFF のままなら1バイトも増えない。
+* **要約 CLI を実際に起動したときだけ1行増える**（コマンドが無い環境では増えない）。
 */
 function getSummarizerLogPath(e = currentPathEnv()) {
 	return path.join(getRuntimeDir(e), "summarizer.log");
@@ -1402,6 +1402,28 @@ function buildFmSummaryArgs(instruction) {
 	];
 }
 /**
+* `fm` の固定の実行パス。Apple 標準の配置場所（SIP で保護される）を直接指す。
+*
+* ★ 名前解決（`findCommandPath("fm")`）をしないこと。PATH や既知の bin ディレクトリに
+*   同名の別バイナリがあると、それに化ける。要約（`summaryPipeline.ts` / `summaryPreview.ts`）と
+*   感情判定（`emotion/fmClassifier.ts`）の両方がここを参照する。
+*/
+const FM_COMMAND_PATH = "/usr/bin/fm";
+/**
+* `commandPath`（既定 `FM_COMMAND_PATH`）が実行できるかを確かめる。
+*
+* ★ `findCommandPath` は使わない。絶対パスは無条件でそのまま返す仕様（存在確認をしない）なので、
+*   `fm` が居ない環境の検出にならない。実行ビットが立っているかで判定する。
+*/
+function resolveFmCommandPath(commandPath = FM_COMMAND_PATH) {
+	try {
+		fs.accessSync(commandPath, fs.constants.X_OK);
+		return commandPath;
+	} catch {
+		return;
+	}
+}
+/**
 * 子（要約 CLI）に渡さない環境変数の denylist。**完全一致のみ**（プレフィックス一括除去はしない）。
 *
 * ★ denylist を選んだ理由: allowlist にすると、こちらが知らない認証構成
@@ -1532,99 +1554,36 @@ function runClaudeCli(deps) {
 }
 
 //#endregion
-//#region src/core/commandPath.ts
+//#region src/emotion/emotionScores.ts
+const EMOTION_KEYS = [
+	"happy",
+	"relaxed",
+	"surprised",
+	"sad",
+	"angry",
+	"neutral"
+];
 /**
-* 外部コマンドの絶対パスを探す。**spawn せずに** `fs.existsSync` だけで判定する。
-*
-* ★ 元は `summarizer/claudeCli.ts` にあった（要約 CLI 専用の探索として書いた）。
-*   [#51] で `server/engineProcess.ts` が合成エンジンの実行パスを解決するのにも要るようになり、
-*   「要約 CLI のファイルからエンジンのパス解決を借りる」形を避けてここへ出した。
-*   **ロジックは移動時に変えていない。**
-*
-* ★ 移植元（cc-mascot の `detect.ts`）は Finder/Dock 起動の Electron アプリ向けに、
-*   ログインシェル PATH の解決（`zsh -ilc`、最大5秒）と `--version` の spawn を検出のたびに
-*   行っていた。ここでは持ち込まない。**ただし PATH が痩せる問題自体は無くなっていない。**
-*   本リポジトリは mise で Node を固定していて、shim が PATH に載るのは対話 rc 経由のみ ——
-*   Finder / Dock から起動した Claude Code はその PATH を継承しない（`plugin/scripts/_lib.sh`
-*   の `chatter_spawn_cli` が同じ前提でログを残す。`core/scripts/verify-phase-a.sh` の ⑫ は
-*   この状態を意図的に再現している）。ログインシェルを起動して補う（`zsh -ilc`）方針は
-*   引き続き持ち込まない — **毎 delta 起動されるプロセスの中で、要約のたびにログインシェルを
-*   立ち上げるコストが見合わないため。**（★ かつてここには「hook の10秒制約に乗せられない」と
-*   書いてあったが誤り。この関数が走るのは hook からデタッチ起動された `chatter-agent-speak`
-*   の中で、hook 自身は spool に1ファイル置いて即 `exit 0` する（`_lib.sh` の
-*   `chatter_spawn_cli` は `nohup ... &`）。同じ経路で既に `execFileSync` を既定で60秒
-*   ブロックしうるので、10秒制約はここには掛かっていない。）代わりに、PATH に
-*   見つからなかったときの保険として mise/asdf/nvm/volta 等の**既知のインストール先**を
-*   `fs.existsSync` だけで（spawn せずに）順に見る軽量な同期探索に絞る。
-*
-* ★ **「既知の場所を探さない」オプションは置かない。** PR #52 のレビューで
-*   「`run` のようなありふれた名前が shim を掴む」と指摘され一度足したが、**実測すると
-*   `getKnownBinDirs` の 7 件は 7/7 とも既に PATH に載っていた**（`~/.local/bin` `~/bin`
-*   `/opt/homebrew/bin` `/usr/local/bin` `~/.volta/bin` mise/asdf の shims）。切っても
-*   PATH 経由で同じものに当たるので**穴が1つも塞がらない**まま、「PATH だけ見るから安全」という
-*   誤った安心だけが残る。名前解決の危うさは、**解決結果を呼び出し側が名指しでログに出す**ことで
-*   扱う（→ `server/engineProcess.ts` の `resolvedFrom`）。
-*
-* [#51]: https://github.com/schwarz9791/chatter-agent/issues/51
+* 最大値のラベルを返す。壊れていれば `null`（呼び出し側が fallback する）。
+* **最大値が0以下、または同点なら `"neutral"`。** 同点を先頭キー（happy）に倒すと、
+* 全部0点や sad/angry と同値の文まで笑顔になる。
 */
-/** CLI がよくインストールされる既知のディレクトリ（PATH に含まれないことがある） */
-function getKnownBinDirs(homeDir) {
-	const dirs = [
-		path.join(homeDir, ".local", "bin"),
-		"/opt/homebrew/bin",
-		"/usr/local/bin",
-		path.join(homeDir, ".volta", "bin"),
-		path.join(homeDir, "bin"),
-		path.join(homeDir, ".local", "share", "mise", "shims"),
-		path.join(homeDir, ".asdf", "shims")
-	];
-	try {
-		const nvmVersionsDir = path.join(homeDir, ".nvm", "versions", "node");
-		if (fs.existsSync(nvmVersionsDir)) for (const version of fs.readdirSync(nvmVersionsDir)) dirs.push(path.join(nvmVersionsDir, version, "bin"));
-	} catch {}
-	return dirs;
-}
-/**
-* コマンドの絶対パスを探す。`fs.existsSync` だけで判定し、**spawn しない**
-* （移植元の `--version` 疎通確認は持ち込まない。上のヘッダ参照）。
-*
-* - `~/` で始まるなら `os.homedir()` に展開する。`aiSummaryCommand: "~/.local/bin/claude"` は
-*   `parseNonEmptyString`（config.ts）がそのまま受理するが、展開しないと下の絶対パス判定に
-*   当たらず、PATH の各ディレクトリと結合されて絶対に見つからないパスになる
-*   （`~user/` のような他ユーザーのホーム形式は対応不要）
-* - 展開後に絶対パスならそのまま使う。ユーザーが `aiSummaryCommand` / `ttsSpawnCommand` に
-*   明示した値を信頼し、存在確認はしない（間違っていれば実行側が ENOENT を返すだけで、
-*   `no-command` と `error` を厳密に分けることに実利が無い）
-* - そうでなければ `PATH` の各ディレクトリ → 既知の bin ディレクトリの順に探す。
-*   ファイルが存在するだけでなく**実行ビット**（`X_OK`）も見る。0644 の同名ファイル
-*   （インストールの残骸や補完スタブ）が後続の正しい候補を隠さないようにするため
-* - 見つからなければ `undefined`。呼び出し側（`summaryPipeline` は原文へフォールバック、
-*   `engineProcess` は spawn を諦めて 503 運用に落ちる）が決める
-*/
-function findCommandPath(command, opts = {}) {
-	const homeDir = opts.homeDir ?? os.homedir();
-	const expanded = command.startsWith("~/") ? path.join(homeDir, command.slice(2)) : command;
-	if (path.isAbsolute(expanded)) return expanded;
-	const env = opts.env ?? process.env;
-	const dirs = [];
-	const seen = /* @__PURE__ */ new Set();
-	const push = (d) => {
-		if (d && !seen.has(d)) {
-			seen.add(d);
-			dirs.push(d);
-		}
-	};
-	for (const d of (env.PATH || "").split(path.delimiter)) push(d);
-	for (const d of getKnownBinDirs(homeDir)) push(d);
-	for (const dir of dirs) {
-		const fullPath = path.join(dir, expanded);
-		try {
-			if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
-				fs.accessSync(fullPath, fs.constants.X_OK);
-				return fullPath;
-			}
-		} catch {}
+function pickEmotion(scores) {
+	if (typeof scores !== "object" || scores === null) return null;
+	let best = null;
+	let bestValue = Number.NEGATIVE_INFINITY;
+	let tie = false;
+	for (const key of EMOTION_KEYS) {
+		const v = scores[key];
+		if (typeof v !== "number" || !Number.isFinite(v)) continue;
+		if (v > bestValue) {
+			bestValue = v;
+			best = key;
+			tie = false;
+		} else if (v === bestValue) tie = true;
 	}
+	if (best === null) return null;
+	return tie || bestValue <= 0 ? "neutral" : best;
 }
 
 //#endregion
@@ -1640,26 +1599,17 @@ function findCommandPath(command, opts = {}) {
 * ★ どの失敗（コマンドが無い・タイムアウト・非ゼロ終了・壊れた JSON）でも例外を投げず、
 *   呼び出し側から渡された `fallback`（辞書式）に委ねる。
 */
-const FM_COMMAND = "fm";
-const EMOTION_KEYS$1 = [
-	"happy",
-	"relaxed",
-	"surprised",
-	"sad",
-	"angry",
-	"neutral"
-];
-/** `fm respond --schema` に渡す構造化出力のスキーマ。初回だけランタイムディレクトリへ書く */
+/** `fm respond --schema` に渡す構造化出力のスキーマ。内容が変わったときだけランタイムディレクトリへ書き直す */
 const FM_EMOTION_SCHEMA = {
 	additionalProperties: false,
 	type: "object",
 	title: "EmotionScores",
-	properties: Object.fromEntries(EMOTION_KEYS$1.map((k) => [k, {
+	properties: Object.fromEntries(EMOTION_KEYS.map((k) => [k, {
 		description: "0.0-1.0",
 		type: "number"
 	}])),
-	"x-order": EMOTION_KEYS$1,
-	required: EMOTION_KEYS$1
+	"x-order": EMOTION_KEYS,
+	required: EMOTION_KEYS
 };
 /**
 * 判定基準の指示文。sad / angry はそのままだと値が付きにくい傾向があるので、
@@ -1688,27 +1638,27 @@ const FM_EMOTION_INSTRUCTION = [
 	"sad と angry は、そのまま判定すると値が付きにくい傾向がある。上の基準に当てはまる文なら、",
 	"遠慮せず0.5以上の値を付けること。"
 ].join("\n");
-/** 既にあれば何もしない。失敗は握り潰し、読み取り専用の配置でも発話を止めない（emotionKeywordsFile.ts と同じ形） */
-function writeFmEmotionSchemaIfAbsent(filePath) {
+/**
+* 内容が変わっていなければ何もしない。変わっていれば tmp + rename で書き直す
+* （`FM_EMOTION_SCHEMA` を変えた将来のアップグレードでも、既存環境に古いスキーマが残り続けない
+* ようにするため）。失敗は握り潰し、読み取り専用の配置でも発話を止めない。
+*
+* ★ ユーザーが手で編集するファイルではない（`emotionKeywordsFile.ts` とは違う）ので、
+*   内容が違えば無条件に上書きしてよい。
+*/
+function writeFmEmotionSchemaIfChanged(filePath) {
 	try {
-		fs.mkdirSync(path.dirname(filePath), { recursive: true });
-		fs.writeFileSync(filePath, `${JSON.stringify(FM_EMOTION_SCHEMA, null, 2)}\n`, { flag: "wx" });
-	} catch {}
-}
-/** スコアオブジェクトから最大値のラベルを返す。壊れていれば null（呼び出し側が fallback する） */
-function argmaxEmotion$1(raw) {
-	if (typeof raw !== "object" || raw === null) return null;
-	const record = raw;
-	let best = null;
-	let bestValue = Number.NEGATIVE_INFINITY;
-	for (const key of EMOTION_KEYS$1) {
-		const v = record[key];
-		if (typeof v === "number" && Number.isFinite(v) && v > bestValue) {
-			bestValue = v;
-			best = key;
+		const desired = `${JSON.stringify(FM_EMOTION_SCHEMA, null, 2)}\n`;
+		let current;
+		try {
+			current = fs.readFileSync(filePath, "utf-8");
+		} catch {
+			current = void 0;
 		}
-	}
-	return best;
+		if (current === desired) return;
+		fs.mkdirSync(path.dirname(filePath), { recursive: true });
+		writeFileAtomic(filePath, desired);
+	} catch {}
 }
 /** ```json フェンス付きで返ってきた場合の保険（--schema があれば通常は素の JSON になる） */
 function parseScores(stdout) {
@@ -1732,8 +1682,8 @@ function createFmEmotionClassifier(deps) {
 	return (texts) => {
 		if (texts.length === 0) return [];
 		try {
-			writeFmEmotionSchemaIfAbsent(deps.schemaPath);
-			const commandPath = findCommandPath(FM_COMMAND);
+			writeFmEmotionSchemaIfChanged(deps.schemaPath);
+			const commandPath = resolveFmCommandPath(deps.commandPath);
 			if (!commandPath) return deps.fallback(texts);
 			const args = [
 				"respond",
@@ -1753,7 +1703,7 @@ function createFmEmotionClassifier(deps) {
 				timeoutMs: deps.getTimeoutMs()
 			});
 			if (!result.ok) return deps.fallback(texts);
-			const emotion = argmaxEmotion$1(parseScores(result.stdout));
+			const emotion = pickEmotion(parseScores(result.stdout));
 			if (emotion === null) return deps.fallback(texts);
 			return texts.map(() => emotion);
 		} catch {
@@ -1777,14 +1727,6 @@ function createFmEmotionClassifier(deps) {
 *   （辞書式）に委ねる。子プロセス全体が失敗すれば全文を、一部の文だけ壊れていればその文
 *   だけを fallback する。
 */
-const EMOTION_KEYS = [
-	"happy",
-	"relaxed",
-	"surprised",
-	"sad",
-	"angry",
-	"neutral"
-];
 /**
 * 子プロセス（Node、CommonJS として `node -e` に渡す）の中で実行するスクリプト。
 * stdin から `{ texts, baseUrl, model }` を読み、stdout に `(Record<Emotion, number> | null)[]` を
@@ -1848,19 +1790,6 @@ const CHILD_SCRIPT = [
 	"  process.stdout.write(JSON.stringify(out));",
 	"})();"
 ].join("\n");
-function argmaxEmotion(scores) {
-	if (!scores) return null;
-	let best = null;
-	let bestValue = Number.NEGATIVE_INFINITY;
-	for (const key of EMOTION_KEYS) {
-		const v = scores[key];
-		if (typeof v === "number" && Number.isFinite(v) && v > bestValue) {
-			bestValue = v;
-			best = key;
-		}
-	}
-	return best;
-}
 /**
 * `(texts: string[]) => Emotion[]` を作る。1文ずつ Ollaya に問い合わせるが、
 * プロセス起動は `texts` 全体で1回にまとめる。throw しない。
@@ -1894,7 +1823,7 @@ function createOllayaEmotionClassifier(deps) {
 			return deps.fallback(texts);
 		}
 		if (!Array.isArray(parsed) || parsed.length !== texts.length) return deps.fallback(texts);
-		const emotions = parsed.map((scores) => argmaxEmotion(scores));
+		const emotions = parsed.map((scores) => pickEmotion(scores));
 		const brokenIndices = [];
 		emotions.forEach((e, i) => {
 			if (e === null) brokenIndices.push(i);
@@ -2301,6 +2230,102 @@ function toSpeechSentences(text, options = {}) {
 }
 
 //#endregion
+//#region src/core/commandPath.ts
+/**
+* 外部コマンドの絶対パスを探す。**spawn せずに** `fs.existsSync` だけで判定する。
+*
+* ★ 元は `summarizer/claudeCli.ts` にあった（要約 CLI 専用の探索として書いた）。
+*   [#51] で `server/engineProcess.ts` が合成エンジンの実行パスを解決するのにも要るようになり、
+*   「要約 CLI のファイルからエンジンのパス解決を借りる」形を避けてここへ出した。
+*   **ロジックは移動時に変えていない。**
+*
+* ★ 移植元（cc-mascot の `detect.ts`）は Finder/Dock 起動の Electron アプリ向けに、
+*   ログインシェル PATH の解決（`zsh -ilc`、最大5秒）と `--version` の spawn を検出のたびに
+*   行っていた。ここでは持ち込まない。**ただし PATH が痩せる問題自体は無くなっていない。**
+*   本リポジトリは mise で Node を固定していて、shim が PATH に載るのは対話 rc 経由のみ ——
+*   Finder / Dock から起動した Claude Code はその PATH を継承しない（`plugin/scripts/_lib.sh`
+*   の `chatter_spawn_cli` が同じ前提でログを残す。`core/scripts/verify-phase-a.sh` の ⑫ は
+*   この状態を意図的に再現している）。ログインシェルを起動して補う（`zsh -ilc`）方針は
+*   引き続き持ち込まない — **毎 delta 起動されるプロセスの中で、要約のたびにログインシェルを
+*   立ち上げるコストが見合わないため。**（★ かつてここには「hook の10秒制約に乗せられない」と
+*   書いてあったが誤り。この関数が走るのは hook からデタッチ起動された `chatter-agent-speak`
+*   の中で、hook 自身は spool に1ファイル置いて即 `exit 0` する（`_lib.sh` の
+*   `chatter_spawn_cli` は `nohup ... &`）。同じ経路で既に `execFileSync` を既定で60秒
+*   ブロックしうるので、10秒制約はここには掛かっていない。）代わりに、PATH に
+*   見つからなかったときの保険として mise/asdf/nvm/volta 等の**既知のインストール先**を
+*   `fs.existsSync` だけで（spawn せずに）順に見る軽量な同期探索に絞る。
+*
+* ★ **「既知の場所を探さない」オプションは置かない。** PR #52 のレビューで
+*   「`run` のようなありふれた名前が shim を掴む」と指摘され一度足したが、**実測すると
+*   `getKnownBinDirs` の 7 件は 7/7 とも既に PATH に載っていた**（`~/.local/bin` `~/bin`
+*   `/opt/homebrew/bin` `/usr/local/bin` `~/.volta/bin` mise/asdf の shims）。切っても
+*   PATH 経由で同じものに当たるので**穴が1つも塞がらない**まま、「PATH だけ見るから安全」という
+*   誤った安心だけが残る。名前解決の危うさは、**解決結果を呼び出し側が名指しでログに出す**ことで
+*   扱う（→ `server/engineProcess.ts` の `resolvedFrom`）。
+*
+* [#51]: https://github.com/schwarz9791/chatter-agent/issues/51
+*/
+/** CLI がよくインストールされる既知のディレクトリ（PATH に含まれないことがある） */
+function getKnownBinDirs(homeDir) {
+	const dirs = [
+		path.join(homeDir, ".local", "bin"),
+		"/opt/homebrew/bin",
+		"/usr/local/bin",
+		path.join(homeDir, ".volta", "bin"),
+		path.join(homeDir, "bin"),
+		path.join(homeDir, ".local", "share", "mise", "shims"),
+		path.join(homeDir, ".asdf", "shims")
+	];
+	try {
+		const nvmVersionsDir = path.join(homeDir, ".nvm", "versions", "node");
+		if (fs.existsSync(nvmVersionsDir)) for (const version of fs.readdirSync(nvmVersionsDir)) dirs.push(path.join(nvmVersionsDir, version, "bin"));
+	} catch {}
+	return dirs;
+}
+/**
+* コマンドの絶対パスを探す。`fs.existsSync` だけで判定し、**spawn しない**
+* （移植元の `--version` 疎通確認は持ち込まない。上のヘッダ参照）。
+*
+* - `~/` で始まるなら `os.homedir()` に展開する。`aiSummaryCommand: "~/.local/bin/claude"` は
+*   `parseNonEmptyString`（config.ts）がそのまま受理するが、展開しないと下の絶対パス判定に
+*   当たらず、PATH の各ディレクトリと結合されて絶対に見つからないパスになる
+*   （`~user/` のような他ユーザーのホーム形式は対応不要）
+* - 展開後に絶対パスならそのまま使う。ユーザーが `aiSummaryCommand` / `ttsSpawnCommand` に
+*   明示した値を信頼し、存在確認はしない（間違っていれば実行側が ENOENT を返すだけで、
+*   `no-command` と `error` を厳密に分けることに実利が無い）
+* - そうでなければ `PATH` の各ディレクトリ → 既知の bin ディレクトリの順に探す。
+*   ファイルが存在するだけでなく**実行ビット**（`X_OK`）も見る。0644 の同名ファイル
+*   （インストールの残骸や補完スタブ）が後続の正しい候補を隠さないようにするため
+* - 見つからなければ `undefined`。呼び出し側（`summaryPipeline` は原文へフォールバック、
+*   `engineProcess` は spawn を諦めて 503 運用に落ちる）が決める
+*/
+function findCommandPath(command, opts = {}) {
+	const homeDir = opts.homeDir ?? os.homedir();
+	const expanded = command.startsWith("~/") ? path.join(homeDir, command.slice(2)) : command;
+	if (path.isAbsolute(expanded)) return expanded;
+	const env = opts.env ?? process.env;
+	const dirs = [];
+	const seen = /* @__PURE__ */ new Set();
+	const push = (d) => {
+		if (d && !seen.has(d)) {
+			seen.add(d);
+			dirs.push(d);
+		}
+	};
+	for (const d of (env.PATH || "").split(path.delimiter)) push(d);
+	for (const d of getKnownBinDirs(homeDir)) push(d);
+	for (const dir of dirs) {
+		const fullPath = path.join(dir, expanded);
+		try {
+			if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
+				fs.accessSync(fullPath, fs.constants.X_OK);
+				return fullPath;
+			}
+		} catch {}
+	}
+}
+
+//#endregion
 //#region src/summarizer/prompt.ts
 /**
 * 要約文の上限文字数。プロンプトの文言（下の `SUMMARY_INSTRUCTION`）と、A1（Phase 2）が
@@ -2325,8 +2350,7 @@ const SUMMARY_INSTRUCTION = [
 	"",
 	"ルール:",
 	`- 2〜3文、合計${120}文字以内`,
-	"- 元の発言の口調と感情（喜び・謝罪・驚き・困惑など）のニュアンスを保つこと。",
-	"  例: 成功報告なら明るく「〜できました！」、謝罪なら「すみません、〜」のように",
+	"- 元の発言の口調と感情（喜び・謝罪・驚き・困惑など）のニュアンスを保つこと",
 	"- 原文に近い口語調で書くこと（句読点と ！ ？ は使ってよい）",
 	"- 発言の主体（誰が）と依頼の向き（誰に）を原文のまま保つこと",
 	"- 原文の肯定・否定を反転させないこと",
@@ -2389,11 +2413,11 @@ function createSummaryPipeline(deps) {
 	*
 	* ★ ログの書き込み失敗で発話を止めないこと。要約の判定結果は既に確定しているので、
 	*   実測用の窓が壊れているだけで発話そのものには影響させない。
-	* ★ ここに来る（＝呼ばれる）のは `isEnabled()` が true かつ閾値を超えたときだけなので、
-	*   要約が既定 OFF のままなら `logPath` は1バイトも増えない。
-	* ★ このログは issue #31 の完了条件（要約 ON のときの実際の遅延を実測して記録する）のための
-	*   窓であり、hook 経路では `console.warn` が `/dev/null` に消えるのでここしか実測の術が無い。
-	*   実測が終わったら消してよい（ローテートは持たせていない）。
+	* ★ ここに来る（＝呼ばれる）のは `isEnabled()` が true かつ閾値を超えたときだけ。
+	*   **コマンドが解決できなかった（`no-command`）ときはここを呼ばない**（呼び出し側を参照） ——
+	*   CLI を1回も起動していない環境では行数が伸び続けない。実際に起動した行だけが増えるので、
+	*   伸びは要約1回に1行のペースに留まる。
+	* ★ このログは hook 経路では `console.warn` が `/dev/null` に消えるので、実測の窓がここしか無い。
 	* ★ D1(b)（issue #38 レビュー）: 6列目 `detail` を追加した。`claudeCli.ts` が拾った stderr の
 	*   抜粋（timeout/overflow/error のときだけ持つ）を渡す。ここが空のままだと、本物の CLI 失敗
 	*   （OAuth トークン切れ、フラグ拒否）の原因が「1行のログ」から追えなくなる（上の★のとおり、
@@ -2419,15 +2443,13 @@ function createSummaryPipeline(deps) {
 				log("skipped-limit", startedAt, text.length, 0);
 				return text;
 			}
-			const commandPath = findCommandPath(deps.getCommand());
-			if (!commandPath) {
-				log("no-command", startedAt, text.length, 0);
-				return text;
-			}
+			const backend = deps.getBackend();
+			const commandPath = backend === "fm" ? resolveFmCommandPath(deps.fmCommandPath) : findCommandPath(deps.getCommand());
+			if (!commandPath) return text;
 			summarizedCount++;
 			const sessionId = randomUUID();
 			registerSessionId(sessionId);
-			const args = deps.getBackend() === "fm" ? buildFmSummaryArgs(SUMMARY_INSTRUCTION) : buildSummaryArgs(SUMMARY_INSTRUCTION, {
+			const args = backend === "fm" ? buildFmSummaryArgs(SUMMARY_INSTRUCTION) : buildSummaryArgs(SUMMARY_INSTRUCTION, {
 				sessionId,
 				model: deps.getModel()
 			});
@@ -3689,8 +3711,8 @@ function processMessage(item, hasNewer, deps, state) {
 		spoken: sentences,
 		summarized: false
 	};
-	const sharedEmotion = summarized ? deps.classify([sentences.join("\n")])[0] : null;
 	const ownEmotions = spoken.length > 0 ? deps.classify(spoken) : [];
+	const sharedEmotion = summarized && ownEmotions.includes("neutral") ? deps.classify([sentences.join("\n")])[0] : null;
 	if (spoken.length > 0) deps.publish(spoken.map((text, i) => {
 		const ownEmotion = ownEmotions[i] ?? "neutral";
 		return {
@@ -3849,7 +3871,7 @@ function main() {
 			getThreshold: () => config.get("aiSummaryThreshold"),
 			getTimeoutMs: () => config.get("aiSummaryTimeoutMs"),
 			getMaxPerDrain: () => config.get("aiSummaryMaxPerDrain"),
-			getCommand: () => config.get("aiSummaryBackend") === "fm" ? "fm" : config.get("aiSummaryCommand"),
+			getCommand: () => config.get("aiSummaryCommand"),
 			getModel: () => config.get("aiSummaryModel"),
 			homeDir: getSummarizerHomeDir(),
 			logPath: getSummarizerLogPath()

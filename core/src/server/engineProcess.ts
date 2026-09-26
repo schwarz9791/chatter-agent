@@ -44,9 +44,9 @@ export interface EngineSpawnPlan {
    * 追加で渡す環境変数（`process.env` に**上書き**で重ねる）。
    *
    * ★ Ollaya 用（`resolveOllayaSpawn`）。`ollaya serve` は `--host` / `--port` を持たず、
-   *   `OLLAYA_HOST`（`host:port` 形式）でしか bind 先を指定できない（バイナリの文字列から
-   *   発見。ヘルプには出てこない）。AivisSpeech（`args` で `--host`/`--port` を渡す）とは
-   *   起こし方が違うので、`args` を汚さずここで分けて持つ。
+   *   `OLLAYA_HOST`（`host:port` 形式）でしか bind 先を指定できない。AivisSpeech
+   *   （`args` で `--host`/`--port` を渡す）とは起こし方が違うので、`args` を汚さずここで
+   *   分けて持つ。
    */
   env?: Record<string, string>;
 }
@@ -195,10 +195,12 @@ export function resolveOllayaSpawn(deps: ResolveOllayaSpawnDeps): EngineSpawnRes
   const resolved = findCommandPath(OLLAYA_COMMAND, { homeDir, env });
   if (resolved === undefined) return { skip: "not-found", tried: searchedPaths(OLLAYA_COMMAND, env) };
 
-  // 角括弧を外す・ポート省略時のフォールバックは buildArgs と同じ理由（そちらのコメント参照）
-  const host = url.hostname.replace(/^\[|\]$/g, "");
+  // ★ **角括弧は外さない。** `buildArgs` が `--host` 引数向けに外すのとは事情が違う——
+  //   `env.OLLAYA_HOST` は `host:port` を丸ごと1つの文字列として渡す形なので、IPv6 は
+  //   `[::1]:port` のまま渡さないと `::1:port` になって host:port として解釈できない。
+  //   `url.hostname` は IPv6 を角括弧付き（`"[::1]"`）で返すので、そのまま使う。
   const port = url.port || DEFAULT_HTTP_PORT;
-  return { command: resolved, args: OLLAYA_ARGS, env: { OLLAYA_HOST: `${host}:${port}` } };
+  return { command: resolved, args: OLLAYA_ARGS, env: { OLLAYA_HOST: `${url.hostname}:${port}` } };
 }
 
 /**
@@ -311,6 +313,13 @@ export interface StartEngineDeps {
   killWaitMs?: number;
   log?: (message: string) => void;
   warn?: (message: string) => void;
+  /** ログの主語。既定 `"[Engine]"`（合成エンジン）。Ollaya には `"[Ollaya]"` を渡す */
+  label?: string;
+  /**
+   * 起こせなかった／落ちたときの帰結を1行で言い切る文言。既定は合成エンジン向け
+   * （`"音声は 503 になります"`）。Ollaya には `"感情判定は辞書式になります"` を渡す。
+   */
+  unavailableNote?: string;
 }
 
 /** 落ちた理由を残すのに要る量。数 KB あれば足りる。stdout / stderr がそれぞれ持つ */
@@ -333,6 +342,8 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
   const killWaitMs = deps.killWaitMs ?? KILL_WAIT_MS;
   const log = deps.log ?? ((m: string) => console.log(m));
   const warn = deps.warn ?? ((m: string) => console.warn(m));
+  const label = deps.label ?? "[Engine]";
+  const unavailableNote = deps.unavailableNote ?? "音声は 503 になります";
 
   const child = spawnFn(plan.command, plan.args, {
     // ★ shell は噛ませない。パスに空白が入るだけで壊れるし、設定ファイル経由の
@@ -377,7 +388,7 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
     stderrTail = (stderrTail + chunk).slice(-OUTPUT_TAIL_CHARS);
   });
 
-  log(`[Engine] 起動しました (pid=${child.pid ?? "?"}): ${plan.command} ${plan.args.join(" ")}`);
+  log(`${label} 起動しました (pid=${child.pid ?? "?"}): ${plan.command} ${plan.args.join(" ")}`);
 
   // ★ spawn の失敗（ENOENT / EACCES）は `exit` ではなく `error` で来る。`exit` だけを見る実装は
   //   「起動したつもりで永久に繋がらない」状態になる（→ `player/audioPlayer.ts`）
@@ -386,7 +397,7 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
     // ★ 帰結までここで言い切る。`index.ts` の `warnAudioUnavailable` は「起こさないと決めた」
     //   経路の行なので、**起こしてから失敗した**この経路には届かない。
     //   ENOENT / EACCES は `ttsSpawnCommand` を書き間違えた人が最も踏む経路
-    warn(`[Engine] 起動できません (${plan.command}): ${String(err)}。音声は 503 になります`);
+    warn(`${label} 起動できません (${plan.command}): ${String(err)}。${unavailableNote}`);
   });
 
   child.on("exit", (code, signal) => {
@@ -394,15 +405,15 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
     // ★ 自分で止めたときに stderr を出さないこと。SIGTERM で殺すと `code` は `null` になり、
     //   `code !== 0` の条件に引っかかるので、**終了のたびに 2KB のログが落ちる**
     if (stopRequested) {
-      log(`[Engine] 停止しました (signal=${signal})`);
+      log(`${label} 停止しました (signal=${signal})`);
       return;
     }
-    warn(`[Engine] 終了しました (code=${code} signal=${signal})。再起動はしません（音声は 503 になります）`);
+    warn(`${label} 終了しました (code=${code} signal=${signal})。再起動はしません（${unavailableNote}）`);
     // ★ これが無いと「起動したはずなのに繋がらない」の原因が1文字も残らない
     if (code === 0) return;
     // stderr を優先。エンジンによっては全部 stdout に出す（uvicorn がそう）ので、その場合は stdout
     const tail = stderrTail.trim() || stdoutTail.trim();
-    if (tail) warn(`[Engine] 出力(末尾):\n${tail}`);
+    if (tail) warn(`${label} 出力(末尾):\n${tail}`);
   });
 
   const waitExit = (ms: number): Promise<boolean> =>
@@ -432,7 +443,7 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
     } catch (err) {
       // ESRCH = そのグループはもう居ない。止めるという目的は達している
       if ((err as NodeJS.ErrnoException).code === "ESRCH") return "gone";
-      warn(`[Engine] ${signal} を送れませんでした (pid=${pid}): ${String(err)}`);
+      warn(`${label} ${signal} を送れませんでした (pid=${pid}): ${String(err)}`);
       return "failed";
     }
   };
@@ -459,7 +470,7 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
     //     **既存の入口ガードと区別できる単体テストは書けない**ので、意図をここに残す
     if (exited) return;
 
-    warn(`[Engine] SIGTERM で終わらないので SIGKILL します (pid=${child.pid})`);
+    warn(`${label} SIGTERM で終わらないので SIGKILL します (pid=${child.pid})`);
     signalGroup("SIGKILL");
     await waitExit(killWaitMs);
   };

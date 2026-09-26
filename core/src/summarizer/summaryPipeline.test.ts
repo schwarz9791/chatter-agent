@@ -227,9 +227,19 @@ describe("createSummaryPipeline", () => {
       result = summarize(LONG_TEXT, () => {});
     }).not.toThrow();
     expect(result).toBe(LONG_TEXT);
+  });
 
-    const lines = readLogLines();
-    expect(lines[0]![1]).toBe("no-command");
+  /**
+   * ★ fm の無い環境（macOS 27 未満・Linux）では既定バックエンドで毎回この経路を通る。
+   *   ログに残すと、要約 CLI を一度も起動していないのにファイルが伸び続ける
+   *   （→ `log()` の docstring）。
+   */
+  it("★ no-command はログを書かない（伸び続けない）", () => {
+    const summarize = createSummaryPipeline(makeDeps({ getCommand: () => "definitely-not-a-real-command-xyz-12345" }));
+
+    summarize(LONG_TEXT, () => {});
+
+    expect(fs.existsSync(logPath)).toBe(false);
   });
 
   // ★ A2（issue #38 レビュー）で契約が変わった。旧実装はここで cleanTextForSpeech を通した
@@ -327,7 +337,9 @@ describe("createSummaryPipeline", () => {
     process.env.RECORD_LOG = recordLog;
     const registered: string[] = [];
 
-    const summarize = createSummaryPipeline(makeDeps({ getBackend: () => "fm" }));
+    // ★ fm バックエンドは固定パス（FM_COMMAND_PATH）で解決するので、テストでは
+    //   fmCommandPath でフェイク CLI に差し替える（getCommand は claude 専用なので見ない）
+    const summarize = createSummaryPipeline(makeDeps({ getBackend: () => "fm", fmCommandPath: writeRecorderScript() }));
     const result = summarize(LONG_TEXT, (id) => registered.push(id));
 
     expect(result).not.toBe(LONG_TEXT); // 採用されている
@@ -343,6 +355,31 @@ describe("createSummaryPipeline", () => {
 
     delete process.env.RECORDER_MODE;
     delete process.env.RECORD_LOG;
+  });
+
+  /**
+   * ★ コマンド解決と引数組み立てを別々に `getBackend()` で読むと、その間に設定パネルで
+   *   バックエンドが切り替わったとき、片方が旧バックエンド・もう片方が新バックエンドの
+   *   組み合わせで実行されうる（fm バイナリに claude 用の引数が渡る等）。1回だけ読むこと。
+   */
+  it("★ getBackend は1回だけ読む（コマンド解決と引数組み立てで値がずれない）", () => {
+    process.env.RECORDER_MODE = "short";
+    let calls = 0;
+    const summarize = createSummaryPipeline(
+      makeDeps({
+        getBackend: () => {
+          calls++;
+          return "claude";
+        },
+      }),
+    );
+
+    const result = summarize(LONG_TEXT, () => {});
+
+    expect(calls).toBe(1);
+    expect(result).not.toBe(LONG_TEXT);
+
+    delete process.env.RECORDER_MODE;
   });
 
   it("registerSessionId は CLI 実行開始より前に呼ばれる（フェイクCLI側から観測する）", () => {

@@ -1174,36 +1174,50 @@ describe("state の永続化が失敗したときの安全側の挙動（A4）",
  * 文ごとに判定する。
  */
 describe("感情判定", () => {
-  it("★ 要約が効いても、文自体で判定できる emotion は原文由来の判定に塗り潰されない", () => {
+  it("★ 要約が効いても、文自体で判定できる emotion は原文由来の判定に塗り潰されない。classify は1回だけ", () => {
     appendDelta("m1", 0, "驚きの出来事がありました。", true);
+    const calls: string[][] = [];
     drain({
       summarize: () => "順調です。バグが直りました！",
       // 原文は surprised に判定されるが、要約後の各文はそれ自体で別の emotion になる
-      classify: (texts) =>
-        texts.map((text) => {
+      classify: (texts) => {
+        calls.push(texts);
+        return texts.map((text) => {
           if (text.includes("順調")) return "relaxed";
           if (text.includes("バグ")) return "happy";
           return "surprised"; // 原文（sentences.join）向け
-        }),
+        });
+      },
     });
 
     const rows = records();
     expect(rows.map((r) => r.text)).toEqual(["順調です。", "バグが直りました！"]);
     expect(rows.map((r) => r.emotion)).toEqual(["relaxed", "happy"]);
+    // ★ 全部の文が自力で判定できているので、原文（sentences.join）はもう一度 classify しない
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual(["順調です。", "バグが直りました！"]);
   });
 
-  it("★ 要約が効いたとき、文自体では neutral にしかならない文は原文由来の emotion を受け取る", () => {
+  it("★ 要約が効いたとき、文自体では neutral にしかならない文は原文由来の emotion を受け取る。neutral が混ざるときだけ原文をもう1回 classify する", () => {
     appendDelta("m1", 0, "元のメッセージです。", true);
+    const calls: string[][] = [];
     drain({
       summarize: () => "要約その1！要約その2？要約その3。",
       // 要約後の文には「元の」が含まれない。文ごとに判定すると全部 neutral になる
-      classify: (texts) => texts.map((text) => (text.includes("元の") ? "happy" : "neutral")),
+      classify: (texts) => {
+        calls.push(texts);
+        return texts.map((text) => (text.includes("元の") ? "happy" : "neutral"));
+      },
     });
 
     const rows = records();
     expect(rows.map((r) => r.text)).toEqual(["要約その1！", "要約その2？", "要約その3。"]);
     // 自力では neutral にしかならないので、原文（sentences.join）由来の happy を借りる
     expect(rows.map((r) => r.emotion)).toEqual(["happy", "happy", "happy"]);
+    // ★ neutral が混ざったので、原文をもう一度 classify する（合計2回）
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toEqual(["要約その1！", "要約その2？", "要約その3。"]);
+    expect(calls[1]).toEqual(["元のメッセージです。"]);
   });
 
   /**

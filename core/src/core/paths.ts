@@ -52,7 +52,7 @@ export function getEmotionKeywordsPath(e: PathEnv = currentPathEnv()): string {
 
 /**
  * `emotionClassifier: "fm"` が使う構造化出力のスキーマ（`fm respond --schema`）。
- * CLI が初回だけ書き出す（`writeDefaultEmotionKeywordsIfAbsent` と同じ形。→ `emotion/fmClassifier.ts`）。
+ * 人間が編集するファイルではない。CLI が内容の変わったときだけ書き直す（→ `emotion/fmClassifier.ts`）。
  */
 export function getEmotionSchemaPath(e: PathEnv = currentPathEnv()): string {
   return e.env.CHATTER_AGENT_EMOTION_SCHEMA || path.join(getRuntimeDir(e), "emotion-schema.json");
@@ -198,7 +198,7 @@ export function getSummarizerHomeDir(e: PathEnv = currentPathEnv()): string {
  * 要約の所要時間を実測するための追記ログ。
  *
  * hook 経路では `console.warn` が `/dev/null` に消えるので、実測の窓がここしかない。
- * **要約が有効なときだけ書かれる**ので、既定 OFF のままなら1バイトも増えない。
+ * **要約 CLI を実際に起動したときだけ1行増える**（コマンドが無い環境では増えない）。
  */
 export function getSummarizerLogPath(e: PathEnv = currentPathEnv()): string {
   return path.join(getRuntimeDir(e), "summarizer.log");

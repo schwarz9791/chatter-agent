@@ -24,6 +24,15 @@ describe("SUMMARY_INSTRUCTION", () => {
     expect(SUMMARY_INSTRUCTION).not.toContain("です・ます調");
   });
 
+  /**
+   * ★ 「口語調で書く」ルールと矛盾する丁寧語の例示を残さない。CLAUDE.md で砕けた口調を
+   *   指示しているセッションでは、例示につられて要約だけ丁寧語になりうる。
+   */
+  it("★ 口調の例示に丁寧語（言い切りの「〜できました！」「すみません、〜」）を含まない", () => {
+    expect(SUMMARY_INSTRUCTION).not.toContain("できました！");
+    expect(SUMMARY_INSTRUCTION).not.toContain("すみません、");
+  });
+
   it("発言の主体と依頼の向きを原文のまま保つことを含む", () => {
     expect(SUMMARY_INSTRUCTION).toContain("発言の主体（誰が）と依頼の向き（誰に）を原文のまま保つ");
   });

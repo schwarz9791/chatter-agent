@@ -639,6 +639,9 @@ try {
       CHATTER_AGENT_TTS_URL: engineUrl,
       CHATTER_AGENT_TTS_SPEAKER_ID: String(SPEAKER_ID),
       CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS: "2000",
+      // ★ 感情判定は見ないシナリオなので固定する。既定（ollaya・spawn=true）のままだと、
+      //   開発機に ollaya が入っていれば本物の `ollaya serve` が起動されうる
+      CHATTER_AGENT_EMOTION_CLASSIFIER: "dictionary",
     };
     // playerServerUrl は空のまま。host / port からの導出も一緒に確かめる
     delete chainEnv.CHATTER_AGENT_PLAYER_SERVER_URL;

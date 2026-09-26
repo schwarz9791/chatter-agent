@@ -13,9 +13,8 @@
  */
 
 import { spawnSync } from "child_process";
+import { EMOTION_KEYS, pickEmotion } from "./emotionScores";
 import type { Emotion } from "../core/types";
-
-const EMOTION_KEYS: readonly Emotion[] = ["happy", "relaxed", "surprised", "sad", "angry", "neutral"];
 
 /**
  * 感情ごとの判定基準（英語）。sad / angry はコーディングエージェント自身の状況に
@@ -91,20 +90,6 @@ const CHILD_SCRIPT = [
   "})();",
 ].join("\n");
 
-function argmaxEmotion(scores: Record<string, number> | null): Emotion | null {
-  if (!scores) return null;
-  let best: Emotion | null = null;
-  let bestValue = Number.NEGATIVE_INFINITY;
-  for (const key of EMOTION_KEYS) {
-    const v = scores[key];
-    if (typeof v === "number" && Number.isFinite(v) && v > bestValue) {
-      bestValue = v;
-      best = key;
-    }
-  }
-  return best;
-}
-
 export interface OllayaEmotionClassifierDeps {
   getBaseUrl: () => string;
   getModel: () => string;
@@ -149,7 +134,7 @@ export function createOllayaEmotionClassifier(deps: OllayaEmotionClassifierDeps)
     }
     if (!Array.isArray(parsed) || parsed.length !== texts.length) return deps.fallback(texts);
 
-    const emotions = (parsed as unknown[]).map((scores) => argmaxEmotion(scores as Record<string, number> | null));
+    const emotions = (parsed as unknown[]).map((scores) => pickEmotion(scores as Record<string, number> | null));
     const brokenIndices: number[] = [];
     emotions.forEach((e, i) => {
       if (e === null) brokenIndices.push(i);

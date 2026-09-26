@@ -2,25 +2,19 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { createFmEmotionClassifier, writeFmEmotionSchemaIfAbsent, FM_EMOTION_SCHEMA } from "./fmClassifier";
+import { createFmEmotionClassifier, writeFmEmotionSchemaIfChanged, FM_EMOTION_SCHEMA } from "./fmClassifier";
 import type { Emotion } from "../core/types";
 
 let dir: string;
 let binDir: string;
 let schemaPath: string;
 let homeDir: string;
-let originalPath: string | undefined;
 
-/**
- * `findCommandPath("fm")` は実 `process.env.PATH` を読む（core/commandPath.ts はテスト用の
- * env 差し替え口を持つが、fmClassifier.ts はそれを公開していない）。ここでは一時ディレクトリを
- * PATH の先頭に足して「fm という名前のコマンド」をテストごとに用意する。
- */
-function installFakeFm(script: string): void {
+function installFakeFm(script: string): string {
   const file = path.join(binDir, "fm");
   fs.writeFileSync(file, script);
   fs.chmodSync(file, 0o755);
-  process.env.PATH = `${binDir}${path.delimiter}${originalPath ?? ""}`;
+  return file;
 }
 
 beforeEach(() => {
@@ -29,11 +23,9 @@ beforeEach(() => {
   fs.mkdirSync(binDir);
   schemaPath = path.join(dir, "emotion-schema.json");
   homeDir = path.join(dir, "home");
-  originalPath = process.env.PATH;
 });
 
 afterEach(() => {
-  process.env.PATH = originalPath;
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -48,13 +40,14 @@ function makeFallback(): { fn: (texts: string[]) => Emotion[]; calls: string[][]
 
 describe("createFmEmotionClassifier", () => {
   it("スキーマ強制の応答から最大値のラベルを全文に適用する", () => {
-    installFakeFm(
+    const commandPath = installFakeFm(
       `#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({ happy: 0.9, relaxed: 0.1, surprised: 0.1, sad: 0.05, angry: 0.02, neutral: 0.1 }));\n`,
     );
     const fallback = makeFallback();
     const classify = createFmEmotionClassifier({
       schemaPath,
       homeDir,
+      commandPath,
       getTimeoutMs: () => 5000,
       fallback: fallback.fn,
     });
@@ -65,13 +58,14 @@ describe("createFmEmotionClassifier", () => {
   });
 
   it("コードフェンス付きの応答でも剥がして読む", () => {
-    installFakeFm(
+    const commandPath = installFakeFm(
       '#!/usr/bin/env node\nprocess.stdout.write("```json\\n" + JSON.stringify({ happy: 0.1, relaxed: 0.1, surprised: 0.1, sad: 0.9, angry: 0.1, neutral: 0.1 }) + "\\n```");\n',
     );
     const fallback = makeFallback();
     const classify = createFmEmotionClassifier({
       schemaPath,
       homeDir,
+      commandPath,
       getTimeoutMs: () => 5000,
       fallback: fallback.fn,
     });
@@ -79,13 +73,14 @@ describe("createFmEmotionClassifier", () => {
     expect(classify(["残念です。"])).toEqual(["sad"]);
   });
 
-  it("初回だけスキーマ JSON を書き出し、以後は上書きしない", () => {
-    installFakeFm(
+  it("初回はスキーマ JSON を書き出す", () => {
+    const commandPath = installFakeFm(
       `#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({ happy: 0, relaxed: 0, surprised: 0, sad: 0, angry: 0, neutral: 1 }));\n`,
     );
     const classify = createFmEmotionClassifier({
       schemaPath,
       homeDir,
+      commandPath,
       getTimeoutMs: () => 5000,
       fallback: (texts) => texts.map(() => "neutral"),
     });
@@ -93,18 +88,40 @@ describe("createFmEmotionClassifier", () => {
     classify(["確認します。"]);
     expect(fs.existsSync(schemaPath)).toBe(true);
     expect(JSON.parse(fs.readFileSync(schemaPath, "utf-8"))).toEqual(FM_EMOTION_SCHEMA);
+  });
 
-    fs.writeFileSync(schemaPath, "触られていないことを確かめる目印");
-    writeFmEmotionSchemaIfAbsent(schemaPath);
-    expect(fs.readFileSync(schemaPath, "utf-8")).toBe("触られていないことを確かめる目印");
+  /** ★ 内容が変わっていれば書き直す（将来 FM_EMOTION_SCHEMA が変わっても古いスキーマが残り続けない） */
+  it("★ 中身が期待と違えば書き直す", () => {
+    fs.mkdirSync(path.dirname(schemaPath), { recursive: true });
+    fs.writeFileSync(schemaPath, "古いスキーマ（違う内容）");
+
+    writeFmEmotionSchemaIfChanged(schemaPath);
+
+    expect(JSON.parse(fs.readFileSync(schemaPath, "utf-8"))).toEqual(FM_EMOTION_SCHEMA);
+  });
+
+  /**
+   * ★ 内容が既に同じなら書き直さない（不要な書き込みをしない）。
+   *   意図的に古い mtime を設定してから呼ぶ。書き直せば mtime が今の時刻に変わるので、
+   *   「触っていない」ことを確認できる（`fs.writeFileSync` は ESM の名前空間を差し替えられず
+   *   spy できないため、mtime で観測する）。
+   */
+  it("★ 中身が既に同じなら書き直さない（mtime が変わらない）", () => {
+    writeFmEmotionSchemaIfChanged(schemaPath); // 初回書き込み
+    const past = new Date(Date.now() - 60_000);
+    fs.utimesSync(schemaPath, past, past);
+
+    writeFmEmotionSchemaIfChanged(schemaPath);
+
+    expect(fs.statSync(schemaPath).mtime.getTime()).toBe(past.getTime());
   });
 
   it("コマンドが見つからなければ fallback へ落ちる", () => {
-    process.env.PATH = "";
     const fallback = makeFallback();
     const classify = createFmEmotionClassifier({
       schemaPath,
       homeDir,
+      commandPath: path.join(dir, "no-such-fm"),
       getTimeoutMs: () => 5000,
       fallback: fallback.fn,
     });
@@ -114,11 +131,12 @@ describe("createFmEmotionClassifier", () => {
   });
 
   it("非ゼロ終了は fallback へ落ちる", () => {
-    installFakeFm("#!/usr/bin/env node\nprocess.exit(1);\n");
+    const commandPath = installFakeFm("#!/usr/bin/env node\nprocess.exit(1);\n");
     const fallback = makeFallback();
     const classify = createFmEmotionClassifier({
       schemaPath,
       homeDir,
+      commandPath,
       getTimeoutMs: () => 5000,
       fallback: fallback.fn,
     });
@@ -128,11 +146,12 @@ describe("createFmEmotionClassifier", () => {
   });
 
   it("壊れた JSON は fallback へ落ちる", () => {
-    installFakeFm('#!/usr/bin/env node\nprocess.stdout.write("not json");\n');
+    const commandPath = installFakeFm('#!/usr/bin/env node\nprocess.stdout.write("not json");\n');
     const fallback = makeFallback();
     const classify = createFmEmotionClassifier({
       schemaPath,
       homeDir,
+      commandPath,
       getTimeoutMs: () => 5000,
       fallback: fallback.fn,
     });
@@ -140,21 +159,45 @@ describe("createFmEmotionClassifier", () => {
     expect(classify(["x"])).toEqual(["neutral"]);
   });
 
-  it("タイムアウトは fallback へ落ちる（例外を投げない）", () => {
-    installFakeFm("#!/usr/bin/env node\nsetInterval(() => {}, 1000);\n");
+  /** ★ 全部0点・同点は先頭キー（happy）に偏らず neutral に倒す（→ emotion/emotionScores.ts） */
+  it("★ スコアが全部0（または同点）なら neutral に倒す", () => {
+    const commandPath = installFakeFm(
+      `#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({ happy: 0, relaxed: 0, surprised: 0, sad: 0, angry: 0, neutral: 0 }));\n`,
+    );
     const fallback = makeFallback();
-    const classify = createFmEmotionClassifier({ schemaPath, homeDir, getTimeoutMs: () => 200, fallback: fallback.fn });
+    const classify = createFmEmotionClassifier({
+      schemaPath,
+      homeDir,
+      commandPath,
+      getTimeoutMs: () => 5000,
+      fallback: fallback.fn,
+    });
+
+    expect(classify(["謝罪です。"])).toEqual(["neutral"]);
+    expect(fallback.calls).toHaveLength(0); // fallback ではなく本物の判定結果として neutral
+  });
+
+  it("タイムアウトは fallback へ落ちる（例外を投げない）", () => {
+    const commandPath = installFakeFm("#!/usr/bin/env node\nsetInterval(() => {}, 1000);\n");
+    const fallback = makeFallback();
+    const classify = createFmEmotionClassifier({
+      schemaPath,
+      homeDir,
+      commandPath,
+      getTimeoutMs: () => 200,
+      fallback: fallback.fn,
+    });
 
     expect(() => classify(["x"])).not.toThrow();
     expect(classify(["x"])).toEqual(["neutral"]);
   }, 10_000);
 
   it("空配列は fm を起動せずに空配列を返す", () => {
-    process.env.PATH = "";
     const fallback = makeFallback();
     const classify = createFmEmotionClassifier({
       schemaPath,
       homeDir,
+      commandPath: path.join(dir, "no-such-fm"),
       getTimeoutMs: () => 5000,
       fallback: fallback.fn,
     });

@@ -258,10 +258,14 @@ describe("resolveOllayaSpawn", () => {
     );
   });
 
-  it("IPv6 ループバックは OLLAYA_HOST から角括弧が外れる", () => {
+  /**
+   * ★ `host:port` の1文字列に丸めるので、角括弧を外すと `::1:11435` になり host:port として
+   *   解釈できなくなる（`buildArgs` が `--host` 引数向けに外すのとは事情が違う）。
+   */
+  it("★ IPv6 ループバックは OLLAYA_HOST の角括弧を保つ", () => {
     expect(
       resolveOllayaSpawn({ baseUrl: "http://[::1]:11435", homeDir: HOME, env: { PATH: "/opt/bin" } }),
-    ).toMatchObject({ env: { OLLAYA_HOST: "::1:11435" } });
+    ).toMatchObject({ env: { OLLAYA_HOST: "[::1]:11435" } });
   });
 });
 
@@ -470,6 +474,26 @@ describe("startEngine", () => {
 
     expect(await until(() => engine.exited())).toBe(true);
     expect(warnings.some((m) => m.includes("起動できません"))).toBe(true);
+  });
+
+  /**
+   * ★ TTS 専用の文言（「[Engine]」「音声は 503」）を Ollaya に流用すると、11435 が別プロセスに
+   *   掴まれて `ollaya serve` がすぐ落ちたときに合成エンジンが壊れたと誤診させる。
+   *   呼び出し側から差し替えられること（→ `server/index.ts` の Ollaya 呼び出し）を見る。
+   */
+  it("★ label / unavailableNote を差し替えると、その文言で warn する", async () => {
+    const warnings: string[] = [];
+    const engine = start("/definitely/not/a/real/binary", [], {
+      warn: (m) => void warnings.push(m),
+      label: "[Ollaya]",
+      unavailableNote: "感情判定は辞書式になります",
+    });
+
+    expect(await until(() => engine.exited())).toBe(true);
+    expect(warnings.some((m) => m.startsWith("[Ollaya] 起動できません"))).toBe(true);
+    expect(warnings.some((m) => m.includes("感情判定は辞書式になります"))).toBe(true);
+    expect(warnings.some((m) => m.includes("[Engine]"))).toBe(false);
+    expect(warnings.some((m) => m.includes("音声は 503"))).toBe(false);
   });
 
   it("★ 既に終わっている相手にはシグナルを送らない（pid の再利用を巻き添えにしない）", async () => {

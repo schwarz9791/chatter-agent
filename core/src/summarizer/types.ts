@@ -2,9 +2,10 @@
  * summarizer/ の型定義。
  *
  * cc-mascot の `services/summarizer/` を移植する際、バックエンド抽象化（`Summarizer` /
- * `BackendSpec` 等）は claude 専用化に伴って不要になったため持ち込んでいない。ここにあるのは
- * chatter-agent の呼び出し契約に合わせて新設した型と、`summaryPipeline.ts` / `claudeCli.ts` が
- * 内部で使う型だけ。
+ * `BackendSpec` 等）は不要になったため持ち込んでいない。呼び出し契約を `Summarize` 型1つに
+ * 絞ってあり、対応するバックエンド（`"fm"` / `"claude"`）の分岐は `summaryPipeline.ts` /
+ * `summaryPreview.ts` 側で閉じている。ここにあるのは chatter-agent の呼び出し契約に合わせて
+ * 新設した型と、`summaryPipeline.ts` / `claudeCli.ts` が内部で使う型だけ。
  */
 
 /**
@@ -25,7 +26,7 @@
 export type Summarize = (text: string, registerSessionId: (sessionId: string) => void) => string;
 
 /**
- * `summaryPipeline.ts` の判定結果。実測ログ（`logPath`）の2列目と1対1で対応する。
+ * `summaryPipeline.ts` の判定結果。`no-command` を除き、実測ログ（`logPath`）の2列目と対応する。
  *
  * - `ok`            要約を採用した
  * - `timeout`       CLI がタイムアウトで強制終了された
@@ -36,7 +37,9 @@ export type Summarize = (text: string, registerSessionId: (sessionId: string) =>
  *                    **CLI は起動していない。** `error`（CLI 起動後の失敗）と混同しないこと
  *                    （issue #38 レビュー D1(a)）
  * - `skipped-limit` このドレインでの要約実行回数が上限に達していた（CLI を起動していない）
- * - `no-command`    要約コマンドの絶対パスが解決できなかった（CLI を起動していない）
+ * - `no-command`    要約コマンドの絶対パスが解決できなかった（CLI を起動していない）。
+ *                   `summaryPipeline` はこれをログに残さない（コマンドが無い環境で行数だけ
+ *                   伸び続けるのを避けるため）。`summaryPreview` の応答（outcome）には載る
  */
 export type SummaryOutcome =
   | "ok"

@@ -12,15 +12,12 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { runClaudeCli } from "../summarizer/claudeCli";
-import { findCommandPath } from "../core/commandPath";
+import { writeFileAtomic } from "../core/atomicWrite";
+import { resolveFmCommandPath, runClaudeCli } from "../summarizer/claudeCli";
+import { EMOTION_KEYS, pickEmotion } from "./emotionScores";
 import type { Emotion } from "../core/types";
 
-const FM_COMMAND = "fm";
-
-const EMOTION_KEYS: readonly Emotion[] = ["happy", "relaxed", "surprised", "sad", "angry", "neutral"];
-
-/** `fm respond --schema` に渡す構造化出力のスキーマ。初回だけランタイムディレクトリへ書く */
+/** `fm respond --schema` に渡す構造化出力のスキーマ。内容が変わったときだけランタイムディレクトリへ書き直す */
 export const FM_EMOTION_SCHEMA = {
   additionalProperties: false,
   type: "object",
@@ -58,31 +55,31 @@ export const FM_EMOTION_INSTRUCTION = [
   "遠慮せず0.5以上の値を付けること。",
 ].join("\n");
 
-/** 既にあれば何もしない。失敗は握り潰し、読み取り専用の配置でも発話を止めない（emotionKeywordsFile.ts と同じ形） */
-export function writeFmEmotionSchemaIfAbsent(filePath: string): void {
+/**
+ * 内容が変わっていなければ何もしない。変わっていれば tmp + rename で書き直す
+ * （`FM_EMOTION_SCHEMA` を変えた将来のアップグレードでも、既存環境に古いスキーマが残り続けない
+ * ようにするため）。失敗は握り潰し、読み取り専用の配置でも発話を止めない。
+ *
+ * ★ ユーザーが手で編集するファイルではない（`emotionKeywordsFile.ts` とは違う）ので、
+ *   内容が違えば無条件に上書きしてよい。
+ */
+export function writeFmEmotionSchemaIfChanged(filePath: string): void {
   try {
+    const desired = `${JSON.stringify(FM_EMOTION_SCHEMA, null, 2)}\n`;
+    let current: string | undefined;
+    try {
+      current = fs.readFileSync(filePath, "utf-8");
+    } catch {
+      current = undefined;
+    }
+    if (current === desired) return;
+
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, `${JSON.stringify(FM_EMOTION_SCHEMA, null, 2)}\n`, { flag: "wx" });
+    writeFileAtomic(filePath, desired);
   } catch {
     // 失敗しても classify 側は毎回 --schema にこのパスを渡すだけなので、書けていなくても
     // fm がエラーになり fallback に落ちるだけで発話は止まらない
   }
-}
-
-/** スコアオブジェクトから最大値のラベルを返す。壊れていれば null（呼び出し側が fallback する） */
-function argmaxEmotion(raw: unknown): Emotion | null {
-  if (typeof raw !== "object" || raw === null) return null;
-  const record = raw as Record<string, unknown>;
-  let best: Emotion | null = null;
-  let bestValue = Number.NEGATIVE_INFINITY;
-  for (const key of EMOTION_KEYS) {
-    const v = record[key];
-    if (typeof v === "number" && Number.isFinite(v) && v > bestValue) {
-      bestValue = v;
-      best = key;
-    }
-  }
-  return best;
 }
 
 /** ```json フェンス付きで返ってきた場合の保険（--schema があれば通常は素の JSON になる） */
@@ -109,6 +106,8 @@ export interface FmEmotionClassifierDeps {
   getTimeoutMs: () => number;
   /** 接続不可・タイムアウト・壊れた応答のときのフォールバック（辞書式） */
   fallback: (texts: string[]) => Emotion[];
+  /** テスト用。既定 `FM_COMMAND_PATH`（`/usr/bin/fm`） */
+  commandPath?: string;
 }
 
 /**
@@ -120,9 +119,9 @@ export function createFmEmotionClassifier(deps: FmEmotionClassifierDeps): (texts
     if (texts.length === 0) return [];
 
     try {
-      writeFmEmotionSchemaIfAbsent(deps.schemaPath);
+      writeFmEmotionSchemaIfChanged(deps.schemaPath);
 
-      const commandPath = findCommandPath(FM_COMMAND);
+      const commandPath = resolveFmCommandPath(deps.commandPath);
       if (!commandPath) return deps.fallback(texts);
 
       const args = [
@@ -144,7 +143,7 @@ export function createFmEmotionClassifier(deps: FmEmotionClassifierDeps): (texts
       });
       if (!result.ok) return deps.fallback(texts);
 
-      const emotion = argmaxEmotion(parseScores(result.stdout));
+      const emotion = pickEmotion(parseScores(result.stdout) as Record<string, number> | null);
       if (emotion === null) return deps.fallback(texts);
 
       return texts.map(() => emotion);

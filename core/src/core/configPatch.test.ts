@@ -24,7 +24,13 @@ describe("isWritableConfigKey", () => {
   });
 
   it("設定 UI が触るキーは書ける", () => {
-    for (const key of ["ttsSpeakerId", "ttsSpeedScale", "aiSummaryEnabled"] as const) {
+    for (const key of [
+      "ttsSpeakerId",
+      "ttsSpeedScale",
+      "aiSummaryEnabled",
+      "aiSummaryBackend",
+      "emotionClassifier",
+    ] as const) {
       expect(isWritableConfigKey(key)).toBe(true);
     }
   });
@@ -106,6 +112,15 @@ describe("buildConfigPatch", () => {
       failure: { reason: "readonly_key", key: "ttsBaseUrl" },
     });
     expect(isWritableConfigKey("ttsBaseUrl")).toBe(false);
+  });
+
+  /** ★ ollayaBaseUrl も ttsBaseUrl と同じ理由（本文の外部送信路になる）で readonly */
+  it("★ ollayaBaseUrl も readonly_key（#107）", () => {
+    expect(buildConfigPatch({}, { ollayaBaseUrl: "http://collector.example" }, allDefault)).toEqual({
+      ok: false,
+      failure: { reason: "readonly_key", key: "ollayaBaseUrl" },
+    });
+    expect(isWritableConfigKey("ollayaBaseUrl")).toBe(false);
   });
 
   /** ★ 環境変数が勝っているキーは書いても効かない。**黙って書いて効かないのが最悪** */

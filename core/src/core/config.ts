@@ -203,6 +203,15 @@ export interface ChatterAgentConfig {
    */
   aiSummaryEnabled: boolean;
   /**
+   * 要約バックエンド。
+   *
+   * - `"fm"`: macOS 27 以降の Apple Foundation Models CLI。固定名 `"fm"` で解決する
+   *   （`aiSummaryCommand` / `aiSummaryModel` は見ない。→ `summarizer/summaryPipeline.ts`）。
+   *   無い環境（macOS 27 未満・Linux）では `no-command` の経路に落ち、原文がそのまま読み上げられる
+   * - `"claude"`: 既存の挙動。`aiSummaryCommand` / `aiSummaryModel` を使う
+   */
+  aiSummaryBackend: AiSummaryBackend;
+  /**
    * この文字数を超えたメッセージだけ要約する。
    * 実測で1メッセージ平均 184.5 文字（`speech.jsonl` 229件）なので、200 だと「長い方だけ」が対象になる。
    */
@@ -248,7 +257,48 @@ export interface ChatterAgentConfig {
    *   （8 × `aiSummaryTimeoutMs` = 既定60秒なら480秒）の方。
    */
   aiSummaryMaxPerDrain: number;
+
+  // ── 以下は感情判定（emotion）が読む ─────────────────────────────────
+  // ★ ここに置く理由は AI要約のキーと同じ（→上の註記）。`ollayaSpawn` だけは
+  //   chatter-agent-server も読む（Ollaya を起こすかどうかの判断に使うため）。
+
+  /**
+   * 感情判定のバックエンド。
+   *
+   * - `"ollaya"`: ローカルの Jev 互換 decision model ランタイム（`ollaya.dev`）。1文ずつ
+   *   `/v1/systemone` に投げる。速いが精度は辞書式をやや上回る程度（→ docs/knowledge）
+   * - `"fm"`: macOS 27 以降の Apple Foundation Models CLI。メッセージ全体を1回だけ判定し、
+   *   同じ感情を全部の文に付ける（1文ずつ判定すると重すぎるため）
+   * - `"dictionary"`: 既存のルールベース（`emotion/ruleBasedEmotionClassifier.ts`）
+   *
+   * どの方式でも、接続不可・タイムアウト・壊れた応答は**辞書式に落ちる**（throw しない契約）。
+   */
+  emotionClassifier: EmotionClassifierKind;
+  /**
+   * Ollaya の baseUrl。**制御 API から書けない**（`configPatch.ts` の (c) 区分。`ttsBaseUrl` と
+   * 同じ理由 —— 書き換えると以後の本文がそのホストへ送られる本文の外部送信路になる）。
+   */
+  ollayaBaseUrl: string;
+  /** Ollaya に読ませるモデル。既定は多言語版。`laya` 単体だと本文の言語で自動振り分けになる */
+  ollayaModel: string;
+  /**
+   * Ollaya が居なければ chatter-agent-server が起こすか。`ttsSpawn` と同じ役回り
+   * （→ `server/engineProcess.ts` の `resolveOllayaSpawn`）。**起こすだけで待たない。**
+   */
+  ollayaSpawn: boolean;
+  /**
+   * 感情判定1回（メッセージ単位）の上限。超えたら判定を諦めて辞書式に落ちる。
+   *
+   * ★ 既定は辞書式より重いバックエンド（Ollaya は1文ずつ・fm はメッセージ全体を1回）を
+   *   数秒〜十数秒で収める前提の値。要約（既定60秒）と違い、感情判定は「無くても発話は
+   *   止まらない」保険的な機能なので、短めに倒して失敗を早く辞書式へ逃がす。
+   *   **秒数を仕様として扱わないこと**（マシン・ネットワークで変わる。→ CLAUDE.md）。
+   */
+  emotionTimeoutMs: number;
 }
+
+export type AiSummaryBackend = "fm" | "claude";
+export type EmotionClassifierKind = "ollaya" | "fm" | "dictionary";
 
 export function createDefaultConfig(): ChatterAgentConfig {
   return {
@@ -275,12 +325,19 @@ export function createDefaultConfig(): ChatterAgentConfig {
     playerServerUrl: "",
     speechMaxAgeMs: 0,
 
-    aiSummaryEnabled: false,
+    aiSummaryEnabled: true,
+    aiSummaryBackend: "fm",
     aiSummaryThreshold: 200,
     aiSummaryCommand: "claude",
     aiSummaryModel: "haiku",
     aiSummaryTimeoutMs: 60_000,
     aiSummaryMaxPerDrain: 3,
+
+    emotionClassifier: "ollaya",
+    ollayaBaseUrl: "http://127.0.0.1:11435",
+    ollayaModel: "laya:multilingual",
+    ollayaSpawn: true,
+    emotionTimeoutMs: 10_000,
   };
 }
 
@@ -504,6 +561,17 @@ function makeUrlParser(protocols: string[]): Parser<string> {
 const parseAiSummaryModel: Parser<string> = (raw) => (typeof raw === "string" ? raw.trim() : undefined);
 
 /**
+ * 列挙値のパーサを作る。**パーサを複製しない規約**（→下の SPECS の docstring）に沿って、
+ * 「既知の値ちょうどの文字列だけを通す」パーサをここ1箇所から生成する。
+ */
+function makeEnumParser<T extends string>(values: readonly T[]): Parser<T> {
+  return (raw) => (typeof raw === "string" && (values as readonly string[]).includes(raw) ? (raw as T) : undefined);
+}
+
+const parseAiSummaryBackend: Parser<AiSummaryBackend> = makeEnumParser(["fm", "claude"]);
+const parseEmotionClassifier: Parser<EmotionClassifierKind> = makeEnumParser(["ollaya", "fm", "dictionary"]);
+
+/**
  * キーの定義。satisfies で ChatterAgentConfig の全キーを網羅していることを型で担保する
  * （satisfies は型のみなので erasableSyntaxOnly に抵触しない）。
  * キーを増やすときは ChatterAgentConfig と SPECS の両方を直さないとコンパイルが通らない。
@@ -537,11 +605,18 @@ const SPECS = {
   speechMaxAgeMs: { env: "CHATTER_AGENT_SPEECH_MAX_AGE_MS", parse: parseNonNegativeInt },
 
   aiSummaryEnabled: { env: "CHATTER_AGENT_AI_SUMMARY_ENABLED", parse: parseBoolean },
+  aiSummaryBackend: { env: "CHATTER_AGENT_AI_SUMMARY_BACKEND", parse: parseAiSummaryBackend },
   aiSummaryThreshold: { env: "CHATTER_AGENT_AI_SUMMARY_THRESHOLD", parse: parsePositiveInt },
   aiSummaryCommand: { env: "CHATTER_AGENT_AI_SUMMARY_COMMAND", parse: parseNonEmptyString },
   aiSummaryModel: { env: "CHATTER_AGENT_AI_SUMMARY_MODEL", parse: parseAiSummaryModel },
   aiSummaryTimeoutMs: { env: "CHATTER_AGENT_AI_SUMMARY_TIMEOUT_MS", parse: parseTimeoutMs },
   aiSummaryMaxPerDrain: { env: "CHATTER_AGENT_AI_SUMMARY_MAX_PER_DRAIN", parse: parseAiSummaryMaxPerDrain },
+
+  emotionClassifier: { env: "CHATTER_AGENT_EMOTION_CLASSIFIER", parse: parseEmotionClassifier },
+  ollayaBaseUrl: { env: "CHATTER_AGENT_OLLAYA_URL", parse: makeUrlParser(["http:", "https:"]) },
+  ollayaModel: { env: "CHATTER_AGENT_OLLAYA_MODEL", parse: parseNonEmptyString },
+  ollayaSpawn: { env: "CHATTER_AGENT_OLLAYA_SPAWN", parse: parseBoolean },
+  emotionTimeoutMs: { env: "CHATTER_AGENT_EMOTION_TIMEOUT_MS", parse: parseTimeoutMs },
 } as const satisfies { [K in ConfigKey]: { env: string; parse: Parser<ChatterAgentConfig[K]> } };
 
 const CONFIG_KEYS = Object.keys(SPECS) as ConfigKey[];

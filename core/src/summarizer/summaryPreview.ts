@@ -29,15 +29,18 @@
 import { randomUUID } from "crypto";
 import { toSpeechSentences } from "../text/speechText";
 import { findCommandPath } from "../core/commandPath";
-import { buildSummaryArgs, runClaudeCliAsync } from "./claudeCli";
+import type { AiSummaryBackend } from "../core/config";
+import { buildFmSummaryArgs, buildSummaryArgs, runClaudeCliAsync } from "./claudeCli";
 import { SUMMARY_INSTRUCTION } from "./prompt";
 import { isAcceptableSummary } from "./summaryPipeline";
 import type { SummaryOutcome } from "./types";
 
 export interface SummaryPreviewDeps {
-  /** 要約に使う CLI（`aiSummaryCommand`） */
+  /** 要約バックエンド（`summaryPipeline.ts` の `SummaryPipelineDeps.getBackend` と同じ規則） */
+  getBackend: () => AiSummaryBackend;
+  /** 要約に使う CLI（`aiSummaryCommand`。バックエンドに応じた解決は呼び出し側の責務） */
   getCommand: () => string;
-  /** `--model` に渡す値（`aiSummaryModel`）。空文字なら渡さない */
+  /** `--model` に渡す値（`aiSummaryModel`）。空文字なら渡さない。`"fm"` バックエンドでは見ない */
   getModel: () => string;
   /** 要約1回の上限（`aiSummaryTimeoutMs`） */
   getTimeoutMs: () => number;
@@ -95,9 +98,14 @@ export async function runSummaryPreview(text: string, deps: SummaryPreviewDeps):
     return done("internal", null, err instanceof Error ? err.message : String(err));
   }
 
+  const args =
+    deps.getBackend() === "fm"
+      ? buildFmSummaryArgs(SUMMARY_INSTRUCTION)
+      : buildSummaryArgs(SUMMARY_INSTRUCTION, { sessionId, model: deps.getModel() });
+
   const result = await runClaudeCliAsync({
     commandPath,
-    args: buildSummaryArgs(SUMMARY_INSTRUCTION, { sessionId, model: deps.getModel() }),
+    args,
     text,
     homeDir: deps.homeDir,
     timeoutMs: deps.getTimeoutMs(),

@@ -65,6 +65,7 @@ const LONG_TEXT =
 
 function makeDeps(overrides: Partial<SummaryPreviewDeps> = {}): SummaryPreviewDeps {
   return {
+    getBackend: () => "claude",
     getCommand: () => writeRecorderScript(),
     getModel: () => "",
     getTimeoutMs: () => 5000,
@@ -199,5 +200,17 @@ describe("runSummaryPreview", () => {
     process.env.RECORDER_MODE = "fail";
     const result = await runSummaryPreview(LONG_TEXT, makeDeps());
     expect(result.summary).toBeNull();
+  });
+
+  it("★ backend が fm のときは claude 専用引数（--session-id 等）を渡さない", async () => {
+    const recordLog = path.join(dir, "record.jsonl");
+    process.env.RECORD_LOG = recordLog;
+    process.env.RECORDER_REPLY = "短い要約です。";
+
+    const result = await runSummaryPreview(LONG_TEXT, makeDeps({ getBackend: () => "fm" }));
+    expect(result.outcome).toBe("ok");
+
+    const line = JSON.parse(fs.readFileSync(recordLog, "utf-8").trim()) as { sessionId: string | null };
+    expect(line.sessionId).toBeNull();
   });
 });

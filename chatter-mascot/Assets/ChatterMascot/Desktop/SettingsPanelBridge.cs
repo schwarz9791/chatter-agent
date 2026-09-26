@@ -526,6 +526,16 @@ namespace ChatterMascot.Desktop
                     return;
                 }
 
+                case SettingKeys.AiSummaryBackend:
+                    _context.AiSummaryBackend = value;
+                    Queue(CoreConfigKeys.AiSummaryBackend, value, key);
+                    return;
+
+                case SettingKeys.EmotionClassifier:
+                    _context.EmotionClassifier = value;
+                    Queue(CoreConfigKeys.EmotionClassifier, value, key);
+                    return;
+
                 // ── 押すだけ ──────────────────────────────
                 case SettingKeys.TtsPreview:
                     _ = TtsPreviewAsync();
@@ -757,6 +767,8 @@ namespace ChatterMascot.Desktop
                 _context.SpeakerId ?? string.Empty,
                 _context.SpeedScale.ToString("R", CultureInfo.InvariantCulture),
                 _context.SummaryEnabled ? "1" : "0",
+                _context.AiSummaryBackend ?? string.Empty,
+                _context.EmotionClassifier ?? string.Empty,
                 _context.CoreReachable ? "1" : "0",
                 _context.CoreNote ?? string.Empty,
                 _context.CoreEnvOverridden == null ? "" : string.Join(",", _context.CoreEnvOverridden),
@@ -779,6 +791,12 @@ namespace ChatterMascot.Desktop
 
                 var summary = values[CoreConfigKeys.SummaryEnabled];
                 if (summary != null) _context.SummaryEnabled = summary.Type == JTokenType.Boolean && summary.Value<bool>();
+
+                var backend = values[CoreConfigKeys.AiSummaryBackend];
+                if (backend != null) _context.AiSummaryBackend = backend.ToString();
+
+                var emotion = values[CoreConfigKeys.EmotionClassifier];
+                if (emotion != null) _context.EmotionClassifier = emotion.ToString();
             }
 
             var origins = root["origins"] as JObject;
@@ -924,7 +942,8 @@ namespace ChatterMascot.Desktop
             {
                 ["title"] = "すべての設定をリセットしますか？",
                 ["message"] =
-                    "大きさ・位置・音量・モーション・ショートカット・音声スタイル・話す速さ・要約の設定が既定に戻り、"
+                    "大きさ・位置・音量・モーション・ショートカット・音声スタイル・話す速さ・要約・"
+                    + "要約エンジン・感情判定の設定が既定に戻り、"
                     + "選んだ VRM モデルのファイルも削除されます。この操作は取り消せません。",
                 ["ok"] = "リセットする",
                 ["cancel"] = "やめる",
@@ -965,18 +984,21 @@ namespace ChatterMascot.Desktop
             return removed;
         }
 
-        /// <summary>core 側の3つを既定へ。戻せなかったら理由を返す</summary>
+        /// <summary>core 側の設定を既定へ。戻せなかったら理由を返す</summary>
         private async Task<string> ResetCoreAsync()
         {
             var config = await _client.ConfigAsync();
-            if (!config.Ok) return "音声スタイル・話す速さ・要約は戻せませんでした（" + config.Reason + "）";
+            if (!config.Ok) return "音声スタイル・話す速さ・要約などは戻せませんでした（" + config.Reason + "）";
 
             var root = config.Body as JObject;
             var defaults = root != null ? root["defaults"] as JObject : null;
-            if (defaults == null) return "音声スタイル・話す速さ・要約は戻せませんでした（既定値を取れません）";
+            if (defaults == null) return "音声スタイル・話す速さ・要約などは戻せませんでした（既定値を取れません）";
 
             foreach (var key in new[]
-                     { CoreConfigKeys.SpeakerId, CoreConfigKeys.SpeedScale, CoreConfigKeys.SummaryEnabled })
+                     {
+                         CoreConfigKeys.SpeakerId, CoreConfigKeys.SpeedScale, CoreConfigKeys.SummaryEnabled,
+                         CoreConfigKeys.AiSummaryBackend, CoreConfigKeys.EmotionClassifier,
+                     })
             {
                 var value = defaults[key];
                 if (value == null) continue;
@@ -1167,6 +1189,8 @@ namespace ChatterMascot.Desktop
                 case CoreConfigKeys.SpeakerId: return SettingKeys.Speaker;
                 case CoreConfigKeys.SpeedScale: return SettingKeys.Speed;
                 case CoreConfigKeys.SummaryEnabled: return SettingKeys.SummaryEnabled;
+                case CoreConfigKeys.AiSummaryBackend: return SettingKeys.AiSummaryBackend;
+                case CoreConfigKeys.EmotionClassifier: return SettingKeys.EmotionClassifier;
                 default: return coreKey;
             }
         }

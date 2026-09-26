@@ -62,6 +62,12 @@ namespace ChatterMascot.Settings
 
         public const string SummaryEnabled = "summaryEnabled";
 
+        /// <summary>要約に使うエンジン（"fm" | "claude"）</summary>
+        public const string AiSummaryBackend = "aiSummaryBackend";
+
+        /// <summary>感情判定に使うエンジン（"ollaya" | "fm" | "dictionary"）</summary>
+        public const string EmotionClassifier = "emotionClassifier";
+
         public const string MuteHotKey = "muteHotKey";
         public const string HideHotKey = "hideHotKey";
 
@@ -79,6 +85,8 @@ namespace ChatterMascot.Settings
         public const string SpeakerId = "ttsSpeakerId";
         public const string SpeedScale = "ttsSpeedScale";
         public const string SummaryEnabled = "aiSummaryEnabled";
+        public const string AiSummaryBackend = "aiSummaryBackend";
+        public const string EmotionClassifier = "emotionClassifier";
     }
 
     /// <summary>
@@ -227,6 +235,21 @@ namespace ChatterMascot.Settings
             //   無く、原文が見えないので「要約されているか」が判断できないうえ、
             //   長い結果でパネルが伸びた。サーバー側の口
             //   （`POST /v1/summary/preview`）は残してあるので、確かめたいときは curl で叩く。
+            var backendOverridden = c.IsCoreEnvOverridden(CoreConfigKeys.AiSummaryBackend);
+            items.Add(SettingSpec.Choice(
+                SettingKeys.AiSummaryBackend, "要約エンジン", c.AiSummaryBackend, AiSummaryBackendChoices(),
+                enabled: c.CoreReachable && !backendOverridden,
+                note: CoreNote(c, backendOverridden, CoreConfigKeys.AiSummaryBackend,
+                    "fm は macOS 27 以降で使えます。使えないときは原文を読み上げます")));
+
+            // ── 感情判定 ─────────────────────────────────────
+            items.Add(SettingSpec.Section("感情判定"));
+            var emotionOverridden = c.IsCoreEnvOverridden(CoreConfigKeys.EmotionClassifier);
+            items.Add(SettingSpec.Choice(
+                SettingKeys.EmotionClassifier, "感情判定エンジン", c.EmotionClassifier, EmotionClassifierChoices(),
+                enabled: c.CoreReachable && !emotionOverridden,
+                note: CoreNote(c, emotionOverridden, CoreConfigKeys.EmotionClassifier,
+                    "fm は macOS 27 以降で使えます。使えないときは辞書式に戻ります")));
 
             // ── ショートカット ────────────────────────────────
             // ★ 記録の仕方は**節の全部にかかる**ので見出しに付ける（→ SettingSpec.Section の ★★）
@@ -286,7 +309,7 @@ namespace ChatterMascot.Settings
         /// （→ <see cref="AddMotionPreview"/>）。
         ///
         /// ★ <b>ここに出さないもの</b>: 待機モーションの ON/OFF・フレームレート・ショートカット・
-        ///   音声系（ミュートを除く）・AI要約・終了。手のひらメニュー／歯車から開く前提で、
+        ///   音声系（ミュートを除く）・AI要約・感情判定・終了。手のひらメニュー／歯車から開く前提で、
         ///   常駐トレイと同じ項目数を持たせる理由が無い。
         /// ★ <b>ミュートだけは出す。</b> デスクトップと違い、XR にはメニューバーもショートカットも
         ///   無く、パネル以外に切り替える手段が無い。
@@ -428,6 +451,27 @@ namespace ChatterMascot.Settings
                 choices[i] = new SettingChoice(fps, fps + " fps");
             }
             return choices;
+        }
+
+        /// <summary>要約エンジンの選択肢。値は core の <c>aiSummaryBackend</c> とそのまま対応する</summary>
+        private static IReadOnlyList<SettingChoice> AiSummaryBackendChoices()
+        {
+            return new[]
+            {
+                new SettingChoice("fm", "fm"),
+                new SettingChoice("claude", "Claude Haiku"),
+            };
+        }
+
+        /// <summary>感情判定エンジンの選択肢。値は core の <c>emotionClassifier</c> とそのまま対応する</summary>
+        private static IReadOnlyList<SettingChoice> EmotionClassifierChoices()
+        {
+            return new[]
+            {
+                new SettingChoice("ollaya", "Ollaya(laya)"),
+                new SettingChoice("fm", "fm"),
+                new SettingChoice("dictionary", "辞書式"),
+            };
         }
 
         /// <summary>
@@ -585,6 +629,8 @@ namespace ChatterMascot.Settings
                 case CoreConfigKeys.SpeakerId: return "CHATTER_AGENT_TTS_SPEAKER_ID";
                 case CoreConfigKeys.SpeedScale: return "CHATTER_AGENT_TTS_SPEED_SCALE";
                 case CoreConfigKeys.SummaryEnabled: return "CHATTER_AGENT_AI_SUMMARY_ENABLED";
+                case CoreConfigKeys.AiSummaryBackend: return "CHATTER_AGENT_AI_SUMMARY_BACKEND";
+                case CoreConfigKeys.EmotionClassifier: return "CHATTER_AGENT_EMOTION_CLASSIFIER";
                 default: return coreKey;
             }
         }

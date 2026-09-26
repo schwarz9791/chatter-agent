@@ -17,7 +17,8 @@ import { randomUUID } from "crypto";
 import * as fs from "fs";
 import { toSpeechSentences } from "../text/speechText";
 import { findCommandPath } from "../core/commandPath";
-import { buildSummaryArgs, runClaudeCli } from "./claudeCli";
+import type { AiSummaryBackend } from "../core/config";
+import { buildFmSummaryArgs, buildSummaryArgs, runClaudeCli } from "./claudeCli";
 import { SUMMARY_INSTRUCTION, SUMMARY_MAX_CHARS } from "./prompt";
 import type { Summarize, SummaryOutcome } from "./types";
 
@@ -42,15 +43,25 @@ export function isAcceptableSummary(spoken: string, originalLength: number): boo
 export interface SummaryPipelineDeps {
   /** 機能が有効か */
   isEnabled: () => boolean;
+  /**
+   * 要約バックエンド。`"fm"` なら `buildFmSummaryArgs`（claude 専用の `--session-id` 等を
+   * 持たない）、`"claude"` なら従来どおり `buildSummaryArgs` で引数を組む。
+   *
+   * ★ **コマンド解決（`getCommand`）はここでは分岐しない。** 呼び出し側（`cli/index.ts`）が
+   *   バックエンドに応じて `getCommand` の中身（固定名 `"fm"` か `aiSummaryCommand`）を
+   *   出し分ける。ここで分岐を複製すると、CLI のテスト用フェイクコマンドと "fm" という
+   *   固定文字列のどちらが権威かが2箇所に分かれる。
+   */
+  getBackend: () => AiSummaryBackend;
   /** 長文判定の閾値（文字数） */
   getThreshold: () => number;
   /** 要約1回の上限。超えたら要約を諦めて原文を返す */
   getTimeoutMs: () => number;
   /** 1回のドレインで要約してよい回数の上限（上のヘッダ参照） */
   getMaxPerDrain: () => number;
-  /** 要約に使う CLI。絶対パスも可 */
+  /** 要約に使う CLI。絶対パスも可（バックエンドに応じた解決は呼び出し側の責務。上の `getBackend` 参照） */
   getCommand: () => string;
-  /** `--model` に渡す値。空文字なら渡さない */
+  /** `--model` に渡す値。空文字なら渡さない。`"fm"` バックエンドでは見ない */
   getModel: () => string;
   /**
    * 要約 CLI の cwd（隔離ディレクトリ）。
@@ -151,7 +162,10 @@ export function createSummaryPipeline(deps: SummaryPipelineDeps): Summarize {
       const sessionId = randomUUID();
       registerSessionId(sessionId);
 
-      const args = buildSummaryArgs(SUMMARY_INSTRUCTION, { sessionId, model: deps.getModel() });
+      const args =
+        deps.getBackend() === "fm"
+          ? buildFmSummaryArgs(SUMMARY_INSTRUCTION)
+          : buildSummaryArgs(SUMMARY_INSTRUCTION, { sessionId, model: deps.getModel() });
       const result = runClaudeCli({
         commandPath,
         args,

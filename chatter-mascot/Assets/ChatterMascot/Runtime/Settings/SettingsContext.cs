@@ -112,6 +112,12 @@ namespace ChatterMascot.Settings
 
         public bool SummaryEnabled { get; set; }
 
+        /// <summary>要約に使うエンジン（"fm" | "claude"）。既定は core と揃えて "fm"</summary>
+        public string AiSummaryBackend { get; set; } = "fm";
+
+        /// <summary>感情判定に使うエンジン（"ollaya" | "fm" | "dictionary"）。既定は core と揃えて "ollaya"</summary>
+        public string EmotionClassifier { get; set; } = "ollaya";
+
         /// <summary>
         /// 環境変数が勝っている core の設定キー（<c>ttsSpeakerId</c> など）。
         ///

@@ -44,6 +44,7 @@ function api(overrides: Partial<ControlApiDeps> = {}) {
     listSpeakers: () => Promise.resolve([{ id: 1, label: "話者（ノーマル）" }]),
     synthesizePreview: () => Promise.resolve(new ArrayBuffer(44)),
     summaryPreview: {
+      getBackend: () => "claude",
       getCommand: () => "chatter-agent-no-such-command",
       getModel: () => "",
       getTimeoutMs: () => 1000,

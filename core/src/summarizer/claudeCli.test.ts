@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { buildSummaryArgs, buildSummaryEnv, runClaudeCli } from "./claudeCli";
+import { buildFmSummaryArgs, buildSummaryArgs, buildSummaryEnv, runClaudeCli } from "./claudeCli";
 
 let dir: string;
 
@@ -62,6 +62,33 @@ describe("buildSummaryArgs", () => {
   it("--setting-sources は渡さない（settings.json 由来の認証を壊すため採用しなかった）", () => {
     const args = buildSummaryArgs("x", { sessionId: "s", model: "" });
     expect(args).not.toContain("--setting-sources");
+  });
+});
+
+describe("buildFmSummaryArgs", () => {
+  it("respond -i <instruction> --no-stream --guardrails permissive-content-transformations を積む", () => {
+    const args = buildFmSummaryArgs("要約して");
+    expect(args).toEqual([
+      "respond",
+      "-i",
+      "要約して",
+      "--no-stream",
+      "--guardrails",
+      "permissive-content-transformations",
+    ]);
+  });
+
+  it("claude 専用の引数（--session-id 等）を一切含まない", () => {
+    const args = buildFmSummaryArgs("x");
+    for (const claudeOnly of [
+      "--session-id",
+      "--no-session-persistence",
+      "--strict-mcp-config",
+      "--disallowedTools",
+      "--model",
+    ]) {
+      expect(args).not.toContain(claudeOnly);
+    }
   });
 });
 

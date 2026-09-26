@@ -76,6 +76,7 @@ if (mode === "fail") {
 function makeDeps(overrides: Partial<SummaryPipelineDeps> = {}): SummaryPipelineDeps {
   return {
     isEnabled: () => true,
+    getBackend: () => "claude",
     getThreshold: () => 10,
     getTimeoutMs: () => 5000,
     getMaxPerDrain: () => 10,
@@ -320,6 +321,30 @@ describe("createSummaryPipeline", () => {
     delete process.env.RECORD_LOG;
   });
 
+  it("★ backend が fm のときは --session-id 等の claude 専用引数を渡さない（registerSessionId 自体は呼ぶ）", () => {
+    process.env.RECORDER_MODE = "short";
+    const recordLog = path.join(dir, "record.jsonl");
+    process.env.RECORD_LOG = recordLog;
+    const registered: string[] = [];
+
+    const summarize = createSummaryPipeline(makeDeps({ getBackend: () => "fm" }));
+    const result = summarize(LONG_TEXT, (id) => registered.push(id));
+
+    expect(result).not.toBe(LONG_TEXT); // 採用されている
+    expect(registered).toHaveLength(1); // A4 の「再要約は1回まで」を効かせるため fm でも呼ばれる
+
+    const record = JSON.parse(fs.readFileSync(recordLog, "utf-8").trim()) as { argv: string[]; sessionId: null };
+    expect(record.argv[0]).toBe("respond");
+    expect(record.argv[1]).toBe("-i");
+    expect(record.argv.slice(3)).toEqual(["--no-stream", "--guardrails", "permissive-content-transformations"]);
+    expect(record.argv).not.toContain("--session-id");
+    expect(record.argv).not.toContain("--model");
+    expect(record.sessionId).toBeNull();
+
+    delete process.env.RECORDER_MODE;
+    delete process.env.RECORD_LOG;
+  });
+
   it("registerSessionId は CLI 実行開始より前に呼ばれる（フェイクCLI側から観測する）", () => {
     process.env.RECORDER_MODE = "short";
     process.env.MARKER_PATH = path.join(dir, "marker");
@@ -384,6 +409,7 @@ describe("createSummaryPipeline", () => {
 
     for (const overrides of [
       { isEnabled: boom as () => boolean },
+      { getBackend: boom as () => "fm" | "claude" },
       { getThreshold: boom as () => number },
       { getCommand: boom as () => string },
       { getModel: boom as () => string },

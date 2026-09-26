@@ -40,12 +40,19 @@ const DEFAULTS: ChatterAgentConfig = {
   playerServerUrl: "",
   speechMaxAgeMs: 0,
 
-  aiSummaryEnabled: false,
+  aiSummaryEnabled: true,
+  aiSummaryBackend: "fm",
   aiSummaryThreshold: 200,
   aiSummaryCommand: "claude",
   aiSummaryModel: "haiku",
   aiSummaryTimeoutMs: 60_000,
   aiSummaryMaxPerDrain: 3,
+
+  emotionClassifier: "ollaya",
+  ollayaBaseUrl: "http://127.0.0.1:11435",
+  ollayaModel: "laya:multilingual",
+  ollayaSpawn: true,
+  emotionTimeoutMs: 10_000,
 };
 
 function store(env: NodeJS.ProcessEnv = {}) {
@@ -349,15 +356,24 @@ describe("isSpeakDisabled（#4）", () => {
   });
 });
 
-describe("aiSummary*（#31）", () => {
-  it("既定はOFF・閾値200・claude/haiku・タイムアウト60秒・1ドレイン3件まで", () => {
+describe("aiSummary*（#31, #107）", () => {
+  it("既定はON・バックエンドfm・閾値200・claude/haiku・タイムアウト60秒・1ドレイン3件まで", () => {
     const c = createDefaultConfig();
-    expect(c.aiSummaryEnabled).toBe(false);
+    expect(c.aiSummaryEnabled).toBe(true);
+    expect(c.aiSummaryBackend).toBe("fm");
     expect(c.aiSummaryThreshold).toBe(200);
     expect(c.aiSummaryCommand).toBe("claude");
     expect(c.aiSummaryModel).toBe("haiku");
     expect(c.aiSummaryTimeoutMs).toBe(60_000);
     expect(c.aiSummaryMaxPerDrain).toBe(3);
+  });
+
+  it("aiSummaryBackend は fm/claude だけを受け、それ以外は既定値に倒れる", () => {
+    write({ aiSummaryBackend: "claude" });
+    expect(store().get("aiSummaryBackend")).toBe("claude");
+    write({ aiSummaryBackend: "gpt" });
+    expect(store().get("aiSummaryBackend")).toBe("fm");
+    expect(store({ CHATTER_AGENT_AI_SUMMARY_BACKEND: "claude" }).get("aiSummaryBackend")).toBe("claude");
   });
 
   it("config.json から読める", () => {
@@ -444,6 +460,46 @@ describe("aiSummary*（#31）", () => {
   it("aiSummaryEnabled は既存の真偽値パーサと同じトークンを受ける", () => {
     expect(store({ CHATTER_AGENT_AI_SUMMARY_ENABLED: "1" }).get("aiSummaryEnabled")).toBe(true);
     expect(store({ CHATTER_AGENT_AI_SUMMARY_ENABLED: "off" }).get("aiSummaryEnabled")).toBe(false);
+  });
+});
+
+describe("感情判定（emotionClassifier 等、#107）", () => {
+  it("既定は ollaya・laya:multilingual・spawn 有効", () => {
+    const c = createDefaultConfig();
+    expect(c.emotionClassifier).toBe("ollaya");
+    expect(c.ollayaBaseUrl).toBe("http://127.0.0.1:11435");
+    expect(c.ollayaModel).toBe("laya:multilingual");
+    expect(c.ollayaSpawn).toBe(true);
+    expect(c.emotionTimeoutMs).toBe(10_000);
+  });
+
+  it("emotionClassifier は ollaya/fm/dictionary だけを受け、それ以外は既定値に倒れる", () => {
+    write({ emotionClassifier: "fm" });
+    expect(store().get("emotionClassifier")).toBe("fm");
+    write({ emotionClassifier: "dictionary" });
+    expect(store().get("emotionClassifier")).toBe("dictionary");
+    write({ emotionClassifier: "nope" });
+    expect(store().get("emotionClassifier")).toBe("ollaya");
+    expect(store({ CHATTER_AGENT_EMOTION_CLASSIFIER: "fm" }).get("emotionClassifier")).toBe("fm");
+  });
+
+  it("ollayaBaseUrl はスキームを検査し、末尾スラッシュを落とす（ttsBaseUrl と同じ規則）", () => {
+    expect(store({ CHATTER_AGENT_OLLAYA_URL: "http://127.0.0.1:11435/" }).get("ollayaBaseUrl")).toBe(
+      "http://127.0.0.1:11435",
+    );
+    write({ ollayaBaseUrl: "localhost:11435" });
+    expect(store().get("ollayaBaseUrl")).toBe("http://127.0.0.1:11435");
+  });
+
+  it("ollayaModel / ollayaSpawn / emotionTimeoutMs は環境変数からも読める", () => {
+    const s = store({
+      CHATTER_AGENT_OLLAYA_MODEL: "laya",
+      CHATTER_AGENT_OLLAYA_SPAWN: "0",
+      CHATTER_AGENT_EMOTION_TIMEOUT_MS: "3000",
+    });
+    expect(s.get("ollayaModel")).toBe("laya");
+    expect(s.get("ollayaSpawn")).toBe(false);
+    expect(s.get("emotionTimeoutMs")).toBe(3000);
   });
 });
 

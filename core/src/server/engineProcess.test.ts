@@ -16,6 +16,7 @@ import {
   describeEngineSkip,
   knownEnginePaths,
   resolveEngineSpawn,
+  resolveOllayaSpawn,
   startEngine,
   type EngineProcess,
   type EngineSpawnSkip,
@@ -208,7 +209,72 @@ describe("resolveEngineSpawn", () => {
   });
 });
 
+describe("resolveOllayaSpawn", () => {
+  /**
+   * ★ `findCommandPath("ollaya")` は既知の bin ディレクトリ（`/usr/local/bin` 等、
+   *   `env.PATH` の外）も探す設計（→ core/commandPath.ts）なので、`ollaya` が実際に
+   *   インストールされているマシンでは `env.PATH` をいじるだけでは「見つからない」を
+   *   再現できない。**実在するファイルを作って PATH の先頭に置く**（`env.PATH` は
+   *   既知の bin ディレクトリより先に見るので、これで確実にこちらが先に見つかる）ことで、
+   *   実行環境に関わらず決定的にする。
+   */
+  it("ループバック・http・コマンドが見つかれば、args は ['serve'] で OLLAYA_HOST に host:port を積む", () => {
+    const binDir = path.join(dir, "ollaya-bin");
+    fs.mkdirSync(binDir, { recursive: true });
+    const bin = path.join(binDir, "ollaya");
+    fs.writeFileSync(bin, "#!/bin/sh\n");
+    fs.chmodSync(bin, 0o755);
+
+    expect(resolveOllayaSpawn({ baseUrl: "http://127.0.0.1:11435", homeDir: HOME, env: { PATH: binDir } })).toEqual({
+      command: bin,
+      args: ["serve"],
+      env: { OLLAYA_HOST: "127.0.0.1:11435" },
+    });
+  });
+
+  // ★ 「固定名で解決する」（ttsSpawnCommand のような差し替えの口が無い）ことは、
+  //   `ResolveOllayaSpawnDeps` に `command` フィールドが無いという**型シグネチャ**で
+  //   保証されている。既知の bin ディレクトリも探す設計（上のテストの docstring 参照）のため、
+  //   「PATH を空にすれば not-found になる」という実行時テストは決定的に書けないので、
+  //   ここでは型で保証されていることを見出しで示すに留める。
+
+  it("ループバックでなければ not-loopback", () => {
+    expect(resolveOllayaSpawn({ baseUrl: "http://example.com:11435", homeDir: HOME })).toEqual({
+      skip: "not-loopback",
+      host: "example.com",
+    });
+  });
+
+  it("https は起こせない", () => {
+    expect(resolveOllayaSpawn({ baseUrl: "https://127.0.0.1:11435", homeDir: HOME })).toEqual({
+      skip: "not-http",
+      protocol: "https:",
+    });
+  });
+
+  it("ポートを省略した baseUrl は http の既定（80）を OLLAYA_HOST に積む", () => {
+    expect(resolveOllayaSpawn({ baseUrl: "http://127.0.0.1", homeDir: HOME, env: { PATH: "/opt/bin" } })).toMatchObject(
+      { env: { OLLAYA_HOST: "127.0.0.1:80" } },
+    );
+  });
+
+  it("IPv6 ループバックは OLLAYA_HOST から角括弧が外れる", () => {
+    expect(
+      resolveOllayaSpawn({ baseUrl: "http://[::1]:11435", homeDir: HOME, env: { PATH: "/opt/bin" } }),
+    ).toMatchObject({ env: { OLLAYA_HOST: "::1:11435" } });
+  });
+});
+
 describe("describeEngineSkip", () => {
+  it("subject を渡すと文中の対象を差し替えられる（Ollaya 用）", () => {
+    expect(describeEngineSkip({ skip: "not-loopback", host: "example.com" }, "Ollaya")).toEqual([
+      "[Server] example.com はループバックではないのでOllayaを起こせません",
+    ]);
+    expect(describeEngineSkip({ skip: "not-found", tried: ["/a/ollaya"] }, "Ollaya")[0]).toContain(
+      "Ollayaが見つかりません",
+    );
+  });
+
   it("ループバックでない理由はホスト名を名指しする", () => {
     expect(describeEngineSkip({ skip: "not-loopback", host: "example.com" })).toEqual([
       "[Server] example.com はループバックではないので合成エンジンを起こせません",
@@ -447,6 +513,43 @@ describe("startEngine", () => {
       },
     );
     expect(calls[0]?.[2]).toMatchObject({ detached: true, shell: false, stdio: ["ignore", "pipe", "pipe"] });
+  });
+
+  /** ★ Ollaya は `OLLAYA_HOST` を env で渡す必要がある（`ollaya serve` に --host/--port が無いため） */
+  it("plan.env を渡すと process.env に重ねて spawn する", () => {
+    const calls: unknown[][] = [];
+    startEngine(
+      { command: "/bin/echo", args: ["x"], env: { OLLAYA_HOST: "127.0.0.1:11999" } },
+      {
+        log: () => {},
+        warn: () => {},
+        spawn: ((...callArgs: unknown[]) => {
+          calls.push(callArgs);
+          return { pid: 1234, stdout: null, stderr: null, on: () => {}, once: () => {} } as never;
+        }) as never,
+      },
+    );
+    const options = calls[0]?.[2] as { env?: Record<string, string> };
+    expect(options.env?.OLLAYA_HOST).toBe("127.0.0.1:11999");
+    // process.env も一緒に継承していること（置換ではなく重ね合わせ）
+    expect(options.env?.PATH).toBe(process.env.PATH);
+  });
+
+  it("plan.env が無ければ env オプション自体を渡さない（process.env をそのまま継承）", () => {
+    const calls: unknown[][] = [];
+    startEngine(
+      { command: "/bin/echo", args: ["x"] },
+      {
+        log: () => {},
+        warn: () => {},
+        spawn: ((...callArgs: unknown[]) => {
+          calls.push(callArgs);
+          return { pid: 1234, stdout: null, stderr: null, on: () => {}, once: () => {} } as never;
+        }) as never,
+      },
+    );
+    const options = calls[0]?.[2] as { env?: unknown };
+    expect(options.env).toBeUndefined();
   });
 
   /**

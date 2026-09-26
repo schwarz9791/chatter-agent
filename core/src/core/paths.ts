@@ -50,6 +50,14 @@ export function getEmotionKeywordsPath(e: PathEnv = currentPathEnv()): string {
   return e.env.CHATTER_AGENT_EMOTION_KEYWORDS || path.join(getRuntimeDir(e), "emotion-keywords.json");
 }
 
+/**
+ * `emotionClassifier: "fm"` が使う構造化出力のスキーマ（`fm respond --schema`）。
+ * CLI が初回だけ書き出す（`writeDefaultEmotionKeywordsIfAbsent` と同じ形。→ `emotion/fmClassifier.ts`）。
+ */
+export function getEmotionSchemaPath(e: PathEnv = currentPathEnv()): string {
+  return e.env.CHATTER_AGENT_EMOTION_SCHEMA || path.join(getRuntimeDir(e), "emotion-schema.json");
+}
+
 /** hook が payload を落とす場所。ワーカーが処理し終えたら削除する */
 export function getSpoolDir(e: PathEnv = currentPathEnv()): string {
   return path.join(getRuntimeDir(e), "spool");

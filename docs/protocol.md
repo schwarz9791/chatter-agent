@@ -416,6 +416,7 @@ LAN からなら `GET, HEAD, OPTIONS` を返す。
 | `ttsSpawnCommand` / `ttsSpawnArgs` / `playerCommand` / `playerArgs` / `aiSummaryCommand` | **(a) コマンド実行に繋がる。** ループバック限定でも「設定を1行書き換えるだけで任意コマンド実行」は別格の壊れ方をする。**緩めないこと** |
 | `host` / `port` / `allowedOrigins` | **(b) 効かない。** 再起動まで反映されないので、UI から触れる意味が無いうえに「効かない設定」という最悪の見え方になる |
 | `ttsBaseUrl` | **(c) 本文の外部送信路になる。** 書き換えると以後**全メッセージ本文**がそのホストの `/audio_query` へ POST される（`currentVoice()` は毎回読み直すので**再起動も要らない**）。しかも音が鳴らなくなるだけなので、**症状は「無音」だけ**で気付けない。**緩めないこと** |
+| `ollayaBaseUrl` | **(c) 本文の外部送信路になる。** `ttsBaseUrl` と同じ理由。感情判定が `"ollaya"` のとき、以後**全メッセージ本文**がそのホストの `/v1/systemone` へ POST される。**緩めないこと**（issue #107） |
 
 ★ **`defaults` は既定値そのもの**（`createDefaultConfig()`）。設定 UI の「すべての設定をリセット」が
 これを使って書き戻す。★ **クライアントに既定値を書き写させないこと** —— 写した瞬間に

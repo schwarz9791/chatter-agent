@@ -101,7 +101,11 @@ namespace ChatterMascot.Tests
         {
             var items = SettingsSchema.Build(Context(reachable: false));
 
-            foreach (var key in new[] { SettingKeys.Speaker, SettingKeys.Speed, SettingKeys.SummaryEnabled })
+            foreach (var key in new[]
+                     {
+                         SettingKeys.Speaker, SettingKeys.Speed, SettingKeys.SummaryEnabled,
+                         SettingKeys.AiSummaryBackend, SettingKeys.EmotionClassifier,
+                     })
             {
                 var spec = Find(items, key);
                 Assert.That(spec, Is.Not.Null, $"{key} が消えている");
@@ -139,6 +143,24 @@ namespace ChatterMascot.Tests
 
             Assert.That(spec.Enabled, Is.False);
             Assert.That(spec.Note, Does.Contain("CHATTER_AGENT_TTS_SPEAKER_ID"));
+        }
+
+        /// <summary>★ 要約エンジン・感情判定も同じ扱い（環境変数名まで note に出す）</summary>
+        [Test]
+        public void DisablesTheSummaryBackendAndEmotionClassifierWhenTheEnvironmentOverridesThem()
+        {
+            var context = Context();
+            context.CoreEnvOverridden = new[] { CoreConfigKeys.AiSummaryBackend, CoreConfigKeys.EmotionClassifier };
+
+            var items = SettingsSchema.Build(context);
+
+            var backend = Find(items, SettingKeys.AiSummaryBackend);
+            Assert.That(backend.Enabled, Is.False);
+            Assert.That(backend.Note, Does.Contain("CHATTER_AGENT_AI_SUMMARY_BACKEND"));
+
+            var emotion = Find(items, SettingKeys.EmotionClassifier);
+            Assert.That(emotion.Enabled, Is.False);
+            Assert.That(emotion.Note, Does.Contain("CHATTER_AGENT_EMOTION_CLASSIFIER"));
         }
 
         /// <summary>
@@ -375,6 +397,53 @@ namespace ChatterMascot.Tests
             Assert.That(spec.Value, Is.EqualTo("60"));
         }
 
+        // ── #107 要約エンジン・感情判定 ─────────────────────────────
+
+        [Test]
+        public void OffersTheAiSummaryBackendChoice()
+        {
+            var spec = Find(SettingsSchema.Build(Context()), SettingKeys.AiSummaryBackend);
+
+            Assert.That(spec, Is.Not.Null);
+            Assert.That(spec.Kind, Is.EqualTo(SettingKind.Choice));
+            Assert.That(spec.Value, Is.EqualTo("fm"));
+            Assert.That(spec.Choices.Select(c => c.Value), Is.EqualTo(new[] { "fm", "claude" }));
+        }
+
+        [Test]
+        public void OffersTheEmotionClassifierChoice()
+        {
+            var spec = Find(SettingsSchema.Build(Context()), SettingKeys.EmotionClassifier);
+
+            Assert.That(spec, Is.Not.Null);
+            Assert.That(spec.Kind, Is.EqualTo(SettingKind.Choice));
+            Assert.That(spec.Value, Is.EqualTo("ollaya"));
+            Assert.That(spec.Choices.Select(c => c.Value), Is.EqualTo(new[] { "ollaya", "fm", "dictionary" }));
+        }
+
+        [Test]
+        public void ReflectsTheChosenSummaryBackendAndEmotionClassifier()
+        {
+            var context = Context();
+            context.AiSummaryBackend = "claude";
+            context.EmotionClassifier = "dictionary";
+
+            var items = SettingsSchema.Build(context);
+
+            Assert.That(Find(items, SettingKeys.AiSummaryBackend).Value, Is.EqualTo("claude"));
+            Assert.That(Find(items, SettingKeys.EmotionClassifier).Value, Is.EqualTo("dictionary"));
+        }
+
+        /// <summary>★ XR には出さない（AI要約そのものを出していないので対象外）</summary>
+        [Test]
+        public void XrDoesNotOfferTheSummaryBackendOrEmotionClassifier()
+        {
+            var keys = SettingsSchema.Build(XrContext()).Select(s => s.Key).ToList();
+
+            Assert.That(keys, Has.None.EqualTo(SettingKeys.AiSummaryBackend));
+            Assert.That(keys, Has.None.EqualTo(SettingKeys.EmotionClassifier));
+        }
+
         // ── #70 派生: モーションを確認 ─────────────────────────────
 
         private static readonly MotionClip Idle01 =
@@ -524,7 +593,8 @@ namespace ChatterMascot.Tests
                 null, SettingKeys.Speaker, SettingKeys.Volume, SettingKeys.Speed, SettingKeys.TtsPreview,
                 null, SettingKeys.IdleMotion, SettingKeys.MotionPreview, SettingKeys.MotionPreviewPlay,
                 SettingKeys.CursorGaze, SettingKeys.Blink, SettingKeys.FrameRate,
-                null, SettingKeys.SummaryEnabled,
+                null, SettingKeys.SummaryEnabled, SettingKeys.AiSummaryBackend,
+                null, SettingKeys.EmotionClassifier,
                 null, SettingKeys.MuteHotKey, SettingKeys.HideHotKey,
                 null, SettingKeys.ResetPosition, SettingKeys.ResetAll,
                 SettingKeys.Quit,
@@ -564,7 +634,8 @@ namespace ChatterMascot.Tests
             {
                 SettingKeys.Vrm, SettingKeys.Scale, SettingKeys.Speaker, SettingKeys.Volume,
                 SettingKeys.Speed, SettingKeys.TtsPreview, SettingKeys.IdleMotion, SettingKeys.FrameRate,
-                SettingKeys.SummaryEnabled, SettingKeys.MuteHotKey, SettingKeys.HideHotKey, SettingKeys.Quit,
+                SettingKeys.SummaryEnabled, SettingKeys.AiSummaryBackend, SettingKeys.EmotionClassifier,
+                SettingKeys.MuteHotKey, SettingKeys.HideHotKey, SettingKeys.Quit,
             })
             {
                 Assert.That(keys, Has.None.EqualTo(key), key);

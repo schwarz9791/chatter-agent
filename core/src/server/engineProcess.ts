@@ -40,6 +40,15 @@ export interface EngineSpawnPlan {
    *   （→ PR #52 のレビュー）。
    */
   resolvedFrom?: string;
+  /**
+   * 追加で渡す環境変数（`process.env` に**上書き**で重ねる）。
+   *
+   * ★ Ollaya 用（`resolveOllayaSpawn`）。`ollaya serve` は `--host` / `--port` を持たず、
+   *   `OLLAYA_HOST`（`host:port` 形式）でしか bind 先を指定できない（バイナリの文字列から
+   *   発見。ヘルプには出てこない）。AivisSpeech（`args` で `--host`/`--port` を渡す）とは
+   *   起こし方が違うので、`args` を汚さずここで分けて持つ。
+   */
+  env?: Record<string, string>;
 }
 
 /**
@@ -148,6 +157,50 @@ export function resolveEngineSpawn(deps: ResolveEngineSpawnDeps): EngineSpawnRes
   return { command: found, args: buildArgs(deps.args, url) };
 }
 
+/** Ollaya のコマンド名。`ttsSpawnCommand` と違い設定で差し替えられない（固定名で解決する） */
+const OLLAYA_COMMAND = "ollaya";
+
+/**
+ * ★ `run`（AivisSpeech-Engine）と違い `ollaya` は**サブコマンド式の CLI**。
+ *   サーバーとして起こすには常に `serve` を渡す必要がある。
+ */
+const OLLAYA_ARGS = ["serve"];
+
+export interface ResolveOllayaSpawnDeps {
+  /** `ollayaBaseUrl`。`makeUrlParser` を通っているので必ず妥当な絶対 URL */
+  baseUrl: string;
+  /** テスト用。既定 `os.homedir()` */
+  homeDir?: string;
+  /** テスト用。既定 `process.env` */
+  env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * Ollaya を起こすプランを決める**純関数**（`resolveEngineSpawn` の Ollaya 版）。
+ *
+ * ★ **コマンドは固定名 `"ollaya"` で解決する。** `ttsSpawnCommand` のような差し替えの口は
+ *   無い（`emotionClassifier` / `aiSummaryBackend` と同じ「書き込み可だが任意のコマンドには
+ *   変えられない」方針）。
+ * ★ **`args` は常に `["serve"]`。** bind 先は引数ではなく `env.OLLAYA_HOST` で渡す
+ *   （`EngineSpawnPlan.env` の docstring参照）。
+ */
+export function resolveOllayaSpawn(deps: ResolveOllayaSpawnDeps): EngineSpawnResolution {
+  const homeDir = deps.homeDir ?? os.homedir();
+  const env = deps.env ?? process.env;
+
+  const url = new URL(deps.baseUrl);
+  if (!isLoopback(url.hostname)) return { skip: "not-loopback", host: url.hostname };
+  if (url.protocol !== "http:") return { skip: "not-http", protocol: url.protocol };
+
+  const resolved = findCommandPath(OLLAYA_COMMAND, { homeDir, env });
+  if (resolved === undefined) return { skip: "not-found", tried: searchedPaths(OLLAYA_COMMAND, env) };
+
+  // 角括弧を外す・ポート省略時のフォールバックは buildArgs と同じ理由（そちらのコメント参照）
+  const host = url.hostname.replace(/^\[|\]$/g, "");
+  const port = url.port || DEFAULT_HTTP_PORT;
+  return { command: resolved, args: OLLAYA_ARGS, env: { OLLAYA_HOST: `${host}:${port}` } };
+}
+
 /**
  * `not-found` のときに「どこを探したか」を返す。
  *
@@ -201,20 +254,23 @@ const TRIED_HINT_LIMIT = 12;
  *
  * ★ **帰結（音声が 503 になる）はここに書かない。** それを知っているのは呼び出し側だけ
  *   （→ `index.ts` の `warnAudioUnavailable`）。
+ *
+ * @param subject 文中で名指しする対象。既定は合成エンジン向けの文言（呼び出し側を変えずに
+ *   済ませるため）。Ollaya には `"Ollaya"` を渡す（→ `resolveOllayaSpawn` の呼び出し側）。
  */
-export function describeEngineSkip(skip: EngineSpawnSkip): string[] {
+export function describeEngineSkip(skip: EngineSpawnSkip, subject = "合成エンジン"): string[] {
   switch (skip.skip) {
     case "not-loopback":
-      return [`${LOG_PREFIX} ${skip.host} はループバックではないので合成エンジンを起こせません`];
+      return [`${LOG_PREFIX} ${skip.host} はループバックではないので${subject}を起こせません`];
 
     case "not-http":
-      return [`${LOG_PREFIX} ${skip.protocol} のエンジンは起こせません（起こせるのは平文の http: だけ）`];
+      return [`${LOG_PREFIX} ${skip.protocol} の${subject}は起こせません（起こせるのは平文の http: だけ）`];
 
     case "not-found": {
       const shown = skip.tried.slice(0, TRIED_HINT_LIMIT);
       const rest = skip.tried.length - shown.length;
       return [
-        `${LOG_PREFIX} 合成エンジンが見つかりません。探した場所:`,
+        `${LOG_PREFIX} ${subject}が見つかりません。探した場所:`,
         ...shown.map((candidate) => `${LOG_PREFIX}${ITEM_INDENT}${candidate}`),
         ...(rest > 0 ? [`${LOG_PREFIX}${ITEM_INDENT}…ほか ${rest} 件`] : []),
         // ★ 実行ビットまで見ていることを言う。`ls` で見えるファイルが「探した場所」に並ぶので、
@@ -291,6 +347,10 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
     //   `run` は PyInstaller のバイナリで**自分の子を持つ**ので、`child.kill()`（自分だけ）では
     //   孫が残り、ポートを掴んだままになる
     detached: true,
+    // ★ `plan.env` が無ければ `undefined` のまま渡す。Node は `options.env` を省略すると
+    //   `process.env` をそのまま継承するので、AivisSpeech（env を持たない）の挙動は変わらない。
+    //   Ollaya（`OLLAYA_HOST` を渡す必要がある）だけがここで `process.env` に重ねる
+    env: plan.env ? { ...process.env, ...plan.env } : undefined,
   });
 
   let exited = false;

@@ -34,7 +34,13 @@ import { createVoicevoxClient, flattenStyles, hasStyle } from "../tts/voicevoxCl
 import { createAssetCatalog } from "./assetCatalog";
 import { createAudioStore, type Voice } from "./audioStore";
 import { createControlApi } from "./controlApi";
-import { describeEngineSkip, resolveEngineSpawn, startEngine, type EngineProcess } from "./engineProcess";
+import {
+  describeEngineSkip,
+  resolveEngineSpawn,
+  resolveOllayaSpawn,
+  startEngine,
+  type EngineProcess,
+} from "./engineProcess";
 import { createDispatcher, type Dispatcher } from "./dispatcher";
 import { createHttpServer } from "./httpServer";
 import { ensureServerToken } from "./lanToken";
@@ -343,6 +349,54 @@ async function main(): Promise<void> {
     lastEngineCheckAt = Number.NEGATIVE_INFINITY;
   };
 
+  /**
+   * Ollaya（感情判定のローカル decision model ランタイム）が居なければ起こす。
+   * **AivisSpeech と同じ扱い**（起こすだけで待たない・既に上がっていれば起こさない）だが、
+   * 使い手が違う —— 実際に `/v1/systemone` を叩くのは `chatter-agent-speak`（CLI）で、
+   * このサーバー自身は一度も呼ばない。ここでの役目は「居なければ起こす」だけ。
+   *
+   * ★ 条件は4つ（TTS の5条件から「話者の検査」に相当するものが無い分、1つ少ない）:
+   *   1. `emotionClassifier === "ollaya"` / 2. `ollayaSpawn` /
+   *   3. 起動時の疎通確認に失敗した / 4. `ollayaBaseUrl` がループバックかつコマンドが解決できた
+   *      （`resolveOllayaSpawn` が4を1回で判定する）
+   *
+   * ★ **辞書式へ落ちるだけなので、TTS の `warnAudioUnavailable` に相当する強い警告は出さない。**
+   *   起こせなくても発話は止まらない（分類器が自分で辞書式にフォールバックする）。
+   */
+  let ollayaEngine: EngineProcess | null = null;
+
+  const probeOllaya = async (baseUrl: string): Promise<EngineProbe> => {
+    try {
+      const res = await fetch(`${baseUrl}/api/version`, {
+        signal: AbortSignal.timeout(config.get("emotionTimeoutMs")),
+      });
+      return res.ok ? "reachable" : "unreachable";
+    } catch {
+      return "unreachable";
+    }
+  };
+
+  const startOllayaIfNeeded = async (): Promise<void> => {
+    if (config.get("emotionClassifier") !== "ollaya") return; // 条件1
+    if (!config.get("ollayaSpawn")) return; // 条件2
+
+    const baseUrl = config.get("ollayaBaseUrl");
+    if ((await probeOllaya(baseUrl)) === "reachable") {
+      console.log(`[Server] Ollaya に繋がりました (${baseUrl})`);
+      return; // 条件3
+    }
+
+    const plan = resolveOllayaSpawn({ baseUrl });
+    if ("skip" in plan) {
+      for (const line of describeEngineSkip(plan, "Ollaya")) console.warn(line);
+      return;
+    }
+
+    // ★ この判定と spawn の間に await を挟まないこと（startEngineIfNeeded と同じ理由）
+    if (stopping) return;
+    ollayaEngine = startEngine(plan);
+  };
+
   const audioStore = createAudioStore({
     currentVoice,
     // ★ 声は `audioStore` が1回だけ解決したものを受け取る。ここで config を読み直すと、
@@ -367,7 +421,9 @@ async function main(): Promise<void> {
     // ★ `audioStore` を通さない。キューに無い文なので `lookup` が引けない
     synthesizePreview: (text) => ttsFor(currentVoice()).synthesize(text),
     summaryPreview: {
-      getCommand: () => config.get("aiSummaryCommand"),
+      getBackend: () => config.get("aiSummaryBackend"),
+      // ★ fm は固定名で解決するので aiSummaryCommand を見ない（cli/index.ts と同じ分岐）
+      getCommand: () => (config.get("aiSummaryBackend") === "fm" ? "fm" : config.get("aiSummaryCommand")),
       getModel: () => config.get("aiSummaryModel"),
       getTimeoutMs: () => config.get("aiSummaryTimeoutMs"),
       homeDir: getSummarizerHomeDir(),
@@ -458,6 +514,8 @@ async function main(): Promise<void> {
   // ★ エンジンを起こすのもここ（#51）。**`Ready` より後ろのまま**にすること —— 前に出すと
   //   起動が疎通待ちで伸び、上の理由がそのまま当てはまる状態に戻る
   void startEngineIfNeeded().catch((err: unknown) => console.error("[Server] 合成エンジンの起動判定に失敗:", err));
+  // ★ Ollaya も同じ理由で Ready より後ろ・起動を待たない
+  void startOllayaIfNeeded().catch((err: unknown) => console.error("[Server] Ollaya の起動判定に失敗:", err));
 
   installShutdown(async () => {
     // ★ 先に立てること。起動判定がまだ走っていれば、spawn する直前で引き返す
@@ -470,9 +528,10 @@ async function main(): Promise<void> {
     //
     // ★ **step は2つまで。** `SHUTDOWN_STEP_TIMEOUT_MS`(2500) × 2 = 5000ms で
     //   `SHUTDOWN_TIMEOUT_MS`(6000) の内側に収まるが、3つ目を足すと 7500ms になって
-    //   watchdog に食われる。この Issue で枠を使い切った
-    await step("合成エンジン", async () => {
-      await engine?.stop();
+    //   watchdog に食われる。この Issue で枠を使い切った。
+    //   ★ Ollaya も同じ枠に同居させる（並行に stop する。3つ目の named step にしない）
+    await step("合成エンジン / Ollaya", async () => {
+      await Promise.all([engine?.stop(), ollayaEngine?.stop()]);
     });
     // ★ isStale() は所有印が読めるなら pid の生死だけで判定する（core/lock.ts）。
     //   このサーバーは常駐で staleMs（既定60秒）をとうに超えて動き続けるが、

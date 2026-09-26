@@ -73,6 +73,19 @@ export function buildSummaryArgs(instruction: string, opts: BuildSummaryArgsOpti
 }
 
 /**
+ * `fm`（Apple Foundation Models CLI、macOS 27 以降）向けの引数組み立て。
+ *
+ * ★ `fm` は `claude` と別物の CLI なので、`--session-id` / `--no-session-persistence` /
+ *   `--strict-mcp-config` / `--disallowedTools` / `--model` はどれも存在しない
+ *   （そもそも hook を持たないので無限ループの心配も無い）。**渡さないのが正しい**。
+ * ★ `--guardrails permissive-content-transformations` が要る。既定のガードレールは
+ *   「殺す」「孤児」等の普通の技術用語を誤検知して拒否することがある。
+ */
+export function buildFmSummaryArgs(instruction: string): string[] {
+  return ["respond", "-i", instruction, "--no-stream", "--guardrails", "permissive-content-transformations"];
+}
+
+/**
  * 子（要約 CLI）に渡さない環境変数の denylist。**完全一致のみ**（プレフィックス一括除去はしない）。
  *
  * ★ denylist を選んだ理由: allowlist にすると、こちらが知らない認証構成

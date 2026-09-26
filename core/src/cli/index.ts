@@ -17,6 +17,7 @@
 import { createConfigStore, isSpeakDisabled } from "../core/config";
 import {
   getEmotionKeywordsPath,
+  getEmotionSchemaPath,
   getLockDir,
   getSpeechLogPath,
   getSpeechQueueDir,
@@ -27,9 +28,12 @@ import {
   getSummarizerSessionsPath,
   getWorkerStatePath,
 } from "../core/paths";
+import type { Emotion } from "../core/types";
 import { createSpeechLog } from "../core/speechLog";
 import { createSpeechQueue } from "../core/speechQueue";
 import { readEmotionKeywords, writeDefaultEmotionKeywordsIfAbsent } from "../emotion/emotionKeywordsFile";
+import { createFmEmotionClassifier } from "../emotion/fmClassifier";
+import { createOllayaEmotionClassifier } from "../emotion/ollayaClassifier";
 import { RuleBasedEmotionClassifier } from "../emotion/ruleBasedEmotionClassifier";
 import { createSummaryPipeline } from "../summarizer/summaryPipeline";
 import { createPublisher } from "./publish";
@@ -59,7 +63,32 @@ function main(): void {
 
     const emotionKeywordsPath = getEmotionKeywordsPath();
     writeDefaultEmotionKeywordsIfAbsent(emotionKeywordsPath);
-    const classifier = new RuleBasedEmotionClassifier(readEmotionKeywords(emotionKeywordsPath));
+    const dictionaryClassifier = new RuleBasedEmotionClassifier(readEmotionKeywords(emotionKeywordsPath));
+    const classifyWithDictionary = (texts: string[]): Emotion[] =>
+      texts.map((text) => dictionaryClassifier.classify(text));
+
+    // ★ どのバックエンドでも「throw しない・失敗したら辞書式」の契約を保つため、
+    //   選ばなかった側は fallback として常に持たせておく（emotion/*Classifier.ts の docstring 参照）
+    const classify: (texts: string[]) => Emotion[] = (() => {
+      switch (config.get("emotionClassifier")) {
+        case "ollaya":
+          return createOllayaEmotionClassifier({
+            getBaseUrl: () => config.get("ollayaBaseUrl"),
+            getModel: () => config.get("ollayaModel"),
+            getTimeoutMs: () => config.get("emotionTimeoutMs"),
+            fallback: classifyWithDictionary,
+          });
+        case "fm":
+          return createFmEmotionClassifier({
+            schemaPath: getEmotionSchemaPath(),
+            homeDir: getSummarizerHomeDir(),
+            getTimeoutMs: () => config.get("emotionTimeoutMs"),
+            fallback: classifyWithDictionary,
+          });
+        default:
+          return classifyWithDictionary;
+      }
+    })();
 
     // 要約 CLI 自身が起動したときは isSpeakDisabled() の早期 return で既にここへ到達しない
     // （無限ループ防止の第1層）。ここに来ることそのものが、その1層目が効いていることの証拠
@@ -68,10 +97,13 @@ function main(): void {
       //   固定されてしまい設定変更が効かなくなるので、下の publish の maxEntries と同じ理由で
       //   getter で渡す
       isEnabled: () => config.get("aiSummaryEnabled"),
+      getBackend: () => config.get("aiSummaryBackend"),
       getThreshold: () => config.get("aiSummaryThreshold"),
       getTimeoutMs: () => config.get("aiSummaryTimeoutMs"),
       getMaxPerDrain: () => config.get("aiSummaryMaxPerDrain"),
-      getCommand: () => config.get("aiSummaryCommand"),
+      // ★ fm は固定名で解決するので aiSummaryCommand を見ない（バックエンドの分岐は
+      //   ここで出す。→ summaryPipeline.ts の SummaryPipelineDeps.getBackend の docstring）
+      getCommand: () => (config.get("aiSummaryBackend") === "fm" ? "fm" : config.get("aiSummaryCommand")),
       getModel: () => config.get("aiSummaryModel"),
       homeDir: getSummarizerHomeDir(),
       logPath: getSummarizerLogPath(),
@@ -91,7 +123,7 @@ function main(): void {
       summarizerSessionsPath: getSummarizerSessionsPath(),
       speakPrompts: config.get("speakPrompts"),
       spoolMaxAgeMs: config.get("spoolMaxAgeHours") * 60 * 60 * 1000,
-      classify: (text) => classifier.classify(text),
+      classify,
       summarize,
     });
   } finally {

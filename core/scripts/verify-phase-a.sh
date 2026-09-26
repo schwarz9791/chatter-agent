@@ -54,6 +54,11 @@ mkdir -p "$SPOOL"
 #   spool へ積むところまでを hook に、ドレインを下の `node "$CLI"` に分担させる。
 export CHATTER_AGENT_CLI="$ROOT/detach-is-suppressed-here.mjs"
 
+# ★ 既定の emotionClassifier は "ollaya"。実機で ollaya serve が動いていると、辞書式の代わりに
+#   実際の Ollaya へ判定を投げてしまい、この検証を実機の状態に依存させてしまう。この検証は
+#   形と順序だけを見るので辞書式に固定する（Ollaya / fm の実機確認は別途 README の手順で行う）。
+export CHATTER_AGENT_EMOTION_CLASSIFIER=dictionary
+
 # MessageDisplay の実測ペイロード（設計書 §2-3）を組み立てて hook の stdin に流す。
 # CLI は呼ばない
 feed_message() { # message_id index final delta [extra-json]
@@ -498,11 +503,14 @@ spoken
 # それ自体が検査したかった状態なので、final で閉じずに spool の残骸だけ片付ける
 rm -f "$SPOOL"/m-orphan-*
 
-# ★ ここから AI要約（issue #31）の受け入れ確認。要約は既定 OFF なので、CHATTER_AGENT_AI_SUMMARY_*
-#   は `VAR=val delta ...` の形で**その1回の呼び出しにだけ**渡す（上の
+# ★ ここから AI要約（issue #31）の受け入れ確認。CHATTER_AGENT_AI_SUMMARY_* は
+#   `VAR=val delta ...` の形で**その1回の呼び出しにだけ**渡す（上の
 #   `CHATTER_AGENT_DISABLE=0 delta m-zero ...` と同じ、R3 で確認済みの伝播規則）。
-#   ここでスクリプト冒頭のように export すると、後続はもう無いとはいえ、①〜⑬の「要約は
-#   既定 OFF なので結果が変わらないはず」という前提を壊しかねないので、あえてこの形を貫く。
+#   ここでスクリプト冒頭のように export すると、後続はもう無いとはいえ、①〜⑬の
+#   結果を壊しかねないので、あえてこの形を貫く。
+#   ★ 既定バックエンドは "fm"（実機に本物の fm があると findCommandPath がそれを解決してしまい、
+#   $FAKE_SUMMARIZER が素通りされる）なので、ここでは明示的に CHATTER_AGENT_AI_SUMMARY_BACKEND=claude
+#   を渡して aiSummaryCommand（$FAKE_SUMMARIZER）が実際に使われるようにする。
 show "⑭ AI要約: 閾値を超えたメッセージは要約されて speech.jsonl に載る（issue #31）"
 
 # ★ aiSummaryCommand には要約 CLI の絶対パスを渡す。findCommandPath（core/src/summarizer/claudeCli.ts）
@@ -520,6 +528,7 @@ LONG_TEXT=$(node -e '
 ')
 
 CHATTER_AGENT_AI_SUMMARY_ENABLED=1 \
+  CHATTER_AGENT_AI_SUMMARY_BACKEND=claude \
   CHATTER_AGENT_AI_SUMMARY_COMMAND="$FAKE_SUMMARIZER" \
   FAKE_SUMMARIZER_MODE=short \
   FAKE_SUMMARIZER_REPLY="$SUMMARIZER_REPLY_1" \
@@ -549,10 +558,10 @@ node -e '
 # 実測ログ（summarizer.log。core/src/core/paths.ts の getSummarizerLogPath）に
 # `<ISO時刻>\tok\t...` の1行が残っているはず（summaryPipeline.ts の log()）
 #
-# ★ ここだけは絶対行数（1）で判定している。$ROOT は使い捨ての mktemp で、要約は既定 OFF
-#   なので、AI要約が OFF のまま進む①〜⑬の間に summarizer.log へ書くシナリオは無い＝
-#   ⑭がこの検証内で summarizer.log に最初に書き込む行、という前提が壊れない限り安全
-#   （F1-b で下の⑯側は絶対行数から相対判定に変えた。ここは変えていない）。
+# ★ ここだけは絶対行数（1）で判定している。$ROOT は使い捨ての mktemp で、①〜⑬のメッセージは
+#   すべて aiSummaryThreshold（既定200字）未満なので、閾値判定より前で return し
+#   summarizer.log には一切書かれない＝⑭がこの検証内で最初に書き込む行、という前提が
+#   壊れない限り安全（F1-b で下の⑯側は絶対行数から相対判定に変えた。ここは変えていない）。
 node -e '
   const fs = require("fs");
   let lines = [];
@@ -579,6 +588,7 @@ SUMMARIZER_RECORD_2="$ROOT/summarizer-record-2.jsonl"
 SHORT_TEXT="これは短い発言です。"
 
 CHATTER_AGENT_AI_SUMMARY_ENABLED=1 \
+  CHATTER_AGENT_AI_SUMMARY_BACKEND=claude \
   CHATTER_AGENT_AI_SUMMARY_COMMAND="$FAKE_SUMMARIZER" \
   FAKE_SUMMARIZER_RECORD="$SUMMARIZER_RECORD_2" \
   delta m-summary-short 0 true "$SHORT_TEXT"
@@ -619,6 +629,7 @@ LONG_TEXT_FAIL=$(node -e '
 ')
 
 CHATTER_AGENT_AI_SUMMARY_ENABLED=1 \
+  CHATTER_AGENT_AI_SUMMARY_BACKEND=claude \
   CHATTER_AGENT_AI_SUMMARY_COMMAND="$FAKE_SUMMARIZER" \
   FAKE_SUMMARIZER_MODE=fail \
   FAKE_SUMMARIZER_RECORD="$SUMMARIZER_RECORD_3" \
@@ -841,6 +852,8 @@ show "㉑ ★ [#92] 感情キーワード辞書のユーザーカスタマイズ
   ROOT3=$(mktemp -d)
   trap 'rm -rf "$ROOT3"' EXIT
   export XDG_CONFIG_HOME="$ROOT3"
+  # CHATTER_AGENT_EMOTION_CLASSIFIER=dictionary はスクリプト冒頭で export 済み
+  # （辞書式のキーワード置き換えを検査するこの節には必須。→冒頭のコメント参照）
   R3="$ROOT3/chatter-agent"
   mkdir -p "$R3/spool"
   KEYWORDS="$R3/emotion-keywords.json"

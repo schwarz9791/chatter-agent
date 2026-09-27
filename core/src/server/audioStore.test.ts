@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import { createAudioStore, SynthesisUnavailableError } from "./audioStore";
+import { createAudioStore, SynthesisRejectedError, SynthesisUnavailableError, type Voice } from "./audioStore";
+import { TtsHttpError, TtsTransportError } from "../tts/ttsEngine";
 
-const VOICE = { baseUrl: "http://127.0.0.1:10101", speakerId: 888753760, speedScale: 1.0 };
+const VOICE: Voice = { engine: "voicevox", baseUrl: "http://127.0.0.1:10101", speakerId: "888753760", speedScale: 1.0 };
 
 function wav(bytes: number): ArrayBuffer {
   return new ArrayBuffer(bytes);
@@ -143,10 +144,10 @@ describe("createAudioStore", () => {
     expect(synthesize).toHaveBeenCalledTimes(1);
 
     // 設定を直した。LRU に残っている古い声をそのまま返してはいけない
-    voice = { ...VOICE, speakerId: 1 };
+    voice = { ...VOICE, speakerId: "1" };
     await store.get("g", 1, "あ。");
     expect(synthesize).toHaveBeenCalledTimes(2);
-    expect(synthesize).toHaveBeenLastCalledWith("あ。", { ...VOICE, speakerId: 1 });
+    expect(synthesize).toHaveBeenLastCalledWith("あ。", { ...VOICE, speakerId: "1" });
   });
 
   /**
@@ -166,6 +167,25 @@ describe("createAudioStore", () => {
     await store.get("g", 1, "あ。");
     expect(synthesize).toHaveBeenCalledTimes(2);
     expect(synthesize).toHaveBeenLastCalledWith("あ。", { ...VOICE, speedScale: 1.5 });
+  });
+
+  /**
+   * ★★ #106。`ttsBaseUrl` はエンジンを跨いで同じ値になりうる（既定値を変えずに
+   *   `ttsEngine` だけ切り替えた直後など）ので、`engine` が無いとそこで別エンジンの
+   *   WAV が LRU に残ったまま返る。`Voice` にフィールドを足したら `keyFor` にも足すこと
+   */
+  it("★★ engine が変わればキャッシュに当たらない（voicevox と openai を切り替えても混線しない）", async () => {
+    let voice = VOICE;
+    const synthesize = vi.fn(() => Promise.resolve(wav(10)));
+    const store = createAudioStore({ currentVoice: () => voice, synthesize });
+
+    await store.get("g", 1, "あ。");
+    expect(synthesize).toHaveBeenCalledTimes(1);
+
+    voice = { ...VOICE, engine: "openai" };
+    await store.get("g", 1, "あ。");
+    expect(synthesize).toHaveBeenCalledTimes(2);
+    expect(synthesize).toHaveBeenLastCalledWith("あ。", { ...VOICE, engine: "openai" });
   });
 
   it("★ 声は1回だけ解決する（キーを決めた後に config が変わると、声Bの WAV が声Aのキーに入る）", async () => {
@@ -210,5 +230,96 @@ describe("createAudioStore", () => {
     calls[0]!.resolve(wav(7));
     expect((await first).byteLength).toBe(7);
     expect((await second).byteLength).toBe(7);
+  });
+});
+
+describe("SynthesisRejectedError（規則7の唯一の例外）", () => {
+  it("同じ声・世代で後ろの seq が成功済みなら Rejected", async () => {
+    const synthesize = vi.fn((text: string) =>
+      text === "拒まれる。"
+        ? Promise.reject(new TtsHttpError("op", 400, "no speakable text"))
+        : Promise.resolve(wav(3)),
+    );
+    const store = createAudioStore({ currentVoice: () => VOICE, synthesize });
+
+    await store.get("g", 2, "後ろ。"); // seq 2 が先に成功
+    await expect(store.get("g", 1, "拒まれる。")).rejects.toBeInstanceOf(SynthesisRejectedError);
+  });
+
+  it("後ろが無ければ Unavailable（503 のまま待つ）", async () => {
+    const synthesize = vi.fn(() => Promise.reject(new TtsHttpError("op", 400, "no speakable text")));
+    const store = createAudioStore({ currentVoice: () => VOICE, synthesize });
+
+    await expect(store.get("g", 1, "拒まれる。")).rejects.toBeInstanceOf(SynthesisUnavailableError);
+  });
+
+  it("★ 全文が拒まれるときは Unavailable のまま（規則7が守る「全部消える」事故は起きない）", async () => {
+    const synthesize = vi.fn(() => Promise.reject(new TtsHttpError("op", 400, "no speakable text")));
+    const store = createAudioStore({ currentVoice: () => VOICE, synthesize });
+
+    await expect(store.get("g", 1, "文1。")).rejects.toBeInstanceOf(SynthesisUnavailableError);
+    await expect(store.get("g", 2, "文2。")).rejects.toBeInstanceOf(SynthesisUnavailableError);
+  });
+
+  it("5xx / 408 / 429 は Rejected にしない（一時的な失敗として扱う）", async () => {
+    const synthesize = vi.fn((text: string) => {
+      if (text === "後ろ。") return Promise.resolve(wav(3));
+      if (text === "500。") return Promise.reject(new TtsHttpError("op", 500, "internal"));
+      if (text === "408。") return Promise.reject(new TtsHttpError("op", 408, "timeout"));
+      return Promise.reject(new TtsHttpError("op", 429, "too many"));
+    });
+    const store = createAudioStore({ currentVoice: () => VOICE, synthesize });
+
+    await store.get("g", 4, "後ろ。");
+    await expect(store.get("g", 1, "500。")).rejects.toBeInstanceOf(SynthesisUnavailableError);
+    await expect(store.get("g", 2, "408。")).rejects.toBeInstanceOf(SynthesisUnavailableError);
+    await expect(store.get("g", 3, "429。")).rejects.toBeInstanceOf(SynthesisUnavailableError);
+  });
+
+  it("転送エラー（エンジンに届いていない）は Rejected にしない", async () => {
+    const synthesize = vi.fn((text: string) =>
+      text === "後ろ。" ? Promise.resolve(wav(3)) : Promise.reject(new TtsTransportError("ECONNREFUSED")),
+    );
+    const store = createAudioStore({ currentVoice: () => VOICE, synthesize });
+
+    await store.get("g", 2, "後ろ。");
+    await expect(store.get("g", 1, "手前。")).rejects.toBeInstanceOf(SynthesisUnavailableError);
+  });
+
+  it("声が違う成功は数えない（別の声で通っていても、いまの声では拒む）", async () => {
+    let voice = VOICE;
+    const synthesize = vi.fn((text: string) =>
+      text === "後ろ。" ? Promise.resolve(wav(3)) : Promise.reject(new TtsHttpError("op", 400, "no speakable text")),
+    );
+    const store = createAudioStore({ currentVoice: () => voice, synthesize });
+
+    await store.get("g", 2, "後ろ。"); // 元の声で成功
+    voice = { ...VOICE, speakerId: "1" };
+    await expect(store.get("g", 1, "拒まれる。")).rejects.toBeInstanceOf(SynthesisUnavailableError);
+  });
+
+  it("epoch が違う成功は数えない（世代を跨いで判定しない）", async () => {
+    const synthesize = vi.fn((text: string) =>
+      text === "後ろ。" ? Promise.resolve(wav(3)) : Promise.reject(new TtsHttpError("op", 400, "no speakable text")),
+    );
+    const store = createAudioStore({ currentVoice: () => VOICE, synthesize });
+
+    await store.get("gen-old", 99, "後ろ。"); // 別世代で成功
+    await expect(store.get("gen-new", 1, "拒まれる。")).rejects.toBeInstanceOf(SynthesisUnavailableError);
+  });
+
+  it("★ 成功の順序は問わない。S が後から成功すれば 200 に戻る", async () => {
+    let engineFixed = false;
+    const synthesize = vi.fn((text: string) => {
+      if (text === "後ろ。") return Promise.resolve(wav(3));
+      return engineFixed ? Promise.resolve(wav(5)) : Promise.reject(new TtsHttpError("op", 400, "no speakable text"));
+    });
+    const store = createAudioStore({ currentVoice: () => VOICE, synthesize });
+
+    await store.get("g", 2, "後ろ。");
+    await expect(store.get("g", 1, "手前。")).rejects.toBeInstanceOf(SynthesisRejectedError);
+
+    engineFixed = true;
+    await expect(store.get("g", 1, "手前。")).resolves.toBeDefined();
   });
 });

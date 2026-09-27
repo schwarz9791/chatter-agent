@@ -36,6 +36,10 @@ const READONLY_EXECUTABLE: readonly ConfigKey[] = [
   "playerCommand",
   "playerArgs",
   "aiSummaryCommand",
+  // ★ `kokoroDir` は `cwd` として Kokoro-FastAPI（`uv run …`）の起動に渡る。
+  //   ディレクトリを1行書き換えるだけで任意のコマンドをそのカレントで実行させられる点は
+  //   `ttsSpawnCommand` と同じ壊れ方になる
+  "kokoroDir",
 ];
 
 /**
@@ -48,13 +52,21 @@ const READONLY_EXECUTABLE: readonly ConfigKey[] = [
  *   起きないというのは**いちばん悪い見え方**（壊れているのか自分の操作が悪いのか分からない）。
  *   403 で明示的に断る方が親切。
  */
-const READONLY_UNTIL_RESTART: readonly ConfigKey[] = ["host", "port", "allowedOrigins"];
+const READONLY_UNTIL_RESTART: readonly ConfigKey[] = [
+  "host",
+  "port",
+  "allowedOrigins",
+  // ★ 起こすかどうかの判断（`resolveEngineSpawn` / `resolveKokoroSpawn`）は起動時の1回きり。
+  //   パネルから切り替えても、次の合成の宛先だけが変わって spawn の判断はやり直されない
+  "ttsEngine",
+];
 
 /**
  * (c) **本文の外部送信路になる。**
  *
  * `ttsBaseUrl` を書き換えると、以後 `ttsFor(currentVoice())` は Claude Code の
- * **全メッセージ本文**をそのホストの `/audio_query` へ POST する。`currentVoice()` は
+ * **全メッセージ本文**をそのホストの合成 API（`ttsEngine` が `"voicevox"` なら `/audio_query`、
+ * `"openai"` なら `/v1/audio/speech`）へ POST する。`currentVoice()` は
  * 毎回 `config.get` するので（→ `server/index.ts`）**再起動も要らず、次の1文から**そうなる。
  * しかも音が鳴らなくなるだけなので、**利用者から見た症状は「無音」だけ**で、本文が
  * 出ていることには気付けない。(a) と同じ「設定を1行書き換えるだけ」の壊れ方。

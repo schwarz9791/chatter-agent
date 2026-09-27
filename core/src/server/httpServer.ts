@@ -6,7 +6,8 @@
  *   200  合成済み、または今から合成して返した（完了までレスポンスを保留する）
  *   401  非ループバックからの未認証アクセス（トークン無し・誤り）
  *   403  Origin が allowedOrigins に無い
- *   404  永久に用意できない（キューから消えた / epoch 違い / 読み上げる中身が無い）
+ *   404  永久に用意できない（キューから消えた / epoch 違い / 読み上げる中身が無い /
+ *        後ろの seq は合成できているのにこの1文だけエンジンが拒む → `SynthesisRejectedError`）
  *   503  エンジンに繋がらない・合成が返らない。**あとで取りに来い**
  *
  * /v1/*   設定パネル（#76）の制御 API。中身は `server/controlApi.ts`
@@ -29,6 +30,9 @@
  * ★ **合成の失敗を 404 に落とさないこと。** 「エンジンが 4xx を返したなら恒久的だから
  *   諦めさせる」は一見筋が通るが、404 は `ack → ackUpTo` まで通って**キューのファイルを
  *   物理削除する**ので、設定を直しても復元できない（→ `server/audioStore.ts`）。
+ *   **唯一の例外は `SynthesisRejectedError`**（同じ声・世代で後ろの seq が現に合成できている
+ *   ときだけ）。設定ミス・導入ミス・エンジン停止ではどの文も合成できないのでこの条件に
+ *   当たらず、従来どおり 503 のまま残る。
  *
  * ★ **`ws` より先に作り、`listen` は `ws` を載せてから。** `new WebSocketServer({ server })`
  *   は `listening` を転送するだけなので、先に `listen()` してしまうと
@@ -49,7 +53,7 @@ import { parseAudioPath } from "../core/audioPath";
 import type { SpeechRecord } from "../core/types";
 import { hasSpeakableText } from "../text/speakable";
 import type { AssetCatalog } from "./assetCatalog";
-import { SynthesisUnavailableError, type AudioStore } from "./audioStore";
+import { SynthesisRejectedError, SynthesisUnavailableError, type AudioStore } from "./audioStore";
 import { isAuthorized } from "./auth";
 import type { ControlApi, ControlResponse } from "./controlApi";
 import { isLoopbackAddress } from "./loopback";
@@ -540,6 +544,12 @@ export function createHttpServer(deps: HttpServerDeps): http.Server {
     try {
       wav = await withDeadline(deps.store.get(key.epoch, key.seq, record.text), deadlineMs);
     } catch (err) {
+      // ★ 規則7の唯一の例外。同じ声・世代で後ろの seq が現に合成できているときだけ
+      //   404 に落とす（→ `server/audioStore.ts` の `SynthesisRejectedError`）
+      if (err instanceof SynthesisRejectedError) {
+        warn(`[HTTP] seq=${key.seq} はエンジンに拒否されました（後続の合成は成功しています）: ${err.message}`);
+        return endWith(res, 404, `rejected by engine: ${err.message}\n`);
+      }
       if (err instanceof SynthesisUnavailableError) {
         deps.onSynthesisFailed?.();
         warn(`[HTTP] seq=${key.seq} の合成に失敗しました（あとで取りに来てもらいます）: ${err.message}`);

@@ -16,6 +16,7 @@ import {
   describeEngineSkip,
   knownEnginePaths,
   resolveEngineSpawn,
+  resolveKokoroSpawn,
   resolveOllayaSpawn,
   startEngine,
   type EngineProcess,
@@ -29,6 +30,23 @@ beforeEach(() => {
 });
 
 const HOME = "/Users/tester";
+
+/**
+ * 実在する実行ファイル `name` を置いた PATH を返す。
+ *
+ * ★ `findCommandPath` は既知の bin ディレクトリ（`/opt/homebrew/bin` 等、`env.PATH` の外）も
+ *   探すので、PATH を差し替えるだけでは「見つかる」も「見つからない」も実行環境に依存する
+ *   （開発機に入っていれば通り、CI では落ちる）。**`env.PATH` は既知の bin より先に見る**ので、
+ *   ここに置けば必ずこちらが見つかる。
+ */
+function fakeCommandPath(name: string): { PATH: string; bin: string } {
+  const binDir = path.join(dir, `${name}-bin`);
+  fs.mkdirSync(binDir, { recursive: true });
+  const bin = path.join(binDir, name);
+  fs.writeFileSync(bin, "#!/bin/sh\n");
+  fs.chmodSync(bin, 0o755);
+  return { PATH: binDir, bin };
+}
 const APP = path.join("/Applications", "AivisSpeech.app", "Contents", "Resources", "AivisSpeech-Engine", "run");
 const HOME_APP = path.join(
   HOME,
@@ -210,22 +228,11 @@ describe("resolveEngineSpawn", () => {
 });
 
 describe("resolveOllayaSpawn", () => {
-  /**
-   * ★ `findCommandPath("ollaya")` は既知の bin ディレクトリ（`/usr/local/bin` 等、
-   *   `env.PATH` の外）も探す設計（→ core/commandPath.ts）なので、`ollaya` が実際に
-   *   インストールされているマシンでは `env.PATH` をいじるだけでは「見つからない」を
-   *   再現できない。**実在するファイルを作って PATH の先頭に置く**（`env.PATH` は
-   *   既知の bin ディレクトリより先に見るので、これで確実にこちらが先に見つかる）ことで、
-   *   実行環境に関わらず決定的にする。
-   */
+  // ★ コマンドが要るケースは必ず `fakeCommandPath` を使うこと（理由はその docstring）
   it("ループバック・http・コマンドが見つかれば、args は ['serve'] で OLLAYA_HOST に host:port を積む", () => {
-    const binDir = path.join(dir, "ollaya-bin");
-    fs.mkdirSync(binDir, { recursive: true });
-    const bin = path.join(binDir, "ollaya");
-    fs.writeFileSync(bin, "#!/bin/sh\n");
-    fs.chmodSync(bin, 0o755);
+    const { PATH, bin } = fakeCommandPath("ollaya");
 
-    expect(resolveOllayaSpawn({ baseUrl: "http://127.0.0.1:11435", homeDir: HOME, env: { PATH: binDir } })).toEqual({
+    expect(resolveOllayaSpawn({ baseUrl: "http://127.0.0.1:11435", homeDir: HOME, env: { PATH } })).toEqual({
       command: bin,
       args: ["serve"],
       env: { OLLAYA_HOST: "127.0.0.1:11435" },
@@ -253,9 +260,10 @@ describe("resolveOllayaSpawn", () => {
   });
 
   it("ポートを省略した baseUrl は http の既定（80）を OLLAYA_HOST に積む", () => {
-    expect(resolveOllayaSpawn({ baseUrl: "http://127.0.0.1", homeDir: HOME, env: { PATH: "/opt/bin" } })).toMatchObject(
-      { env: { OLLAYA_HOST: "127.0.0.1:80" } },
-    );
+    const { PATH } = fakeCommandPath("ollaya");
+    expect(resolveOllayaSpawn({ baseUrl: "http://127.0.0.1", homeDir: HOME, env: { PATH } })).toMatchObject({
+      env: { OLLAYA_HOST: "127.0.0.1:80" },
+    });
   });
 
   /**
@@ -263,9 +271,214 @@ describe("resolveOllayaSpawn", () => {
    *   解釈できなくなる（`buildArgs` が `--host` 引数向けに外すのとは事情が違う）。
    */
   it("★ IPv6 ループバックは OLLAYA_HOST の角括弧を保つ", () => {
-    expect(
-      resolveOllayaSpawn({ baseUrl: "http://[::1]:11435", homeDir: HOME, env: { PATH: "/opt/bin" } }),
-    ).toMatchObject({ env: { OLLAYA_HOST: "[::1]:11435" } });
+    const { PATH } = fakeCommandPath("ollaya");
+    expect(resolveOllayaSpawn({ baseUrl: "http://[::1]:11435", homeDir: HOME, env: { PATH } })).toMatchObject({
+      env: { OLLAYA_HOST: "[::1]:11435" },
+    });
+  });
+});
+
+describe("resolveKokoroSpawn", () => {
+  const KOKORO_DIR = "/opt/Kokoro-FastAPI";
+
+  /** 既定は「kokoroDir は存在するが uv は見つからない」。見つけたいものだけ上書きする */
+  function kokoro(
+    overrides: Partial<Parameters<typeof resolveKokoroSpawn>[0]> = {},
+  ): ReturnType<typeof resolveKokoroSpawn> {
+    return resolveKokoroSpawn({
+      baseUrl: "http://127.0.0.1:8880",
+      kokoroDir: KOKORO_DIR,
+      homeDir: HOME,
+      env: { PATH: "" },
+      exists: (p) => p === KOKORO_DIR,
+      platform: "darwin",
+      ...overrides,
+    });
+  }
+
+  function withUv(): { env: { PATH: string } } {
+    return { env: { PATH: fakeCommandPath("uv").PATH } };
+  }
+
+  it("kokoroDir が空なら not-configured（AivisSpeech と違って既知の候補が無い）", () => {
+    expect(kokoro({ kokoroDir: "" })).toEqual({ skip: "not-configured" });
+  });
+
+  /**
+   * ★ 実行ファイルの探索（`not-found`）とは別の種類にしてある。あちらの文面は chmod の助言や
+   *   PATH の一覧を前提にしていて、ディレクトリの指定ミスには合わない。
+   */
+  it("kokoroDir が存在しなければ kokoro-dir-not-found（path は展開後の絶対パス）", () => {
+    expect(kokoro({ exists: () => false })).toEqual({ skip: "kokoro-dir-not-found", path: KOKORO_DIR });
+  });
+
+  it("★ ループバックでなければ not-loopback。fs には一度も触らない", () => {
+    const exists = vi.fn(() => true);
+    const result = kokoro({ baseUrl: "http://example.com:8880", exists });
+    expect(result).toEqual({ skip: "not-loopback", host: "example.com" });
+    expect(exists).not.toHaveBeenCalled();
+  });
+
+  it("https は起こせない", () => {
+    expect(kokoro({ baseUrl: "https://127.0.0.1:8880" })).toEqual({ skip: "not-http", protocol: "https:" });
+  });
+
+  it("~/ 始まりは homeDir に展開してから存在確認する", () => {
+    const seen: string[] = [];
+    kokoro({
+      kokoroDir: "~/dev/Kokoro-FastAPI",
+      exists: (p) => {
+        seen.push(p);
+        return false;
+      },
+    });
+    expect(seen).toEqual([path.join(HOME, "dev", "Kokoro-FastAPI")]);
+  });
+
+  /** ★ `~` 単独（スラッシュ無し）も homeDir に展開する */
+  it("★ ~ 単独は homeDir そのものに展開する", () => {
+    const seen: string[] = [];
+    kokoro({
+      kokoroDir: "~",
+      exists: (p) => {
+        seen.push(p);
+        return false;
+      },
+    });
+    expect(seen).toEqual([path.resolve(HOME)]);
+  });
+
+  /**
+   * ★ 相対パスは `chatter-agent-server` の cwd 基準の絶対パスにする。展開しないまま
+   *   `cwd=dir` で子プロセスを起こすと、`PYTHONPATH` / `WEB_PLAYER_PATH` が `dir` からの
+   *   相対で組まれるので `dir/dir` を指してしまい起動が落ちる。
+   */
+  it("★ 相対パスは process.cwd() 基準の絶対パスに解決する", () => {
+    const seen: string[] = [];
+    kokoro({
+      kokoroDir: "Kokoro-FastAPI",
+      exists: (p) => {
+        seen.push(p);
+        return false;
+      },
+    });
+    expect(seen).toEqual([path.resolve("Kokoro-FastAPI")]);
+  });
+
+  it("uv が見つかれば command は uv のフルパス、args は run --no-sync uvicorn …", () => {
+    const { env } = withUv();
+    const result = kokoro({ env });
+    expect(result).toMatchObject({
+      args: ["run", "--no-sync", "uvicorn", "api.src.main:app", "--host", "127.0.0.1", "--port", "8880"],
+      cwd: KOKORO_DIR,
+    });
+    expect((result as { command: string }).command.endsWith(path.join("uv-bin", "uv"))).toBe(true);
+  });
+
+  /**
+   * ★ `findCommandPath` は `env.PATH` の外の既知の bin ディレクトリも探すので、`env` を
+   *   空にするだけでは「uv が見つからない」を決定的に再現できない（開発機に実際に
+   *   入っていれば見つかってしまう）。テスト用の差し替え口（`findCommand`）で固定する。
+   */
+  it('★ uv が見つからなければ not-found（subject: "uv" で名指しする）', () => {
+    const result = kokoro({ findCommand: () => undefined });
+    expect(result).toEqual({ skip: "not-found", tried: ["uv"], subject: "uv" });
+  });
+
+  /** ★ `ttsSpawnArgs` を渡すと導出した args を丸ごと置換する（`buildArgs` と同じ規則） */
+  it("★ args を渡すと導出した run 引数を置換する（cwd と env はそのまま）", () => {
+    const { env } = withUv();
+    const result = kokoro({ env, args: ["run", "python", "-m", "custom_entrypoint"] });
+    expect(result).toMatchObject({ args: ["run", "python", "-m", "custom_entrypoint"], cwd: KOKORO_DIR });
+  });
+
+  it("args が空配列なら従来どおり導出する", () => {
+    const { env } = withUv();
+    const result = kokoro({ env, args: [] });
+    expect(result).toMatchObject({
+      args: ["run", "--no-sync", "uvicorn", "api.src.main:app", "--host", "127.0.0.1", "--port", "8880"],
+    });
+  });
+
+  it("★ IPv6 のループバックを受け、--host からは角括弧が外れる", () => {
+    const { env } = withUv();
+    expect(kokoro({ baseUrl: "http://[::1]:8880", env })).toMatchObject({
+      args: ["run", "--no-sync", "uvicorn", "api.src.main:app", "--host", "::1", "--port", "8880"],
+    });
+  });
+
+  it("ポートを省略した baseUrl は http の既定（80）に落とす", () => {
+    const { env } = withUv();
+    expect(kokoro({ baseUrl: "http://127.0.0.1", env })).toMatchObject({
+      args: ["run", "--no-sync", "uvicorn", "api.src.main:app", "--host", "127.0.0.1", "--port", "80"],
+    });
+  });
+
+  it("cwd は展開後の kokoroDir", () => {
+    const { env } = withUv();
+    expect(kokoro({ kokoroDir: "~/dev/Kokoro-FastAPI", exists: () => true, env })).toMatchObject({
+      cwd: path.join(HOME, "dev", "Kokoro-FastAPI"),
+    });
+  });
+
+  /** ★ darwin は MPS 向けの env、それ以外（Linux）は USE_GPU=false だけ */
+  it("darwin: USE_GPU=true / DEVICE_TYPE=mps / PYTORCH_ENABLE_MPS_FALLBACK=1 を積む", () => {
+    const { env } = withUv();
+    const result = kokoro({ env, platform: "darwin" });
+    expect(result).toMatchObject({
+      env: {
+        USE_GPU: "true",
+        DEVICE_TYPE: "mps",
+        PYTORCH_ENABLE_MPS_FALLBACK: "1",
+        PYTHONPATH: `${KOKORO_DIR}${path.delimiter}${path.join(KOKORO_DIR, "api")}`,
+        MODEL_DIR: "src/models",
+        VOICES_DIR: "src/voices/v1_0",
+        WEB_PLAYER_PATH: path.join(KOKORO_DIR, "web"),
+      },
+    });
+  });
+
+  it("darwin 以外は USE_GPU=false のみで、DEVICE_TYPE 等は積まない", () => {
+    const { env } = withUv();
+    const result = kokoro({ env, platform: "linux" }) as { env: Record<string, string> };
+    expect(result.env.USE_GPU).toBe("false");
+    expect(result.env).not.toHaveProperty("DEVICE_TYPE");
+    expect(result.env).not.toHaveProperty("PYTORCH_ENABLE_MPS_FALLBACK");
+  });
+
+  it("espeak-ng のデータが候補にあれば ESPEAK_DATA_PATH を積み、警告は出さない", () => {
+    const { env } = withUv();
+    const espeakDir = "/opt/homebrew/opt/espeak-ng/share/espeak-ng-data";
+    const result = kokoro({
+      env,
+      exists: (p) => p === KOKORO_DIR || p === path.join(espeakDir, "phontab"),
+    }) as { env: Record<string, string>; warnings?: string[] };
+    expect(result.env.ESPEAK_DATA_PATH).toBe(espeakDir);
+    expect(result.warnings ?? []).toEqual([]);
+  });
+
+  it("★ espeak-ng のデータがどこにも無ければ、ESPEAK_DATA_PATH を付けずに警告する", () => {
+    const { env } = withUv();
+    const result = kokoro({ env }) as { env: Record<string, string>; warnings?: string[] };
+    expect(result.env.ESPEAK_DATA_PATH).toBeUndefined();
+    expect(result.warnings?.some((w) => w.includes("espeak-ng"))).toBe(true);
+  });
+
+  /**
+   * ★ 既存の `ESPEAK_DATA_PATH`（MacPorts や自前ビルドの espeak-ng 等）を優先する。
+   *   候補探索で黙って上書きすると、動いている構成を壊す。
+   */
+  it("★ env に既存の ESPEAK_DATA_PATH があれば、それを優先し候補探索も警告もしない", () => {
+    const { env: uvEnv } = withUv();
+    const customPath = "/opt/local/share/espeak-ng-data";
+    const env = { ...uvEnv, ESPEAK_DATA_PATH: customPath };
+    // exists は既知候補にもヒットしうるが、既存の env が勝つことを見る
+    const result = kokoro({
+      env,
+      exists: (p) => p === KOKORO_DIR || p.includes("espeak-ng-data"),
+    }) as { env: Record<string, string>; warnings?: string[] };
+    expect(result.env.ESPEAK_DATA_PATH).toBe(customPath);
+    expect(result.warnings ?? []).toEqual([]);
   });
 });
 
@@ -283,6 +496,26 @@ describe("describeEngineSkip", () => {
     expect(describeEngineSkip({ skip: "not-loopback", host: "example.com" })).toEqual([
       "[Server] example.com はループバックではないので合成エンジンを起こせません",
     ]);
+  });
+
+  /** ★ verify-tts の否定検査は「起こせません」「見つかりません」で全変種を拾う */
+  it("★ not-configured も「起こせません」で言う", () => {
+    expect(describeEngineSkip({ skip: "not-configured" })).toEqual([
+      "[Server] kokoroDir が未設定なので合成エンジンを起こせません",
+    ]);
+  });
+
+  /** ★ `resolveKokoroSpawn` が uv の not-found にこれを積む（合成エンジン全般ではなく uv が要ることを言う） */
+  it("★ not-found は skip.subject があれば呼び出し側の subject より優先する", () => {
+    const lines = describeEngineSkip({ skip: "not-found", tried: ["uv"], subject: "uv" });
+    expect(lines[0]).toContain("uvが見つかりません");
+  });
+
+  /** ★ ディレクトリの指定ミスは実行ファイルの探索（chmod の助言・PATH の一覧）と文面を分ける */
+  it("★ kokoro-dir-not-found はパスを名指しし、「見つかりません」を含む（chmod の助言は出さない）", () => {
+    const lines = describeEngineSkip({ skip: "kokoro-dir-not-found", path: "/opt/Kokoro-FastAPI" });
+    expect(lines).toEqual(["[Server] kokoroDir が見つかりません: /opt/Kokoro-FastAPI"]);
+    expect(lines.some((l) => l.includes("chmod"))).toBe(false);
   });
 
   it("http 以外はスキームを名指しする", () => {
@@ -537,6 +770,41 @@ describe("startEngine", () => {
       },
     );
     expect(calls[0]?.[2]).toMatchObject({ detached: true, shell: false, stdio: ["ignore", "pipe", "pipe"] });
+  });
+
+  /** ★ Kokoro-FastAPI は clone したディレクトリを cwd として要る（→ `resolveKokoroSpawn`） */
+  it("plan.cwd を渡すと spawn の cwd に渡る", () => {
+    const calls: unknown[][] = [];
+    startEngine(
+      { command: "/bin/echo", args: ["x"], cwd: "/opt/Kokoro-FastAPI" },
+      {
+        log: () => {},
+        warn: () => {},
+        spawn: ((...callArgs: unknown[]) => {
+          calls.push(callArgs);
+          return { pid: 1234, stdout: null, stderr: null, on: () => {}, once: () => {} } as never;
+        }) as never,
+      },
+    );
+    const options = calls[0]?.[2] as { cwd?: string };
+    expect(options.cwd).toBe("/opt/Kokoro-FastAPI");
+  });
+
+  it("plan.cwd が無ければ cwd を渡さない（自分の cwd を継承する）", () => {
+    const calls: unknown[][] = [];
+    startEngine(
+      { command: "/bin/echo", args: ["x"] },
+      {
+        log: () => {},
+        warn: () => {},
+        spawn: ((...callArgs: unknown[]) => {
+          calls.push(callArgs);
+          return { pid: 1234, stdout: null, stderr: null, on: () => {}, once: () => {} } as never;
+        }) as never,
+      },
+    );
+    const options = calls[0]?.[2] as { cwd?: string };
+    expect(options.cwd).toBeUndefined();
   });
 
   /** ★ Ollaya は `OLLAYA_HOST` を env で渡す必要がある（`ollaya serve` に --host/--port が無いため） */

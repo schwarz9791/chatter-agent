@@ -277,6 +277,70 @@ server（音声合成）だけが読むキーは「音声合成エンジン」�
 `~/Library/Application Support/AivisSpeech-Engine/Models/` に `.aivmx` を直接置くことになる。
 モデル自体は GUI から独立しているので、**一度入れた話者はエンジン単体でもそのまま使える**。
 
+### Kokoro を起こす（`kokoroDir`、[#106](https://github.com/schwarz9791/chatter-agent/issues/106)）
+
+導入・使い方は [`../kokoro.md`](../kokoro.md)。ここは spawn の実装で決めた理由だけ。
+
+- **起動スクリプト（`start-*.sh`）を通さず、`uv run --no-sync uvicorn api.src.main:app` を
+  直接起こす。** スクリプトは毎回 `uv pip install -e .` とモデルの確認（済んでいれば確認だけ）を
+  走らせ、ネットワークに触れて起動が数秒延びる。導入はユーザーが済ませてある前提で、server は
+  次を起こすだけにした: `cwd=<kokoroDir>`、`uv run --no-sync uvicorn api.src.main:app --host <host> --port <port>`
+- ★★ **環境変数の表（`resolveKokoroSpawn` が組む `PYTHONPATH` / `MODEL_DIR` / `VOICES_DIR` /
+  `WEB_PLAYER_PATH` / `USE_GPU` / `DEVICE_TYPE` / `PYTORCH_ENABLE_MPS_FALLBACK`）は
+  `server/engineProcess.ts` が権威。** Kokoro-FastAPI 側の起動スクリプトが変わるとずれうる
+  —— この表はある時点のスナップショットを書き写したもので、上流に追従する仕組みは無い
+- ★ **`ESPEAK_DATA_PATH` を渡さないと、Kokoro-FastAPI は起動の途中で落ちる。** 依存の
+  `espeakng-loader` が同梱する dylib が、ビルドしたマシンのパスにあるデータを既定で探しに
+  いくため。`resolveKokoroSpawn` は brew（Apple Silicon → Intel）→ Linux の順に既知の場所を
+  探し、どこにも無ければ **spawn はしたうえで**診断のログに警告を出す（Mac では起動の途中で
+  落ちるので、原因がすぐ分かるように）
+- ★★ **日本語の声（`j*`）は UniDic 辞書が要る。** 辞書が無いと、日本語の声は**本文の言語に
+  よらず** `400 Input contains no speakable text` を返す。英語の声（`af_heart` 等）なら
+  同じリクエストでも `200` が通る —— 本文ではなく声で決まるので、`ttsSpeakerId` を英語の声に
+  変えれば切り分けられる。エンジンの 400 は `503` として取り直され続けるので、症状は
+  「その声では一切鳴らない」になる
+  - ★★ **実機でこの 400 が「その1文で後ろが全部止まる」形になった**。
+    player の先読み窓（`synthesisLookahead`）は seq 昇順で `pending` な item を
+    `lookahead + 1` 件まとめて GET しに行くので、先頭の1文が 503 を返し続けている間も
+    後ろの文の GET は別に飛び、サーバー側では合成に成功してキャッシュへ入る。ただし
+    **再生は先頭の item が `ready` にならない限り進まない**ので、後ろが鳴らせる状態に
+    なっていても発話は止まったまま
+  - この条件（同じ声・同じ世代で、拒まれている seq より後ろの seq が現に合成できている）を
+    選んだ理由: 「どの文も合成できない」設定ミス・導入ミス・エンジン停止では後ろの seq も
+    等しく失敗するので、この条件には当たらない。**当たるのはこの1文だけがエンジンに
+    拒まれているときに限られる**（`server/audioStore.ts` の `SynthesisRejectedError`）
+  - ★ **効くのは先読み窓が1以上のときだけ。** 窓 0（完全直列）では後ろの seq を誰も
+    取りに行かないので「後ろが合成できている」事実がそもそも生まれず、従来どおり `503`
+    のまま待ち続ける（詰まりを検知する手段が無い、ということではなく、この仕組みが
+    関与できる場面が無いという意味）
+- ★ **英語の声で日本語の文を読ませると、G2P が漢字・仮名を espeak-ng に回し、
+  「Japanese letter …」「Chinese letter …」と文字の名前を読み上げる。** 誤動作ではなく、
+  英語の G2P に日本語の読みを渡した結果として一貫している
+- 中国語（misaki の zh）は jieba / pypinyin の辞書がパッケージに同梱されていて、追加の
+  ダウンロードは要らない（実機で鳴らしての確認はまだ）
+- **位置づけ: 日本語は AivisSpeech、Kokoro は日本語以外の言語向け。** 設定パネルからの
+  切り替えは未対応（[#148](https://github.com/schwarz9791/chatter-agent/issues/148)）—— `ttsEngine`
+  は再起動まで反映されない区分なので、いまは `config.json` を直接編集してサーバーを再起動する
+
+**実機で確認した**（M1 Max / 32GB、macOS 27、Kokoro-FastAPI をローカルに clone して導入。
+`b4ef64b`、2026-09-09 時点）:
+
+- ディスク: venv が約 1.2GB、モデルが約 343MB、声のデータが約 36MB。日本語の声を使うなら
+  UniDic 辞書が別途ディスク上で約 526MB
+- 常駐メモリ（RSS）は 1.3〜1.7GB
+- 声は 72 種（英語は 46 種）。ID は `{言語}{性別}_{名前}`（`af_` = アメリカ英語の女性、
+  `am_` = アメリカ英語の男性、`bf_` / `bm_` = イギリス英語）で、`GET /v1/audio/voices` が
+  そのまま `{id, label}[]` に写せる形（`name` が `id` と同じ）で返す
+- `speed` はエンジン側の受理範囲が 0.25〜4.0 と `ttsSpeedScale` の実用範囲（0.5〜2.0）より広い。範囲外は `422`
+- 存在しない声・空の入力はどちらも `400`（`404` ではない）。「合成のエラーを 404 に落とさない」
+  契約（→ `protocol.md`）とはぶつからない
+- WAV は 24kHz / 16bit / モノラル固定。RIFF と data の長さが `0xFFFFFFFF` になり、fmt と data
+  の間に LIST チャンクが挟まる（`stream` の真偽に関わらず同じ）。既存の読み手（Unity の
+  `WavDecoder.cs`、`player/audioPlayer.ts` の `wavDurationMs`）はチャンクを順に辿って実体の
+  長さで測り直す作りなので、無変更で対応できた
+
+★ **この数値を仕様として扱わないこと。** マシン・ネットワーク・Kokoro-FastAPI 側のバージョンで変わる。
+
 player だけが読むキーの一覧・既定値・意味は [`../core.md`](../core.md)「設定と環境変数」の「再生」にある。
 
 以前は `audioFetchTimeoutMs` とサーバー側の `synthesisTimeoutMs` の順序に「長くすること」という
@@ -284,6 +348,12 @@ player だけが読むキーの一覧・既定値・意味は [`../core.md`](../
 発話が捨てられる）に化けた。しかも `synthesize` は2往復なので**最悪は `synthesisTimeoutMs` の2倍**
 になり、旧既定の45秒でも足りなかったことがある。いまはサーバーが `GET` の応答を自分で打ち切って
 503 を返すので、この制約そのものが無い。
+
+★★ **`speechMaxAgeMs` の既定は `0`（無効）のまま変えないこと。** 一度 `60000` を既定にしたが、
+起動待ちの間に溜まった発話・同一メッセージ内で `ts` が同値になる長いメッセージの後半・端末の
+時計のずれ、そのどれもが「古い」と誤判定されて無関係な発話まで消える。合成できない1文で
+後ろが詰まる問題はこれで解かず、`server/audioStore.ts` の `SynthesisRejectedError`
+（→ `../CLAUDE.md`「絶対に守ること」7の例外）が担う。
 
 `chatter-agent-speak`（`summarizer/` の AI要約）だけが読むキーの一覧・既定値・意味は
 [`../core.md`](../core.md)「設定と環境変数」の「AI要約」にある。

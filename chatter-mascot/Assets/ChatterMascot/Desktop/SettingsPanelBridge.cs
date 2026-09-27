@@ -496,17 +496,16 @@ namespace ChatterMascot.Desktop
 
                 // ── core 側 ───────────────────────────────
                 case SettingKeys.Speaker:
-                {
-                    int id;
-                    if (!SettingsPanelJson.TryParseInt(value, out id))
+                    // ★ 話者 ID はエンジンにより数値・文字列のどちらもある。core が文字列でも
+                    //   数値でも受けるので、ここでは空でないことだけ見て素通しする
+                    if (string.IsNullOrEmpty(value))
                     {
                         Notice(key, "話者 ID を読めませんでした");
                         return;
                     }
                     _context.SpeakerId = value;
-                    Queue(CoreConfigKeys.SpeakerId, id, key);
+                    Queue(CoreConfigKeys.SpeakerId, value, key);
                     return;
-                }
 
                 case SettingKeys.Speed:
                 {

@@ -30,8 +30,10 @@ core/src/
 │   ├── loopback.ts          peer がループバックか（純粋関数）。`auth.ts` の免除判定と、書き込み口を絞るのに使う（issue #76 / #98）
 │   ├── wsServer.ts          配信と ack。トークン認証（issue #98）→ Origin 検査、外部 http.Server への相乗りもここ
 │   └── throttledWarn.ts     同じ警告を間引く（503 の連発と Origin 拒否。黙らせずに件数を出す）
-├── tts/          音声合成エンジンのクライアント（issue #29 で player/ から移設）
-│   └── voicevoxClient.ts    AivisSpeech / VOICEVOX 互換 API（fetch + AbortSignal.timeout）
+├── tts/          音声合成エンジンの抽象とクライアント（issue #29 で player/ から移設。issue #106 で複数エンジン化）
+│   ├── ttsEngine.ts         ★ `TtsEngine` の抽象。タイムアウト・診断・WAV 検査は共通ヘルパーとしてここに集める
+│   ├── voicevoxClient.ts    AivisSpeech / VOICEVOX 互換 API（fetch + AbortSignal.timeout）
+│   └── openaiClient.ts      OpenAI 互換の音声合成 API（Kokoro-FastAPI が対象。→ `docs/kokoro.md`）
 ├── player/       chatter-agent-player（WebSocket → 音声取得 → 再生 → ack）
 │   ├── index.ts             合成ルート。ロック → 一時dir → 接続。コマンドを実行してイベントを戻すドライバ
 │   ├── playbackQueue.ts     ★中核。取得/再生/ack の判断だけを持つ reducer（副作用ゼロ）
@@ -352,42 +354,71 @@ server / player はこのファイルを読みも書きもしない（読むの�
 
 | キー | 既定値 | 環境変数 |
 |---|---|---|
+| `ttsEngine` | `"voicevox"`（`"voicevox" \| "openai"`） | `CHATTER_AGENT_TTS_ENGINE` |
 | `ttsEnabled` | `true` | `CHATTER_AGENT_TTS_ENABLED` |
-| `ttsBaseUrl` | `"http://127.0.0.1:10101"` | `CHATTER_AGENT_TTS_URL` |
-| `ttsSpeakerId` | `888753760` | `CHATTER_AGENT_TTS_SPEAKER_ID` |
+| `ttsBaseUrl` | `ttsEngine` から導く（→下記） | `CHATTER_AGENT_TTS_URL` |
+| `ttsSpeakerId` | `ttsEngine` から導く（→下記） | `CHATTER_AGENT_TTS_SPEAKER_ID` |
 | `ttsSpeedScale` | `1.0` | `CHATTER_AGENT_TTS_SPEED_SCALE` |
 | `synthesisTimeoutMs` | `30000` | `CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS` |
 | `ttsSpawn` | `true` | `CHATTER_AGENT_TTS_SPAWN` |
 | `ttsSpawnCommand` | `""` | `CHATTER_AGENT_TTS_SPAWN_COMMAND` |
 | `ttsSpawnArgs` | `[]` | `CHATTER_AGENT_TTS_SPAWN_ARGS` |
+| `kokoroDir` | `""`（空なら Kokoro を起こさない） | `CHATTER_AGENT_KOKORO_DIR` |
 
-- 既定の `ttsBaseUrl` は AivisSpeech の標準ポート。cc-mascot はエンジンを自分で `--port 8564` で
-  spawn するので、そちらに繋ぐなら明示的に指定する
-- `ttsSpeakerId` の既定は AivisSpeech 標準同梱の Anneli（ノーマル）。起動時に `/speakers` で
-  存在を検査し、無ければ候補を並べて警告する（設定ミスの症状が「無音」なので、これが無いと
-  切り分けできない）。
+- ★ `ttsEngine` は `ttsBaseUrl` をどの API 契約で叩くかを決める（→ `tts/ttsEngine.ts`）。
+  `"voicevox"` は AivisSpeech / VOICEVOX 互換（`tts/voicevoxClient.ts`）、`"openai"` は OpenAI
+  互換（`tts/openaiClient.ts`。第一の相手は Kokoro-FastAPI → [`kokoro.md`](./kokoro.md)）。
+  制御 API からは書けない（再起動まで反映されない区分。→ `protocol.md`「書けないキーは3種類ある」）
+  —— 起こすかどうかの判断は起動時の1回きりで、切り替えても spawn の判断はやり直されない
+- ★ `ttsBaseUrl` / `ttsSpeakerId` の既定値は `ttsEngine` から導く（`ttsEngineDefaults`。
+  → `core/config.ts`）。`"voicevox"` は `http://127.0.0.1:10101` / `"888753760"`
+  （AivisSpeech 標準構成の Anneli・ノーマル）、`"openai"` は `http://127.0.0.1:8880` /
+  `"af_heart"`（Kokoro-FastAPI 標準構成）。file にも環境変数にも書かれていなければこの既定に
+  なるので、`ttsEngine: "openai"` だけ書けば足りる。設定パネルの「すべての設定をリセット」も
+  今の `ttsEngine` に合わせたこの既定を書く（→ `server/controlApi.ts` の `getConfig`）。
+  cc-mascot はエンジンを自分で `--port 8564` で spawn するので、そちらに繋ぐなら明示的に指定する
+  ★ `ttsEngine: "openai"` のときは **`/v1` を含まない origin** を書くこと（パスはクライアントが足す。
+  書いてしまっても `tts/openaiClient.ts` が末尾の `/v1` を正規化してから連結する）
+- `ttsSpeakerId` は文字列。VOICEVOX 系は数値のスタイル ID（文字列化して持つ）、Kokoro のような
+  OpenAI 互換エンジンは `af_heart` のような英字の声 ID になる（Kokoro-FastAPI はさらに
+  `af_bella+af_sky` のような合成指定や `af_bella(2)+af_sky(1)` のような重み付けも受ける ——
+  存在確認（`TtsEngine.hasVoice`）はエンジンごとの書き方を知ったうえで判定する）。
+  起動時に声の一覧（`listVoices()`）で存在を検査し、無ければ候補を並べて警告する
+  （設定ミスの症状が「無音」なので、これが無いと切り分けできない）。
   ★ ここで起動を止めないこと。止めるとテキストの配信まで巻き添えになり、クライアントからは
   「数十秒の無音は正常」と区別できなくなる。音声だけを 503 に落として、原因を症状に出す
+  ★ `listVoices()` が応答**あり**の失敗（`TtsHttpError`）で落ちたときは unreachable にしない ——
+  そのポートには別の何かが応答しているということなので、起こすと bind に失敗するか二重に起こす。
+  「応答はあるが声の一覧を返さない」と警告して `reachable` を返す（→ `server/index.ts` の `checkEngine`）
 - `ttsEnabled: false` にすると配信フレームの `audio` が常に `null` になり、`GET /audio/…` も
   404 を返す。**テキストの配信は止まらない**ので、自前で合成するクライアントや字幕だけの
   クライアントの逃げ道になる。
   ★ `POST /v1/tts/preview` は 409 `tts_disabled`。ここを見ずに合成へ入ると、待ち切って
   `503 synthesis_unavailable` になり、設定パネルには「エンジンに繋がりません」と出る ——
   本当の理由は利用者自身が切ったことなので、名指しで断る
+- `ttsSpawnCommand` が空のときの探し方は `ttsEngine` で決まる —— `"voicevox"` なら
+  AivisSpeech.app の既知の場所、`"openai"` なら `kokoroDir` から Kokoro-FastAPI（`uv`）を起こす
+  （→ `server/engineProcess.ts` の `resolveKokoroSpawn`。実機の確認は
+  [`knowledge/core.md`](./knowledge/core.md)「エンジンを起こす」）
+- `kokoroDir` は Kokoro-FastAPI を clone したディレクトリ。**既定は空文字で、そのときは起こさない**
+  —— AivisSpeech と違って決まったインストール先が無く、導入（依存とモデルの取得）はユーザーに
+  済ませてもらう前提のため。制御 API からは書けない（(a) コマンド実行に繋がる区分。`cwd` として渡る）
 - ★ `synthesisTimeoutMs` は2つの場所に効く。エンジンへの**1リクエストあたり**の上限
-  （`audio_query` と `synthesis` に別々に）と、`GET /audio/…` の**応答**を保留する上限。
+  （VOICEVOX は `audio_query` と `synthesis` に別々に。openai は `/v1/audio/speech` の1回）と、
+  `GET /audio/…` の**応答**を保留する上限。
   後者は応答を打ち切るだけで**合成は続ける**ので、クライアントの取り直しがキャッシュに
   当たって即 200 になる。
   ★ どちらもリクエストごとに読み直す。応答側を起動時の値で固定すると、`PATCH /v1/config`
   で変えたときに片方にしか効かない
-- ★★ `ttsSpeedScale`（[#76](https://github.com/schwarz9791/chatter-agent/issues/76)）は
-  `voicevoxClient` の「`AudioQuery` の中身は解釈しない」方針の唯一の例外。`audio_query` が
-  返した JSON の `speedScale` **だけ**を書き換えて `synthesis` に投げる（`applySpeedScale`）。
-  例外をここ1つに留めること —— `pitchScale` / `intonationScale` を同じ理屈で足していくと、
-  「エンジンが返した JSON をそのまま返送する」という一番安全な形が失われる。`speedScale` を
-  持たないエンジンには何もしない
-- ★ 範囲 0.5〜2.0 はエンジンの受理範囲ではなく実用の範囲。VOICEVOX 互換 API はもっと広い値も
-  受けるが、0.5 未満は間延びして意味を取りづらく、2.0 超は聞き取れない
+- ★★ `ttsSpeedScale`（[#76](https://github.com/schwarz9791/chatter-agent/issues/76)）の伝え方は
+  エンジンで違う。`voicevoxClient` は「`AudioQuery` の中身は解釈しない」方針の唯一の例外として、
+  `audio_query` が返した JSON の `speedScale` **だけ**を書き換えて `synthesis` に投げる
+  （`applySpeedScale`）。例外をここ1つに留めること —— `pitchScale` / `intonationScale` を
+  同じ理屈で足していくと、「エンジンが返した JSON をそのまま返送する」という一番安全な形が
+  失われる。`openaiClient` は逆に `speed` を**毎回明示で**送る —— 「省略は触らない」という余地が
+  向こうには無く、省略するとエンジン側の既定に委ねることになるため
+- ★ 範囲 0.5〜2.0 はエンジンの受理範囲ではなく実用の範囲。VOICEVOX 互換 API・Kokoro-FastAPI の
+  どちらも受理範囲はもっと広いが、0.5 未満は間延びして意味を取りづらく、2.0 超は聞き取れない
 
 ★ エンジンを起こす条件と実機確認は [`knowledge/core.md`](./knowledge/core.md)「エンジンを起こす」。
 

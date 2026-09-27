@@ -144,7 +144,9 @@ spool を見る（走査直後に到着した分の取りこぼし防止）。
 - ★ **`503`（あとで取りに来い）を「失敗」に数えないこと。** 数えると、エンジンを起動し忘れている
   だけで溜まっていた発話が全部 ack されて消える
 - ★ **合成のエラーを `404` に落とさないこと。** `404` は ack まで通って**キューの本文を物理削除する**。
-  **無音の原因は 404 ではなく診断で出す**（`server/index.ts` の `recheckEngine`）
+  **無音の原因は 404 ではなく診断で出す**（`server/index.ts` の `recheckEngine`）。
+  **唯一の例外**: 同じ声で後ろの文が現に合成できているのに、その1文だけをエンジンが 4xx で
+  拒むときだけ（`server/audioStore.ts` の `SynthesisRejectedError`）
 - ★ **応答の期限と合成の期限を混ぜないこと。** `GET` の**応答**は `synthesisTimeoutMs` で打ち切って
   `503` を返すが、**合成は走らせたままにする**
 - ★ **`prompt` を配信順で追い越させないこと。** 配信順を変えると 4 の逆転が再発する
@@ -207,6 +209,7 @@ cd chatter-mascot
 | [`docs/plugin.md`](./docs/plugin.md) | `plugin/` を触るとき。bash hook の制約、spool 命名、`hooks.json` の3種 |
 | [`docs/mascot.md`](./docs/mascot.md) | `chatter-mascot/` を触るとき。セットアップ、構成、探索順、ビルドと実行 |
 | [`docs/origin.md`](./docs/origin.md) | cc-mascot 由来のコードを触るとき。移植の対応表、フォーク点、ライセンス義務 |
+| [`docs/kokoro.md`](./docs/kokoro.md) | Kokoro-FastAPI（`ttsEngine: "openai"`。日本語以外向けの TTS）を使うとき |
 | [`docs/knowledge/`](./docs/knowledge) | **踏んだこと・なぜそうしたか・実測値。** 同じ罠に2度目で刺されないため |
 | `_workspace/chatter-agent-design.md` | 着手前の検討記録（git 管理外）。**基本設計の正は `docs/` 側** |
 

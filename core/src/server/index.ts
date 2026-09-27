@@ -30,13 +30,16 @@ import {
 } from "../core/paths";
 import { registerSummarizerSession } from "../core/summarizerSessions";
 import { createSpeechQueue } from "../core/speechQueue";
-import { createVoicevoxClient, flattenStyles, hasStyle } from "../tts/voicevoxClient";
+import { createVoicevoxEngine } from "../tts/voicevoxClient";
+import { createOpenAiEngine } from "../tts/openaiClient";
+import { TtsHttpError, type TtsEngine } from "../tts/ttsEngine";
 import { createAssetCatalog } from "./assetCatalog";
 import { createAudioStore, type Voice } from "./audioStore";
 import { createControlApi } from "./controlApi";
 import {
   describeEngineSkip,
   resolveEngineSpawn,
+  resolveKokoroSpawn,
   resolveOllayaSpawn,
   startEngine,
   type EngineProcess,
@@ -96,7 +99,7 @@ const STARTUP_KEEP_MS = 10_000;
 /**
  * 合成が失敗したときに、エンジンの診断（話者一覧）を出し直す間隔。
  *
- * ★ 合成の失敗ごとに `listSpeakers` を叩くと、エンジンが落ちている間 1 req/s で
+ * ★ 合成の失敗ごとに `listVoices` を叩くと、エンジンが落ちている間 1 req/s で
  *   繋ぎに行き続けることになる。診断は「設定が変わった / エンジンが起きた」を
  *   拾えれば十分なので、分単位で足りる。
  */
@@ -108,7 +111,7 @@ const SPEAKER_HINT_LIMIT = 20;
 /**
  * 疎通確認の結果。
  *
- * ★ **boolean にしないこと。** 意味は「`listSpeakers` に繋がったか」であって
+ * ★ **boolean にしないこと。** 意味は「`listVoices` に繋がったか」であって
  *   「話者 ID が実在するか」ではない。`true`/`false` だと後者と読み違えられ、
  *   読み違えたまま直すと**エンジンの二重起動**になる（→ `checkEngine`）。
  */
@@ -242,11 +245,21 @@ async function main(): Promise<void> {
   //   直したらすぐ効く方がよい（クライアント側の警告もそこを名指しする）。
   //   クライアントの生成は object literal と closure だけなので、GET のたびに作って問題ない
   const currentVoice = (): Voice => ({
+    engine: config.get("ttsEngine"),
     baseUrl: config.get("ttsBaseUrl"),
     speakerId: config.get("ttsSpeakerId"),
     speedScale: config.get("ttsSpeedScale"),
   });
-  const ttsFor = (voice: Voice) => createVoicevoxClient({ ...voice, timeoutMs: config.get("synthesisTimeoutMs") });
+  // ★ ファクトリは作らない。分岐はここ1行だけで、エンジンごとの生成先は `tts/` にある
+  const ttsFor = (voice: Voice): TtsEngine => {
+    const opts = {
+      baseUrl: voice.baseUrl,
+      voiceId: voice.speakerId,
+      speedScale: voice.speedScale,
+      timeoutMs: config.get("synthesisTimeoutMs"),
+    };
+    return voice.engine === "openai" ? createOpenAiEngine(opts) : createVoicevoxEngine(opts);
+  };
 
   let lastEngineCheckAt = Number.NEGATIVE_INFINITY;
 
@@ -295,7 +308,8 @@ async function main(): Promise<void> {
    *
    * 条件は5つで、全部満たすときだけ起こす:
    * 1. `ttsEnabled` / 2. `ttsSpawn` / 3. **起動時の疎通確認に失敗した** /
-   * 4. `ttsBaseUrl` がループバック / 5. コマンドが解決できた（4と5は `resolveEngineSpawn`）
+   * 4. `ttsBaseUrl` がループバック / 5. コマンドが解決できた（4と5は `resolveEngineSpawn` /
+   * `resolveKokoroSpawn`。どちらを使うかは `ttsSpawnCommand` と `ttsEngine` で決まる）
    *
    * ★ **条件3が要。** 「まず繋いでみて、居なければ起こす」ことで、GUI 併用・verify のスタブ・
    *   別ポート運用のすべてが追加の分岐なしで素通りする（ポート衝突の判定コードが要らない）。
@@ -315,11 +329,23 @@ async function main(): Promise<void> {
       return;
     }
 
-    const plan = resolveEngineSpawn({
-      baseUrl: config.get("ttsBaseUrl"),
-      command: config.get("ttsSpawnCommand"),
-      args: config.get("ttsSpawnArgs"),
-    });
+    // ★ `ttsSpawnCommand` を明示したら、エンジン種別に関わらずそれを使う（従来どおり）。
+    //   空なら `ttsEngine` で分岐 —— voicevox は既知候補（`resolveEngineSpawn`）、
+    //   openai は `kokoroDir` から Kokoro-FastAPI を起こす（`resolveKokoroSpawn`）
+    const ttsSpawnCommand = config.get("ttsSpawnCommand");
+    const plan =
+      ttsSpawnCommand || config.get("ttsEngine") === "voicevox"
+        ? resolveEngineSpawn({
+            baseUrl: config.get("ttsBaseUrl"),
+            command: ttsSpawnCommand,
+            args: config.get("ttsSpawnArgs"),
+          })
+        : resolveKokoroSpawn({
+            baseUrl: config.get("ttsBaseUrl"),
+            kokoroDir: config.get("kokoroDir"),
+            args: config.get("ttsSpawnArgs"),
+          });
+
     if ("skip" in plan) {
       // 条件4 / 条件5。どちらも従来どおりの 503 運用に落ちるだけ。
       // ★ 文面は `engineProcess.ts` が組む（既知候補の一覧を持っているのがあちらなので）
@@ -327,6 +353,8 @@ async function main(): Promise<void> {
       warnAudioUnavailable();
       return;
     }
+
+    for (const warning of plan.warnings ?? []) console.warn(warning);
 
     // ★ **この判定と spawn の間に await を挟まないこと。** 挟むと「終了処理が始まった後に
     //   spawn する」窓ができ、detached の子がサーバーより長生きする（孤児のエンジンが残る）
@@ -420,7 +448,7 @@ async function main(): Promise<void> {
    */
   const control = createControlApi({
     config,
-    listSpeakers: async () => flattenStyles(await ttsFor(currentVoice()).listSpeakers()),
+    listSpeakers: () => ttsFor(currentVoice()).listVoices(),
     // ★ `audioStore` を通さない。キューに無い文なので `lookup` が引けない
     synthesizePreview: (text) => ttsFor(currentVoice()).synthesize(text),
     summaryPreview: {
@@ -557,17 +585,27 @@ async function main(): Promise<void> {
  * エンジンに繋がるか、話者 ID が実在するかを見る。**待たないし、止めない。**
  * 結果はログに残すだけで、配信の判断は `GET /audio/…` のたびに行われる。
  *
- * ★ **起動時の1回だけにしないこと。** 起動時に `listSpeakers` が落ちると、そこで
+ * ★ **起動時の1回だけにしないこと。** 起動時に `listVoices` が落ちると、そこで
  *   early return するので**話者 ID の検査そのものが行われない**。
  *   「player を先に立ち上げ、後から AivisSpeech を起動する」という最も普通の順序で
  *   `ttsSpeakerId` の診断が永久に出なくなる — これが「無音なのにログが数行しかない」の真因。
  *   合成が失敗するたびに呼び直す（間隔は `ENGINE_RECHECK_INTERVAL_MS` で間引く）。
  */
-async function checkEngine(tts: ReturnType<typeof createVoicevoxClient>, speakerId: number): Promise<EngineProbe> {
-  let speakers;
+async function checkEngine(tts: TtsEngine, speakerId: string): Promise<EngineProbe> {
+  let voices;
   try {
-    speakers = await tts.listSpeakers();
+    voices = await tts.listVoices();
   } catch (err) {
+    // ★ **応答があった（`TtsHttpError`）なら unreachable にしない。** そのポートには
+    //   何か別のもの（`ttsEngine` と `ttsBaseUrl` の取り違え等）が居るということなので、
+    //   ここで起こすと bind に失敗するか、既に居るものと二重に起こすことになる
+    if (err instanceof TtsHttpError) {
+      console.warn(
+        `[Server] 音声合成エンジンは応答しましたが声の一覧を返しません (${tts.baseUrl}, status=${err.status})。` +
+          "ttsEngine と ttsBaseUrl を確認してください",
+      );
+      return "reachable";
+    }
     console.warn(`[Server] 音声合成エンジンに繋がりません (${tts.baseUrl}): ${String(err)}`);
     // ★ **「503 になる」の結論はここで出さない。** 起動時のプローブから呼ばれたときは、
     //   直後にエンジンを起こすかもしれず、その場合この行は嘘になる（実機ログで、
@@ -576,14 +614,16 @@ async function checkEngine(tts: ReturnType<typeof createVoicevoxClient>, speaker
     return "unreachable";
   }
 
-  if (hasStyle(speakers, speakerId)) {
+  // ★ 一致の取り方はエンジンごとに違う（Kokoro-FastAPI の `a+b` のような合成指定）ので、
+  //   ここでは完全一致を書かず `TtsEngine` 自身に委ねる（→ `tts/ttsEngine.ts` の `hasVoice`）
+  if (tts.hasVoice(voices, speakerId)) {
     console.log(`[Server] 音声合成エンジンに繋がりました (${tts.baseUrl}, speaker=${speakerId})`);
     return "reachable";
   }
 
   console.warn(`[Server] ttsSpeakerId=${speakerId} はこのエンジンに存在しません。音声は 503 になります`);
-  for (const style of flattenStyles(speakers).slice(0, SPEAKER_HINT_LIMIT)) {
-    console.warn(`[Server]   ${style.id}  ${style.label}`);
+  for (const voice of voices.slice(0, SPEAKER_HINT_LIMIT)) {
+    console.warn(`[Server]   ${voice.id}  ${voice.label}`);
   }
   // ★ **話者は無いが、エンジンには繋がっている。** ここを "unreachable" にすると、
   //   スタブや GUI が生きているのに `ttsSpeakerId` だけ間違えている状態（verify-tts の

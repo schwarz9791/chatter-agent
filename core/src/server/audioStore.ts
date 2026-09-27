@@ -16,7 +16,8 @@
  *   保持すると「キューから消えたのに古い本文で合成する」経路ができる。
  */
 
-import { TtsHttpError } from "../tts/voicevoxClient";
+import { TtsHttpError } from "../tts/ttsEngine";
+import type { TtsEngineKind } from "../core/config";
 
 /**
  * 合成できなかった。`httpServer` が 503 に落とすために型で区別する。
@@ -29,6 +30,11 @@ import { TtsHttpError } from "../tts/voicevoxClient";
  *   プロキシの 407 まで巻き込む。「溜まった発話を今さら鳴らすか」は
  *   `speechMaxAgeMs`（既定0＝無効）で既にユーザーの選択として表現してある。
  *
+ * ★ **唯一の例外は `SynthesisRejectedError`（下）。** 同じ声・同じ世代で、この seq より
+ *   後ろの seq が現に合成できているときだけ、この1文はエンジンが拒んでいると判断して 404 に
+ *   落とす。設定ミス・導入ミス・エンジン停止では**どの文も合成できていない**ので、この条件に
+ *   当たらず従来どおり 503 のまま残る —— 規則7が守りたい「全部消える」事故はここでは起きない。
+ *
  * ★ 代わりに**理由を持ち回る**。無音の原因はログにしか出ないので、ここで捨てない。
  */
 export class SynthesisUnavailableError extends Error {
@@ -38,6 +44,21 @@ export class SynthesisUnavailableError extends Error {
     super(message, options);
     this.name = "SynthesisUnavailableError";
     this.status = options?.status ?? null;
+  }
+}
+
+/**
+ * 後ろの seq が同じ声・同じ世代で合成できているのに、この1文だけをエンジンが拒んでいる。
+ * `httpServer` はこれだけを 404 に落とす（→ 上の `SynthesisUnavailableError` の★、
+ * CLAUDE.md「絶対に守ること」7の唯一の例外）。
+ */
+export class SynthesisRejectedError extends Error {
+  /** エンジンが返した 4xx（408 / 429 を除く） */
+  readonly status: number;
+  constructor(message: string, options: { cause?: unknown; status: number }) {
+    super(message, options);
+    this.name = "SynthesisRejectedError";
+    this.status = options.status;
   }
 }
 
@@ -68,9 +89,11 @@ export interface AudioStoreDeps {
  *   `ttsSpeedScale`（#76）はこれを踏みかけた —— 話者は入っていたが速度は入っていなかった。
  */
 export interface Voice {
+  /** どの API 契約で叩くか（→ `tts/ttsEngine.ts`）。`baseUrl` は同じでも解釈が変わる */
+  engine: TtsEngineKind;
   baseUrl: string;
-  speakerId: number;
-  /** 話速。`audio_query` の `speedScale` に載る（→ `tts/voicevoxClient.ts`） */
+  speakerId: string;
+  /** 話速。エンジンへの渡し方は各クライアントが決める（→ `tts/`） */
   speedScale: number;
 }
 
@@ -112,8 +135,23 @@ const DEFAULT_MAX_IN_FLIGHT = 8;
 
 function keyFor(voice: Voice, epoch: string, seq: number): string {
   // ★ 声をキーに混ぜること。`ttsSpeakerId` を直しても、LRU にいる分は古い声のまま返る
-  // ★ `speedScale` も同じ理由で混ぜる（#76）。**`Voice` にフィールドを足したらここにも足す**
-  return `${voice.baseUrl}|${voice.speakerId}|${voice.speedScale}|${epoch}:${seq}`;
+  // ★ `speedScale` も同じ理由で混ぜる（#76）。`engine` も同じ理由（#106。ttsBaseUrl はエンジンを
+  //   跨いで同じ値になりうるので、これが無いと切り替え直後に別エンジンの WAV が返りうる）。
+  //   **`Voice` にフィールドを足したらここにも足す**
+  return `${voice.engine}|${voice.baseUrl}|${voice.speakerId}|${voice.speedScale}|${epoch}:${seq}`;
+}
+
+/** `keyFor` から `seq` を落としたもの。「この声・この世代で最後に成功した seq」を引くキー */
+function voiceEpochKey(voice: Voice, epoch: string): string {
+  return `${voice.engine}|${voice.baseUrl}|${voice.speakerId}|${voice.speedScale}|${epoch}`;
+}
+
+/**
+ * `SynthesisRejectedError` に落としてよい HTTP ステータス。**408 / 429 は除く** ——
+ * どちらも「今は無理だが後で通るかもしれない」一時的な失敗で、恒久的な拒否ではない。
+ */
+function isRejectableStatus(status: number): boolean {
+  return status >= 400 && status < 500 && status !== 408 && status !== 429;
 }
 
 export function createAudioStore(deps: AudioStoreDeps): AudioStore {
@@ -127,6 +165,26 @@ export function createAudioStore(deps: AudioStoreDeps): AudioStore {
 
   /** 合成中の約束。同じキーの2人目はこれに相乗りする */
   const inFlight = new Map<string, Promise<ArrayBuffer>>();
+
+  /**
+   * 声・世代ごとに「合成に成功した最大の seq」。`cache` と違って追い出さない
+   * ——先読み窓ぶんしか持たない `cache` から消えた後も、「後ろは合成できていた」事実は
+   * 残しておく必要がある。声・世代の組は事実上少数（設定変更・採番のやり直しの回数）
+   * なので、上限は設けていない。
+   */
+  const maxSuccessfulSeq = new Map<string, number>();
+
+  function markSuccess(voice: Voice, epoch: string, seq: number): void {
+    const vek = voiceEpochKey(voice, epoch);
+    const prev = maxSuccessfulSeq.get(vek);
+    if (prev === undefined || seq > prev) maxSuccessfulSeq.set(vek, seq);
+  }
+
+  /** 同じ声・同じ世代で、`seq` より後ろが現に合成できているか */
+  function laterSeqSucceeded(voice: Voice, epoch: string, seq: number): boolean {
+    const maxOk = maxSuccessfulSeq.get(voiceEpochKey(voice, epoch));
+    return maxOk !== undefined && maxOk > seq;
+  }
 
   function evict(): void {
     while (cache.size > maxEntries || bytes > maxBytes) {
@@ -174,14 +232,26 @@ export function createAudioStore(deps: AudioStoreDeps): AudioStore {
         .synthesize(text, voice)
         .then((wav) => {
           remember(key, wav);
+          markSuccess(voice, epoch, seq);
           return wav;
         })
         .catch((err: unknown) => {
+          const status = err instanceof TtsHttpError ? err.status : null;
+          const message = err instanceof Error ? err.message : String(err);
+
+          // ★ 唯一の例外（→ `SynthesisUnavailableError` の★）。同じ声・世代で後ろの seq が
+          //   現に合成できているときだけ、この1文はエンジンに拒まれたと判断する。
+          //   ★ 成功の順序は問わない —— ここは `get()` が呼ばれるたびに毎回判定するので、
+          //   S が先に失敗していても、後で S+1 が成功すれば次の取り直しで Rejected に変わる。
+          //   エンジンが直って S 自身も通れば、この分岐にすら来ない（200 に戻る）
+          if (status !== null && isRejectableStatus(status) && laterSeqSucceeded(voice, epoch, seq)) {
+            throw new SynthesisRejectedError(message, { cause: err, status });
+          }
+
           // ★ 「あとで取りに来い」に落とす。クライアントは 503 を受けても
           //    試行回数を減らさないので、エンジンが戻れば追いつける。
           //    理由は握り潰さずに持ち回る（無音の原因はログにしか出ない）
-          const status = err instanceof TtsHttpError ? err.status : null;
-          throw new SynthesisUnavailableError(err instanceof Error ? err.message : String(err), { cause: err, status });
+          throw new SynthesisUnavailableError(message, { cause: err, status });
         })
         .finally(() => {
           inFlight.delete(key);

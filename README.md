@@ -112,6 +112,7 @@ cd chatter-mascot
 
 - **Claude Code**
 - **[AivisSpeech](https://aivis-project.com/)** — **just having it installed is enough.** If the synthesis engine isn't running, the server wakes it up, and stopping the server takes it down too. You only need to start it by hand to connect to an engine on a different host, or **to add a speaker** (adding a voice model needs the GUI). To turn the auto-start off entirely, set `CHATTER_AGENT_TTS_SPAWN=0`
+- **The synthesis engine is swappable** (`ttsEngine`). The default is AivisSpeech (VOICEVOX-compatible); for languages other than Japanese, **[Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI)** (OpenAI-compatible) is also supported. Setup steps are in [`docs/kokoro.md`](./docs/kokoro.md)
 - **macOS** — the display apps target macOS and Android XR, the playback command defaults to `afplay`, and the engine is auto-discovered only at macOS paths. On Linux / Windows, point the CLI player at a playback command with `CHATTER_AGENT_PLAYER_COMMAND`
 - **Summarization (optional)** — shortens long messages before reading them aloud. The default backend is `fm` (the Apple Foundation Models CLI, macOS 27+). Where it's unavailable (pre-macOS 27, Linux, Windows), the original text is read as-is. `aiSummaryBackend` can be switched to `claude` (`claude -p`) instead
 - **Emotion classification (optional)** — picks an expression for each utterance. The default is **[Ollaya](https://ollaya.dev/)** (a local decision model). Run `ollaya pull laya:multilingual` once to fetch the model; after that the server wakes it up whenever it isn't running, the same way it does for AivisSpeech. Where it's not installed or unreachable, classification falls back to the dictionary-based classifier, so speech never stops. `emotionClassifier` can also be switched to `fm` or `dictionary` (the original rule-based classifier)
@@ -240,16 +241,17 @@ cd chatter-mascot
 | [`docs/plugin.md`](./docs/plugin.md) | when touching `plugin/` |
 | [`docs/mascot.md`](./docs/mascot.md) | when touching the display-side app |
 | [`docs/origin.md`](./docs/origin.md) | when touching code that comes from cc-mascot |
+| [`docs/kokoro.md`](./docs/kokoro.md) | when using Kokoro-FastAPI (TTS for non-Japanese languages) |
 | [`docs/knowledge/`](./docs/knowledge) | what was learned along the way, why, and measured values |
 
 ## Roadmap
 
-- Multi-language support — make the TTS swappable / drop the dictionary-based emotion classification
+- Multi-language support — extend sentence splitting, summarization, and emotion classification beyond Japanese (TTS is already swappable; see [`docs/kokoro.md`](./docs/kokoro.md))
 - Support for coding agents other than Claude
 - Support for moving around in XR space to some degree, and spatial anchor support
 - CI setup and distribution to various app stores
 - Galaxy XR support
-- Making it displayable in the Android XR Home Scene as well
+- Letting it run alongside Home Scene apps on Android XR
 - Making it work on Android glasses (INAIR Pod / Viture Neckband, etc.)
 
 ## License

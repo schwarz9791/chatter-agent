@@ -184,7 +184,7 @@ CLI ──┬──▶ speech.jsonl        記録。消さずに残す。配信�
 | `200` | WAV が返る。**サーバーは合成が終わるまでレスポンスを保留する**（下の「応答の期限」まで） |
 | `401` | **非ループバックからの未認証アクセス**（トークン無し・誤り）。`www-authenticate: Bearer` を返す。★ **`503` と同じく試行回数に数えないこと**（下の「クライアント側の責務」9） |
 | `503` | **あとで取りに来い。** エンジンに繋がらない・合成が返らない・まだ終わっていない。`Retry-After`（秒）を返す。★ **試行回数に数えないこと**（下の「クライアント側の責務」8） |
-| `404` | **永久に用意できない。** キューから消えた（ack / 上限超過 / 起動時の掃除）、世代違いの古い URL、読み上げる中身が無い文、`ttsEnabled: false`。`audio: null` と同じ扱いで、warn して ack する |
+| `404` | **永久に用意できない。** キューから消えた（ack / 上限超過 / 起動時の掃除）、世代違いの古い URL、読み上げる中身が無い文、`ttsEnabled: false`。**加えて、同じ声・同じ世代で後ろの seq が現に合成できているのに、この1文だけをエンジンが 4xx で拒んでいるとき**（下の「★ 合成のエラーを `404` に落とさないこと」の唯一の例外）。`audio: null` と同じ扱いで、warn して ack する |
 | `403` | `Origin` が `allowedOrigins` に無い（WebSocket と同じ規則） |
 | `405` | `GET` / `HEAD` / `OPTIONS` 以外。`Allow` を返す |
 
@@ -199,7 +199,13 @@ CLI ──┬──▶ speech.jsonl        記録。消さずに残す。配信�
   諦めさせる」は一見筋が通るが、`404` はクライアント側で ack まで通り、**キューの本文が
   物理削除される**。`ttsSpeakerId` を30秒後に直しても復元できない（`503` のままなら直した瞬間に
   全部鳴る）。しかも「恒久」の線引きは実質不可能で、モデルロード中の 4xx・`ttsBaseUrl` の
-  パス違いで別サービスが返す 404/405・プロキシの 407 まで巻き込む
+  パス違いで別サービスが返す 404/405・プロキシの 407 まで巻き込む。
+  **唯一の例外**: 同じ声・同じ世代で、この seq より後ろの seq が現に合成できているときだけ、
+  この1文はエンジンが拒んでいると判断して `404` に落とす（`server/audioStore.ts` の
+  `SynthesisRejectedError`）。設定ミス・導入ミス・エンジン停止では**どの文も合成できない**ので
+  この条件に当たらず、従来どおり `503` のまま残る。★ 効くのはクライアントの先読み窓が
+  1件以上のときだけ——窓 0（完全直列）では後ろの seq を取りに行かないので、この例外は
+  発火しようがなく従来どおり `503` で待つ
 
 - **`Range` は実装しない。** `Accept-Ranges: none` を返して常に全体を送る。1文ぶんの WAV は
   数百KB なので、分割で得るものが無い（Unity の `UnityWebRequestMultimedia` や ExoPlayer は
@@ -360,7 +366,7 @@ Ordinal 昇順に並ぶ。
 
 ```
 GET   /v1/health           200 {"ok":true,"version":"0.1.0"}
-GET   /v1/speakers         200 {"speakers":[{"id":888753760,"label":"Anneli（ノーマル）"}]}
+GET   /v1/speakers         200 {"speakers":[{"id":"888753760","label":"Anneli（ノーマル）"}]}
                            503 {"error":"engine_unreachable","detail":"…"}
 GET   /v1/config           200 {"values":{…},"origins":{…},"writable":[…],"defaults":{…}}
 PATCH /v1/config           200 {"values":{…},"origins":{…}}   ← 適用後に読み直した値
@@ -381,6 +387,12 @@ GET   /v1/assets           200 {"files":[{"path":"models/mascot.vrm","size":1234
 ```
 
 ★ **`GET /v1/assets` はマニフェストだけ。本体は別ルート**（`GET /v1/assets/<path>`。上の「素材配布」）。
+
+★★ **`GET /v1/speakers` の `id` は文字列。** Kokoro のような英字の声 ID（`af_heart` 等）を
+VOICEVOX 系の数値スタイル ID と同じ形で返すための変更（[#106](https://github.com/schwarz9791/chatter-agent/issues/106)）。
+**旧版の表示側アプリ（`chatter-mascot`）はこれを `Integer` として読むため、文字列の `id` は
+表示側の JSON デコードで丸ごと捨てられ、話者一覧が空になる。** サーバーと表示側アプリは
+両方まとめて更新すること——片方だけ上げると設定パネルの話者一覧だけが壊れる。
 
 ### 書き込み口の絞りは3重
 
@@ -413,9 +425,9 @@ LAN からなら `GET, HEAD, OPTIONS` を返す。
 
 | キー | 理由 |
 |---|---|
-| `ttsSpawnCommand` / `ttsSpawnArgs` / `playerCommand` / `playerArgs` / `aiSummaryCommand` | **(a) コマンド実行に繋がる。** ループバック限定でも「設定を1行書き換えるだけで任意コマンド実行」は別格の壊れ方をする。**緩めないこと** |
-| `host` / `port` / `allowedOrigins` | **(b) 効かない。** 再起動まで反映されないので、UI から触れる意味が無いうえに「効かない設定」という最悪の見え方になる |
-| `ttsBaseUrl` | **(c) 本文の外部送信路になる。** 書き換えると以後**全メッセージ本文**がそのホストの `/audio_query` へ POST される（`currentVoice()` は毎回読み直すので**再起動も要らない**）。しかも音が鳴らなくなるだけなので、**症状は「無音」だけ**で気付けない。**緩めないこと** |
+| `ttsSpawnCommand` / `ttsSpawnArgs` / `playerCommand` / `playerArgs` / `aiSummaryCommand` / `kokoroDir` | **(a) コマンド実行に繋がる。** ループバック限定でも「設定を1行書き換えるだけで任意コマンド実行」は別格の壊れ方をする。`kokoroDir` は `cwd` として Kokoro-FastAPI の起動に渡るので、`ttsSpawnCommand` と同じ壊れ方をする。**緩めないこと** |
+| `host` / `port` / `allowedOrigins` / `ttsEngine` | **(b) 効かない。** 再起動まで反映されないので、UI から触れる意味が無いうえに「効かない設定」という最悪の見え方になる。`ttsEngine` は、起こすかどうかの判断が起動時の1回きりのため —— 切り替えても次の合成の宛先だけが変わり、spawn の判断はやり直されない |
+| `ttsBaseUrl` | **(c) 本文の外部送信路になる。** 書き換えると以後**全メッセージ本文**がそのホストの合成 API（`ttsEngine` が `"voicevox"` なら `/audio_query`、`"openai"` なら `/v1/audio/speech`）へ POST される（`currentVoice()` は毎回読み直すので**再起動も要らない**）。しかも音が鳴らなくなるだけなので、**症状は「無音」だけ**で気付けない。**緩めないこと** |
 | `ollayaBaseUrl` | **(c) 本文の外部送信路になる。** `ttsBaseUrl` と同じ理由。感情判定が `"ollaya"` のとき、以後**全メッセージ本文**がそのホストの `/v1/systemone` へ POST される。**緩めないこと**（issue #107） |
 
 ★ **`defaults` は既定値そのもの**（`createDefaultConfig()`）。設定 UI の「すべての設定をリセット」が

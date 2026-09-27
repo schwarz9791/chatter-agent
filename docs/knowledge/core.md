@@ -304,9 +304,7 @@ server（音声合成）だけが読むキーは「音声合成エンジン」�
   英語の G2P に日本語の読みを渡した結果として一貫している
 - 中国語（misaki の zh）は jieba / pypinyin の辞書がパッケージに同梱されていて、追加の
   ダウンロードは要らない（実機で鳴らしての確認はまだ）
-- **位置づけ: 日本語は AivisSpeech、Kokoro は日本語以外の言語向け。** 要約・感情判定・文分割が
-  日本語前提なので、英語の発言を要約させると日本語になって返る
-  （[#147](https://github.com/schwarz9791/chatter-agent/issues/147)）。設定パネルからの
+- **位置づけ: 日本語は AivisSpeech、Kokoro は日本語以外の言語向け。** 設定パネルからの
   切り替えは未対応（[#148](https://github.com/schwarz9791/chatter-agent/issues/148)）—— `ttsEngine`
   は再起動まで反映されない区分なので、いまは `config.json` を直接編集してサーバーを再起動する
 

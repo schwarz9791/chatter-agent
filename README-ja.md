@@ -250,7 +250,7 @@ cd chatter-mascot
 - XR 空間である程度動き回る対応、空間アンカー対応
 - CI 整備と各種アプリストアへの配信
 - Galaxy XR 対応
-- Android XR の Home Scene でも表示できるようにする
+- Android XR で Home Scene アプリと同居できるようにする
 - Android グラス（INAIR Pod / Viture Neckband など）で動くようにする
 
 ## ライセンス

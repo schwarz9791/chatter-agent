@@ -251,7 +251,7 @@ cd chatter-mascot
 - Support for moving around in XR space to some degree, and spatial anchor support
 - CI setup and distribution to various app stores
 - Galaxy XR support
-- Making it displayable in the Android XR Home Scene as well
+- Letting it run alongside Home Scene apps on Android XR
 - Making it work on Android glasses (INAIR Pod / Viture Neckband, etc.)
 
 ## License

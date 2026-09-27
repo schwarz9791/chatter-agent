@@ -79,6 +79,9 @@ export function createVoicevoxEngine(options: TtsEngineOptions): TtsEngine {
   return {
     baseUrl,
 
+    // VOICEVOX 系のスタイル ID は1声を1つの ID で指す。完全一致で足りる
+    hasVoice: (voices, id) => voices.some((voice) => voice.id === id),
+
     async synthesize(text) {
       // text はクエリ文字列に載る。長文だと 414 になりうるが、その1文が捨てられるだけ
       const queryUrl = `${baseUrl}/audio_query?text=${encodeURIComponent(text)}&speaker=${speaker}`;

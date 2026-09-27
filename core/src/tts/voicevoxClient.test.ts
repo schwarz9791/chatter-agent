@@ -251,6 +251,19 @@ describe("listVoices", () => {
   });
 });
 
+describe("hasVoice", () => {
+  const voices = [
+    { id: "888753760", label: "Anneli（ノーマル）" },
+    { id: "1", label: "つくよみちゃん（れいせい）" },
+  ];
+
+  it("完全一致だけを見る（+ や重みは解釈しない）", () => {
+    expect(client("http://x").hasVoice(voices, "888753760")).toBe(true);
+    expect(client("http://x").hasVoice(voices, "999")).toBe(false);
+    expect(client("http://x").hasVoice(voices, "888753760+1")).toBe(false);
+  });
+});
+
 describe("applySpeedScale（#76）", () => {
   /**
    * ★★ **キーを持たないエンジンには何もしない。** 無いところに作ると、そのエンジンが

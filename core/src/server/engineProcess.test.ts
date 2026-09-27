@@ -304,8 +304,12 @@ describe("resolveKokoroSpawn", () => {
     expect(kokoro({ kokoroDir: "" })).toEqual({ skip: "not-configured" });
   });
 
-  it("kokoroDir が存在しなければ not-found（tried は kokoroDir そのもの）", () => {
-    expect(kokoro({ exists: () => false })).toEqual({ skip: "not-found", tried: [KOKORO_DIR] });
+  /**
+   * ★ 実行ファイルの探索（`not-found`）とは別の種類にしてある。あちらの文面は chmod の助言や
+   *   PATH の一覧を前提にしていて、ディレクトリの指定ミスには合わない。
+   */
+  it("kokoroDir が存在しなければ kokoro-dir-not-found（path は展開後の絶対パス）", () => {
+    expect(kokoro({ exists: () => false })).toEqual({ skip: "kokoro-dir-not-found", path: KOKORO_DIR });
   });
 
   it("★ ループバックでなければ not-loopback。fs には一度も触らない", () => {
@@ -331,13 +335,36 @@ describe("resolveKokoroSpawn", () => {
     expect(seen).toEqual([path.join(HOME, "dev", "Kokoro-FastAPI")]);
   });
 
+  /** ★ `~` 単独（スラッシュ無し）も homeDir に展開する */
+  it("★ ~ 単独は homeDir そのものに展開する", () => {
+    const seen: string[] = [];
+    kokoro({
+      kokoroDir: "~",
+      exists: (p) => {
+        seen.push(p);
+        return false;
+      },
+    });
+    expect(seen).toEqual([path.resolve(HOME)]);
+  });
+
   /**
-   * ★ `uv` は固定名で解決する（`ttsSpawnCommand` のような差し替えの口は無い）。
-   *   このマシンには実際に `uv` が入っている（`/opt/homebrew/bin` 等、`env.PATH` の外にある
-   *   既知の bin ディレクトリも探す設計のため）ので、「見つからない」を決定的に再現する
-   *   実行時テストは書けない —— `resolveOllayaSpawn` の `ollaya` と同じ理由（→ 上のテスト）。
-   *   ここでは「見つかる」側だけを、PATH の先頭に置いた実在のファイルで決定的に検証する。
+   * ★ 相対パスは `chatter-agent-server` の cwd 基準の絶対パスにする。展開しないまま
+   *   `cwd=dir` で子プロセスを起こすと、`PYTHONPATH` / `WEB_PLAYER_PATH` が `dir` からの
+   *   相対で組まれるので `dir/dir` を指してしまい起動が落ちる。
    */
+  it("★ 相対パスは process.cwd() 基準の絶対パスに解決する", () => {
+    const seen: string[] = [];
+    kokoro({
+      kokoroDir: "Kokoro-FastAPI",
+      exists: (p) => {
+        seen.push(p);
+        return false;
+      },
+    });
+    expect(seen).toEqual([path.resolve("Kokoro-FastAPI")]);
+  });
+
   it("uv が見つかれば command は uv のフルパス、args は run --no-sync uvicorn …", () => {
     const { env } = withUv();
     const result = kokoro({ env });
@@ -346,6 +373,31 @@ describe("resolveKokoroSpawn", () => {
       cwd: KOKORO_DIR,
     });
     expect((result as { command: string }).command.endsWith(path.join("uv-bin", "uv"))).toBe(true);
+  });
+
+  /**
+   * ★ `findCommandPath` は `env.PATH` の外の既知の bin ディレクトリも探すので、`env` を
+   *   空にするだけでは「uv が見つからない」を決定的に再現できない（開発機に実際に
+   *   入っていれば見つかってしまう）。テスト用の差し替え口（`findCommand`）で固定する。
+   */
+  it('★ uv が見つからなければ not-found（subject: "uv" で名指しする）', () => {
+    const result = kokoro({ findCommand: () => undefined });
+    expect(result).toEqual({ skip: "not-found", tried: ["uv"], subject: "uv" });
+  });
+
+  /** ★ `ttsSpawnArgs` を渡すと導出した args を丸ごと置換する（`buildArgs` と同じ規則） */
+  it("★ args を渡すと導出した run 引数を置換する（cwd と env はそのまま）", () => {
+    const { env } = withUv();
+    const result = kokoro({ env, args: ["run", "python", "-m", "custom_entrypoint"] });
+    expect(result).toMatchObject({ args: ["run", "python", "-m", "custom_entrypoint"], cwd: KOKORO_DIR });
+  });
+
+  it("args が空配列なら従来どおり導出する", () => {
+    const { env } = withUv();
+    const result = kokoro({ env, args: [] });
+    expect(result).toMatchObject({
+      args: ["run", "--no-sync", "uvicorn", "api.src.main:app", "--host", "127.0.0.1", "--port", "8880"],
+    });
   });
 
   it("★ IPv6 のループバックを受け、--host からは角括弧が外れる", () => {
@@ -411,6 +463,23 @@ describe("resolveKokoroSpawn", () => {
     expect(result.env.ESPEAK_DATA_PATH).toBeUndefined();
     expect(result.warnings?.some((w) => w.includes("espeak-ng"))).toBe(true);
   });
+
+  /**
+   * ★ 既存の `ESPEAK_DATA_PATH`（MacPorts や自前ビルドの espeak-ng 等）を優先する。
+   *   候補探索で黙って上書きすると、動いている構成を壊す。
+   */
+  it("★ env に既存の ESPEAK_DATA_PATH があれば、それを優先し候補探索も警告もしない", () => {
+    const { env: uvEnv } = withUv();
+    const customPath = "/opt/local/share/espeak-ng-data";
+    const env = { ...uvEnv, ESPEAK_DATA_PATH: customPath };
+    // exists は既知候補にもヒットしうるが、既存の env が勝つことを見る
+    const result = kokoro({
+      env,
+      exists: (p) => p === KOKORO_DIR || p.includes("espeak-ng-data"),
+    }) as { env: Record<string, string>; warnings?: string[] };
+    expect(result.env.ESPEAK_DATA_PATH).toBe(customPath);
+    expect(result.warnings ?? []).toEqual([]);
+  });
 });
 
 describe("describeEngineSkip", () => {
@@ -434,6 +503,19 @@ describe("describeEngineSkip", () => {
     expect(describeEngineSkip({ skip: "not-configured" })).toEqual([
       "[Server] kokoroDir が未設定なので合成エンジンを起こせません",
     ]);
+  });
+
+  /** ★ `resolveKokoroSpawn` が uv の not-found にこれを積む（合成エンジン全般ではなく uv が要ることを言う） */
+  it("★ not-found は skip.subject があれば呼び出し側の subject より優先する", () => {
+    const lines = describeEngineSkip({ skip: "not-found", tried: ["uv"], subject: "uv" });
+    expect(lines[0]).toContain("uvが見つかりません");
+  });
+
+  /** ★ ディレクトリの指定ミスは実行ファイルの探索（chmod の助言・PATH の一覧）と文面を分ける */
+  it("★ kokoro-dir-not-found はパスを名指しし、「見つかりません」を含む（chmod の助言は出さない）", () => {
+    const lines = describeEngineSkip({ skip: "kokoro-dir-not-found", path: "/opt/Kokoro-FastAPI" });
+    expect(lines).toEqual(["[Server] kokoroDir が見つかりません: /opt/Kokoro-FastAPI"]);
+    expect(lines.some((l) => l.includes("chmod"))).toBe(false);
   });
 
   it("http 以外はスキームを名指しする", () => {

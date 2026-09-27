@@ -9,6 +9,7 @@ import {
   isConfigKey,
   isSpeakDisabled,
   parseConfigValue,
+  ttsEngineDefaults,
 } from "./config";
 import type { ChatterAgentConfig } from "./config";
 
@@ -40,7 +41,7 @@ const DEFAULTS: ChatterAgentConfig = {
   playerCommand: "afplay",
   playerArgs: ["{file}"],
   playerServerUrl: "",
-  speechMaxAgeMs: 60_000,
+  speechMaxAgeMs: 0,
 
   aiSummaryEnabled: true,
   aiSummaryBackend: "fm",
@@ -116,8 +117,8 @@ describe("createDefaultConfig", () => {
     expect(c.playerArgs).toEqual(["{file}"]);
     // 空なら port / host から導出する
     expect(c.playerServerUrl).toBe("");
-    // ★ タイミングを外した発話は捨てる（合成できない1文で後ろが詰まったときの出口でもある）
-    expect(c.speechMaxAgeMs).toBe(60_000);
+    // ★ 既定は無効。起動待ち・長いメッセージ・端末の時計のずれで無関係な発話まで消えるため
+    expect(c.speechMaxAgeMs).toBe(0);
   });
 });
 
@@ -343,6 +344,18 @@ describe("ttsSpeakerId（#106、文字列化）", () => {
   it("0 は有効な話者 ID として通る（VOICEVOX の先頭スタイル）", () => {
     expect(store({ CHATTER_AGENT_TTS_SPEAKER_ID: "0" }).get("ttsSpeakerId")).toBe("0");
   });
+
+  /**
+   * ★ 数値らしい文字列（符号・小数点・指数を含む）で非負整数でないものは既定値に倒す。
+   *   `number` で渡したときの `-1` / `1.5` と挙動を揃える。
+   */
+  it("★ 数値らしいが非負整数でない文字列は既定値にフォールバックする", () => {
+    for (const raw of ["-1", "1.5", "+3", "1e3"]) {
+      expect(store({ CHATTER_AGENT_TTS_SPEAKER_ID: raw }).get("ttsSpeakerId")).toBe("888753760");
+      write({ ttsSpeakerId: raw });
+      expect(store().get("ttsSpeakerId")).toBe("888753760");
+    }
+  });
 });
 
 describe("ttsEngine（#106）", () => {
@@ -356,6 +369,47 @@ describe("ttsEngine（#106）", () => {
     write({ ttsEngine: "nope" });
     expect(store().get("ttsEngine")).toBe("voicevox");
     expect(store({ CHATTER_AGENT_TTS_ENGINE: "openai" }).get("ttsEngine")).toBe("openai");
+  });
+});
+
+describe("ttsEngineDefaults", () => {
+  it("voicevox は AivisSpeech 標準構成、openai は Kokoro-FastAPI 標準構成", () => {
+    expect(ttsEngineDefaults("voicevox")).toEqual({ ttsBaseUrl: "http://127.0.0.1:10101", ttsSpeakerId: "888753760" });
+    expect(ttsEngineDefaults("openai")).toEqual({ ttsBaseUrl: "http://127.0.0.1:8880", ttsSpeakerId: "af_heart" });
+  });
+});
+
+describe("ttsEngine ごとの ttsBaseUrl / ttsSpeakerId の既定", () => {
+  it("openai に切り替え、file にも env にも無ければ Kokoro-FastAPI 向けの既定になる", () => {
+    write({ ttsEngine: "openai" });
+    const s = store();
+    expect(s.get("ttsBaseUrl")).toBe("http://127.0.0.1:8880");
+    expect(s.get("ttsSpeakerId")).toBe("af_heart");
+    // ★ 既定で埋めているだけなので origin は変わらない
+    expect(s.originOf("ttsBaseUrl")).toBe("default");
+    expect(s.originOf("ttsSpeakerId")).toBe("default");
+  });
+
+  it("file に明示されていればそちらを使う（エンジンの既定で上書きしない）", () => {
+    write({ ttsEngine: "openai", ttsBaseUrl: "http://127.0.0.1:9000", ttsSpeakerId: "af_bella" });
+    const s = store();
+    expect(s.get("ttsBaseUrl")).toBe("http://127.0.0.1:9000");
+    expect(s.get("ttsSpeakerId")).toBe("af_bella");
+    expect(s.originOf("ttsBaseUrl")).toBe("file");
+    expect(s.originOf("ttsSpeakerId")).toBe("file");
+  });
+
+  it("環境変数はエンジンの既定にも file にも勝つ", () => {
+    write({ ttsEngine: "openai", ttsBaseUrl: "http://127.0.0.1:9000" });
+    const s = store({ CHATTER_AGENT_TTS_URL: "http://127.0.0.1:9500" });
+    expect(s.get("ttsBaseUrl")).toBe("http://127.0.0.1:9500");
+    expect(s.originOf("ttsBaseUrl")).toBe("env");
+  });
+
+  it("voicevox のままなら AivisSpeech 向けの既定のまま", () => {
+    const s = store();
+    expect(s.get("ttsBaseUrl")).toBe("http://127.0.0.1:10101");
+    expect(s.get("ttsSpeakerId")).toBe("888753760");
   });
 });
 

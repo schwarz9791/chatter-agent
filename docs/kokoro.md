@@ -62,8 +62,6 @@ Add the following to `~/.config/chatter-agent/config.json`:
 ```json
 {
   "ttsEngine": "openai",
-  "ttsBaseUrl": "http://127.0.0.1:8880",
-  "ttsSpeakerId": "af_heart",
   "kokoroDir": "/absolute/path/to/Kokoro-FastAPI"
 }
 ```
@@ -71,9 +69,9 @@ Add the following to `~/.config/chatter-agent/config.json`:
 | Key | Meaning |
 |---|---|
 | `ttsEngine` | `"openai"`. Treat `ttsBaseUrl` as an OpenAI-compatible API |
-| `ttsBaseUrl` | The origin of Kokoro-FastAPI. **Do not include `/v1`** (the client appends the path) |
-| `ttsSpeakerId` | The voice ID (e.g. `af_heart`). Pick one from `GET /v1/speakers` (chatter-agent's control API) or the voice list in the settings panel |
-| `kokoroDir` | Absolute path to the clone above. When `ttsSpawnCommand` is empty, the server launches `uv run --no-sync uvicorn …` from here. Left empty, the server does not launch Kokoro |
+| `ttsBaseUrl` | The origin of Kokoro-FastAPI. **Do not include `/v1`** (the client appends the path; a trailing `/v1` is normalized away if you do). Defaults to `http://127.0.0.1:8880` for this engine — omit it unless Kokoro-FastAPI runs elsewhere |
+| `ttsSpeakerId` | The voice ID (e.g. `af_heart`). Defaults to `af_heart` for this engine — omit it, or pick another from `GET /v1/speakers` (chatter-agent's control API) or the voice list in the settings panel. Composite specs such as `af_bella+af_sky` or weighted ones like `af_bella(2)+af_sky(1)` are accepted |
+| `kokoroDir` | Absolute path to the clone above (`~/...` and relative paths are also accepted and get expanded/resolved). When `ttsSpawnCommand` is empty, the server launches `uv run --no-sync uvicorn …` from here. Left empty, the server does not launch Kokoro |
 
 Restart `chatter-agent-server` after editing. If the engine is not running, the server launches it
 when the startup reachability check fails (`ttsSpawn: true`, the default). Startup takes a while;
@@ -96,4 +94,5 @@ docker run --rm -p 127.0.0.1:8880:8880 <image name from the Kokoro-FastAPI READM
   slower than the native `uv venv` setup
 - In this setup `chatter-agent-server` does not start the container (`kokoroDir` only applies to
   launching a local clone with `uv`). Start and stop the container yourself; in `config.json`,
-  setting `ttsEngine` / `ttsBaseUrl` / `ttsSpeakerId` is enough (leave `kokoroDir` empty)
+  setting `ttsEngine: "openai"` is enough (leave `kokoroDir` empty; `ttsBaseUrl` / `ttsSpeakerId`
+  only need to be set if you're not using the defaults above)

@@ -356,8 +356,8 @@ server / player はこのファイルを読みも書きもしない（読むの�
 |---|---|---|
 | `ttsEngine` | `"voicevox"`（`"voicevox" \| "openai"`） | `CHATTER_AGENT_TTS_ENGINE` |
 | `ttsEnabled` | `true` | `CHATTER_AGENT_TTS_ENABLED` |
-| `ttsBaseUrl` | `"http://127.0.0.1:10101"` | `CHATTER_AGENT_TTS_URL` |
-| `ttsSpeakerId` | `"888753760"` | `CHATTER_AGENT_TTS_SPEAKER_ID` |
+| `ttsBaseUrl` | `ttsEngine` から導く（→下記） | `CHATTER_AGENT_TTS_URL` |
+| `ttsSpeakerId` | `ttsEngine` から導く（→下記） | `CHATTER_AGENT_TTS_SPEAKER_ID` |
 | `ttsSpeedScale` | `1.0` | `CHATTER_AGENT_TTS_SPEED_SCALE` |
 | `synthesisTimeoutMs` | `30000` | `CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS` |
 | `ttsSpawn` | `true` | `CHATTER_AGENT_TTS_SPAWN` |
@@ -370,15 +370,26 @@ server / player はこのファイルを読みも書きもしない（読むの�
   互換（`tts/openaiClient.ts`。第一の相手は Kokoro-FastAPI → [`kokoro.md`](./kokoro.md)）。
   制御 API からは書けない（再起動まで反映されない区分。→ `protocol.md`「書けないキーは3種類ある」）
   —— 起こすかどうかの判断は起動時の1回きりで、切り替えても spawn の判断はやり直されない
-- 既定の `ttsBaseUrl` は AivisSpeech の標準ポート。cc-mascot はエンジンを自分で `--port 8564` で
-  spawn するので、そちらに繋ぐなら明示的に指定する。
-  ★ `ttsEngine: "openai"` のときは **`/v1` を含まない origin** を書くこと（パスはクライアントが足す）
+- ★ `ttsBaseUrl` / `ttsSpeakerId` の既定値は `ttsEngine` から導く（`ttsEngineDefaults`。
+  → `core/config.ts`）。`"voicevox"` は `http://127.0.0.1:10101` / `"888753760"`
+  （AivisSpeech 標準構成の Anneli・ノーマル）、`"openai"` は `http://127.0.0.1:8880` /
+  `"af_heart"`（Kokoro-FastAPI 標準構成）。file にも環境変数にも書かれていなければこの既定に
+  なるので、`ttsEngine: "openai"` だけ書けば足りる。設定パネルの「すべての設定をリセット」も
+  今の `ttsEngine` に合わせたこの既定を書く（→ `server/controlApi.ts` の `getConfig`）。
+  cc-mascot はエンジンを自分で `--port 8564` で spawn するので、そちらに繋ぐなら明示的に指定する
+  ★ `ttsEngine: "openai"` のときは **`/v1` を含まない origin** を書くこと（パスはクライアントが足す。
+  書いてしまっても `tts/openaiClient.ts` が末尾の `/v1` を正規化してから連結する）
 - `ttsSpeakerId` は文字列。VOICEVOX 系は数値のスタイル ID（文字列化して持つ）、Kokoro のような
-  OpenAI 互換エンジンは `af_heart` のような英字の声 ID になる。既定は AivisSpeech 標準同梱の
-  Anneli（ノーマル）。起動時に声の一覧（`listVoices()`）で存在を検査し、無ければ候補を並べて
-  警告する（設定ミスの症状が「無音」なので、これが無いと切り分けできない）。
+  OpenAI 互換エンジンは `af_heart` のような英字の声 ID になる（Kokoro-FastAPI はさらに
+  `af_bella+af_sky` のような合成指定や `af_bella(2)+af_sky(1)` のような重み付けも受ける ——
+  存在確認（`TtsEngine.hasVoice`）はエンジンごとの書き方を知ったうえで判定する）。
+  起動時に声の一覧（`listVoices()`）で存在を検査し、無ければ候補を並べて警告する
+  （設定ミスの症状が「無音」なので、これが無いと切り分けできない）。
   ★ ここで起動を止めないこと。止めるとテキストの配信まで巻き添えになり、クライアントからは
   「数十秒の無音は正常」と区別できなくなる。音声だけを 503 に落として、原因を症状に出す
+  ★ `listVoices()` が応答**あり**の失敗（`TtsHttpError`）で落ちたときは unreachable にしない ——
+  そのポートには別の何かが応答しているということなので、起こすと bind に失敗するか二重に起こす。
+  「応答はあるが声の一覧を返さない」と警告して `reachable` を返す（→ `server/index.ts` の `checkEngine`）
 - `ttsEnabled: false` にすると配信フレームの `audio` が常に `null` になり、`GET /audio/…` も
   404 を返す。**テキストの配信は止まらない**ので、自前で合成するクライアントや字幕だけの
   クライアントの逃げ道になる。
@@ -420,7 +431,7 @@ server / player はこのファイルを読みも書きもしない（読むの�
 | `playerCommand` | `"afplay"` | `CHATTER_AGENT_PLAYER_COMMAND` |
 | `playerArgs` | `["{file}"]` | `CHATTER_AGENT_PLAYER_ARGS`（カンマ区切り） |
 | `playerServerUrl` | `""`（空なら `host`/`port` から導出） | `CHATTER_AGENT_PLAYER_SERVER_URL` |
-| `speechMaxAgeMs` | `60000` | `CHATTER_AGENT_SPEECH_MAX_AGE_MS` |
+| `speechMaxAgeMs` | `0`（無効） | `CHATTER_AGENT_SPEECH_MAX_AGE_MS` |
 
 - ★ `synthesisLookahead` はサーバーの先読みではなく、player が「先何件を先読み取得するか」の窓。
   サーバーは投機的な先読みを持たず `GET` が来たときに合成するので、この窓がそのまま合成の

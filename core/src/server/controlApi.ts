@@ -26,7 +26,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { buildConfigPatch, writableConfigKeys } from "../core/configPatch";
-import { configKeys, createDefaultConfig, type ConfigKey, type ConfigStore } from "../core/config";
+import { configKeys, createDefaultConfig, ttsEngineDefaults, type ConfigKey, type ConfigStore } from "../core/config";
 import { writeFileAtomic } from "../core/atomicWrite";
 import { VERSION } from "../core/version";
 import { runSummaryPreview, type SummaryPreviewDeps } from "../summarizer/summaryPreview";
@@ -42,6 +42,12 @@ import type { AssetCatalog } from "./assetCatalog";
  * ★ 話者と話速の両方が耳で分かる長さにしてある。短すぎると速度の違いが分からない。
  */
 export const TTS_PREVIEW_TEXT = "テスト音声です。この声と速さで読み上げます。";
+
+/**
+ * `ttsEngine: "openai"` のときの固定文。Kokoro のような英語の声に日本語の文を読ませると、
+ * G2P が漢字・仮名を文字の名前として読み上げてしまい、テストとして意味を成さない。
+ */
+export const TTS_PREVIEW_TEXT_EN = "This is a test voice. I will read aloud with this voice and speed.";
 
 /**
  * テスト要約の固定文。
@@ -175,7 +181,11 @@ export function createControlApi(deps: ControlApiDeps): ControlApi {
         // ★★ **既定値をクライアントに書き写させないこと。** `SPECS` が権威なので、
         //   写した瞬間に「core を直したのにクライアントだけ古い既定に戻す」がありうる。
         //   設定パネルの「すべての設定をリセット」がこれを使う（#76）
-        defaults: createDefaultConfig(),
+        //
+        // ★ **`ttsBaseUrl` / `ttsSpeakerId` は今の `ttsEngine` に合わせる。** `createDefaultConfig()`
+        //   がそのまま返すのは `"voicevox"` 向けの値なので、`openai` 運用中にリセットすると
+        //   Kokoro に voicevox の話者 ID（数値）が渡り、以後ずっと無音になる
+        defaults: { ...createDefaultConfig(), ...ttsEngineDefaults(deps.config.get("ttsEngine")) },
       });
     },
 
@@ -240,7 +250,8 @@ export function createControlApi(deps: ControlApiDeps): ControlApi {
       if (!deps.config.get("ttsEnabled")) return fail(409, "tts_disabled");
       if (!ttsGate.tryEnter()) return fail(429, "too_many_requests");
       try {
-        const wav = await deps.synthesizePreview(TTS_PREVIEW_TEXT);
+        const text = deps.config.get("ttsEngine") === "openai" ? TTS_PREVIEW_TEXT_EN : TTS_PREVIEW_TEXT;
+        const wav = await deps.synthesizePreview(text);
         return { status: 200, kind: "wav", body: wav };
       } catch (err) {
         return fail(503, "synthesis_unavailable", { detail: err instanceof Error ? err.message : String(err) });

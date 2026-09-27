@@ -79,9 +79,20 @@ export interface EngineSpawnPlan {
 export type EngineSpawnSkip =
   | { skip: "not-loopback"; host: string }
   | { skip: "not-http"; protocol: string }
-  | { skip: "not-found"; tried: string[] }
+  /**
+   * `subject` を省略すると `describeEngineSkip` の引数（既定 `"合成エンジン"`）に従う。
+   * 実行ファイルの名前（`"uv"` 等）を名指ししたいときだけ渡す —— `resolveKokoroSpawn` が
+   * `uv` の not-found にこれを積む（合成エンジン全般ではなく uv が要ることを言うため）。
+   */
+  | { skip: "not-found"; tried: string[]; subject?: string }
   /** `kokoroDir` が空。AivisSpeech と違って既知の候補が無いので、未設定は「起こさない」の意味 */
-  | { skip: "not-configured" };
+  | { skip: "not-configured" }
+  /**
+   * `kokoroDir` に書かれたパスが存在しない。`not-found` と分けてあるのは、あちらの文面が
+   * 「実行ファイルの探索」（chmod の助言・PATH の一覧）を前提にしていて、ディレクトリの
+   * 指定ミスには合わないため。
+   */
+  | { skip: "kokoro-dir-not-found"; path: string };
 
 export type EngineSpawnResolution = EngineSpawnPlan | EngineSpawnSkip;
 
@@ -246,6 +257,11 @@ export interface ResolveKokoroSpawnDeps {
   baseUrl: string;
   /** `kokoroDir`。空なら起こさない */
   kokoroDir: string;
+  /**
+   * `ttsSpawnArgs`。空なら `run --no-sync uvicorn api.src.main:app --host <host> --port <port>`
+   * を組む。指定すると**置換**（`buildArgs` と同じ規則。cwd と env はこの引数に関わらず組む）。
+   */
+  args?: readonly string[];
   /** テスト用。既定 `fs.existsSync` */
   exists?: (filePath: string) => boolean;
   /** テスト用。既定 `os.homedir()` */
@@ -254,6 +270,28 @@ export interface ResolveKokoroSpawnDeps {
   env?: NodeJS.ProcessEnv;
   /** テスト用。既定 `process.platform` */
   platform?: NodeJS.Platform;
+  /**
+   * テスト用。既定 `findCommandPath`。
+   *
+   * ★ **これが無いと `uv` が見つからない経路を決定的に再現できない。** `findCommandPath` は
+   *   `env.PATH` の外の既知の bin ディレクトリ（`/opt/homebrew/bin` 等）も探すので、
+   *   開発機に実際に `uv` が入っていると `env` を空にしても「見つかる」側にしかならない。
+   */
+  findCommand?: (command: string, opts: { homeDir: string; env: NodeJS.ProcessEnv }) => string | undefined;
+}
+
+/**
+ * `kokoroDir` を絶対パスに展開する。単独の `~` と `~/…` を `homeDir` に展開したうえで
+ * `path.resolve` を通す —— 相対パスは `chatter-agent-server` の cwd 基準の絶対パスになる。
+ *
+ * ★ **展開してから `path.resolve` すること。** 相対パスのまま `cwd=dir` で子プロセスを
+ *   起こすと、`PYTHONPATH` / `WEB_PLAYER_PATH` は `dir` からの相対で組んでいるので
+ *   `dir/dir` を指してしまい起動が落ちる。
+ */
+function expandKokoroDir(kokoroDir: string, homeDir: string): string {
+  if (kokoroDir === "~") return path.resolve(homeDir);
+  if (kokoroDir.startsWith("~/")) return path.resolve(homeDir, kokoroDir.slice("~/".length));
+  return path.resolve(kokoroDir);
 }
 
 /**
@@ -267,14 +305,15 @@ export interface ResolveKokoroSpawnDeps {
  *
  * ★ **環境変数の表はここが権威。** Kokoro-FastAPI 側の起動スクリプトが変わるとずれうる。
  *
- * ★ **`--host` は必ず渡す。** 既定の `0.0.0.0` のまま起こすと LAN に公開される
- *   （`buildArgs` / `resolveOllayaSpawn` と同じ判断）。
+ * ★ **`--host` は必ず渡す（`args` が空のとき）。** 既定の `0.0.0.0` のまま起こすと LAN に
+ *   公開される（`buildArgs` / `resolveOllayaSpawn` と同じ判断）。
  */
 export function resolveKokoroSpawn(deps: ResolveKokoroSpawnDeps): EngineSpawnResolution {
   const exists = deps.exists ?? fs.existsSync;
   const homeDir = deps.homeDir ?? os.homedir();
   const env = deps.env ?? process.env;
   const platform = deps.platform ?? process.platform;
+  const findCommand = deps.findCommand ?? findCommandPath;
 
   const url = new URL(deps.baseUrl);
   if (!isLoopback(url.hostname)) return { skip: "not-loopback", host: url.hostname };
@@ -283,13 +322,17 @@ export function resolveKokoroSpawn(deps: ResolveKokoroSpawnDeps): EngineSpawnRes
   // ★ AivisSpeech と違って既知のインストール先が無い。未設定は「起こさない」の意味
   if (!deps.kokoroDir) return { skip: "not-configured" };
 
-  const dir = deps.kokoroDir.startsWith("~/") ? path.join(homeDir, deps.kokoroDir.slice("~/".length)) : deps.kokoroDir;
-  if (!exists(dir)) return { skip: "not-found", tried: [dir] };
+  const dir = expandKokoroDir(deps.kokoroDir, homeDir);
+  if (!exists(dir)) return { skip: "kokoro-dir-not-found", path: dir };
 
-  const uv = findCommandPath(UV_COMMAND, { homeDir, env });
-  if (uv === undefined) return { skip: "not-found", tried: searchedPaths(UV_COMMAND, env) };
+  const uv = findCommand(UV_COMMAND, { homeDir, env });
+  if (uv === undefined) return { skip: "not-found", tried: searchedPaths(UV_COMMAND, env), subject: "uv" };
 
   const { host, port } = hostAndPort(url);
+  const runArgs =
+    deps.args && deps.args.length > 0
+      ? [...deps.args]
+      : ["run", "--no-sync", "uvicorn", "api.src.main:app", "--host", host, "--port", port];
 
   const kokoroEnv: Record<string, string> = {
     PYTHONPATH: `${dir}${path.delimiter}${path.join(dir, "api")}`,
@@ -306,19 +349,26 @@ export function resolveKokoroSpawn(deps: ResolveKokoroSpawnDeps): EngineSpawnRes
   }
 
   const warnings: string[] = [];
-  const espeakDataDir = ESPEAK_DATA_CANDIDATES.find((candidate) => exists(path.join(candidate, "phontab")));
-  if (espeakDataDir !== undefined) {
-    kokoroEnv.ESPEAK_DATA_PATH = espeakDataDir;
+  // ★ 既存の ESPEAK_DATA_PATH（MacPorts や自前ビルドの espeak-ng 等）があれば、それを
+  //   優先し、候補探索も警告もしない。黙って上書きすると、動いている構成を壊す
+  const existingEspeakDataPath = env.ESPEAK_DATA_PATH;
+  if (existingEspeakDataPath) {
+    kokoroEnv.ESPEAK_DATA_PATH = existingEspeakDataPath;
   } else {
-    warnings.push(
-      `${LOG_PREFIX} espeak-ng のデータが見つかりません（brew install espeak-ng）。Kokoro は起動の途中で落ちます。探した場所:`,
-      ...ESPEAK_DATA_CANDIDATES.map((candidate) => `${LOG_PREFIX}${ITEM_INDENT}${candidate}`),
-    );
+    const espeakDataDir = ESPEAK_DATA_CANDIDATES.find((candidate) => exists(path.join(candidate, "phontab")));
+    if (espeakDataDir !== undefined) {
+      kokoroEnv.ESPEAK_DATA_PATH = espeakDataDir;
+    } else {
+      warnings.push(
+        `${LOG_PREFIX} espeak-ng のデータが見つかりません（brew install espeak-ng）。Kokoro は起動の途中で落ちます。探した場所:`,
+        ...ESPEAK_DATA_CANDIDATES.map((candidate) => `${LOG_PREFIX}${ITEM_INDENT}${candidate}`),
+      );
+    }
   }
 
   return {
     command: uv,
-    args: ["run", "--no-sync", "uvicorn", "api.src.main:app", "--host", host, "--port", port],
+    args: runArgs,
     cwd: dir,
     env: kokoroEnv,
     ...(warnings.length > 0 ? { warnings } : {}),
@@ -401,10 +451,11 @@ export function describeEngineSkip(skip: EngineSpawnSkip, subject = "合成エ�
       return [`${LOG_PREFIX} ${skip.protocol} の${subject}は起こせません（起こせるのは平文の http: だけ）`];
 
     case "not-found": {
+      const name = skip.subject ?? subject;
       const shown = skip.tried.slice(0, TRIED_HINT_LIMIT);
       const rest = skip.tried.length - shown.length;
       return [
-        `${LOG_PREFIX} ${subject}が見つかりません。探した場所:`,
+        `${LOG_PREFIX} ${name}が見つかりません。探した場所:`,
         ...shown.map((candidate) => `${LOG_PREFIX}${ITEM_INDENT}${candidate}`),
         ...(rest > 0 ? [`${LOG_PREFIX}${ITEM_INDENT}…ほか ${rest} 件`] : []),
         // ★ 実行ビットまで見ていることを言う。`ls` で見えるファイルが「探した場所」に並ぶので、
@@ -416,6 +467,11 @@ export function describeEngineSkip(skip: EngineSpawnSkip, subject = "合成エ�
     case "not-configured":
       // ★ 「起こせません」で揃える。verify-tts の否定検査はこの語で全変種を拾っている
       return [`${LOG_PREFIX} kokoroDir が未設定なので${subject}を起こせません`];
+
+    case "kokoro-dir-not-found":
+      // ★ 実行ファイルの探索（chmod の助言・PATH の一覧）は無い —— ディレクトリの指定ミスなので
+      //   言うことが違う。「見つかりません」で verify-tts の否定検査に拾わせる
+      return [`${LOG_PREFIX} kokoroDir が見つかりません: ${skip.path}`];
   }
 }
 

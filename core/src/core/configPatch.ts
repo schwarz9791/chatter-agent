@@ -65,7 +65,8 @@ const READONLY_UNTIL_RESTART: readonly ConfigKey[] = [
  * (c) **本文の外部送信路になる。**
  *
  * `ttsBaseUrl` を書き換えると、以後 `ttsFor(currentVoice())` は Claude Code の
- * **全メッセージ本文**をそのホストの `/audio_query` へ POST する。`currentVoice()` は
+ * **全メッセージ本文**をそのホストの合成 API（`ttsEngine` が `"voicevox"` なら `/audio_query`、
+ * `"openai"` なら `/v1/audio/speech`）へ POST する。`currentVoice()` は
  * 毎回 `config.get` するので（→ `server/index.ts`）**再起動も要らず、次の1文から**そうなる。
  * しかも音が鳴らなくなるだけなので、**利用者から見た症状は「無音」だけ**で、本文が
  * 出ていることには気付けない。(a) と同じ「設定を1行書き換えるだけ」の壊れ方。

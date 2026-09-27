@@ -114,7 +114,7 @@ namespace ChatterMascot
         [SerializeField] private int lookahead = 3;
 
         [Tooltip("これより古い発話は音を出さずに飛ばす（ミリ秒）。0 なら無効")]
-        [SerializeField] private int speechMaxAgeMs = 60000;
+        [SerializeField] private int speechMaxAgeMs = 0;
 
         [Tooltip("音声の取得1回あたりの上限（ミリ秒）。サーバーの合成タイムアウトと揃える必要は無い")]
         [SerializeField] private int audioFetchTimeoutMs = 60000;

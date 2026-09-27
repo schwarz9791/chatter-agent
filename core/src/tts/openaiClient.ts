@@ -5,6 +5,9 @@
  *
  * ★ `baseUrl` は **`/v1` を含まない origin**。`ttsSpawn` が `--host`/`--port` を
  *   `ttsBaseUrl` から導出するのと揃うように、パスはこのクライアントが足す。
+ *   末尾に `/` や `/v1` が書かれていても正規化してから連結する（`normalizeBaseUrl`）——
+ *   さもないと `/v1/v1/audio/speech` になり、別のエンジンが応答しているのと区別が
+ *   付かない 404 になる。
  *
  * ★ **`speedScale` は毎回明示で送る。** VOICEVOX 系（`voicevoxClient.ts`）と違い
  *   「省略は触らない」という余地がここには無い —— `speed` は `POST /v1/audio/speech` の
@@ -42,12 +45,42 @@ function normalizeVoices(list: unknown[]): { id: string; label: string }[] {
   return out;
 }
 
+/**
+ * `baseUrl` の末尾の `/` と `/v1` を落とす。**利用者が OpenAI の慣例に倣って
+ * `http://host:port/v1` と書くことがある**ので、そのまま連結すると `/v1/v1/audio/speech` に
+ * なって 404 が返る（別のエンジンが応答しているのと区別が付かない誤診断を招く）。
+ */
+function normalizeBaseUrl(raw: string): string {
+  return raw.replace(/\/+$/, "").replace(/\/v1$/i, "");
+}
+
+/** 合成指定に載る重み `(2)` / `(0.5)` を落とす。`af_bella(2)` → `af_bella` */
+function stripWeight(part: string): string {
+  return part.replace(/\(\d+(?:\.\d+)?\)$/, "");
+}
+
 export function createOpenAiEngine(options: TtsEngineOptions): TtsEngine {
-  const { baseUrl, voiceId, timeoutMs, speedScale } = options;
+  const baseUrl = normalizeBaseUrl(options.baseUrl);
+  const { voiceId, timeoutMs, speedScale } = options;
   const request = createRequester(timeoutMs);
 
   return {
     baseUrl,
+
+    /**
+     * Kokoro-FastAPI は複数の声を `+` で混ぜた合成指定（`af_bella+af_sky`）や、
+     * 重み付き（`af_bella(2)+af_sky(1)`）を受け付ける。完全一致で見ると、
+     * 合成は 200 で鳴るのに「存在しません」と誤診断する。**構成要素がすべて
+     * 一覧にあれば真**（重みの大小や順序までは検査しない —— それはエンジンの仕事）。
+     */
+    hasVoice(voices, id) {
+      const known = new Set(voices.map((voice) => voice.id));
+      const parts = id
+        .split("+")
+        .map((part) => stripWeight(part.trim()).trim())
+        .filter(Boolean);
+      return parts.length > 0 && parts.every((part) => known.has(part));
+    },
 
     async synthesize(text) {
       // ★ 存在しない声・空の入力は 400（404 ではない）。そのまま TtsHttpError として

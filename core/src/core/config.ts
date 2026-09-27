@@ -69,8 +69,10 @@ export interface ChatterAgentConfig {
    */
   ttsEngine: TtsEngineKind;
   /**
-   * 音声合成エンジンの baseUrl。既定は AivisSpeech.app を単体起動したときの標準ポート。
-   * （cc-mascot はエンジンを自分で spawn して 8564 を使うので、そちらとは別物）
+   * 音声合成エンジンの baseUrl。既定は `ttsEngine` から導く（→ `ttsEngineDefaults`）——
+   * `"voicevox"` は AivisSpeech.app を単体起動したときの標準ポート、`"openai"` は
+   * Kokoro-FastAPI の標準ポート。（cc-mascot はエンジンを自分で spawn して 8564 を使うので、
+   * そちらとは別物）
    *
    * ★ `ttsEngine` が `"openai"` のときは **`/v1` を含まない origin** を書くこと
    *   （パスはクライアントが足す）。
@@ -79,7 +81,8 @@ export interface ChatterAgentConfig {
   /**
    * 声を選ぶ ID。VOICEVOX 系は数値のスタイル ID（文字列化して持つ）、Kokoro のような
    * OpenAI 互換エンジンは `af_heart` のような英字の声 ID になる。
-   * 既定は AivisSpeech 標準同梱の Anneli（ノーマル）。
+   * 既定は `ttsEngine` から導く（→ `ttsEngineDefaults`）—— `"voicevox"` は AivisSpeech
+   * 標準同梱の Anneli（ノーマル）、`"openai"` は Kokoro-FastAPI 標準同梱の声。
    */
   ttsSpeakerId: string;
   /**
@@ -147,10 +150,12 @@ export interface ChatterAgentConfig {
    */
   ttsSpawnCommand: string;
   /**
-   * 起こすときの引数。空なら `ttsBaseUrl` から `--host <host> --port <port>` を組む。
+   * 起こすときの引数。空なら `ttsBaseUrl` から導く —— `"voicevox"` は `--host <host>
+   * --port <port>`、`"openai"`（Kokoro-FastAPI）は `run --no-sync uvicorn api.src.main:app
+   * --host <host> --port <port>`（→ `server/engineProcess.ts` の `resolveKokoroSpawn`）。
    *
-   * ★ **指定すると導出は行われない**（追加ではなく置換）。自分で書くなら `--host` と
-   *   `--port` も自分で書くこと。「足りない分だけ補う」形は挙動が読めなくなる。
+   * ★ **指定すると導出は行われない**（追加ではなく置換）。自分で書くならエンジンが要る
+   *   引数を全部自分で書くこと。「足りない分だけ補う」形は挙動が読めなくなる。
    */
   ttsSpawnArgs: string[];
   /**
@@ -201,14 +206,12 @@ export interface ChatterAgentConfig {
    */
   playerServerUrl: string;
   /**
-   * これより古い発話は音を出さずに ack だけして飛ばす。0 なら無効。
+   * これより古い発話は音を出さずに ack だけして飛ばす。**既定 0（無効）。**
    *
    * TTS + 再生は生成よりずっと遅いので、バックログを抱えると数分前の発言を今喋ることになる。
-   * タイミングを外した発話は鳴らしても役に立たないので、既定で捨てる。
+   * 明示的に設定すれば、タイミングを外した発話を飛ばす手段として使える。
    *
-   * ★ **合成できない発話で後ろが詰まったときの出口もこれ。** 合成のエラーは 503 のまま
-   *   取り直し続ける（404 に落とさない → `server/audioStore.ts`）ので、エンジンが特定の文を
-   *   永久に拒むと、その1文が後ろを全部止める。古くなった時点で飛ばすことで流れを戻す。
+   * ★ 合成できない1文で後ろが詰まる問題への対処はこれではない（→ `server/audioStore.ts`）。
    */
   speechMaxAgeMs: number;
 
@@ -329,6 +332,19 @@ export type AiSummaryBackend = "fm" | "claude";
 export type EmotionClassifierKind = "ollaya" | "fm" | "dictionary";
 export type TtsEngineKind = "voicevox" | "openai";
 
+/**
+ * `ttsEngine` ごとの `ttsBaseUrl` / `ttsSpeakerId` の既定値。
+ *
+ * ★ **1か所にまとめること。** `createDefaultConfig()` と `createConfigStore()` のマージ
+ *   （`ttsEngine` を切り替えたのに `ttsBaseUrl` / `ttsSpeakerId` が別エンジン向けの値の
+ *   ままになる事故）、`controlApi.ts` の「すべての設定をリセット」の3か所が同じ値を要る。
+ */
+export function ttsEngineDefaults(engine: TtsEngineKind): { ttsBaseUrl: string; ttsSpeakerId: string } {
+  return engine === "openai"
+    ? { ttsBaseUrl: "http://127.0.0.1:8880", ttsSpeakerId: "af_heart" }
+    : { ttsBaseUrl: "http://127.0.0.1:10101", ttsSpeakerId: "888753760" };
+}
+
 export function createDefaultConfig(): ChatterAgentConfig {
   return {
     port: 8570,
@@ -341,8 +357,7 @@ export function createDefaultConfig(): ChatterAgentConfig {
 
     ttsEnabled: true,
     ttsEngine: "voicevox",
-    ttsBaseUrl: "http://127.0.0.1:10101",
-    ttsSpeakerId: "888753760",
+    ...ttsEngineDefaults("voicevox"),
     ttsSpeedScale: 1.0,
     synthesisTimeoutMs: 30_000,
     ttsSpawn: true,
@@ -354,7 +369,7 @@ export function createDefaultConfig(): ChatterAgentConfig {
     playerCommand: "afplay",
     playerArgs: ["{file}"],
     playerServerUrl: "",
-    speechMaxAgeMs: 60_000,
+    speechMaxAgeMs: 0,
 
     aiSummaryEnabled: true,
     aiSummaryBackend: "fm",
@@ -491,15 +506,25 @@ const parseSpeedScale: Parser<number> = makeRangeParser(TTS_SPEED_SCALE_MIN, TTS
  *   （前後の空白や桁の表記ゆれを1つの形に揃える）
  * - それ以外の非空文字列 → trim してそのまま通す（英字の声 ID はここを通る）
  * - 負の数・空文字・空白だけの文字列は既定値に倒す
+ *
+ * ★ **数値らしい文字列（符号・小数点・指数を含む）は、非負整数のときだけ通す。**
+ *   `"-1"` / `"1.5"` / `"+3"` / `"1e3"` は英字の声 ID ではなく「数値のつもりで書いたが
+ *   非負整数ではない」値なので、`number` で渡したときの `-1` や `1.5` と同じく既定値に
+ *   倒す —— 文字列と数値とで挙動を揃える。数値に見えない文字列（`af_heart` 等）は
+ *   この判定に掛からず、従来どおりそのまま通る。
  */
+const NUMERIC_LOOKING = /^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i;
+
 const parseSpeakerId: Parser<string> = (raw) => {
   if (typeof raw === "number") return Number.isInteger(raw) && raw >= 0 ? String(raw) : undefined;
   if (typeof raw !== "string") return undefined;
   const trimmed = raw.trim();
   if (!trimmed) return undefined;
-  if (/^\d+$/.test(trimmed)) {
+  if (NUMERIC_LOOKING.test(trimmed)) {
+    // 非負整数の見た目（数字だけ）でなければ既定値に倒す
+    if (!/^\d+$/.test(trimmed)) return undefined;
     const n = Number(trimmed);
-    if (Number.isSafeInteger(n)) return String(n);
+    return Number.isSafeInteger(n) ? String(n) : undefined;
   }
   return trimmed;
 };
@@ -794,8 +819,29 @@ export function createConfigStore(deps: ConfigStoreDeps = {}): ConfigStore {
   }
   const overrides = collect(envValues, "環境変数");
 
+  /**
+   * `ttsBaseUrl` / `ttsSpeakerId` が env にも file にも無ければ、今の `ttsEngine` 向けの
+   * 既定で埋める。**`overrides` / `fileValues` 自体は書き換えない**ので `originOf` は
+   * 引き続き `"default"` を返す。
+   *
+   * ★ **`deps.defaults` を丸ごと信じない。** 差し替えられた既定（テストが `defaults` を
+   *   注入する場合）が別のエンジンの値を持っていても、実際に効いている `ttsEngine`
+   *   （env / file を merge 済みの値）から導くので食い違わない。
+   */
+  function fillTtsEngineDefaults(base: ChatterAgentConfig): ChatterAgentConfig {
+    const hasBaseUrl = Object.hasOwn(fileValues, "ttsBaseUrl") || Object.hasOwn(overrides, "ttsBaseUrl");
+    const hasSpeakerId = Object.hasOwn(fileValues, "ttsSpeakerId") || Object.hasOwn(overrides, "ttsSpeakerId");
+    if (hasBaseUrl && hasSpeakerId) return base;
+    const engineDefaults = ttsEngineDefaults(base.ttsEngine);
+    return {
+      ...base,
+      ...(hasBaseUrl ? {} : { ttsBaseUrl: engineDefaults.ttsBaseUrl }),
+      ...(hasSpeakerId ? {} : { ttsSpeakerId: engineDefaults.ttsSpeakerId }),
+    };
+  }
+
   let fileValues: Partial<ChatterAgentConfig> = {};
-  let merged: ChatterAgentConfig = { ...defaults, ...overrides };
+  let merged: ChatterAgentConfig = fillTtsEngineDefaults({ ...defaults, ...overrides });
   /** `${mtimeMs}:${size}`。ファイルが無いときは null */
   let stamp: string | null = null;
   let loaded = false;
@@ -853,7 +899,7 @@ export function createConfigStore(deps: ConfigStoreDeps = {}): ConfigStore {
       const parsed = readFileValues();
       if (parsed) fileValues = parsed;
     }
-    merged = { ...defaults, ...fileValues, ...overrides };
+    merged = fillTtsEngineDefaults({ ...defaults, ...fileValues, ...overrides });
   }
 
   /**

@@ -87,6 +87,18 @@ const openaiRequests = [];
 let engineDown = false;
 /** 合成を遅らせる（同時要求のまとめを観測するため） */
 let synthesisDelayMs = 0;
+/**
+ * #149: 声は正しいのに、この本文だけをエンジンが拒む状況を再現する（実機で踏んだ
+ * Kokoro の `400 Input contains no speakable text` が典型）。
+ */
+const rejectedTexts = new Set();
+/**
+ * #149: `ttsEngine=openai` なのに `ttsBaseUrl` が openai 互換ではない何か（VOICEVOX 系や
+ * 無関係な HTTP サーバー）を指している状況を再現する。true の間は `/v1/audio/voices` も
+ * 404 を返す —— このスタブは同じポートで両方の口を持っているので、素の 404（下の
+ * catch-all）だけでは「エンジンには繋がるが openai の口を持たない」を表せない。
+ */
+let openaiVoicesUnavailable = false;
 
 const engine = http.createServer((req, res) => {
   const url = new URL(req.url, "http://x");
@@ -121,6 +133,10 @@ const engine = http.createServer((req, res) => {
     return;
   }
   if (url.pathname === "/v1/audio/voices") {
+    if (openaiVoicesUnavailable) {
+      res.writeHead(404).end();
+      return;
+    }
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ voices: [{ id: OPENAI_VOICE_ID, name: "Heart" }] }));
     return;
@@ -129,11 +145,17 @@ const engine = http.createServer((req, res) => {
     let body = "";
     req.on("data", (chunk) => (body += chunk));
     req.on("end", () => {
-      const { voice, speed } = JSON.parse(body);
+      const { voice, speed, input } = JSON.parse(body);
       // 本物の Kokoro-FastAPI と同じで、存在しない声は 400 + detail
       if (voice !== OPENAI_VOICE_ID) {
         res.writeHead(400, { "content-type": "application/json" });
         res.end(JSON.stringify({ detail: `voice not found: ${voice}` }));
+        return;
+      }
+      // ★ #149: 声は合っているのに、この本文だけをエンジンが拒む状況を再現する
+      if (rejectedTexts.has(input)) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ detail: "Input contains no speakable text" }));
         return;
       }
       openaiRequests.push({ voice, speed });
@@ -571,6 +593,81 @@ try {
       Array.isArray(speakersBody.speakers) && speakersBody.speakers.some((s) => s.id === OPENAI_VOICE_ID),
       JSON.stringify(speakersBody),
     );
+  }
+
+  {
+    show("㉒ ★ #149: 後ろの seq が合成できているのに、この1文だけ拒まれたら 404 に落ちる");
+    // ここまでの ⑳ でサーバーは ttsEngine=openai のまま動いている
+    const client = await connect();
+
+    const rejectedText = "この文だけ拒まれます。";
+    rejectedTexts.add(rejectedText);
+    const rejected = enqueue(rejectedText);
+    const okAfter = enqueue("後ろの文は通ります。");
+    await until(() => client.frames.some((f) => f.seq === okAfter.seq), 5000);
+
+    const first = await fetch(`${base}${audioPath(rejected)}`);
+    await first.arrayBuffer();
+    check("★ 後ろがまだ合成されていない間は 503（消えない）", first.status === 503, `status=${first.status}`);
+
+    const second = await fetch(`${base}${audioPath(okAfter)}`);
+    await second.arrayBuffer();
+    check("後ろの文は 200", second.status === 200, `status=${second.status}`);
+
+    const third = await fetch(`${base}${audioPath(rejected)}`);
+    const thirdBody = await third.text();
+    check("★ 後ろが成功した後は、拒まれた文だけ 404 に落ちる", third.status === 404, `status=${third.status}`);
+    check("理由が本文に載る", thirdBody.includes("rejected by engine"), thirdBody);
+
+    rejectedTexts.delete(rejectedText);
+    await client.close();
+  }
+
+  {
+    show("㉓ ★ #149: 全文が拒まれるときは 404 にならず 503 のまま残る（規則7が守る形のまま）");
+    const client = await connect();
+
+    const text = "誰にも通りません。";
+    rejectedTexts.add(text);
+    const record = enqueue(text);
+    await until(() => client.frames.some((f) => f.seq === record.seq), 5000);
+
+    for (let i = 0; i < 3; i++) {
+      const res = await fetch(`${base}${audioPath(record)}`);
+      await res.arrayBuffer();
+      check(
+        `★ ${i + 1}回目の GET も 503 のまま（後ろが無いので404にならない）`,
+        res.status === 503,
+        `status=${res.status}`,
+      );
+    }
+
+    rejectedTexts.delete(text);
+    await client.close();
+  }
+
+  {
+    show("㉔ ★ #149: openai で ttsBaseUrl が openai 互換ではない相手（404）を指しても、起こさず警告する");
+    await stopServer();
+    openaiVoicesUnavailable = true;
+    await startServer(
+      serverEnv({
+        CHATTER_AGENT_TTS_ENGINE: "openai",
+        CHATTER_AGENT_TTS_SPEAKER_ID: OPENAI_VOICE_ID,
+      }),
+    );
+
+    const warned = await until(() => (server?.log ?? "").includes("音声合成エンジンは応答しましたが"), 5000);
+    check("★ 応答はあったという警告が出る", warned, server?.log ?? "");
+    const freshLog = server?.log ?? "";
+    check("★ 警告に status が載る（404）", freshLog.includes("status=404"), freshLog);
+    check(
+      "★ 応答はあるので unreachable 扱いにせず、エンジンを起こさない",
+      !freshLog.includes("[Engine] 起動しました"),
+      freshLog,
+    );
+
+    openaiVoicesUnavailable = false;
   }
 } catch (err) {
   console.error("\n\x1b[31m検証中に例外が発生しました\x1b[0m");

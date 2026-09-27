@@ -349,7 +349,7 @@ MonoBehaviour:
   lipSyncOffsetMs: 120
   speakingFrameRate: 0
   lookahead: 3
-  speechMaxAgeMs: 60000
+  speechMaxAgeMs: 0
   audioFetchTimeoutMs: 60000
 --- !u!82 &622504112
 AudioSource:

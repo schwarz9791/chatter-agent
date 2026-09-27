@@ -121,6 +121,53 @@ describe("synthesize", () => {
   });
 });
 
+describe("baseUrl の正規化", () => {
+  /** ★ OpenAI の慣例に倣って `/v1` を書いてしまうと、正規化しない限り `/v1/v1/…` になる */
+  it("末尾の /v1・/v1/・/ を落としてから連結する", async () => {
+    let seenUrl: string | undefined;
+    const baseUrl = await serve((req, res) => {
+      seenUrl = req.url;
+      req.resume();
+      res.writeHead(200, { "Content-Type": "audio/wav" });
+      res.end(WAV_HEAD);
+    });
+
+    for (const suffix of ["/v1", "/v1/", "/", ""]) {
+      seenUrl = undefined;
+      await client(`${baseUrl}${suffix}`).synthesize("hello");
+      expect(seenUrl).toBe("/v1/audio/speech");
+    }
+  });
+});
+
+describe("hasVoice", () => {
+  const voices = [
+    { id: "af_heart", label: "af_heart" },
+    { id: "af_bella", label: "af_bella" },
+    { id: "af_sky", label: "af_sky" },
+  ];
+
+  it("単一の声は完全一致で見る", () => {
+    expect(client("http://x").hasVoice(voices, "af_heart")).toBe(true);
+    expect(client("http://x").hasVoice(voices, "af_nope")).toBe(false);
+  });
+
+  /** ★ Kokoro-FastAPI は複数の声を + で混ぜた合成指定を受け付ける */
+  it("+ で混ぜた合成指定は構成要素がすべて一覧にあれば真", () => {
+    expect(client("http://x").hasVoice(voices, "af_bella+af_sky")).toBe(true);
+    expect(client("http://x").hasVoice(voices, "af_bella+af_nope")).toBe(false);
+  });
+
+  it("重み付き（af_bella(2)+af_sky(1)）も声の名前だけ見る", () => {
+    expect(client("http://x").hasVoice(voices, "af_bella(2)+af_sky(1)")).toBe(true);
+    expect(client("http://x").hasVoice(voices, "af_bella(2.5)+af_sky(1)")).toBe(true);
+  });
+
+  it("空文字は false（既定値へのフォールバックで踏みうる）", () => {
+    expect(client("http://x").hasVoice(voices, "")).toBe(false);
+  });
+});
+
 describe("listVoices", () => {
   it("{id, name} 形式を受ける（label には id を入れる）", async () => {
     const baseUrl = await serve((_req, res) => {

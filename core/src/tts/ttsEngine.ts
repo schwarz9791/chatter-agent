@@ -13,6 +13,13 @@ export interface TtsEngine {
   synthesize(text: string): Promise<ArrayBuffer>;
   /** 声の一覧。起動時の疎通確認と、`ttsSpeakerId` の検査に使う */
   listVoices(): Promise<{ id: string; label: string }[]>;
+  /**
+   * `ttsSpeakerId` が `voices` の中に実在するか。**エンジンごとに指定の書き方が違うので、
+   * 一致の取り方はエンジン自身が知っている。** `voicevoxClient` は完全一致だが、
+   * `openaiClient`（Kokoro-FastAPI）は `af_bella+af_sky` のような合成指定を受け付けるため、
+   * `index.ts` 側で共通の完全一致を書くと存在するのに「無い」と誤診断する。
+   */
+  hasVoice(voices: { id: string; label: string }[], id: string): boolean;
 }
 
 export interface TtsEngineOptions {

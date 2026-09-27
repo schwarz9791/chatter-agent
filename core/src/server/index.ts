@@ -32,7 +32,7 @@ import { registerSummarizerSession } from "../core/summarizerSessions";
 import { createSpeechQueue } from "../core/speechQueue";
 import { createVoicevoxEngine } from "../tts/voicevoxClient";
 import { createOpenAiEngine } from "../tts/openaiClient";
-import type { TtsEngine } from "../tts/ttsEngine";
+import { TtsHttpError, type TtsEngine } from "../tts/ttsEngine";
 import { createAssetCatalog } from "./assetCatalog";
 import { createAudioStore, type Voice } from "./audioStore";
 import { createControlApi } from "./controlApi";
@@ -340,7 +340,11 @@ async function main(): Promise<void> {
             command: ttsSpawnCommand,
             args: config.get("ttsSpawnArgs"),
           })
-        : resolveKokoroSpawn({ baseUrl: config.get("ttsBaseUrl"), kokoroDir: config.get("kokoroDir") });
+        : resolveKokoroSpawn({
+            baseUrl: config.get("ttsBaseUrl"),
+            kokoroDir: config.get("kokoroDir"),
+            args: config.get("ttsSpawnArgs"),
+          });
 
     if ("skip" in plan) {
       // 条件4 / 条件5。どちらも従来どおりの 503 運用に落ちるだけ。
@@ -592,6 +596,16 @@ async function checkEngine(tts: TtsEngine, speakerId: string): Promise<EnginePro
   try {
     voices = await tts.listVoices();
   } catch (err) {
+    // ★ **応答があった（`TtsHttpError`）なら unreachable にしない。** そのポートには
+    //   何か別のもの（`ttsEngine` と `ttsBaseUrl` の取り違え等）が居るということなので、
+    //   ここで起こすと bind に失敗するか、既に居るものと二重に起こすことになる
+    if (err instanceof TtsHttpError) {
+      console.warn(
+        `[Server] 音声合成エンジンは応答しましたが声の一覧を返しません (${tts.baseUrl}, status=${err.status})。` +
+          "ttsEngine と ttsBaseUrl を確認してください",
+      );
+      return "reachable";
+    }
     console.warn(`[Server] 音声合成エンジンに繋がりません (${tts.baseUrl}): ${String(err)}`);
     // ★ **「503 になる」の結論はここで出さない。** 起動時のプローブから呼ばれたときは、
     //   直後にエンジンを起こすかもしれず、その場合この行は嘘になる（実機ログで、
@@ -600,7 +614,9 @@ async function checkEngine(tts: TtsEngine, speakerId: string): Promise<EnginePro
     return "unreachable";
   }
 
-  if (voices.some((voice) => voice.id === speakerId)) {
+  // ★ 一致の取り方はエンジンごとに違う（Kokoro-FastAPI の `a+b` のような合成指定）ので、
+  //   ここでは完全一致を書かず `TtsEngine` 自身に委ねる（→ `tts/ttsEngine.ts` の `hasVoice`）
+  if (tts.hasVoice(voices, speakerId)) {
     console.log(`[Server] 音声合成エンジンに繋がりました (${tts.baseUrl}, speaker=${speakerId})`);
     return "reachable";
   }

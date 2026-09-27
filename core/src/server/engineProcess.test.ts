@@ -30,6 +30,23 @@ beforeEach(() => {
 });
 
 const HOME = "/Users/tester";
+
+/**
+ * 実在する実行ファイル `name` を置いた PATH を返す。
+ *
+ * ★ `findCommandPath` は既知の bin ディレクトリ（`/opt/homebrew/bin` 等、`env.PATH` の外）も
+ *   探すので、PATH を差し替えるだけでは「見つかる」も「見つからない」も実行環境に依存する
+ *   （開発機に入っていれば通り、CI では落ちる）。**`env.PATH` は既知の bin より先に見る**ので、
+ *   ここに置けば必ずこちらが見つかる。
+ */
+function fakeCommandPath(name: string): { PATH: string; bin: string } {
+  const binDir = path.join(dir, `${name}-bin`);
+  fs.mkdirSync(binDir, { recursive: true });
+  const bin = path.join(binDir, name);
+  fs.writeFileSync(bin, "#!/bin/sh\n");
+  fs.chmodSync(bin, 0o755);
+  return { PATH: binDir, bin };
+}
 const APP = path.join("/Applications", "AivisSpeech.app", "Contents", "Resources", "AivisSpeech-Engine", "run");
 const HOME_APP = path.join(
   HOME,
@@ -211,22 +228,11 @@ describe("resolveEngineSpawn", () => {
 });
 
 describe("resolveOllayaSpawn", () => {
-  /**
-   * ★ `findCommandPath("ollaya")` は既知の bin ディレクトリ（`/usr/local/bin` 等、
-   *   `env.PATH` の外）も探す設計（→ core/commandPath.ts）なので、`ollaya` が実際に
-   *   インストールされているマシンでは `env.PATH` をいじるだけでは「見つからない」を
-   *   再現できない。**実在するファイルを作って PATH の先頭に置く**（`env.PATH` は
-   *   既知の bin ディレクトリより先に見るので、これで確実にこちらが先に見つかる）ことで、
-   *   実行環境に関わらず決定的にする。
-   */
+  // ★ コマンドが要るケースは必ず `fakeCommandPath` を使うこと（理由はその docstring）
   it("ループバック・http・コマンドが見つかれば、args は ['serve'] で OLLAYA_HOST に host:port を積む", () => {
-    const binDir = path.join(dir, "ollaya-bin");
-    fs.mkdirSync(binDir, { recursive: true });
-    const bin = path.join(binDir, "ollaya");
-    fs.writeFileSync(bin, "#!/bin/sh\n");
-    fs.chmodSync(bin, 0o755);
+    const { PATH, bin } = fakeCommandPath("ollaya");
 
-    expect(resolveOllayaSpawn({ baseUrl: "http://127.0.0.1:11435", homeDir: HOME, env: { PATH: binDir } })).toEqual({
+    expect(resolveOllayaSpawn({ baseUrl: "http://127.0.0.1:11435", homeDir: HOME, env: { PATH } })).toEqual({
       command: bin,
       args: ["serve"],
       env: { OLLAYA_HOST: "127.0.0.1:11435" },
@@ -254,9 +260,10 @@ describe("resolveOllayaSpawn", () => {
   });
 
   it("ポートを省略した baseUrl は http の既定（80）を OLLAYA_HOST に積む", () => {
-    expect(resolveOllayaSpawn({ baseUrl: "http://127.0.0.1", homeDir: HOME, env: { PATH: "/opt/bin" } })).toMatchObject(
-      { env: { OLLAYA_HOST: "127.0.0.1:80" } },
-    );
+    const { PATH } = fakeCommandPath("ollaya");
+    expect(resolveOllayaSpawn({ baseUrl: "http://127.0.0.1", homeDir: HOME, env: { PATH } })).toMatchObject({
+      env: { OLLAYA_HOST: "127.0.0.1:80" },
+    });
   });
 
   /**
@@ -264,9 +271,10 @@ describe("resolveOllayaSpawn", () => {
    *   解釈できなくなる（`buildArgs` が `--host` 引数向けに外すのとは事情が違う）。
    */
   it("★ IPv6 ループバックは OLLAYA_HOST の角括弧を保つ", () => {
-    expect(
-      resolveOllayaSpawn({ baseUrl: "http://[::1]:11435", homeDir: HOME, env: { PATH: "/opt/bin" } }),
-    ).toMatchObject({ env: { OLLAYA_HOST: "[::1]:11435" } });
+    const { PATH } = fakeCommandPath("ollaya");
+    expect(resolveOllayaSpawn({ baseUrl: "http://[::1]:11435", homeDir: HOME, env: { PATH } })).toMatchObject({
+      env: { OLLAYA_HOST: "[::1]:11435" },
+    });
   });
 });
 
@@ -288,14 +296,8 @@ describe("resolveKokoroSpawn", () => {
     });
   }
 
-  /** PATH の先頭に実在する `uv` を置く（`resolveOllayaSpawn` のテストと同じ手） */
   function withUv(): { env: { PATH: string } } {
-    const binDir = path.join(dir, "uv-bin");
-    fs.mkdirSync(binDir, { recursive: true });
-    const bin = path.join(binDir, "uv");
-    fs.writeFileSync(bin, "#!/bin/sh\n");
-    fs.chmodSync(bin, 0o755);
-    return { env: { PATH: binDir } };
+    return { env: { PATH: fakeCommandPath("uv").PATH } };
   }
 
   it("kokoroDir が空なら not-configured（AivisSpeech と違って既知の候補が無い）", () => {

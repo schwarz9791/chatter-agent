@@ -64,7 +64,7 @@ core/src/
 ├── prompt/       応答待ち通知の整形
 └── summarizer/   AI要約（既定ON。issue #31）
     ├── types.ts             Summarize / SummaryOutcome / ClaudeCliResult の型定義
-    ├── prompt.ts            要約 CLI に渡す指示文（SUMMARY_INSTRUCTION）
+    ├── prompt.ts            要約 CLI に渡す指示文（buildSummaryInstruction）
     ├── claudeCli.ts         引数組み立て / 実行（同期版と**非同期版**。コマンド解決は `core/commandPath.ts`）
     ├── summaryPipeline.ts   判定とフォールバック（createSummaryPipeline）。cli/worker.ts から呼ばれる
     └── summaryPreview.ts    ★テスト要約（`POST /v1/summary/preview`）。**非同期**。server から呼ばれる

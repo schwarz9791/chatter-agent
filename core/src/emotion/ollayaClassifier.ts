@@ -6,7 +6,7 @@
  *   プロセスの中では直接使えない。1メッセージぶんの文をまとめて子プロセス（`spawnSync`）に
  *   渡し、子の中で非同期に問い合わせて結果をまとめて返すことで、プロセス起動のコストを
  *   メッセージ単位に抑える（依存を増やさない。curl には頼らない）。
- * ★ 判定の指示と基準は英語で書く（本文自体は日本語のまま渡す）。日本語で書くと精度が落ちる。
+ * ★ 判定の指示と基準は英語で書く。日本語で書くと精度が落ちる。本文の言語は問わない。
  * ★ どの失敗（接続拒否・タイムアウト・壊れた応答）でも例外を投げず、渡された `fallback`
  *   （辞書式）に委ねる。子プロセス全体が失敗すれば全文を、一部の文だけ壊れていればその文
  *   だけを fallback する。
@@ -54,7 +54,7 @@ const CHILD_SCRIPT = [
   '      : "";',
   "    questions[k] = {",
   '      type: "noul",',
-  '      instructions: "Does this remark by a coding agent carry the following emotion? The utterance is in Japanese. \\"" + k + "\\": " + DESC[k] + "." + suffix,',
+  '      instructions: "Does this remark by a coding agent carry the following emotion? \\"" + k + "\\": " + DESC[k] + "." + suffix,',
   '      criteria: { true: "present", false: "not present" },',
   "    };",
   "  }",

@@ -1,6 +1,7 @@
 /**
  * Originally from kazakago/cc-mascot (Apache-2.0, Copyright 2026 kazakago)
  *   electron/filters/textFilter.test.ts @ 46f7def
+ * Modified for chatter-agent.
  */
 
 import { describe, it, expect } from "vitest";
@@ -342,5 +343,57 @@ describe("splitIntoSentences", () => {
   it("前後の空白をトリムする", () => {
     const result = splitIntoSentences("  1文目です。  2文目です。  ");
     expect(result).toEqual(["1文目です。", "2文目です。", ""]);
+  });
+
+  describe("英文のピリオドで分割する", () => {
+    it("ピリオドの後に空白が続く位置で分割する", () => {
+      const result = splitIntoSentences("This is one sentence. This is another.");
+      expect(result).toEqual(["This is one sentence.", "This is another."]);
+    });
+
+    it("略語のピリオドでは分割しない", () => {
+      const abbreviations = ["e.g.", "i.e.", "etc.", "vs.", "Mr.", "Dr."];
+      for (const abbr of abbreviations) {
+        const result = splitIntoSentences(`See ${abbr} the notes for details.`);
+        expect(result).toEqual([`See ${abbr} the notes for details.`]);
+      }
+    });
+
+    it("小数のピリオドでは分割しない", () => {
+      const result = splitIntoSentences("The value is 1.5 for now. It may change.");
+      expect(result).toEqual(["The value is 1.5 for now.", "It may change."]);
+    });
+
+    it("バージョン番号のピリオドでは分割しない", () => {
+      const result = splitIntoSentences("Bumped to v1.2.3 in this release. Please update.");
+      expect(result).toEqual(["Bumped to v1.2.3 in this release.", "Please update."]);
+    });
+
+    it("ファイル名のピリオドでは分割しない", () => {
+      const result = splitIntoSentences("Edit foo.ts and save it. Then commit.");
+      expect(result).toEqual(["Edit foo.ts and save it.", "Then commit."]);
+    });
+
+    it("ドメイン名のピリオドでは分割しない", () => {
+      const result = splitIntoSentences("Visit example.com for more info. Thanks.");
+      expect(result).toEqual(["Visit example.com for more info.", "Thanks."]);
+    });
+
+    it("三点リーダー(...)の直後では分割しない", () => {
+      const result = splitIntoSentences("Wait... really? Yes it did.");
+      expect(result).toEqual(["Wait... really?", "Yes it did."]);
+    });
+
+    it("省略記号(…)を含む文はそのまま返す", () => {
+      const result = splitIntoSentences("Hold on… let me check.");
+      expect(result).toEqual(["Hold on… let me check."]);
+    });
+  });
+  it("行頭の番号付きリストの番号では切らない", () => {
+    expect(splitIntoSentences("1. Install deps. Then build.\n2. Run tests.")).toEqual([
+      "1. Install deps.",
+      "Then build.",
+      "2. Run tests.",
+    ]);
   });
 });

@@ -1,6 +1,7 @@
 /**
  * Originally from kazakago/cc-mascot (Apache-2.0, Copyright 2026 kazakago)
  *   electron/filters/textFilter.ts @ 46f7def
+ * Modified for chatter-agent.
  */
 
 /**
@@ -48,14 +49,25 @@ export function cleanTextForSpeech(text: string): string {
   return cleaned;
 }
 
+// English abbreviations whose trailing period is not a sentence end.
+const ABBREVIATIONS = "e\\.g|i\\.e|etc|vs|Mr|Mrs|Ms|Dr|Prof|Jr|Sr|St|approx";
+
 /**
  * Split text into individual sentences for sequential speech synthesis.
- * Splits on Japanese period (。), exclamation (！/!), question (？/?), and newlines.
+ * Splits on Japanese sentence-ending punctuation (。！？!?) and newlines, and on an
+ * English sentence-ending period followed by whitespace. A period belonging to an
+ * abbreviation, a list number at the start of a line, a decimal, a version number, or an
+ * ellipsis is not a split point.
  * Returns trimmed sentences (including empty strings as spacing information).
  */
 export function splitIntoSentences(text: string): string[] {
   // Split on sentence-ending punctuation (keeping the punctuation attached) and newlines
-  const parts = text.split(/(?<=[。！？!?])|[\n\r]+/);
+  const parts = text.split(
+    new RegExp(
+      `(?<=[。！？!?])|(?<!\\.\\.)(?<!\\b(?:${ABBREVIATIONS})\\.)(?<!(?:^|[\\n\\r])[ \\t]*\\d+\\.)(?<=\\.)(?=[ \\t])|[\\n\\r]+`,
+      "i",
+    ),
+  );
 
   return parts.map((s) => s.trim());
 }

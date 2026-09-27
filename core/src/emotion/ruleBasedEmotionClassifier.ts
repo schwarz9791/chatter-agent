@@ -21,6 +21,8 @@ export type { Emotion };
 // キーワード直後の否定形を弾く共通ガード。活用形を辞書に並べる代わりに、
 // 当たった位置の直後だけを見て判定する。
 const SENTENCE_BOUNDARY = /[。！？!?\n、]/;
+// 辞書・文末パターンは日本語の語彙に依存するため、仮名・漢字を含まない文には適用できない
+const HAS_JAPANESE_SCRIPT = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u;
 const NEGATION_LINK = "[はがもをにでとしてられさきりえけいうつっまなわ]{0,6}";
 const NEGATION_ENDING = "(ない|ないで|ません|ませんで|なかっ|ず|ぬ)";
 const NEGATION_PATTERN = new RegExp("^(?:" + NEGATION_LINK + "|とは言え|とはいえ|とは思え)" + NEGATION_ENDING);
@@ -160,6 +162,11 @@ export class RuleBasedEmotionClassifier {
     }
 
     const normalizedText = text.trim();
+
+    if (!HAS_JAPANESE_SCRIPT.test(normalizedText)) {
+      return "neutral";
+    }
+
     const textLength = normalizedText.length;
     const isLongText = textLength > 100; // 長文判定
 

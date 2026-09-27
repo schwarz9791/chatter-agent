@@ -18,6 +18,14 @@ describe("toSpeechSentences", () => {
     expect(toSpeechSentences("Aの一文目。Aの途中", { dropUnterminatedTail: true })).toEqual(["Aの一文目。"]);
   });
 
+  it("dropUnterminatedTail でも、ピリオドで閉じた英語の末尾は落とさない", () => {
+    expect(
+      toSpeechSentences("First one. Second one.", {
+        dropUnterminatedTail: true,
+      }),
+    ).toEqual(["First one.", "Second one."]);
+  });
+
   it("dropUnterminatedTail を渡さなければ、閉じていない末尾もそのまま出す", () => {
     expect(toSpeechSentences("Aの一文目。Aの途中")).toEqual(["Aの一文目。", "Aの途中"]);
   });

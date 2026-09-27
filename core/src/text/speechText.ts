@@ -25,8 +25,8 @@
 import { cleanTextForSpeech, splitIntoSentences } from "./textFilter";
 import { truncateAtUnstableTail } from "./unstableTail";
 
-/** 文として閉じているとみなす末尾（句点・感嘆符・疑問符・改行） */
-const SENTENCE_END_RE = /[。！？!?\n\r]\s*$/;
+/** 文として閉じているとみなす末尾（句点・ピリオド・感嘆符・疑問符・改行） */
+const SENTENCE_END_RE = /[。.！？!?\n\r]\s*$/;
 
 export interface SpeechSentencesOptions {
   /**

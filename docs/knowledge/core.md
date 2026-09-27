@@ -32,7 +32,7 @@
 逆にすると overflow が timeout に化ける。
 
 ★ **判断そのものは分けないこと。** 引数（`buildSummaryArgs`）・環境変数（`buildSummaryEnv`）・
-指示文（`SUMMARY_INSTRUCTION`）・採用の規則（`isAcceptableSummary`）・整形（`toSpeechSentences`）は
+指示文（`buildSummaryInstruction`）・採用の規則（`isAcceptableSummary`）・整形（`toSpeechSentences`）は
 同期版と**同じものを共有している**。片方だけ直すと「テストボタンは通るのに本番では原文が
 読み上げられる」という、いちばん切り分けにくいズレになる。
 

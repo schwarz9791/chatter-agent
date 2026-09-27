@@ -14,7 +14,7 @@
  *
  *     - 引数        `buildSummaryArgs`
  *     - 環境変数     `buildSummaryEnv`（無限ループ防止の第1層 `CHATTER_AGENT_DISABLE=1` を含む）
- *     - 指示文       `SUMMARY_INSTRUCTION`
+ *     - 指示文       `buildSummaryInstruction`
  *     - 採用の規則   `isAcceptableSummary`
  *     - 整形         `toSpeechSentences`
  *
@@ -31,7 +31,7 @@ import { toSpeechSentences } from "../text/speechText";
 import { findCommandPath } from "../core/commandPath";
 import type { AiSummaryBackend } from "../core/config";
 import { buildFmSummaryArgs, buildSummaryArgs, resolveFmCommandPath, runClaudeCliAsync } from "./claudeCli";
-import { SUMMARY_INSTRUCTION } from "./prompt";
+import { buildSummaryInstruction, summaryLengthLimit, wrapSummaryInput } from "./prompt";
 import { isAcceptableSummary } from "./summaryPipeline";
 import type { SummaryOutcome } from "./types";
 
@@ -107,15 +107,16 @@ export async function runSummaryPreview(text: string, deps: SummaryPreviewDeps):
     return done("internal", null, err instanceof Error ? err.message : String(err));
   }
 
+  const instruction = buildSummaryInstruction(summaryLengthLimit(text));
   const args =
     backend === "fm"
-      ? buildFmSummaryArgs(SUMMARY_INSTRUCTION)
-      : buildSummaryArgs(SUMMARY_INSTRUCTION, { sessionId, model: deps.getModel() });
+      ? buildFmSummaryArgs(instruction)
+      : buildSummaryArgs(instruction, { sessionId, model: deps.getModel() });
 
   const result = await runClaudeCliAsync({
     commandPath,
     args,
-    text,
+    text: wrapSummaryInput(text),
     homeDir: deps.homeDir,
     timeoutMs: deps.getTimeoutMs(),
   });
@@ -125,7 +126,7 @@ export async function runSummaryPreview(text: string, deps: SummaryPreviewDeps):
   const summary = result.stdout.trim();
   // 妥当性は「実際に読み上げる形」で判定する（本番と同じ規則。→ `isAcceptableSummary`）
   const spoken = toSpeechSentences(summary).join("\n");
-  if (!isAcceptableSummary(spoken, text.length)) return done("invalid", null);
+  if (!isAcceptableSummary(spoken, text)) return done("invalid", null);
 
   // ★ 返すのは素の stdout（本番と同じ。整形は読み上げ経路が1箇所で行う）
   return done("ok", summary);

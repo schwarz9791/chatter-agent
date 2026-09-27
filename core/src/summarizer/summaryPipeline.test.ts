@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { createSummaryPipeline, type SummaryPipelineDeps } from "./summaryPipeline";
-import { SUMMARY_MAX_CHARS } from "./prompt";
+import { createSummaryPipeline, isAcceptableSummary, type SummaryPipelineDeps } from "./summaryPipeline";
+import { summaryLengthLimit, wrapSummaryInput } from "./prompt";
 
 let dir: string;
 let homeDir: string;
@@ -29,7 +29,7 @@ afterEach(() => {
  *   RECORDER_MODE        short（既定・固定の短文を返す）/ cat（stdin をそのまま返す）/
  *                         fail（stderr を書いて exit 1）/ hang（返ってこない）
  *   RECORDER_REPLY       short モードで返す文字列
- *   RECORD_LOG           受け取った argv 等を1行1JSONで追記するファイル（省略可）
+ *   RECORD_LOG           受け取った argv・stdin 等を1行1JSONで追記するファイル（省略可）
  *   MARKER_PATH / MARKER_RESULT_PATH  registerSessionId の順序検証用（下のテスト参照）
  */
 function writeRecorderScript(): string {
@@ -43,12 +43,14 @@ const argv = process.argv.slice(2);
 const mode = process.env.RECORDER_MODE ?? "short";
 const recordLog = process.env.RECORD_LOG;
 
+const stdinContent = fs.readFileSync(0, "utf-8");
+
 if (recordLog) {
   const sessionIdIdx = argv.indexOf("--session-id");
   const sessionId = sessionIdIdx >= 0 ? argv[sessionIdIdx + 1] : null;
   const modelIdx = argv.indexOf("--model");
   const model = modelIdx >= 0 ? argv[modelIdx + 1] : null;
-  fs.appendFileSync(recordLog, JSON.stringify({ argv, sessionId, model, mode }) + "\\n");
+  fs.appendFileSync(recordLog, JSON.stringify({ argv, sessionId, model, mode, stdin: stdinContent }) + "\\n");
 }
 
 const markerPath = process.env.MARKER_PATH;
@@ -63,7 +65,7 @@ if (mode === "fail") {
 } else if (mode === "hang") {
   setInterval(() => {}, 1000);
 } else if (mode === "cat") {
-  process.stdout.write(fs.readFileSync(0, "utf-8"));
+  process.stdout.write(stdinContent);
 } else {
   process.stdout.write(process.env.RECORDER_REPLY ?? "短い要約です。");
 }
@@ -98,6 +100,39 @@ function readLogLines(): string[][] {
     .filter((l) => l.length > 0)
     .map((l) => l.split("\t"));
 }
+
+describe("isAcceptableSummary", () => {
+  it("chars: 上限の2倍以内なら採用する", () => {
+    const original = "あ".repeat(1000); // limit.max = 200
+    expect(isAcceptableSummary("い".repeat(400), original)).toBe(true);
+  });
+
+  it("chars: 上限の2倍を超えたら不採用にする", () => {
+    const original = "あ".repeat(1000); // limit.max = 200
+    expect(isAcceptableSummary("い".repeat(401), original)).toBe(false);
+  });
+
+  it("words: 語数が上限の2倍以内なら採用する（原文より短い英単語で）", () => {
+    const original = Array.from({ length: 200 }, (_, i) => `original${i}`).join(" "); // limit.max = 40
+    const spoken = Array.from({ length: 80 }, (_, i) => `w${i}`).join(" ");
+    expect(isAcceptableSummary(spoken, original)).toBe(true);
+  });
+
+  it("words: 語数が上限の2倍を超えたら不採用にする", () => {
+    const original = Array.from({ length: 200 }, (_, i) => `original${i}`).join(" "); // limit.max = 40
+    const spoken = Array.from({ length: 81 }, (_, i) => `w${i}`).join(" ");
+    expect(isAcceptableSummary(spoken, original)).toBe(false);
+  });
+
+  it("空の要約は不採用にする", () => {
+    expect(isAcceptableSummary("", "あ".repeat(1000))).toBe(false);
+  });
+
+  it("原文以上の長さの要約は不採用にする", () => {
+    const original = "あ".repeat(10);
+    expect(isAcceptableSummary("あ".repeat(10), original)).toBe(false);
+  });
+});
 
 describe("createSummaryPipeline", () => {
   it("無効なら原文を返し、CLI を一度も起動しない（ログも書かない）", () => {
@@ -264,12 +299,13 @@ describe("createSummaryPipeline", () => {
     delete process.env.RECORDER_REPLY;
   });
 
-  it("★ A1（issue #38 レビュー）: 要約後の長さが SUMMARY_MAX_CHARS の2倍を超えたら不採用にする", () => {
+  it("★ 要約後の長さが上限（chars）の2倍を超えたら不採用にする", () => {
     // claude -p が exit 0 のままレート制限の通知や拒否文を stdout に出すケースの再現。
     // 原文より短くても、読み上げる長さとして長すぎるものは要約として採用しない
     process.env.RECORDER_MODE = "short";
-    process.env.RECORDER_REPLY = "あ".repeat(SUMMARY_MAX_CHARS * 2 + 1);
-    const veryLongText = "あ".repeat(SUMMARY_MAX_CHARS * 2 + 100);
+    const veryLongText = "あ".repeat(5000);
+    const limit = summaryLengthLimit(veryLongText);
+    process.env.RECORDER_REPLY = "あ".repeat(limit.max * 2 + 1);
     const summarize = createSummaryPipeline(makeDeps());
 
     const result = summarize(veryLongText, () => {});
@@ -280,6 +316,41 @@ describe("createSummaryPipeline", () => {
 
     delete process.env.RECORDER_MODE;
     delete process.env.RECORDER_REPLY;
+  });
+
+  it("★ 要約後の長さが上限（words）の2倍を超えたら不採用にする（英語原文）", () => {
+    process.env.RECORDER_MODE = "short";
+    const veryLongText = Array.from({ length: 2000 }, (_, i) => `word${i}`).join(" ");
+    const limit = summaryLengthLimit(veryLongText);
+    expect(limit.unit).toBe("words");
+    process.env.RECORDER_REPLY = Array.from({ length: limit.max * 2 + 1 }, (_, i) => `w${i}`).join(" ");
+    const summarize = createSummaryPipeline(makeDeps());
+
+    const result = summarize(veryLongText, () => {});
+    expect(result).toBe(veryLongText);
+
+    const lines = readLogLines();
+    expect(lines[0]![1]).toBe("invalid");
+
+    delete process.env.RECORDER_MODE;
+    delete process.env.RECORDER_REPLY;
+  });
+
+  it("CLI への stdin は <text> タグで包んだ原文になる", () => {
+    process.env.RECORDER_MODE = "short";
+    const recordLog = path.join(dir, "record.jsonl");
+    process.env.RECORD_LOG = recordLog;
+    const summarize = createSummaryPipeline(makeDeps());
+
+    summarize(LONG_TEXT, () => {});
+
+    const record = JSON.parse(fs.readFileSync(recordLog, "utf-8").trim()) as {
+      stdin: string;
+    };
+    expect(record.stdin).toBe(wrapSummaryInput(LONG_TEXT));
+
+    delete process.env.RECORDER_MODE;
+    delete process.env.RECORD_LOG;
   });
 
   it("--session-id は呼び出しごとに変わる", () => {
@@ -339,13 +410,21 @@ describe("createSummaryPipeline", () => {
 
     // ★ fm バックエンドは固定パス（FM_COMMAND_PATH）で解決するので、テストでは
     //   fmCommandPath でフェイク CLI に差し替える（getCommand は claude 専用なので見ない）
-    const summarize = createSummaryPipeline(makeDeps({ getBackend: () => "fm", fmCommandPath: writeRecorderScript() }));
+    const summarize = createSummaryPipeline(
+      makeDeps({
+        getBackend: () => "fm",
+        fmCommandPath: writeRecorderScript(),
+      }),
+    );
     const result = summarize(LONG_TEXT, (id) => registered.push(id));
 
     expect(result).not.toBe(LONG_TEXT); // 採用されている
     expect(registered).toHaveLength(1); // A4 の「再要約は1回まで」を効かせるため fm でも呼ばれる
 
-    const record = JSON.parse(fs.readFileSync(recordLog, "utf-8").trim()) as { argv: string[]; sessionId: null };
+    const record = JSON.parse(fs.readFileSync(recordLog, "utf-8").trim()) as {
+      argv: string[];
+      sessionId: null;
+    };
     expect(record.argv[0]).toBe("respond");
     expect(record.argv[1]).toBe("-i");
     expect(record.argv.slice(3)).toEqual(["--no-stream", "--guardrails", "permissive-content-transformations"]);

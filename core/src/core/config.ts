@@ -62,16 +62,30 @@ export interface ChatterAgentConfig {
    */
   ttsEnabled: boolean;
   /**
-   * 音声合成エンジンの baseUrl。AivisSpeech / VOICEVOX の互換 API を叩く。
-   * 既定は AivisSpeech.app を単体起動したときの標準ポート。
+   * 音声合成エンジンの種類。`ttsBaseUrl` をどの API 契約で叩くかを決める（→ `tts/`）。
+   *
+   * - `"voicevox"`: AivisSpeech / VOICEVOX の互換 API（`tts/voicevoxClient.ts`）
+   * - `"openai"`: OpenAI 互換の音声合成 API（`tts/openaiClient.ts`）。Kokoro-FastAPI が対象
+   */
+  ttsEngine: TtsEngineKind;
+  /**
+   * 音声合成エンジンの baseUrl。既定は AivisSpeech.app を単体起動したときの標準ポート。
    * （cc-mascot はエンジンを自分で spawn して 8564 を使うので、そちらとは別物）
+   *
+   * ★ `ttsEngine` が `"openai"` のときは **`/v1` を含まない origin** を書くこと
+   *   （パスはクライアントが足す）。
    */
   ttsBaseUrl: string;
-  /** 話者のスタイル ID。既定は AivisSpeech 標準同梱の Anneli（ノーマル）。VOICEVOX は 0 始まりの小さい整数 */
-  ttsSpeakerId: number;
   /**
-   * 合成の話速。`audio_query` が返した JSON の `speedScale` **だけ**を書き換えて
-   * `synthesis` に投げる（→ `tts/voicevoxClient.ts`）。
+   * 声を選ぶ ID。VOICEVOX 系は数値のスタイル ID（文字列化して持つ）、Kokoro のような
+   * OpenAI 互換エンジンは `af_heart` のような英字の声 ID になる。
+   * 既定は AivisSpeech 標準同梱の Anneli（ノーマル）。
+   */
+  ttsSpeakerId: string;
+  /**
+   * 合成の話速。`"voicevox"` は `audio_query` が返した JSON の `speedScale` **だけ**を
+   * 書き換えて `synthesis` に投げ（→ `tts/voicevoxClient.ts`）、`"openai"` は `speed` に
+   * 載せる（→ `tts/openaiClient.ts`）。
    *
    * ★ **`voicevoxClient` の「`AudioQuery` の中身は解釈しない」方針の唯一の例外。**
    *   例外をここ1つに留めること —— `pitchScale` / `intonationScale` を同じ理屈で足すと、
@@ -120,8 +134,9 @@ export interface ChatterAgentConfig {
    */
   ttsSpawn: boolean;
   /**
-   * 起こすエンジンの実行パス。空なら AivisSpeech.app の既知の場所を順に見る
-   * （`/Applications/…` → `~/Applications/…`。→ `server/engineProcess.ts`）。
+   * 起こすエンジンの実行パス。空のときの探し方は `ttsEngine` で決まる（→ `server/engineProcess.ts`）
+   * —— `"voicevox"` なら AivisSpeech.app の既知の場所（`/Applications/…` →
+   * `~/Applications/…`）、`"openai"` なら `kokoroDir` から Kokoro-FastAPI（`uv`）を起こす。
    *
    * ★ 明示した値が見つからないとき、既知の候補へ**フォールバックしない**。
    *   指定を黙って別のバイナリに読み替えるのは最悪の失敗の仕方になる。
@@ -138,6 +153,15 @@ export interface ChatterAgentConfig {
    *   `--port` も自分で書くこと。「足りない分だけ補う」形は挙動が読めなくなる。
    */
   ttsSpawnArgs: string[];
+  /**
+   * Kokoro-FastAPI（`ttsEngine: "openai"`）を clone したディレクトリ。
+   * `ttsSpawnCommand` が空のときの起こし方（`server/engineProcess.ts` の
+   * `resolveKokoroSpawn`）が `cwd` と `PYTHONPATH` の起点として使う。
+   *
+   * ★ **既定は空文字で、そのときは起こさない。** AivisSpeech と違って決まったインストール先が
+   *   無く、導入（依存とモデルの取得）はユーザーに済ませてもらう前提のため。
+   */
+  kokoroDir: string;
 
   // ── 以下は発話クライアント（player）だけが読む ─────────────────────────
 
@@ -180,8 +204,11 @@ export interface ChatterAgentConfig {
    * これより古い発話は音を出さずに ack だけして飛ばす。0 なら無効。
    *
    * TTS + 再生は生成よりずっと遅いので、バックログを抱えると数分前の発言を今喋ることになる。
-   * server 側の起動時の掃除（10秒）と同じ判断をクライアント側にも置けるようにしてあるが、
-   * 既定は無効。実機で遅れを測ってから決める。
+   * タイミングを外した発話は鳴らしても役に立たないので、既定で捨てる。
+   *
+   * ★ **合成できない発話で後ろが詰まったときの出口もこれ。** 合成のエラーは 503 のまま
+   *   取り直し続ける（404 に落とさない → `server/audioStore.ts`）ので、エンジンが特定の文を
+   *   永久に拒むと、その1文が後ろを全部止める。古くなった時点で飛ばすことで流れを戻す。
    */
   speechMaxAgeMs: number;
 
@@ -300,6 +327,7 @@ export interface ChatterAgentConfig {
 
 export type AiSummaryBackend = "fm" | "claude";
 export type EmotionClassifierKind = "ollaya" | "fm" | "dictionary";
+export type TtsEngineKind = "voicevox" | "openai";
 
 export function createDefaultConfig(): ChatterAgentConfig {
   return {
@@ -312,19 +340,21 @@ export function createDefaultConfig(): ChatterAgentConfig {
     allowedOrigins: [],
 
     ttsEnabled: true,
+    ttsEngine: "voicevox",
     ttsBaseUrl: "http://127.0.0.1:10101",
-    ttsSpeakerId: 888753760,
+    ttsSpeakerId: "888753760",
     ttsSpeedScale: 1.0,
     synthesisTimeoutMs: 30_000,
     ttsSpawn: true,
     ttsSpawnCommand: "",
     ttsSpawnArgs: [],
+    kokoroDir: "",
     synthesisLookahead: 3,
     audioFetchTimeoutMs: 45_000,
     playerCommand: "afplay",
     playerArgs: ["{file}"],
     playerServerUrl: "",
-    speechMaxAgeMs: 0,
+    speechMaxAgeMs: 60_000,
 
     aiSummaryEnabled: true,
     aiSummaryBackend: "fm",
@@ -414,8 +444,7 @@ const parsePositiveInt: Parser<number> = (raw) => {
   return n !== undefined && n >= 1 ? n : undefined;
 };
 
-// 0 を「無効」「直列」として意味づけているキー用（synthesisLookahead / speechMaxAgeMs）。
-// VOICEVOX の話者 ID も 0 から始まるのでこちらを使う
+// 0 を「無効」「直列」として意味づけているキー用（synthesisLookahead / speechMaxAgeMs）
 const parseNonNegativeInt: Parser<number> = (raw) => {
   const n = toInt(raw);
   return n !== undefined && n >= 0 ? n : undefined;
@@ -453,6 +482,27 @@ const TTS_SPEED_SCALE_MIN = 0.5;
 const TTS_SPEED_SCALE_MAX = 2.0;
 
 const parseSpeedScale: Parser<number> = makeRangeParser(TTS_SPEED_SCALE_MIN, TTS_SPEED_SCALE_MAX);
+
+/**
+ * `ttsSpeakerId` 専用。VOICEVOX 系（数値のスタイル ID）と Kokoro のような OpenAI 互換
+ * エンジン（`af_heart` のような英字の声 ID）の両方を、1つの文字列キーで受ける。
+ *
+ * - 非負整数（`number` でも、数字だけの文字列でも）→ `String(n)` に正規化する
+ *   （前後の空白や桁の表記ゆれを1つの形に揃える）
+ * - それ以外の非空文字列 → trim してそのまま通す（英字の声 ID はここを通る）
+ * - 負の数・空文字・空白だけの文字列は既定値に倒す
+ */
+const parseSpeakerId: Parser<string> = (raw) => {
+  if (typeof raw === "number") return Number.isInteger(raw) && raw >= 0 ? String(raw) : undefined;
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  if (/^\d+$/.test(trimmed)) {
+    const n = Number(trimmed);
+    if (Number.isSafeInteger(n)) return String(n);
+  }
+  return trimmed;
+};
 
 // trim した値を返すこと。判定にだけ使って生値を返すと、CHATTER_AGENT_HOST=" 127.0.0.1 "
 // のような値がそのまま listen() へ渡る
@@ -549,17 +599,19 @@ function makeUrlParser(protocols: string[]): Parser<string> {
 }
 
 /**
- * `aiSummaryModel` 専用。**空文字を「指定なし」として通す唯一のパーサ。**
+ * 空文字も含めて、文字列ならそのまま（trim して）通す共通パーサ。
  *
- * ★ `parseNonEmptyString` に統一したくなるが、ここだけは空に意味がある
- *   （`--model` を渡さず要約 CLI 自身の既定モデルに従う、という指定）。`parsePlayerArgs` が
- *   空入力を弾いているのは逆に「空だと `afplay` が引数なしで起動し全文が無音になる」事故を
- *   防ぐためで、両者は「空を落とし穴として扱う」点で対称なだけで、結論（空を通すか弾くか）は
+ * ★ `parseNonEmptyString` に統一したくなるが、ここを使うキーは**空にも意味がある**——
+ *   `aiSummaryModel`（`--model` を渡さず要約 CLI 自身の既定モデルに従う）と
+ *   `kokoroDir`（未設定なら Kokoro を起こさない）。空を「不正値」として既定へ倒すと、
+ *   どちらも意図した「指定なし」の状態に戻せなくなる。`parsePlayerArgs` が空入力を弾くのは
+ *   逆に「空だと `afplay` が引数なしで起動し全文が無音になる」事故を防ぐためで、
+ *   両者は「空を落とし穴として扱う」点で対称なだけで、結論（空を通すか弾くか）は
  *   キーごとの意味に従って逆になる。
- *   trim だけはする（`CHATTER_AGENT_AI_SUMMARY_MODEL=" haiku "` のような値がそのまま
- *   `--model` の引数に渡らないように。`parseNonEmptyString` と同じ理由）。
+ *   trim だけはする（前後の空白がそのままコマンドの引数やパスに渡らないように。
+ *   `parseNonEmptyString` と同じ理由）。
  */
-const parseAiSummaryModel: Parser<string> = (raw) => (typeof raw === "string" ? raw.trim() : undefined);
+const parseOptionalString: Parser<string> = (raw) => (typeof raw === "string" ? raw.trim() : undefined);
 
 /**
  * 列挙値のパーサを作る。**パーサを複製しない規約**（→下の SPECS の docstring）に沿って、
@@ -571,6 +623,7 @@ function makeEnumParser<T extends string>(values: readonly T[]): Parser<T> {
 
 const parseAiSummaryBackend: Parser<AiSummaryBackend> = makeEnumParser(["fm", "claude"]);
 const parseEmotionClassifier: Parser<EmotionClassifierKind> = makeEnumParser(["ollaya", "fm", "dictionary"]);
+const parseTtsEngine: Parser<TtsEngineKind> = makeEnumParser(["voicevox", "openai"]);
 
 /**
  * キーの定義。satisfies で ChatterAgentConfig の全キーを網羅していることを型で担保する
@@ -587,8 +640,9 @@ const SPECS = {
   allowedOrigins: { env: "CHATTER_AGENT_ALLOWED_ORIGINS", parse: parseStringList },
 
   ttsEnabled: { env: "CHATTER_AGENT_TTS_ENABLED", parse: parseBoolean },
+  ttsEngine: { env: "CHATTER_AGENT_TTS_ENGINE", parse: parseTtsEngine },
   ttsBaseUrl: { env: "CHATTER_AGENT_TTS_URL", parse: makeUrlParser(["http:", "https:"]) },
-  ttsSpeakerId: { env: "CHATTER_AGENT_TTS_SPEAKER_ID", parse: parseNonNegativeInt },
+  ttsSpeakerId: { env: "CHATTER_AGENT_TTS_SPEAKER_ID", parse: parseSpeakerId },
   ttsSpeedScale: { env: "CHATTER_AGENT_TTS_SPEED_SCALE", parse: parseSpeedScale },
   synthesisTimeoutMs: { env: "CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS", parse: parseTimeoutMs },
   ttsSpawn: { env: "CHATTER_AGENT_TTS_SPAWN", parse: parseBoolean },
@@ -598,6 +652,7 @@ const SPECS = {
   //   `parseStringList` は空入力で `[]` を返すので、`CHATTER_AGENT_TTS_SPAWN_ARGS=` が
   //   既定どおり導出に落ちる。issue #51 の表は `parsePlayerArgs` と書いてあるが誤り
   ttsSpawnArgs: { env: "CHATTER_AGENT_TTS_SPAWN_ARGS", parse: parseStringList },
+  kokoroDir: { env: "CHATTER_AGENT_KOKORO_DIR", parse: parseOptionalString },
   synthesisLookahead: { env: "CHATTER_AGENT_SYNTHESIS_LOOKAHEAD", parse: parseNonNegativeInt },
   audioFetchTimeoutMs: { env: "CHATTER_AGENT_AUDIO_FETCH_TIMEOUT_MS", parse: parseTimeoutMs },
   playerCommand: { env: "CHATTER_AGENT_PLAYER_COMMAND", parse: parseNonEmptyString },
@@ -609,7 +664,7 @@ const SPECS = {
   aiSummaryBackend: { env: "CHATTER_AGENT_AI_SUMMARY_BACKEND", parse: parseAiSummaryBackend },
   aiSummaryThreshold: { env: "CHATTER_AGENT_AI_SUMMARY_THRESHOLD", parse: parsePositiveInt },
   aiSummaryCommand: { env: "CHATTER_AGENT_AI_SUMMARY_COMMAND", parse: parseNonEmptyString },
-  aiSummaryModel: { env: "CHATTER_AGENT_AI_SUMMARY_MODEL", parse: parseAiSummaryModel },
+  aiSummaryModel: { env: "CHATTER_AGENT_AI_SUMMARY_MODEL", parse: parseOptionalString },
   aiSummaryTimeoutMs: { env: "CHATTER_AGENT_AI_SUMMARY_TIMEOUT_MS", parse: parseTimeoutMs },
   aiSummaryMaxPerDrain: { env: "CHATTER_AGENT_AI_SUMMARY_MAX_PER_DRAIN", parse: parseAiSummaryMaxPerDrain },
 

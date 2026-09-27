@@ -11,16 +11,35 @@ describe("isWritableConfigKey", () => {
    *   「設定を1行書き換えるだけで任意コマンド実行」になる
    */
   it("★★ コマンド実行に繋がるキーは書けない", () => {
-    for (const key of ["ttsSpawnCommand", "ttsSpawnArgs", "playerCommand", "playerArgs", "aiSummaryCommand"] as const) {
+    for (const key of [
+      "ttsSpawnCommand",
+      "ttsSpawnArgs",
+      "playerCommand",
+      "playerArgs",
+      "aiSummaryCommand",
+      "kokoroDir",
+    ] as const) {
       expect(isWritableConfigKey(key)).toBe(false);
     }
   });
 
   /** (b) 再起動まで反映されないキー。「効かない設定」をパネルに出さないため */
   it("再起動まで効かないキーは書けない", () => {
-    for (const key of ["host", "port", "allowedOrigins"] as const) {
+    for (const key of ["host", "port", "allowedOrigins", "ttsEngine"] as const) {
       expect(isWritableConfigKey(key)).toBe(false);
     }
+  });
+
+  /** ★ #106。理由は2つとも別々（kokoroDir はコマンド実行、ttsEngine は spawn 判断の起動時固定） */
+  it("★ kokoroDir / ttsEngine も書けない", () => {
+    expect(buildConfigPatch({}, { kokoroDir: "/opt/Kokoro-FastAPI" }, allDefault)).toEqual({
+      ok: false,
+      failure: { reason: "readonly_key", key: "kokoroDir" },
+    });
+    expect(buildConfigPatch({}, { ttsEngine: "openai" }, allDefault)).toEqual({
+      ok: false,
+      failure: { reason: "readonly_key", key: "ttsEngine" },
+    });
   });
 
   it("設定 UI が触るキーは書ける", () => {
@@ -63,11 +82,12 @@ describe("buildConfigPatch", () => {
    *   上書きするとここが落ちる
    */
   it("★★ 未知のキーを消さない", () => {
-    const base = { ttsSpeakerId: 1, somethingElse: { deep: true }, futureKey: "残す" };
+    const base = { ttsSpeakerId: "1", somethingElse: { deep: true }, futureKey: "残す" };
+    // ★ 書くのは正規化した値（数値→文字列。→ `core/config.ts` の `parseSpeakerId`）
     const result = buildConfigPatch(base, { ttsSpeakerId: 2 }, allDefault);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.next).toEqual({ ttsSpeakerId: 2, somethingElse: { deep: true }, futureKey: "残す" });
+    expect(result.next).toEqual({ ttsSpeakerId: "2", somethingElse: { deep: true }, futureKey: "残す" });
   });
 
   it("元のオブジェクトを書き換えない", () => {

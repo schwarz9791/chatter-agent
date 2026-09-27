@@ -687,8 +687,8 @@ try {
     const playerBundle = fs.readFileSync(PLAYER, "utf-8");
     check(
       "★ player のバンドルに合成エンジンのクライアントが入っていない",
-      !playerBundle.includes("createVoicevoxClient"),
-      "createVoicevoxClient がバンドルに含まれています",
+      !playerBundle.includes("createVoicevoxEngine") && !playerBundle.includes("createOpenAiEngine"),
+      "合成エンジンのクライアントがバンドルに含まれています",
     );
 
     await stopPlayer(player);

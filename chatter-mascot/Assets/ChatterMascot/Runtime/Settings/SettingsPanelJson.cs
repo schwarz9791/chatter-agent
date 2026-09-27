@@ -163,7 +163,7 @@ namespace ChatterMascot.Settings
             return fallback;
         }
 
-        /// <summary>変更イベントの値を <c>int</c> として読む（話者 ID）</summary>
+        /// <summary>変更イベントの値を <c>int</c> として読む（フレームレートなど）</summary>
         public static bool TryParseInt(string value, out int result)
         {
             return int.TryParse(

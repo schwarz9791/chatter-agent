@@ -361,6 +361,8 @@ namespace ChatterMascot.Net
         /// ★ 読めない要素は落として、読めたぶんだけ返す。★ <b>1件でも壊れていたら
         ///   全部捨てる、にしないこと</b> —— 話者一覧は許可リストではないので、
         ///   出せるものを出す方が親切。
+        /// ★ <c>id</c> は数値・文字列のどちらも読む（エンジンによって話者 ID の形が違う）。
+        ///   空文字は読めない要素として落とす。
         /// </summary>
         public static List<Settings.SettingChoice> ReadSpeakers(JToken body)
         {
@@ -377,11 +379,18 @@ namespace ChatterMascot.Net
                 if (entry == null) continue;
                 var id = entry["id"];
                 var label = entry["label"];
-                if (id == null || id.Type != JTokenType.Integer) continue;
+                if (!IsValidSpeakerId(id)) continue;
                 var text = label != null && label.Type == JTokenType.String ? label.Value<string>() : id.ToString();
                 result.Add(new Settings.SettingChoice(id.ToString(), text));
             }
             return result;
+        }
+
+        private static bool IsValidSpeakerId(JToken id)
+        {
+            if (id == null) return false;
+            if (id.Type == JTokenType.Integer) return true;
+            return id.Type == JTokenType.String && !string.IsNullOrEmpty(id.Value<string>());
         }
     }
 }

@@ -36,6 +36,10 @@ const READONLY_EXECUTABLE: readonly ConfigKey[] = [
   "playerCommand",
   "playerArgs",
   "aiSummaryCommand",
+  // ★ `kokoroDir` は `cwd` として Kokoro-FastAPI（`uv run …`）の起動に渡る。
+  //   ディレクトリを1行書き換えるだけで任意のコマンドをそのカレントで実行させられる点は
+  //   `ttsSpawnCommand` と同じ壊れ方になる
+  "kokoroDir",
 ];
 
 /**
@@ -48,7 +52,14 @@ const READONLY_EXECUTABLE: readonly ConfigKey[] = [
  *   起きないというのは**いちばん悪い見え方**（壊れているのか自分の操作が悪いのか分からない）。
  *   403 で明示的に断る方が親切。
  */
-const READONLY_UNTIL_RESTART: readonly ConfigKey[] = ["host", "port", "allowedOrigins"];
+const READONLY_UNTIL_RESTART: readonly ConfigKey[] = [
+  "host",
+  "port",
+  "allowedOrigins",
+  // ★ 起こすかどうかの判断（`resolveEngineSpawn` / `resolveKokoroSpawn`）は起動時の1回きり。
+  //   パネルから切り替えても、次の合成の宛先だけが変わって spawn の判断はやり直されない
+  "ttsEngine",
+];
 
 /**
  * (c) **本文の外部送信路になる。**

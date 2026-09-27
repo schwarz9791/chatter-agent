@@ -16,7 +16,8 @@
  *   保持すると「キューから消えたのに古い本文で合成する」経路ができる。
  */
 
-import { TtsHttpError } from "../tts/voicevoxClient";
+import { TtsHttpError } from "../tts/ttsEngine";
+import type { TtsEngineKind } from "../core/config";
 
 /**
  * 合成できなかった。`httpServer` が 503 に落とすために型で区別する。
@@ -68,9 +69,11 @@ export interface AudioStoreDeps {
  *   `ttsSpeedScale`（#76）はこれを踏みかけた —— 話者は入っていたが速度は入っていなかった。
  */
 export interface Voice {
+  /** どの API 契約で叩くか（→ `tts/ttsEngine.ts`）。`baseUrl` は同じでも解釈が変わる */
+  engine: TtsEngineKind;
   baseUrl: string;
-  speakerId: number;
-  /** 話速。`audio_query` の `speedScale` に載る（→ `tts/voicevoxClient.ts`） */
+  speakerId: string;
+  /** 話速。エンジンへの渡し方は各クライアントが決める（→ `tts/`） */
   speedScale: number;
 }
 
@@ -112,8 +115,10 @@ const DEFAULT_MAX_IN_FLIGHT = 8;
 
 function keyFor(voice: Voice, epoch: string, seq: number): string {
   // ★ 声をキーに混ぜること。`ttsSpeakerId` を直しても、LRU にいる分は古い声のまま返る
-  // ★ `speedScale` も同じ理由で混ぜる（#76）。**`Voice` にフィールドを足したらここにも足す**
-  return `${voice.baseUrl}|${voice.speakerId}|${voice.speedScale}|${epoch}:${seq}`;
+  // ★ `speedScale` も同じ理由で混ぜる（#76）。`engine` も同じ理由（#106。ttsBaseUrl はエンジンを
+  //   跨いで同じ値になりうるので、これが無いと切り替え直後に別エンジンの WAV が返りうる）。
+  //   **`Voice` にフィールドを足したらここにも足す**
+  return `${voice.engine}|${voice.baseUrl}|${voice.speakerId}|${voice.speedScale}|${epoch}:${seq}`;
 }
 
 export function createAudioStore(deps: AudioStoreDeps): AudioStore {

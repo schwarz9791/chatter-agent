@@ -161,19 +161,21 @@ function createDefaultConfig() {
 		spoolMaxAgeHours: 6,
 		allowedOrigins: [],
 		ttsEnabled: true,
+		ttsEngine: "voicevox",
 		ttsBaseUrl: "http://127.0.0.1:10101",
-		ttsSpeakerId: 888753760,
+		ttsSpeakerId: "888753760",
 		ttsSpeedScale: 1,
 		synthesisTimeoutMs: 3e4,
 		ttsSpawn: true,
 		ttsSpawnCommand: "",
 		ttsSpawnArgs: [],
+		kokoroDir: "",
 		synthesisLookahead: 3,
 		audioFetchTimeoutMs: 45e3,
 		playerCommand: "afplay",
 		playerArgs: ["{file}"],
 		playerServerUrl: "",
-		speechMaxAgeMs: 0,
+		speechMaxAgeMs: 6e4,
 		aiSummaryEnabled: true,
 		aiSummaryBackend: "fm",
 		aiSummaryThreshold: 200,
@@ -284,6 +286,26 @@ function makeRangeParser(min, max) {
 	};
 }
 const parseSpeedScale = makeRangeParser(.5, 2);
+/**
+* `ttsSpeakerId` 専用。VOICEVOX 系（数値のスタイル ID）と Kokoro のような OpenAI 互換
+* エンジン（`af_heart` のような英字の声 ID）の両方を、1つの文字列キーで受ける。
+*
+* - 非負整数（`number` でも、数字だけの文字列でも）→ `String(n)` に正規化する
+*   （前後の空白や桁の表記ゆれを1つの形に揃える）
+* - それ以外の非空文字列 → trim してそのまま通す（英字の声 ID はここを通る）
+* - 負の数・空文字・空白だけの文字列は既定値に倒す
+*/
+const parseSpeakerId = (raw) => {
+	if (typeof raw === "number") return Number.isInteger(raw) && raw >= 0 ? String(raw) : void 0;
+	if (typeof raw !== "string") return void 0;
+	const trimmed = raw.trim();
+	if (!trimmed) return void 0;
+	if (/^\d+$/.test(trimmed)) {
+		const n = Number(trimmed);
+		if (Number.isSafeInteger(n)) return String(n);
+	}
+	return trimmed;
+};
 const parseNonEmptyString = (raw) => typeof raw === "string" && raw.trim() ? raw.trim() : void 0;
 const parseStringList = (raw) => {
 	let items;
@@ -358,17 +380,19 @@ function makeUrlParser(protocols) {
 	};
 }
 /**
-* `aiSummaryModel` 専用。**空文字を「指定なし」として通す唯一のパーサ。**
+* 空文字も含めて、文字列ならそのまま（trim して）通す共通パーサ。
 *
-* ★ `parseNonEmptyString` に統一したくなるが、ここだけは空に意味がある
-*   （`--model` を渡さず要約 CLI 自身の既定モデルに従う、という指定）。`parsePlayerArgs` が
-*   空入力を弾いているのは逆に「空だと `afplay` が引数なしで起動し全文が無音になる」事故を
-*   防ぐためで、両者は「空を落とし穴として扱う」点で対称なだけで、結論（空を通すか弾くか）は
+* ★ `parseNonEmptyString` に統一したくなるが、ここを使うキーは**空にも意味がある**——
+*   `aiSummaryModel`（`--model` を渡さず要約 CLI 自身の既定モデルに従う）と
+*   `kokoroDir`（未設定なら Kokoro を起こさない）。空を「不正値」として既定へ倒すと、
+*   どちらも意図した「指定なし」の状態に戻せなくなる。`parsePlayerArgs` が空入力を弾くのは
+*   逆に「空だと `afplay` が引数なしで起動し全文が無音になる」事故を防ぐためで、
+*   両者は「空を落とし穴として扱う」点で対称なだけで、結論（空を通すか弾くか）は
 *   キーごとの意味に従って逆になる。
-*   trim だけはする（`CHATTER_AGENT_AI_SUMMARY_MODEL=" haiku "` のような値がそのまま
-*   `--model` の引数に渡らないように。`parseNonEmptyString` と同じ理由）。
+*   trim だけはする（前後の空白がそのままコマンドの引数やパスに渡らないように。
+*   `parseNonEmptyString` と同じ理由）。
 */
-const parseAiSummaryModel = (raw) => typeof raw === "string" ? raw.trim() : void 0;
+const parseOptionalString = (raw) => typeof raw === "string" ? raw.trim() : void 0;
 /**
 * 列挙値のパーサを作る。**パーサを複製しない規約**（→下の SPECS の docstring）に沿って、
 * 「既知の値ちょうどの文字列だけを通す」パーサをここ1箇所から生成する。
@@ -382,6 +406,7 @@ const parseEmotionClassifier = makeEnumParser([
 	"fm",
 	"dictionary"
 ]);
+const parseTtsEngine = makeEnumParser(["voicevox", "openai"]);
 /**
 * キーの定義。satisfies で ChatterAgentConfig の全キーを網羅していることを型で担保する
 * （satisfies は型のみなので erasableSyntaxOnly に抵触しない）。
@@ -420,13 +445,17 @@ const SPECS = {
 		env: "CHATTER_AGENT_TTS_ENABLED",
 		parse: parseBoolean
 	},
+	ttsEngine: {
+		env: "CHATTER_AGENT_TTS_ENGINE",
+		parse: parseTtsEngine
+	},
 	ttsBaseUrl: {
 		env: "CHATTER_AGENT_TTS_URL",
 		parse: makeUrlParser(["http:", "https:"])
 	},
 	ttsSpeakerId: {
 		env: "CHATTER_AGENT_TTS_SPEAKER_ID",
-		parse: parseNonNegativeInt
+		parse: parseSpeakerId
 	},
 	ttsSpeedScale: {
 		env: "CHATTER_AGENT_TTS_SPEED_SCALE",
@@ -447,6 +476,10 @@ const SPECS = {
 	ttsSpawnArgs: {
 		env: "CHATTER_AGENT_TTS_SPAWN_ARGS",
 		parse: parseStringList
+	},
+	kokoroDir: {
+		env: "CHATTER_AGENT_KOKORO_DIR",
+		parse: parseOptionalString
 	},
 	synthesisLookahead: {
 		env: "CHATTER_AGENT_SYNTHESIS_LOOKAHEAD",
@@ -490,7 +523,7 @@ const SPECS = {
 	},
 	aiSummaryModel: {
 		env: "CHATTER_AGENT_AI_SUMMARY_MODEL",
-		parse: parseAiSummaryModel
+		parse: parseOptionalString
 	},
 	aiSummaryTimeoutMs: {
 		env: "CHATTER_AGENT_AI_SUMMARY_TIMEOUT_MS",

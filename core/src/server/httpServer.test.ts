@@ -3,8 +3,8 @@ import * as http from "http";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { createAudioStore } from "./audioStore";
-import { TtsHttpError } from "../tts/voicevoxClient";
+import { createAudioStore, type Voice } from "./audioStore";
+import { TtsHttpError } from "../tts/ttsEngine";
 import { createHttpServer, type HttpServerDeps } from "./httpServer";
 import type { AssetCatalog } from "./assetCatalog";
 import type { ControlApi, ControlResponse } from "./controlApi";
@@ -47,7 +47,7 @@ function record(seq: number, text = `文${seq}。`, epoch = EPOCH): SpeechRecord
   };
 }
 
-const VOICE = { baseUrl: "http://127.0.0.1:10101", speakerId: 888753760, speedScale: 1.0 };
+const VOICE: Voice = { engine: "voicevox", baseUrl: "http://127.0.0.1:10101", speakerId: "888753760", speedScale: 1.0 };
 
 function wavOf(bytes: number): ArrayBuffer {
   return new ArrayBuffer(bytes);

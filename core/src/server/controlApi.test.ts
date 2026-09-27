@@ -41,7 +41,7 @@ const stubAssetCatalog: AssetCatalog = { manifest: () => [], resolve: () => null
 function api(overrides: Partial<ControlApiDeps> = {}) {
   return createControlApi({
     config: store(),
-    listSpeakers: () => Promise.resolve([{ id: 1, label: "話者（ノーマル）" }]),
+    listSpeakers: () => Promise.resolve([{ id: "1", label: "話者（ノーマル）" }]),
     synthesizePreview: () => Promise.resolve(new ArrayBuffer(44)),
     summaryPreview: {
       getBackend: () => "claude",
@@ -83,7 +83,7 @@ describe("GET /v1/speakers", () => {
   it("話者一覧を返す", async () => {
     const res = await api().speakers();
     expect(res.status).toBe(200);
-    expect(body(res)).toEqual({ speakers: [{ id: 1, label: "話者（ノーマル）" }] });
+    expect(body(res)).toEqual({ speakers: [{ id: "1", label: "話者（ノーマル）" }] });
   });
 
   /**
@@ -109,7 +109,7 @@ describe("GET /v1/config", () => {
 
     expect(value.defaults).toEqual(createDefaultConfig());
     // 書かれている値ではなく既定値であること
-    expect(value.defaults.ttsSpeakerId).not.toBe(3);
+    expect(value.defaults.ttsSpeakerId).not.toBe("3");
   });
 
   it("values / origins / writable を返す", () => {
@@ -122,7 +122,7 @@ describe("GET /v1/config", () => {
     }>(res);
 
     expect(res.status).toBe(200);
-    expect(value.values.ttsSpeakerId).toBe(3);
+    expect(value.values.ttsSpeakerId).toBe("3");
     expect(value.values.ttsSpeedScale).toBe(1.5);
     expect(value.origins.ttsSpeakerId).toBe("file");
     expect(value.origins.ttsSpeedScale).toBe("env");
@@ -145,13 +145,14 @@ describe("PATCH /v1/config", () => {
   it("★★ config.json の未知キーを消さない", () => {
     write({ futureKey: "残す", ttsSpeakerId: 1 });
     api().patchConfig({ ttsSpeakerId: 2 });
-    expect(readFile()).toEqual({ futureKey: "残す", ttsSpeakerId: 2 });
+    // ★ 書くのは `parseConfigValue` が正規化した値（数値→文字列。→ `core/config.ts`）
+    expect(readFile()).toEqual({ futureKey: "残す", ttsSpeakerId: "2" });
   });
 
   it("ファイルが無くても新規作成できる", () => {
     expect(fs.existsSync(filePath)).toBe(false);
     expect(api().patchConfig({ ttsSpeakerId: 7 }).status).toBe(200);
-    expect(readFile()).toEqual({ ttsSpeakerId: 7 });
+    expect(readFile()).toEqual({ ttsSpeakerId: "7" });
   });
 
   /**

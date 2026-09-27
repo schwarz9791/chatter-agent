@@ -1,5 +1,6 @@
 /**
- * 合成エンジン（AivisSpeech-Engine の `run`）を起こして、サーバーと道連れで落とす（[#51]）。
+ * 合成エンジン（AivisSpeech-Engine の `run`、または Kokoro-FastAPI の `uvicorn`）や
+ * Ollaya を起こして、サーバーと道連れで落とす（[#51]）。
  *
  * **`server/index.ts` は配線と終了処理しか置かない**方針なので、判断はここに出す
  * （`dispatcher.ts` / `audioStore.ts` と同じ理由 → docs/core.md）。`index.ts` には
@@ -47,8 +48,27 @@ export interface EngineSpawnPlan {
    *   `OLLAYA_HOST`（`host:port` 形式）でしか bind 先を指定できない。AivisSpeech
    *   （`args` で `--host`/`--port` を渡す）とは起こし方が違うので、`args` を汚さずここで
    *   分けて持つ。
+   *
+   * ★ Kokoro 用（`resolveKokoroSpawn`）でも使う。`PYTHONPATH` / `MODEL_DIR` などを渡す。
    */
   env?: Record<string, string>;
+  /**
+   * 起こすときのカレントディレクトリ。省略時は `startEngine` を呼んだプロセスの cwd を継承する
+   * （Node の `spawn` の既定と同じ）。
+   *
+   * ★ Kokoro 用。Kokoro-FastAPI は clone したディレクトリで実行される前提で、
+   *   `PYTHONPATH` などをそこからの相対で組んでいる（→ `resolveKokoroSpawn`）。
+   */
+  cwd?: string;
+  /**
+   * 起こす前に出しておきたい警告。**帰結（503 になる等）を知らない呼び出し側にも
+   * そのまま出させるためのもの**（`describeEngineSkip` と同じ役回りだが、こちらは
+   * 「起こしはする」プラン側に付く警告）。
+   *
+   * ★ Kokoro 用。espeak-ng のデータが見つからないと、spawn 自体はするが起動の途中で落ちる
+   *   （→ `resolveKokoroSpawn`）。
+   */
+  warnings?: string[];
 }
 
 /**
@@ -59,7 +79,9 @@ export interface EngineSpawnPlan {
 export type EngineSpawnSkip =
   | { skip: "not-loopback"; host: string }
   | { skip: "not-http"; protocol: string }
-  | { skip: "not-found"; tried: string[] };
+  | { skip: "not-found"; tried: string[] }
+  /** `kokoroDir` が空。AivisSpeech と違って既知の候補が無いので、未設定は「起こさない」の意味 */
+  | { skip: "not-configured" };
 
 export type EngineSpawnResolution = EngineSpawnPlan | EngineSpawnSkip;
 
@@ -203,6 +225,106 @@ export function resolveOllayaSpawn(deps: ResolveOllayaSpawnDeps): EngineSpawnRes
   return { command: resolved, args: OLLAYA_ARGS, env: { OLLAYA_HOST: `${url.hostname}:${port}` } };
 }
 
+/** 固定のコマンド名。導入済みの `uv` を PATH から解決する（`ttsSpawnCommand` のような差し替えの口は無い） */
+const UV_COMMAND = "uv";
+
+/**
+ * espeak-ng のデータの既知の置き場所。Apple Silicon の brew → Intel Mac の brew → Linux の順。
+ *
+ * ★ 依存の `espeakng-loader` は、ビルドしたマシンのパスにあるデータを既定で探しにいくため、
+ *   `ESPEAK_DATA_PATH` を渡さないと起動の途中で落ちる。
+ */
+const ESPEAK_DATA_CANDIDATES = [
+  "/opt/homebrew/opt/espeak-ng/share/espeak-ng-data",
+  "/usr/local/opt/espeak-ng/share/espeak-ng-data",
+  "/usr/lib/x86_64-linux-gnu/espeak-ng-data",
+  "/usr/share/espeak-ng-data",
+];
+
+export interface ResolveKokoroSpawnDeps {
+  /** `ttsBaseUrl`。`makeUrlParser` を通っているので必ず妥当な絶対 URL */
+  baseUrl: string;
+  /** `kokoroDir`。空なら起こさない */
+  kokoroDir: string;
+  /** テスト用。既定 `fs.existsSync` */
+  exists?: (filePath: string) => boolean;
+  /** テスト用。既定 `os.homedir()` */
+  homeDir?: string;
+  /** テスト用。既定 `process.env` */
+  env?: NodeJS.ProcessEnv;
+  /** テスト用。既定 `process.platform` */
+  platform?: NodeJS.Platform;
+}
+
+/**
+ * Kokoro-FastAPI（`ttsEngine: "openai"`）を起こすプランを決める**純関数**
+ * （`resolveEngineSpawn` / `resolveOllayaSpawn` の Kokoro 版）。
+ *
+ * ★ **起動スクリプト（`start-*.sh`）を通さない。** 毎回 `uv pip install -e .` とモデルの
+ *   確認（済んでいれば確認だけ）が走り、ネットワークに触れて起動が数秒延びる。導入は
+ *   ユーザーが済ませてある前提で、次の uvicorn を直接起こす:
+ *   `cwd=<kokoroDir>`, `uv run --no-sync uvicorn api.src.main:app --host <host> --port <port>`。
+ *
+ * ★ **環境変数の表はここが権威。** Kokoro-FastAPI 側の起動スクリプトが変わるとずれうる。
+ *
+ * ★ **`--host` は必ず渡す。** 既定の `0.0.0.0` のまま起こすと LAN に公開される
+ *   （`buildArgs` / `resolveOllayaSpawn` と同じ判断）。
+ */
+export function resolveKokoroSpawn(deps: ResolveKokoroSpawnDeps): EngineSpawnResolution {
+  const exists = deps.exists ?? fs.existsSync;
+  const homeDir = deps.homeDir ?? os.homedir();
+  const env = deps.env ?? process.env;
+  const platform = deps.platform ?? process.platform;
+
+  const url = new URL(deps.baseUrl);
+  if (!isLoopback(url.hostname)) return { skip: "not-loopback", host: url.hostname };
+  if (url.protocol !== "http:") return { skip: "not-http", protocol: url.protocol };
+
+  // ★ AivisSpeech と違って既知のインストール先が無い。未設定は「起こさない」の意味
+  if (!deps.kokoroDir) return { skip: "not-configured" };
+
+  const dir = deps.kokoroDir.startsWith("~/") ? path.join(homeDir, deps.kokoroDir.slice("~/".length)) : deps.kokoroDir;
+  if (!exists(dir)) return { skip: "not-found", tried: [dir] };
+
+  const uv = findCommandPath(UV_COMMAND, { homeDir, env });
+  if (uv === undefined) return { skip: "not-found", tried: searchedPaths(UV_COMMAND, env) };
+
+  const { host, port } = hostAndPort(url);
+
+  const kokoroEnv: Record<string, string> = {
+    PYTHONPATH: `${dir}${path.delimiter}${path.join(dir, "api")}`,
+    MODEL_DIR: "src/models",
+    VOICES_DIR: "src/voices/v1_0",
+    WEB_PLAYER_PATH: path.join(dir, "web"),
+  };
+  if (platform === "darwin") {
+    kokoroEnv.USE_GPU = "true";
+    kokoroEnv.DEVICE_TYPE = "mps";
+    kokoroEnv.PYTORCH_ENABLE_MPS_FALLBACK = "1";
+  } else {
+    kokoroEnv.USE_GPU = "false";
+  }
+
+  const warnings: string[] = [];
+  const espeakDataDir = ESPEAK_DATA_CANDIDATES.find((candidate) => exists(path.join(candidate, "phontab")));
+  if (espeakDataDir !== undefined) {
+    kokoroEnv.ESPEAK_DATA_PATH = espeakDataDir;
+  } else {
+    warnings.push(
+      `${LOG_PREFIX} espeak-ng のデータが見つかりません（brew install espeak-ng）。Kokoro は起動の途中で落ちます。探した場所:`,
+      ...ESPEAK_DATA_CANDIDATES.map((candidate) => `${LOG_PREFIX}${ITEM_INDENT}${candidate}`),
+    );
+  }
+
+  return {
+    command: uv,
+    args: ["run", "--no-sync", "uvicorn", "api.src.main:app", "--host", host, "--port", port],
+    cwd: dir,
+    env: kokoroEnv,
+    ...(warnings.length > 0 ? { warnings } : {}),
+  };
+}
+
 /**
  * `not-found` のときに「どこを探したか」を返す。
  *
@@ -217,19 +339,29 @@ function searchedPaths(command: string, env: NodeJS.ProcessEnv): string[] {
   return dirs.map((dir) => path.join(dir, command));
 }
 
+/**
+ * `--host` / `--port` に渡す値を URL から導出する。`buildArgs` と `resolveKokoroSpawn` の
+ * 両方が使う（Kokoro-FastAPI も uvicorn 系なので、host/port の作法は同じ）。
+ *
+ * ★ 角括弧を必ず外す。`hostname` は IPv6 を `[::1]` で返すが、uvicorn 系の `--host` は
+ *   角括弧なしを期待し、`[::1]` を渡すと bind に失敗する。
+ * ★ ポート省略（`http://127.0.0.1`）だと `url.port` は空文字。そのまま渡すと壊れるので
+ *   `http:` の既定に落とす（ここに来る時点でスキームは `http:` に絞ってある）。
+ *   80 は非 root で bind できないが、その失敗は exit コードと stderr の末尾としてログに出る
+ *   （下の `startEngine`）ので、原因が症状に出る。
+ */
+function hostAndPort(url: URL): { host: string; port: string } {
+  const host = url.hostname.replace(/^\[|\]$/g, "");
+  const port = url.port || DEFAULT_HTTP_PORT;
+  return { host, port };
+}
+
 function buildArgs(args: readonly string[], url: URL): string[] {
   // ★ 指定があるなら**置換**（`--host` / `--port` を足さない）。「足りない分だけ補う」形は
   //   賢すぎて挙動が読めない。上書きするなら全部自分で書いてもらう
   if (args.length > 0) return [...args];
 
-  // ★ 角括弧を必ず外す。`hostname` は IPv6 を `[::1]` で返すが、uvicorn 系の `--host` は
-  //   角括弧なしを期待し、`[::1]` を渡すと bind に失敗する
-  const host = url.hostname.replace(/^\[|\]$/g, "");
-  // ★ ポート省略（`http://127.0.0.1`）だと `url.port` は空文字。そのまま渡すと壊れるので
-  //   `http:` の既定に落とす（ここに来る時点でスキームは `http:` に絞ってある）。
-  //   80 は非 root で bind できないが、その失敗は exit コードと stderr の末尾としてログに出る
-  //   （下の `startEngine`）ので、原因が症状に出る
-  const port = url.port || DEFAULT_HTTP_PORT;
+  const { host, port } = hostAndPort(url);
   return ["--host", host, "--port", port];
 }
 
@@ -280,6 +412,10 @@ export function describeEngineSkip(skip: EngineSpawnSkip, subject = "合成エ�
         `${LOG_PREFIX} ファイルが在っても実行ビット（chmod +x）が無いと候補から外れます`,
       ];
     }
+
+    case "not-configured":
+      // ★ 「起こせません」で揃える。verify-tts の否定検査はこの語で全変種を拾っている
+      return [`${LOG_PREFIX} kokoroDir が未設定なので${subject}を起こせません`];
   }
 }
 
@@ -360,8 +496,11 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
     detached: true,
     // ★ `plan.env` が無ければ `undefined` のまま渡す。Node は `options.env` を省略すると
     //   `process.env` をそのまま継承するので、AivisSpeech（env を持たない）の挙動は変わらない。
-    //   Ollaya（`OLLAYA_HOST` を渡す必要がある）だけがここで `process.env` に重ねる
+    //   Ollaya（`OLLAYA_HOST` を渡す必要がある）・Kokoro だけがここで `process.env` に重ねる
     env: plan.env ? { ...process.env, ...plan.env } : undefined,
+    // ★ `plan.cwd` が無ければ `undefined` のまま渡す（Node は自分の cwd を継承する）。
+    //   Kokoro-FastAPI だけが clone したディレクトリを cwd として要る
+    cwd: plan.cwd,
   });
 
   let exited = false;

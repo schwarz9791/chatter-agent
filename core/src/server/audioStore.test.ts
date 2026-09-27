@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import { createAudioStore, SynthesisUnavailableError } from "./audioStore";
+import { createAudioStore, SynthesisUnavailableError, type Voice } from "./audioStore";
 
-const VOICE = { baseUrl: "http://127.0.0.1:10101", speakerId: 888753760, speedScale: 1.0 };
+const VOICE: Voice = { engine: "voicevox", baseUrl: "http://127.0.0.1:10101", speakerId: "888753760", speedScale: 1.0 };
 
 function wav(bytes: number): ArrayBuffer {
   return new ArrayBuffer(bytes);
@@ -143,10 +143,10 @@ describe("createAudioStore", () => {
     expect(synthesize).toHaveBeenCalledTimes(1);
 
     // 設定を直した。LRU に残っている古い声をそのまま返してはいけない
-    voice = { ...VOICE, speakerId: 1 };
+    voice = { ...VOICE, speakerId: "1" };
     await store.get("g", 1, "あ。");
     expect(synthesize).toHaveBeenCalledTimes(2);
-    expect(synthesize).toHaveBeenLastCalledWith("あ。", { ...VOICE, speakerId: 1 });
+    expect(synthesize).toHaveBeenLastCalledWith("あ。", { ...VOICE, speakerId: "1" });
   });
 
   /**
@@ -166,6 +166,25 @@ describe("createAudioStore", () => {
     await store.get("g", 1, "あ。");
     expect(synthesize).toHaveBeenCalledTimes(2);
     expect(synthesize).toHaveBeenLastCalledWith("あ。", { ...VOICE, speedScale: 1.5 });
+  });
+
+  /**
+   * ★★ #106。`ttsBaseUrl` はエンジンを跨いで同じ値になりうる（既定値を変えずに
+   *   `ttsEngine` だけ切り替えた直後など）ので、`engine` が無いとそこで別エンジンの
+   *   WAV が LRU に残ったまま返る。`Voice` にフィールドを足したら `keyFor` にも足すこと
+   */
+  it("★★ engine が変わればキャッシュに当たらない（voicevox と openai を切り替えても混線しない）", async () => {
+    let voice = VOICE;
+    const synthesize = vi.fn(() => Promise.resolve(wav(10)));
+    const store = createAudioStore({ currentVoice: () => voice, synthesize });
+
+    await store.get("g", 1, "あ。");
+    expect(synthesize).toHaveBeenCalledTimes(1);
+
+    voice = { ...VOICE, engine: "openai" };
+    await store.get("g", 1, "あ。");
+    expect(synthesize).toHaveBeenCalledTimes(2);
+    expect(synthesize).toHaveBeenLastCalledWith("あ。", { ...VOICE, engine: "openai" });
   });
 
   it("★ 声は1回だけ解決する（キーを決めた後に config が変わると、声Bの WAV が声Aのキーに入る）", async () => {

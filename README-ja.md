@@ -112,6 +112,7 @@ cd chatter-mascot
 
 - **Claude Code**
 - **[AivisSpeech](https://aivis-project.com/)** —— **インストールだけしておけば十分です。** 合成エンジンが動いていなければサーバーが起こし、サーバーを止めれば一緒に落ちます。手で起こすのは、別ホストのエンジンに繋ぐときと、**話者を増やすとき**（音声モデルの追加には GUI が要ります）。自動起動そのものを止めるなら `CHATTER_AGENT_TTS_SPAWN=0`
+- **音声合成エンジンは差し替え可能です**（`ttsEngine`）。既定は AivisSpeech（VOICEVOX 互換）ですが、日本語以外の言語には **[Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI)**（OpenAI 互換）も使えます。導入手順は [`docs/kokoro.md`](./docs/kokoro.md)
 - **macOS** —— 表示側アプリは macOS と Android XR 向けで、再生コマンドの既定は `afplay`、合成エンジンの自動探索も macOS のパスしか見ません。Linux / Windows では、CLI プレーヤーに `CHATTER_AGENT_PLAYER_COMMAND` で再生コマンドを指定してください
 - **要約（任意）** —— 長い発言を短く整えてから読み上げます。既定は `fm`（macOS 27 以降に入っている Apple Foundation Models CLI）。使えない環境（macOS 27 未満・Linux・Windows）では原文がそのまま読み上げられます。`aiSummaryBackend` を `claude`（`claude -p`）に切り替えることもできます
 - **感情判定（任意）** —— 発話ごとに表情を選びます。既定は **[Ollaya](https://ollaya.dev/)**（ローカルで動く decision model）で、`ollaya pull laya:multilingual` で一度モデルを取得しておけば、以後は AivisSpeech と同じく居なければサーバーが起こします。導入していない・繋がらないときは辞書式の判定にフォールバックするので、無くても発話は止まりません。`emotionClassifier` で `fm` や `dictionary`（従来の辞書式）にも切り替えられます
@@ -239,11 +240,12 @@ cd chatter-mascot
 | [`docs/plugin.md`](./docs/plugin.md) | `plugin/` を触るとき |
 | [`docs/mascot.md`](./docs/mascot.md) | 表示側アプリを触るとき |
 | [`docs/origin.md`](./docs/origin.md) | cc-mascot 由来のコードを触るとき |
+| [`docs/kokoro.md`](./docs/kokoro.md) | Kokoro-FastAPI（日本語以外向けの TTS）を使うとき |
 | [`docs/knowledge/`](./docs/knowledge) | 実装で踏んだこと・なぜそうしたか・実測値 |
 
 ## ロードマップ
 
-- 多言語対応 —— TTS を差し替えられるようにする / 辞書ベースの感情判定をやめる
+- 多言語対応 —— 文分割・要約・感情判定を日本語以外にも対応させる（TTS の差し替えは対応済み。→ [`docs/kokoro.md`](./docs/kokoro.md)）
 - Claude 以外のコーディングエージェントへの対応
 - XR 空間である程度動き回る対応、空間アンカー対応
 - CI 整備と各種アプリストアへの配信

@@ -360,7 +360,7 @@ Ordinal 昇順に並ぶ。
 
 ```
 GET   /v1/health           200 {"ok":true,"version":"0.1.0"}
-GET   /v1/speakers         200 {"speakers":[{"id":888753760,"label":"Anneli（ノーマル）"}]}
+GET   /v1/speakers         200 {"speakers":[{"id":"888753760","label":"Anneli（ノーマル）"}]}
                            503 {"error":"engine_unreachable","detail":"…"}
 GET   /v1/config           200 {"values":{…},"origins":{…},"writable":[…],"defaults":{…}}
 PATCH /v1/config           200 {"values":{…},"origins":{…}}   ← 適用後に読み直した値
@@ -413,9 +413,9 @@ LAN からなら `GET, HEAD, OPTIONS` を返す。
 
 | キー | 理由 |
 |---|---|
-| `ttsSpawnCommand` / `ttsSpawnArgs` / `playerCommand` / `playerArgs` / `aiSummaryCommand` | **(a) コマンド実行に繋がる。** ループバック限定でも「設定を1行書き換えるだけで任意コマンド実行」は別格の壊れ方をする。**緩めないこと** |
-| `host` / `port` / `allowedOrigins` | **(b) 効かない。** 再起動まで反映されないので、UI から触れる意味が無いうえに「効かない設定」という最悪の見え方になる |
-| `ttsBaseUrl` | **(c) 本文の外部送信路になる。** 書き換えると以後**全メッセージ本文**がそのホストの `/audio_query` へ POST される（`currentVoice()` は毎回読み直すので**再起動も要らない**）。しかも音が鳴らなくなるだけなので、**症状は「無音」だけ**で気付けない。**緩めないこと** |
+| `ttsSpawnCommand` / `ttsSpawnArgs` / `playerCommand` / `playerArgs` / `aiSummaryCommand` / `kokoroDir` | **(a) コマンド実行に繋がる。** ループバック限定でも「設定を1行書き換えるだけで任意コマンド実行」は別格の壊れ方をする。`kokoroDir` は `cwd` として Kokoro-FastAPI の起動に渡るので、`ttsSpawnCommand` と同じ壊れ方をする。**緩めないこと** |
+| `host` / `port` / `allowedOrigins` / `ttsEngine` | **(b) 効かない。** 再起動まで反映されないので、UI から触れる意味が無いうえに「効かない設定」という最悪の見え方になる。`ttsEngine` は、起こすかどうかの判断が起動時の1回きりのため —— 切り替えても次の合成の宛先だけが変わり、spawn の判断はやり直されない |
+| `ttsBaseUrl` | **(c) 本文の外部送信路になる。** 書き換えると以後**全メッセージ本文**がそのホストの合成 API（`ttsEngine` が `"voicevox"` なら `/audio_query`、`"openai"` なら `/v1/audio/speech`）へ POST される（`currentVoice()` は毎回読み直すので**再起動も要らない**）。しかも音が鳴らなくなるだけなので、**症状は「無音」だけ**で気付けない。**緩めないこと** |
 | `ollayaBaseUrl` | **(c) 本文の外部送信路になる。** `ttsBaseUrl` と同じ理由。感情判定が `"ollaya"` のとき、以後**全メッセージ本文**がそのホストの `/v1/systemone` へ POST される。**緩めないこと**（issue #107） |
 
 ★ **`defaults` は既定値そのもの**（`createDefaultConfig()`）。設定 UI の「すべての設定をリセット」が

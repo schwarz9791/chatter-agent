@@ -207,6 +207,7 @@ cd chatter-mascot
 | [`docs/plugin.md`](./docs/plugin.md) | `plugin/` を触るとき。bash hook の制約、spool 命名、`hooks.json` の3種 |
 | [`docs/mascot.md`](./docs/mascot.md) | `chatter-mascot/` を触るとき。セットアップ、構成、探索順、ビルドと実行 |
 | [`docs/origin.md`](./docs/origin.md) | cc-mascot 由来のコードを触るとき。移植の対応表、フォーク点、ライセンス義務 |
+| [`docs/kokoro.md`](./docs/kokoro.md) | Kokoro-FastAPI（`ttsEngine: "openai"`。日本語以外向けの TTS）を使うとき |
 | [`docs/knowledge/`](./docs/knowledge) | **踏んだこと・なぜそうしたか・実測値。** 同じ罠に2度目で刺されないため |
 | `_workspace/chatter-agent-design.md` | 着手前の検討記録（git 管理外）。**基本設計の正は `docs/` 側** |
 

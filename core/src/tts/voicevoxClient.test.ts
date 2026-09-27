@@ -7,15 +7,8 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as http from "http";
 import type { AddressInfo } from "net";
-import {
-  applySpeedScale,
-  createVoicevoxClient,
-  flattenStyles,
-  hasStyle,
-  TtsHttpError,
-  TtsTransportError,
-} from "./voicevoxClient";
-import type { Speaker } from "./voicevoxClient";
+import { applySpeedScale, createVoicevoxEngine } from "./voicevoxClient";
+import { TtsHttpError, TtsTransportError } from "./ttsEngine";
 
 type Handler = (req: http.IncomingMessage, res: http.ServerResponse) => void;
 
@@ -36,7 +29,7 @@ async function serve(handler: Handler): Promise<string> {
 }
 
 function client(baseUrl: string, timeoutMs = 2000) {
-  return createVoicevoxClient({ baseUrl, speakerId: 888753760, timeoutMs });
+  return createVoicevoxEngine({ baseUrl, voiceId: "888753760", timeoutMs });
 }
 
 /** 一度 listen して即閉じ、確実に誰もいないポートを得る */
@@ -51,7 +44,7 @@ async function closedPort(): Promise<number> {
 /** RIFF/WAVE の最小ヘッダ。`synthesize` が中身を検証するので4バイトでは足りない */
 const WAV_HEAD = Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WAVE")]);
 
-const SPEAKERS: Speaker[] = [
+const SPEAKERS = [
   { name: "Anneli", speaker_uuid: "u1", styles: [{ id: 888753760, name: "ノーマル" }] },
   { name: "つくよみちゃん", speaker_uuid: "u2", styles: [{ id: 1, name: "れいせい" }] },
 ];
@@ -77,7 +70,7 @@ describe("synthesize", () => {
     const wav = await client(baseUrl).synthesize("こんにちは。");
     expect(Buffer.from(wav).subarray(0, 4).toString("latin1")).toBe("RIFF");
 
-    // text はクエリ文字列、speaker も両方に載る
+    // text はクエリ文字列、voiceId（speaker）も両方に載る
     expect(seen[0].url).toBe(`/audio_query?text=${encodeURIComponent("こんにちは。")}&speaker=888753760`);
     expect(seen[0].body).toBe("");
     expect(seen[1].url).toBe("/synthesis?speaker=888753760");
@@ -115,7 +108,7 @@ describe("synthesize", () => {
 
   it("繋がらない相手も例外になる", async () => {
     // 誰も listen していないポート
-    const dead = createVoicevoxClient({ baseUrl: "http://127.0.0.1:1", speakerId: 0, timeoutMs: 1000 });
+    const dead = createVoicevoxEngine({ baseUrl: "http://127.0.0.1:1", voiceId: "0", timeoutMs: 1000 });
     await expect(dead.synthesize("だれもいない。")).rejects.toThrow("audio_query に失敗しました");
   });
 
@@ -228,13 +221,25 @@ describe("失敗の診断（#49 のレビュー）", () => {
   });
 });
 
-describe("listSpeakers", () => {
-  it("話者の一覧を返す", async () => {
+describe("listVoices", () => {
+  it("話者 × スタイルの直積を、id を文字列にして返す", async () => {
     const baseUrl = await serve((_req, res) => {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(SPEAKERS));
     });
-    expect(await client(baseUrl).listSpeakers()).toEqual(SPEAKERS);
+    expect(await client(baseUrl).listVoices()).toEqual([
+      { id: "888753760", label: "Anneli（ノーマル）" },
+      { id: "1", label: "つくよみちゃん（れいせい）" },
+    ]);
+  });
+
+  it("styles が壊れていても落ちない", async () => {
+    const broken = [{ name: "x", speaker_uuid: "u", styles: undefined }];
+    const baseUrl = await serve((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(broken));
+    });
+    expect(await client(baseUrl).listVoices()).toEqual([]);
   });
 
   it("配列でなければ例外", async () => {
@@ -242,26 +247,7 @@ describe("listSpeakers", () => {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end('{"detail":"not found"}');
     });
-    await expect(client(baseUrl).listSpeakers()).rejects.toThrow("配列を返しませんでした");
-  });
-});
-
-describe("flattenStyles / hasStyle", () => {
-  it("話者 × スタイルの直積を作る", () => {
-    expect(flattenStyles(SPEAKERS)).toEqual([
-      { id: 888753760, label: "Anneli（ノーマル）" },
-      { id: 1, label: "つくよみちゃん（れいせい）" },
-    ]);
-  });
-
-  it("styles が壊れていても落ちない", () => {
-    const broken = [{ name: "x", speaker_uuid: "u", styles: undefined }] as unknown as Speaker[];
-    expect(flattenStyles(broken)).toEqual([]);
-  });
-
-  it("設定した話者 ID が実在するか判定できる", () => {
-    expect(hasStyle(SPEAKERS, 888753760)).toBe(true);
-    expect(hasStyle(SPEAKERS, 999)).toBe(false);
+    await expect(client(baseUrl).listVoices()).rejects.toThrow("配列を返しませんでした");
   });
 });
 

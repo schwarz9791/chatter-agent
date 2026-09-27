@@ -110,10 +110,10 @@ const PREVIEW_MIN_INTERVAL_MS = 1_000;
 export interface ControlApiDeps {
   config: ConfigStore;
   /**
-   * 話者一覧（`voicevoxClient.listSpeakers()` + `flattenStyles()`）。
+   * 話者一覧（`ttsFor(currentVoice()).listVoices()`）。
    * エンジンに繋がらなければ reject する。
    */
-  listSpeakers: () => Promise<{ id: number; label: string }[]>;
+  listSpeakers: () => Promise<{ id: string; label: string }[]>;
   /** 固定文を今の声で合成する。`audioStore` は通さない（キューに無い文なので `lookup` が引けない） */
   synthesizePreview: (text: string) => Promise<ArrayBuffer>;
   /** テスト要約（→ `summarizer/summaryPreview.ts`）。**同期の pipeline を呼ばないこと** */

@@ -1801,10 +1801,10 @@ function createFmEmotionClassifier(deps) {
 * Ollaya（ローカルの Jev 互換 decision model ランタイム、`ollaya.dev`）へ、1文ずつ
 * `/v1/systemone` の choice で問い合わせる感情分類器。
 *
-* ★ 6感情を1問の choice で聞く。感情ごとに独立に「乗っているか」を聞くと、neutral は
-*   平叙文でも低く出て、argmax（`pickEmotion`）ではまず選ばれない。
-* ★ 最上位の感情の確率が `NEUTRAL_FLOOR` に届かなければ neutral に倒す。人はいつも感情を
-*   表に出しているわけではないので、確信が持てないときの既定を neutral 側に置く。
+* ★ 2段階で聞く。1段目で `GROUP_A` と `GROUP_B` からそれぞれ1つ選ばせ、2段目でその2つと
+*   neutral から選ばせる。6感情を一度に選ばせるより、平叙文が surprised や sad に流れにくい。
+* ★ 2段目の最上位の確率が下限（`EMOTION_FLOOR`）に届かなければ neutral に倒す。人はいつも
+*   感情を表に出しているわけではないので、確信が持てないときの既定を neutral 側に置く。
 * ★ 判定基準（`CRITERIA`）は感情そのもの（嬉しい・驚き・詫び・苛立ち）を軸に書く。
 *   出来事の種類（「予期しない事実」等）で書くと、ただの説明文までその出来事の感情に
 *   引き寄せられる。
@@ -1828,12 +1828,24 @@ const CRITERIA = {
 	neutral: "No particular emotion: a routine progress report, plan, question, or plain explanation."
 };
 const EMOTION_QUESTION_INSTRUCTIONS = "Which emotion does this remark by a coding agent express?";
-/** 最上位の感情の確率がこれに届かなければ neutral として扱う。 */
-const NEUTRAL_FLOOR = .6;
+/** 1段目で比べさせる組。似た向きの感情どうしを先に比べさせ、勝者だけを neutral と比べる。 */
+const GROUP_A = [
+	"happy",
+	"angry",
+	"sad"
+];
+const GROUP_B = ["relaxed", "surprised"];
+/** 2段目の最上位の確率がこれに届かなければ neutral として扱う。 */
+const EMOTION_FLOOR = .8;
+/**
+* relaxed だけの下限。relaxed は穏やかで確率が高く出にくく、一方で誤っても neutral と
+* 見分けがつきにくい表情なので、他の感情より緩める。
+*/
+const RELAXED_FLOOR = .5;
 /**
 * 子プロセス（Node、CommonJS として `node -e` に渡す）の中で実行するスクリプト。
-* stdin から `{ texts, baseUrl, model }` を読み、stdout に `(Record<Emotion, number> | null)[]` を
-* JSON で書く。壊れた応答・接続エラーはその文だけ `null` にして続行する（1文の失敗で残りを
+* stdin から `{ texts, baseUrl, model }` を読み、stdout に `(Record<Emotion, number> | null)[]`
+* （2段目の確率。2段目に残らなかった感情は0）を JSON で書く。壊れた応答・接続エラーはその文だけ `null` にして続行する（1文の失敗で残りを
 * 諦めない）。
 *
 * ★ テンプレートリテラルの入れ子を避けるため、文字列連結だけで組んである（コード生成時の
@@ -1844,30 +1856,50 @@ const CHILD_SCRIPT = [
 	`const KEYS = ${JSON.stringify(EMOTION_KEYS)};`,
 	`const CRITERIA = ${JSON.stringify(CRITERIA)};`,
 	`const INSTRUCTIONS = ${JSON.stringify(EMOTION_QUESTION_INSTRUCTIONS)};`,
-	"function payloadFor(model, text) {",
-	"  return {",
-	"    model: model,",
-	"    state: text,",
-	"    questions: {",
-	"      emotion: { type: \"choice\", instructions: INSTRUCTIONS, criteria: CRITERIA },",
-	"    },",
-	"  };",
+	`const GROUP_A = ${JSON.stringify(GROUP_A)};`,
+	`const GROUP_B = ${JSON.stringify(GROUP_B)};`,
+	"function choice(keys) {",
+	"  const criteria = {};",
+	"  for (const k of keys) criteria[k] = CRITERIA[k];",
+	"  return { type: \"choice\", instructions: INSTRUCTIONS, criteria: criteria };",
 	"}",
-	"async function classifyOne(baseUrl, model, text) {",
+	"async function ask(baseUrl, model, text, questions) {",
 	"  const res = await fetch(baseUrl + \"/v1/systemone\", {",
 	"    method: \"POST\",",
 	"    headers: { \"Content-Type\": \"application/json\" },",
-	"    body: JSON.stringify(payloadFor(model, text)),",
+	"    body: JSON.stringify({ model: model, state: text, questions: questions }),",
 	"  });",
 	"  if (!res.ok) return null;",
 	"  const obj = await res.json();",
-	"  const probs = obj && obj.answers && obj.answers.emotion ? obj.answers.emotion.probabilities : undefined;",
-	"  if (typeof probs !== \"object\" || probs === null) return null;",
+	"  return obj && obj.answers ? obj.answers : null;",
+	"}",
+	"function probs(answer, keys) {",
+	"  const p = answer ? answer.probabilities : undefined;",
+	"  if (typeof p !== \"object\" || p === null) return null;",
+	"  for (const k of keys) {",
+	"    if (typeof p[k] !== \"number\") return null;",
+	"  }",
+	"  return p;",
+	"}",
+	"function top(p, keys) {",
+	"  let best = keys[0];",
+	"  for (const k of keys) {",
+	"    if (p[k] > p[best]) best = k;",
+	"  }",
+	"  return best;",
+	"}",
+	"async function classifyOne(baseUrl, model, text) {",
+	"  const first = await ask(baseUrl, model, text, { a: choice(GROUP_A), b: choice(GROUP_B) });",
+	"  const pa = probs(first && first.a, GROUP_A);",
+	"  const pb = probs(first && first.b, GROUP_B);",
+	"  if (!pa || !pb) return null;",
+	"  const finalKeys = [top(pa, GROUP_A), top(pb, GROUP_B), \"neutral\"];",
+	"  const second = await ask(baseUrl, model, text, { final: choice(finalKeys) });",
+	"  const pf = probs(second && second.final, finalKeys);",
+	"  if (!pf) return null;",
 	"  const scores = {};",
 	"  for (const k of KEYS) {",
-	"    const v = probs[k];",
-	"    if (typeof v !== \"number\") return null;",
-	"    scores[k] = v;",
+	"    scores[k] = finalKeys.indexOf(k) >= 0 ? pf[k] : 0;",
 	"  }",
 	"  return scores;",
 	"}",
@@ -1884,13 +1916,12 @@ const CHILD_SCRIPT = [
 	"  process.stdout.write(JSON.stringify(out));",
 	"})();"
 ].join("\n");
-/** neutral の確率を `NEUTRAL_FLOOR` まで底上げする。argmax がそのまま「届かなければ neutral」になる。 */
-function applyNeutralFloor(scores) {
-	if (scores === null || typeof scores.neutral !== "number") return scores;
-	return {
-		...scores,
-		neutral: Math.max(scores.neutral, NEUTRAL_FLOOR)
-	};
+/** 最上位の感情を選び、その確率が下限に届かなければ neutral にする。壊れていれば `null`。 */
+function pickWithFloor(scores) {
+	const top = pickEmotion(scores);
+	if (top === null || top === "neutral") return top;
+	const floor = top === "relaxed" ? RELAXED_FLOOR : EMOTION_FLOOR;
+	return scores[top] >= floor ? top : "neutral";
 }
 /**
 * `(texts: string[]) => Emotion[]` を作る。1文ずつ Ollaya に問い合わせるが、
@@ -1925,7 +1956,7 @@ function createOllayaEmotionClassifier(deps) {
 			return deps.fallback(texts);
 		}
 		if (!Array.isArray(parsed) || parsed.length !== texts.length) return deps.fallback(texts);
-		const emotions = parsed.map((scores) => pickEmotion(applyNeutralFloor(scores)));
+		const emotions = parsed.map((scores) => pickWithFloor(scores));
 		const brokenIndices = [];
 		emotions.forEach((e, i) => {
 			if (e === null) brokenIndices.push(i);

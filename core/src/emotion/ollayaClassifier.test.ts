@@ -62,6 +62,75 @@ describe("createOllayaEmotionClassifier（spawnSync を差し替えた単体テ�
     expect(fallback.calls).toHaveLength(0);
   });
 
+  it("happy 0.7（下限0.8未満）なら neutral にする", () => {
+    const scores = [{ happy: 0.7, relaxed: 0.1, surprised: 0.1, sad: 0.05, angry: 0.05, neutral: 0.0 }];
+    const fallback = makeFallback();
+    const classify = createOllayaEmotionClassifier({
+      getBaseUrl: () => "http://127.0.0.1:11435",
+      getModel: () => "laya:multilingual",
+      getTimeoutMs: () => 5000,
+      fallback: fallback.fn,
+      spawnSyncFn: (() => ({
+        pid: 1,
+        output: [],
+        stdout: JSON.stringify(scores),
+        stderr: "",
+        status: 0,
+        signal: null,
+        error: undefined,
+      })) as never,
+    });
+
+    expect(classify(["まあまあ嬉しいです。"])).toEqual(["neutral"]);
+    expect(fallback.calls).toHaveLength(0);
+  });
+
+  it("relaxed 0.6（relaxed だけの下限0.5以上）なら relaxed にする", () => {
+    const scores = [{ happy: 0.1, relaxed: 0.6, surprised: 0.1, sad: 0.1, angry: 0.05, neutral: 0.05 }];
+    const fallback = makeFallback();
+    const classify = createOllayaEmotionClassifier({
+      getBaseUrl: () => "http://127.0.0.1:11435",
+      getModel: () => "laya:multilingual",
+      getTimeoutMs: () => 5000,
+      fallback: fallback.fn,
+      spawnSyncFn: (() => ({
+        pid: 1,
+        output: [],
+        stdout: JSON.stringify(scores),
+        stderr: "",
+        status: 0,
+        signal: null,
+        error: undefined,
+      })) as never,
+    });
+
+    expect(classify(["結果を待ちます。"])).toEqual(["relaxed"]);
+    expect(fallback.calls).toHaveLength(0);
+  });
+
+  it("relaxed 0.4（relaxed だけの下限0.5未満）なら neutral にする", () => {
+    const scores = [{ happy: 0.1, relaxed: 0.4, surprised: 0.1, sad: 0.1, angry: 0.05, neutral: 0.05 }];
+    const fallback = makeFallback();
+    const classify = createOllayaEmotionClassifier({
+      getBaseUrl: () => "http://127.0.0.1:11435",
+      getModel: () => "laya:multilingual",
+      getTimeoutMs: () => 5000,
+      fallback: fallback.fn,
+      spawnSyncFn: (() => ({
+        pid: 1,
+        output: [],
+        stdout: JSON.stringify(scores),
+        stderr: "",
+        status: 0,
+        signal: null,
+        error: undefined,
+      })) as never,
+    });
+
+    expect(classify(["結果を待ちます。"])).toEqual(["neutral"]);
+    expect(fallback.calls).toHaveLength(0);
+  });
+
   it("neutral 自身の確率が最上位なら neutral にする", () => {
     const scores = [{ happy: 0.2, relaxed: 0.02, surprised: 0.02, sad: 0.02, angry: 0.02, neutral: 0.7 }];
     const fallback = makeFallback();
@@ -206,6 +275,8 @@ describe("createOllayaEmotionClassifier（実プロセス経由の結合テス�
     stub = undefined;
   });
 
+  // ★ 実装の2段階（1回目 `questions.a` / `questions.b`、2回目 `questions.final`）を模す。
+  //   どちらの回も `body.state` で判定するので、同じ文には一貫した勝者を返す。
   const STUB_SCRIPT = [
     'const http = require("http");',
     "const server = http.createServer((req, res) => {",
@@ -213,23 +284,44 @@ describe("createOllayaEmotionClassifier（実プロセス経由の結合テス�
     '  req.on("data", (c) => chunks.push(c));',
     '  req.on("end", () => {',
     '    const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));',
-    "    const q = body.questions && body.questions.emotion;",
-    '    if (!q || q.type !== "choice") {',
-    '      res.writeHead(400, { "Content-Type": "application/json" });',
-    '      res.end(JSON.stringify({ error: "expected a choice question" }));',
+    "    const q = body.questions || {};",
+    '    const isHappy = body.state.includes("やりました");',
+    "    if (q.a && q.b) {",
+    '      if (q.a.type !== "choice" || q.b.type !== "choice") {',
+    '        res.writeHead(400, { "Content-Type": "application/json" });',
+    '        res.end(JSON.stringify({ error: "expected choice questions for a/b" }));',
+    "        return;",
+    "      }",
+    "      const pa = { happy: isHappy ? 0.9 : 0.05, angry: 0.05, sad: isHappy ? 0.05 : 0.9 };",
+    "      const pb = { relaxed: 0.1, surprised: 0.9 };",
+    '      const winnerA = isHappy ? "happy" : "sad";',
+    "      const answers = {",
+    '        a: { type: "choice", choice: winnerA, confidence: pa[winnerA], probabilities: pa },',
+    '        b: { type: "choice", choice: "surprised", confidence: pb.surprised, probabilities: pb },',
+    "      };",
+    '      res.writeHead(200, { "Content-Type": "application/json" });',
+    "      res.end(JSON.stringify({ model: body.model, answers }));",
     "      return;",
     "    }",
-    '    const isHappy = body.state.includes("やりました");',
-    "    const probabilities = {",
-    "      happy: isHappy ? 0.9 : 0.05, relaxed: 0.1, surprised: 0.1,",
-    "      sad: isHappy ? 0.05 : 0.9, angry: 0.1, neutral: 0.1,",
-    "    };",
-    '    const choice = isHappy ? "happy" : "sad";',
-    "    const answers = {",
-    '      emotion: { type: "choice", choice: choice, confidence: probabilities[choice], probabilities: probabilities },',
-    "    };",
-    '    res.writeHead(200, { "Content-Type": "application/json" });',
-    "    res.end(JSON.stringify({ model: body.model, answers }));",
+    "    if (q.final) {",
+    "      const criteriaKeys = Object.keys(q.final.criteria || {});",
+    '      if (q.final.type !== "choice" || criteriaKeys.length !== 3 || criteriaKeys.indexOf("neutral") === -1) {',
+    '        res.writeHead(400, { "Content-Type": "application/json" });',
+    '        res.end(JSON.stringify({ error: "expected a 3-way final choice including neutral" }));',
+    "        return;",
+    "      }",
+    '      const winner = isHappy ? "happy" : "sad";',
+    "      const pf = {};",
+    "      criteriaKeys.forEach((k) => { pf[k] = k === winner ? 0.9 : 0.05; });",
+    "      const answers = {",
+    '        final: { type: "choice", choice: winner, confidence: pf[winner], probabilities: pf },',
+    "      };",
+    '      res.writeHead(200, { "Content-Type": "application/json" });',
+    "      res.end(JSON.stringify({ model: body.model, answers }));",
+    "      return;",
+    "    }",
+    '    res.writeHead(400, { "Content-Type": "application/json" });',
+    '    res.end(JSON.stringify({ error: "unexpected questions shape" }));',
     "  });",
     "});",
     'server.listen(0, "127.0.0.1", () => {',

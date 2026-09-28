@@ -483,9 +483,9 @@ server / player はこのファイルを読みも書きもしない（読むの�
 - `emotionClassifier` は `classify: (texts: string[]) => Emotion[]`（メッセージ単位で1回だけ
   呼ぶ契約。→ `cli/worker.ts` の `DrainDeps.classify`）を組み立てる分岐。どの方式でも
   接続不可・タイムアウト・壊れた応答は**辞書式に落ちる**（throw しない）
-  - `"ollaya"`: ローカルの Jev 互換ランタイム（[ollaya.dev](https://ollaya.dev/)）へ1文ずつ
-    `/v1/systemone` の choice で問い合わせる。CLI は同期実行なので、`spawnSync` の子プロセス1個に
-    メッセージぶんの文をまとめて渡す（→ `emotion/ollayaClassifier.ts`）
+  - `"ollaya"`: ローカルの Jev 互換ランタイム（[ollaya.dev](https://ollaya.dev/)）へ1文につき
+    `/v1/systemone` の choice で2段階・2往復問い合わせる。CLI は同期実行なので、`spawnSync` の
+    子プロセス1個にメッセージぶんの文をまとめて渡す（→ `emotion/ollayaClassifier.ts`）
   - `"fm"`: macOS 27 以降の Apple Foundation Models CLI。メッセージ全体を1回だけ `--schema` 付きで
     判定し、同じ感情を全部の文に適用する（→ `emotion/fmClassifier.ts`）
   - `"dictionary"`: 既存のルールベース（`emotion/ruleBasedEmotionClassifier.ts`）をそのまま使う

@@ -194,7 +194,7 @@ namespace ChatterMascot.EditorTools
         }
 
         /// <summary>
-        /// Android XR を動かす必須の Android XR Support、背景に部屋を透かす自前の Additive Blend、
+        /// Android XR を動かす必須の Android XR Support、背景に部屋を透かす自前の See-Through Blend、
         /// キャラを手やマウスで置き直すのに要る Hand Interaction Profile / Android Mouse Interaction Profile /
         /// AR Session / AR Plane だけを有効化する。それ以外の feature には触れない。
         ///
@@ -218,7 +218,7 @@ namespace ChatterMascot.EditorTools
             changed |= EnableFeature<AndroidXRSupportFeature>(settings, "Android XR Support");
             changed |= EnableFeature<ARSessionFeature>(settings, "Android XR: Session");
             changed |= EnableFeature<ARPlaneFeature>(settings, "Android XR: Planes");
-            changed |= EnableFeature<XrAdditiveBlendFeature>(settings, "Chatter Mascot: Additive Blend");
+            changed |= EnableFeature<XrSeeThroughBlendFeature>(settings, "Chatter Mascot: See-Through Blend");
             changed |= EnableFeature<HandInteractionProfile>(settings, "Hand Interaction Profile");
             changed |= EnableFeature<AndroidMouseInteractionProfile>(settings, "Android Mouse Interaction Profile");
             return changed;

@@ -641,6 +641,8 @@ B・C どちらの経路でもこのポートへ向ける。C（`configure-andro
 
 起動は `~/Library/Android/sdk/emulator/emulator -avd XR_Glasses`。`XR_Glasses`（光学シースルーの
 模擬）を使うこと（→ [`mascot-android-xr.md`](./knowledge/mascot-android-xr.md)）。
+ヘッドセット（ビデオパススルー）で確かめるときは、**XR Headset** フォームファクタの AVD を
+**Google Play XR API v3 以降**のイメージで作る（v1 は systemui が ANR する）。
 
 ### 実機（XREAL Aura）で最初に確認すること
 

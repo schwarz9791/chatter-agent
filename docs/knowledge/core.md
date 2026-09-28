@@ -163,9 +163,46 @@ Ollaya（[ollaya.dev](https://ollaya.dev/)、ローカルの Jev 互換 decision
   全体を1回だけ判定し、同じ感情を全部の文に適用する**（`emotion/fmClassifier.ts`）。
   **Ollaya（`laya`）は1文0.06秒と十分速いので、1文ずつ判定してもメッセージ単位の呼び出し回数は
   変わらない**（`emotion/ollayaClassifier.ts` が `spawnSync` の子プロセス1個にまとめて渡す）
-- **既定に `laya:multilingual` の score を選んだ理由**: 精度は `fm` / `decider` に劣るが、
-  macOS を要求せず、本文を外部サービスへ送らず、1文0.06秒と十分速い。`fm` は `emotionClassifier`、`decider` は
+- **既定に `laya:multilingual` の choice を選んだ理由**: 精度は `fm` / `decider` に劣るが、
+  macOS を要求せず、本文を外部サービスへ送らず、1文0.03秒（choice）と十分速い。`fm` は `emotionClassifier`、`decider` は
   `ollayaModel` で選べる
+
+### 偏りの是正（[#153](https://github.com/schwarz9791/chatter-agent/issues/153)）
+
+**測定条件**: Ollaya 0.7.1、`laya:multilingual`。評価セットは2つ —— 実ログから無作為に抽出した
+100文（正解 neutral 78 / happy 13 / relaxed 5 / sad 3 / surprised 1 / angry 0。進行報告・予告は
+neutral とする基準）と、#107 の30文（感情の強い文に偏ったセット。neutral 正解は2文）。**評価セット
+は実ログの文を含むのでリポジトリに置いていない。**
+
+実ログの分布はこの変更の前に大きく崩れていた。辞書式の期間（9/18〜9/25）は neutral 44〜59%、
+Ollaya（6感情を独立に noul で聞く方式）の期間（9/27〜9/28）は neutral 0.2〜0.3% / surprised
+63〜64% / sad 12〜18%。
+
+| 方式 | 実分布 厳しめ/緩め | #107 厳しめ/緩め | 予測分布（neu/hap/rel/sur/sad/ang） |
+|---|---|---|---|
+| noul 6問（旧） | 7/11 | 14/20 | 0/5/11/64/18/2 |
+| noul 6問から sad/angry の後押しだけ外す | 5/6 | 13/19 | 0/3/2/13/74/8 |
+| noul 5問 + neutral の基準値 0.7 | 66/73 | 12/19 | — |
+| choice（出来事の種類で書いた基準）+ 下限 0.65 | 70/78 | 14/20 | 76/3/5/10/6/0 |
+| **choice（感情を軸に書いた基準）+ 下限 0.6（採用）** | **72/79** | **15/18** | **77/7/5/7/4/0** |
+
+厳しめ = 第一候補一致、緩め = 次点も含む。予測分布は実分布セットでの内訳。
+
+分かったこと:
+
+- noul で「neutral が乗っているか」を聞くと、平叙文でも 0.01〜0.1 程度しか出ず、argmax ではまず
+  勝てない
+- 後押しの一文（sad / angry を「当てはまるなら迷わず true に」と後押しする指示）を外すだけでは
+  直らなかった。逆に sad が増えた —— 小さいモデルは文面の小さな違いで出力が大きく動く
+- choice の surprised を「予期しない事実」と出来事の種類で書くと、ただの事実説明
+  （「〜の問題ではありません」等）が 0.9 以上で surprised になった。「Astonished」
+  「Sorry」「Frustrated」と感情そのもので書くと減った
+- relaxed を "At ease:" で始めると一件も当たらなくなった。待ち・一段落の出来事で書いた方が当たる
+- angry はどの候補でもほぼ出ない。angry の文は sad になる（次点としては許容する）
+- 下限は、実分布セットで予測の neutral 比率が正解の比率に揃う値を採った。上げると neutral は
+  増えるが happy が当たらなくなる
+- **感情判定を比べるときは実ログから無作為に取った文を必ず含める。** #107 の30文だけでは
+  neutral 正解が2文しかなく、「平叙文に感情を付ける」誤りが測れていなかった
 
 ### Ollaya の運用で分かったこと（実装時の確認）
 
@@ -176,7 +213,9 @@ Ollaya（[ollaya.dev](https://ollaya.dev/)、ローカルの Jev 互換 decision
 - 疎通確認には `GET /api/version`（`{"version":"..."}` を返す）を使う。モデルのロードを要求しない
   軽い確認で、TTS の `listSpeakers` に相当する
 - `/v1/systemone` の応答形は `{model, answers: {<key>: {type, noul | choice, ...}}}`。score モードは
-  `noul` が0.0〜1.0、感情ごとに独立（合計1にならない）
+  `noul` が0.0〜1.0、感情ごとに独立（合計1にならない）。choice モードは
+  `{type: "choice", choice: "<label>", confidence: <number>, probabilities: {<label>: <number>, ...}}`
+  で、`probabilities` が候補全体の確率分布になる
 
 ## 設定キーと環境変数の経緯
 

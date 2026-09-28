@@ -39,6 +39,52 @@ describe("createOllayaEmotionClassifier（spawnSync を差し替えた単体テ�
     expect(fallback.calls).toHaveLength(0);
   });
 
+  it("最上位の感情の確率が下限未満なら neutral にする", () => {
+    const scores = [{ happy: 0.5, relaxed: 0.1, surprised: 0.1, sad: 0.1, angry: 0.1, neutral: 0.1 }];
+    const fallback = makeFallback();
+    const classify = createOllayaEmotionClassifier({
+      getBaseUrl: () => "http://127.0.0.1:11435",
+      getModel: () => "laya:multilingual",
+      getTimeoutMs: () => 5000,
+      fallback: fallback.fn,
+      spawnSyncFn: (() => ({
+        pid: 1,
+        output: [],
+        stdout: JSON.stringify(scores),
+        stderr: "",
+        status: 0,
+        signal: null,
+        error: undefined,
+      })) as never,
+    });
+
+    expect(classify(["まあまあです。"])).toEqual(["neutral"]);
+    expect(fallback.calls).toHaveLength(0);
+  });
+
+  it("neutral 自身の確率が最上位なら neutral にする", () => {
+    const scores = [{ happy: 0.2, relaxed: 0.02, surprised: 0.02, sad: 0.02, angry: 0.02, neutral: 0.7 }];
+    const fallback = makeFallback();
+    const classify = createOllayaEmotionClassifier({
+      getBaseUrl: () => "http://127.0.0.1:11435",
+      getModel: () => "laya:multilingual",
+      getTimeoutMs: () => 5000,
+      fallback: fallback.fn,
+      spawnSyncFn: (() => ({
+        pid: 1,
+        output: [],
+        stdout: JSON.stringify(scores),
+        stderr: "",
+        status: 0,
+        signal: null,
+        error: undefined,
+      })) as never,
+    });
+
+    expect(classify(["続きを進めます。"])).toEqual(["neutral"]);
+    expect(fallback.calls).toHaveLength(0);
+  });
+
   it("子プロセスが起動できない・非ゼロ終了なら全文を fallback する", () => {
     const fallback = makeFallback();
     const classify = createOllayaEmotionClassifier({
@@ -167,13 +213,21 @@ describe("createOllayaEmotionClassifier（実プロセス経由の結合テス�
     '  req.on("data", (c) => chunks.push(c));',
     '  req.on("end", () => {',
     '    const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));',
+    "    const q = body.questions && body.questions.emotion;",
+    '    if (!q || q.type !== "choice") {',
+    '      res.writeHead(400, { "Content-Type": "application/json" });',
+    '      res.end(JSON.stringify({ error: "expected a choice question" }));',
+    "      return;",
+    "    }",
     '    const isHappy = body.state.includes("やりました");',
-    "    const scores = {",
+    "    const probabilities = {",
     "      happy: isHappy ? 0.9 : 0.05, relaxed: 0.1, surprised: 0.1,",
     "      sad: isHappy ? 0.05 : 0.9, angry: 0.1, neutral: 0.1,",
     "    };",
-    "    const answers = {};",
-    '    for (const k of Object.keys(scores)) answers[k] = { type: "noul", noul: scores[k] };',
+    '    const choice = isHappy ? "happy" : "sad";',
+    "    const answers = {",
+    '      emotion: { type: "choice", choice: choice, confidence: probabilities[choice], probabilities: probabilities },',
+    "    };",
     '    res.writeHead(200, { "Content-Type": "application/json" });',
     "    res.end(JSON.stringify({ model: body.model, answers }));",
     "  });",

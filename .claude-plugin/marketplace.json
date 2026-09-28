@@ -11,7 +11,7 @@
       "name": "chatter-agent",
       "source": "./plugin",
       "description": "MessageDisplay / PreToolUse / Notification の hook で発言を捕捉し、同梱の chatter-agent-speak に渡します。",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "author": {
         "name": "Masaki Matsumura"
       },

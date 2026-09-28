@@ -297,7 +297,7 @@ export interface ChatterAgentConfig {
    * 感情判定のバックエンド。
    *
    * - `"ollaya"`: ローカルの Jev 互換 decision model ランタイム（`ollaya.dev`）。1文ずつ
-   *   `/v1/systemone` に投げる。速いが精度は辞書式をやや上回る程度（→ docs/knowledge）
+   *   `/v1/systemone` の choice で判定する（→ docs/knowledge）
    * - `"fm"`: macOS 27 以降の Apple Foundation Models CLI。メッセージ全体を1回だけ判定し、
    *   同じ感情を全部の文に付ける（1文ずつ判定すると重すぎるため）
    * - `"dictionary"`: 既存のルールベース（`emotion/ruleBasedEmotionClassifier.ts`）

@@ -1799,8 +1799,16 @@ function createFmEmotionClassifier(deps) {
 //#region src/emotion/ollayaClassifier.ts
 /**
 * Ollaya（ローカルの Jev 互換 decision model ランタイム、`ollaya.dev`）へ、1文ずつ
-* `/v1/systemone` の score（`noul`）で問い合わせる感情分類器。
+* `/v1/systemone` の choice で問い合わせる感情分類器。
 *
+* ★ 6感情を1問の choice で聞く。感情ごとに独立に「乗っているか」を聞くと、neutral は
+*   平叙文でも低く出て、argmax（`pickEmotion`）ではまず選ばれない。
+* ★ 最上位の感情の確率が `NEUTRAL_FLOOR` に届かなければ neutral に倒す。人はいつも感情を
+*   表に出しているわけではないので、確信が持てないときの既定を neutral 側に置く。
+* ★ 判定基準（`CRITERIA`）は感情そのもの（嬉しい・驚き・詫び・苛立ち）を軸に書く。
+*   出来事の種類（「予期しない事実」等）で書くと、ただの説明文までその出来事の感情に
+*   引き寄せられる。
+* ★ 選択肢の説明は短く保つ（長いと判定時に切り詰められる）。
 * ★ **CLI（chatter-agent-speak）は同期実行**なので、Node の `fetch`（非同期）はメイン
 *   プロセスの中では直接使えない。1メッセージぶんの文をまとめて子プロセス（`spawnSync`）に
 *   渡し、子の中で非同期に問い合わせて結果をまとめて返すことで、プロセス起動のコストを
@@ -1810,6 +1818,18 @@ function createFmEmotionClassifier(deps) {
 *   （辞書式）に委ねる。子プロセス全体が失敗すれば全文を、一部の文だけ壊れていればその文
 *   だけを fallback する。
 */
+/** choice の選択肢（英語）。 */
+const CRITERIA = {
+	happy: "Glad that something went well: work finished, tests passing.",
+	relaxed: "Calmly waiting for a result, or relieved after finishing something.",
+	surprised: "Astonished by an unexpected result or bug.",
+	sad: "Sorry or disappointed: an apology, rework, or a mistake noticed.",
+	angry: "Frustrated at its own failure: a broken test, a regression, a repeated mistake.",
+	neutral: "No particular emotion: a routine progress report, plan, question, or plain explanation."
+};
+const EMOTION_QUESTION_INSTRUCTIONS = "Which emotion does this remark by a coding agent express?";
+/** 最上位の感情の確率がこれに届かなければ neutral として扱う。 */
+const NEUTRAL_FLOOR = .6;
 /**
 * 子プロセス（Node、CommonJS として `node -e` に渡す）の中で実行するスクリプト。
 * stdin から `{ texts, baseUrl, model }` を読み、stdout に `(Record<Emotion, number> | null)[]` を
@@ -1822,27 +1842,16 @@ function createFmEmotionClassifier(deps) {
 const CHILD_SCRIPT = [
 	"const fs = require(\"fs\");",
 	`const KEYS = ${JSON.stringify(EMOTION_KEYS)};`,
-	`const DESC = ${JSON.stringify({
-		happy: "A report that something went well: finished work, tests passing, review feedback addressed.",
-		relaxed: "Waiting for a result, doing a routine check, or calmly describing the current state.",
-		surprised: "An unexpected discovery: a fact or bug nobody anticipated, told with a sense of surprise.",
-		sad: "Something did not go as hoped. Examples: a sub-agent has not reported back, work had to be sent back, an apology (\"I'm sorry\"), or realizing something was overlooked.",
-		angry: "The agent's own failure or an unexpected breakdown. Examples: a test failed unexpectedly, the agent's own change caused a regression, or the same mistake was made twice.",
-		neutral: "A flat statement of fact with no emotional ups or downs."
-	})};`,
+	`const CRITERIA = ${JSON.stringify(CRITERIA)};`,
+	`const INSTRUCTIONS = ${JSON.stringify(EMOTION_QUESTION_INSTRUCTIONS)};`,
 	"function payloadFor(model, text) {",
-	"  const questions = {};",
-	"  for (const k of KEYS) {",
-	"    var suffix = (k === \"sad\" || k === \"angry\")",
-	"      ? \" Sad and angry tend to score low; when the criteria fit, score them true without hesitation.\"",
-	"      : \"\";",
-	"    questions[k] = {",
-	"      type: \"noul\",",
-	"      instructions: \"Does this remark by a coding agent carry the following emotion? \\\"\" + k + \"\\\": \" + DESC[k] + \".\" + suffix,",
-	"      criteria: { true: \"present\", false: \"not present\" },",
-	"    };",
-	"  }",
-	"  return { model: model, state: text, questions: questions };",
+	"  return {",
+	"    model: model,",
+	"    state: text,",
+	"    questions: {",
+	"      emotion: { type: \"choice\", instructions: INSTRUCTIONS, criteria: CRITERIA },",
+	"    },",
+	"  };",
 	"}",
 	"async function classifyOne(baseUrl, model, text) {",
 	"  const res = await fetch(baseUrl + \"/v1/systemone\", {",
@@ -1852,9 +1861,11 @@ const CHILD_SCRIPT = [
 	"  });",
 	"  if (!res.ok) return null;",
 	"  const obj = await res.json();",
+	"  const probs = obj && obj.answers && obj.answers.emotion ? obj.answers.emotion.probabilities : undefined;",
+	"  if (typeof probs !== \"object\" || probs === null) return null;",
 	"  const scores = {};",
 	"  for (const k of KEYS) {",
-	"    const v = obj && obj.answers && obj.answers[k] ? obj.answers[k].noul : undefined;",
+	"    const v = probs[k];",
 	"    if (typeof v !== \"number\") return null;",
 	"    scores[k] = v;",
 	"  }",
@@ -1873,6 +1884,14 @@ const CHILD_SCRIPT = [
 	"  process.stdout.write(JSON.stringify(out));",
 	"})();"
 ].join("\n");
+/** neutral の確率を `NEUTRAL_FLOOR` まで底上げする。argmax がそのまま「届かなければ neutral」になる。 */
+function applyNeutralFloor(scores) {
+	if (scores === null || typeof scores.neutral !== "number") return scores;
+	return {
+		...scores,
+		neutral: Math.max(scores.neutral, NEUTRAL_FLOOR)
+	};
+}
 /**
 * `(texts: string[]) => Emotion[]` を作る。1文ずつ Ollaya に問い合わせるが、
 * プロセス起動は `texts` 全体で1回にまとめる。throw しない。
@@ -1906,7 +1925,7 @@ function createOllayaEmotionClassifier(deps) {
 			return deps.fallback(texts);
 		}
 		if (!Array.isArray(parsed) || parsed.length !== texts.length) return deps.fallback(texts);
-		const emotions = parsed.map((scores) => pickEmotion(scores));
+		const emotions = parsed.map((scores) => pickEmotion(applyNeutralFloor(scores)));
 		const brokenIndices = [];
 		emotions.forEach((e, i) => {
 			if (e === null) brokenIndices.push(i);

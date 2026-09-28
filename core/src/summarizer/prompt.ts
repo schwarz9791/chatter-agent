@@ -1,9 +1,15 @@
 /**
- * 要約の上限を数える単位は原文の言語で切り替える。日本語は分かち書きしないので文字数、
- * 英語などは空白で分かち書きするので語数で数えないと、上限が実際の長さの体感と合わない。
- * 言語の判定は仮名の有無で行う（漢字だけでは中国語と区別できないため使わない）。
+ * 要約の上限を数える単位は原文の言語で切り替える。分かち書きしない言語（日本語・中国語など）は
+ * 文字数、空白で分かち書きする言語（英語など）は語数で数えないと、上限が実際の長さの体感と合わない。
+ *
+ * 判定は空白以外の文字のうち漢字・仮名が占める割合で行う。空白の有無や量では判定しない
+ * （識別子や数値の前後に半角空白を置く日本語の技術文が、空白の量では英語と見分けられないため）。
+ * 割合にしているのは、別の言語の語が少数混じっただけで単位が切り替わらないようにするため。
  */
-const KANA_PATTERN = /[\p{Script=Hiragana}\p{Script=Katakana}]/u;
+const CJ_PATTERN = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/gu;
+
+/** この割合以上を漢字・仮名が占めていれば、分かち書きしない言語として文字数で数える。 */
+export const SUMMARY_CJ_RATIO_THRESHOLD = 0.2;
 
 /**
  * 要約の上限を原文の長さに比例させるための比率。要約は原文と同じ言語で出るので、
@@ -40,9 +46,17 @@ export function countWords(text: string): number {
   return trimmed.length === 0 ? 0 : trimmed.split(/\s+/).length;
 }
 
+/** 空白以外の文字のうち漢字・仮名が占める割合。空白以外の文字が無ければ 0（語数側の既定に合わせる）。 */
+function cjRatio(text: string): number {
+  const nonWhitespaceCount = text.match(/\S/gu)?.length ?? 0;
+  if (nonWhitespaceCount === 0) return 0;
+  const cjCount = text.match(CJ_PATTERN)?.length ?? 0;
+  return cjCount / nonWhitespaceCount;
+}
+
 /** 原文の言語と長さから、要約の上限（単位・上限値・文数）を決める。 */
 export function summaryLengthLimit(text: string): SummaryLengthLimit {
-  if (KANA_PATTERN.test(text)) {
+  if (cjRatio(text) >= SUMMARY_CJ_RATIO_THRESHOLD) {
     const max = clamp(Math.round(text.length * SUMMARY_RATIO), SUMMARY_CHARS_MIN, SUMMARY_CHARS_MAX);
     const sentences = clamp(Math.round(max / SUMMARY_CHARS_PER_SENTENCE), SUMMARY_SENTENCES_MIN, SUMMARY_SENTENCES_MAX);
     return { unit: "chars", max, sentences };

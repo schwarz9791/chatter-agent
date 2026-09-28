@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   SUMMARY_CHARS_MAX,
   SUMMARY_CHARS_MIN,
+  SUMMARY_CJ_RATIO_THRESHOLD,
   SUMMARY_RATIO,
   SUMMARY_SENTENCES_MAX,
   SUMMARY_SENTENCES_MIN,
@@ -24,12 +25,37 @@ describe("summaryLengthLimit", () => {
     expect(summaryLengthLimit("This is an English sentence.").unit).toBe("words");
   });
 
-  it("漢字だけの中国語相当の原文は仮名が無いので語数（words）で数える（漢字は判定に使わない）", () => {
-    expect(summaryLengthLimit("这是一个中文句子没有假名").unit).toBe("words");
+  it("漢字だけの中国語相当の原文は分かち書きしない言語として文字数（chars）で数える", () => {
+    expect(summaryLengthLimit("这是一个中文句子没有假名").unit).toBe("chars");
   });
 
   it("英単語が混じっていても仮名があれば文字数（chars）で数える", () => {
     expect(summaryLengthLimit("これは API を呼び出す処理です").unit).toBe("chars");
+  });
+
+  it("英語の文に日本語の単語が1語混じるだけでは語数（words）のまま", () => {
+    const text = "This is an English sentence with one 日本語 word mixed in for testing purposes today and tomorrow.";
+    expect(summaryLengthLimit(text).unit).toBe("words");
+  });
+
+  it("英単語・識別子・数字が多く半角空白を挟む日本語の技術文は文字数（chars）で数える", () => {
+    const text = "PR #125 の未解決コメントはゼロです。 14 件すべて閉じました。 git show --stat で 1 insertion";
+    expect(summaryLengthLimit(text).unit).toBe("chars");
+  });
+
+  it("漢字・仮名の割合が閾値ちょうどなら文字数（chars）で数える", () => {
+    const atThreshold = "字字" + "a".repeat(8); // 空白以外10文字中2文字が漢字 → ちょうど閾値
+    expect(SUMMARY_CJ_RATIO_THRESHOLD).toBe(0.2);
+    expect(summaryLengthLimit(atThreshold).unit).toBe("chars");
+  });
+
+  it("漢字・仮名の割合が閾値をわずかに下回ると語数（words）で数える", () => {
+    const belowThreshold = "字" + "a".repeat(9); // 空白以外10文字中1文字が漢字 → 閾値未満
+    expect(summaryLengthLimit(belowThreshold).unit).toBe("words");
+  });
+
+  it("空文字は語数（words）で数える（空白以外の文字が無いときの既定）", () => {
+    expect(summaryLengthLimit("").unit).toBe("words");
   });
 
   it("chars: 下限を下回る原文長は下限にクランプする", () => {

@@ -12,143 +12,86 @@ function makeFallback(): { fn: (texts: string[]) => Emotion[]; calls: string[][]
   return { fn, calls };
 }
 
+/**
+ * `spawnSyncFn` を、子プロセスが `scores` をそのまま JSON で返したときの形に差し替えた
+ * classifier を作る。単体テストの大半はこの形（起動成功・stdout が有効な JSON 配列）を
+ * 共有しているので、これに乗らない失敗系（起動失敗・非ゼロ終了・壊れた JSON・空配列）は
+ * 個別に組み立てる。
+ */
+function classifierFor(scores: unknown[]): {
+  classify: (texts: string[]) => Emotion[];
+  fallback: { fn: (texts: string[]) => Emotion[]; calls: string[][] };
+} {
+  const fallback = makeFallback();
+  const classify = createOllayaEmotionClassifier({
+    getBaseUrl: () => "http://127.0.0.1:11435",
+    getModel: () => "laya:multilingual",
+    getTimeoutMs: () => 5000,
+    fallback: fallback.fn,
+    spawnSyncFn: (() => ({
+      pid: 1,
+      output: [],
+      stdout: JSON.stringify(scores),
+      stderr: "",
+      status: 0,
+      signal: null,
+      error: undefined,
+    })) as never,
+  });
+  return { classify, fallback };
+}
+
 describe("createOllayaEmotionClassifier（spawnSync を差し替えた単体テスト）", () => {
   it("応答から最大値のラベルを文ごとに割り当てる", () => {
-    const scores = [
+    const { classify, fallback } = classifierFor([
       { first: { happy: 0.6, surprised: 0.1 }, final: { happy: 0.9, surprised: 0.05, neutral: 0.05 } },
       { first: { sad: 0.65, surprised: 0.8 }, final: { sad: 0.85, surprised: 0.05, neutral: 0.1 } },
-    ];
-    const fallback = makeFallback();
-    const classify = createOllayaEmotionClassifier({
-      getBaseUrl: () => "http://127.0.0.1:11435",
-      getModel: () => "laya:multilingual",
-      getTimeoutMs: () => 5000,
-      fallback: fallback.fn,
-      spawnSyncFn: (() => ({
-        pid: 1,
-        output: [],
-        stdout: JSON.stringify(scores),
-        stderr: "",
-        status: 0,
-        signal: null,
-        error: undefined,
-      })) as never,
-    });
+    ]);
 
     expect(classify(["やりました！", "残念です。"])).toEqual(["happy", "sad"]);
     expect(fallback.calls).toHaveLength(0);
   });
 
   it("最上位の感情の確率が下限未満なら neutral にする", () => {
-    const scores = [{ first: { happy: 0.6, surprised: 0.4 }, final: { happy: 0.5, surprised: 0.3, neutral: 0.2 } }];
-    const fallback = makeFallback();
-    const classify = createOllayaEmotionClassifier({
-      getBaseUrl: () => "http://127.0.0.1:11435",
-      getModel: () => "laya:multilingual",
-      getTimeoutMs: () => 5000,
-      fallback: fallback.fn,
-      spawnSyncFn: (() => ({
-        pid: 1,
-        output: [],
-        stdout: JSON.stringify(scores),
-        stderr: "",
-        status: 0,
-        signal: null,
-        error: undefined,
-      })) as never,
-    });
+    const { classify, fallback } = classifierFor([
+      { first: { happy: 0.6, surprised: 0.4 }, final: { happy: 0.5, surprised: 0.3, neutral: 0.2 } },
+    ]);
 
     expect(classify(["まあまあです。"])).toEqual(["neutral"]);
     expect(fallback.calls).toHaveLength(0);
   });
 
   it("happy 0.7（下限0.8未満）なら neutral にする", () => {
-    const scores = [{ first: { happy: 0.6, surprised: 0.1 }, final: { happy: 0.7, surprised: 0.2, neutral: 0.1 } }];
-    const fallback = makeFallback();
-    const classify = createOllayaEmotionClassifier({
-      getBaseUrl: () => "http://127.0.0.1:11435",
-      getModel: () => "laya:multilingual",
-      getTimeoutMs: () => 5000,
-      fallback: fallback.fn,
-      spawnSyncFn: (() => ({
-        pid: 1,
-        output: [],
-        stdout: JSON.stringify(scores),
-        stderr: "",
-        status: 0,
-        signal: null,
-        error: undefined,
-      })) as never,
-    });
+    const { classify, fallback } = classifierFor([
+      { first: { happy: 0.6, surprised: 0.1 }, final: { happy: 0.7, surprised: 0.2, neutral: 0.1 } },
+    ]);
 
     expect(classify(["まあまあ嬉しいです。"])).toEqual(["neutral"]);
     expect(fallback.calls).toHaveLength(0);
   });
 
   it("relaxed 0.6（relaxed だけの下限0.5以上）なら relaxed にする", () => {
-    const scores = [{ first: { relaxed: 0.3, surprised: 0.7 }, final: { relaxed: 0.6, happy: 0.3, neutral: 0.1 } }];
-    const fallback = makeFallback();
-    const classify = createOllayaEmotionClassifier({
-      getBaseUrl: () => "http://127.0.0.1:11435",
-      getModel: () => "laya:multilingual",
-      getTimeoutMs: () => 5000,
-      fallback: fallback.fn,
-      spawnSyncFn: (() => ({
-        pid: 1,
-        output: [],
-        stdout: JSON.stringify(scores),
-        stderr: "",
-        status: 0,
-        signal: null,
-        error: undefined,
-      })) as never,
-    });
+    const { classify, fallback } = classifierFor([
+      { first: { relaxed: 0.3, surprised: 0.7 }, final: { relaxed: 0.6, happy: 0.3, neutral: 0.1 } },
+    ]);
 
     expect(classify(["結果を待ちます。"])).toEqual(["relaxed"]);
     expect(fallback.calls).toHaveLength(0);
   });
 
   it("relaxed 0.4（relaxed だけの下限0.5未満）なら neutral にする", () => {
-    const scores = [{ first: { relaxed: 0.2, surprised: 0.8 }, final: { relaxed: 0.4, happy: 0.3, neutral: 0.3 } }];
-    const fallback = makeFallback();
-    const classify = createOllayaEmotionClassifier({
-      getBaseUrl: () => "http://127.0.0.1:11435",
-      getModel: () => "laya:multilingual",
-      getTimeoutMs: () => 5000,
-      fallback: fallback.fn,
-      spawnSyncFn: (() => ({
-        pid: 1,
-        output: [],
-        stdout: JSON.stringify(scores),
-        stderr: "",
-        status: 0,
-        signal: null,
-        error: undefined,
-      })) as never,
-    });
+    const { classify, fallback } = classifierFor([
+      { first: { relaxed: 0.2, surprised: 0.8 }, final: { relaxed: 0.4, happy: 0.3, neutral: 0.3 } },
+    ]);
 
     expect(classify(["結果を待ちます。"])).toEqual(["neutral"]);
     expect(fallback.calls).toHaveLength(0);
   });
 
   it("neutral 自身の確率が最上位なら neutral にする", () => {
-    const scores = [{ first: { happy: 0.6, surprised: 0.4 }, final: { happy: 0.2, surprised: 0.1, neutral: 0.7 } }];
-    const fallback = makeFallback();
-    const classify = createOllayaEmotionClassifier({
-      getBaseUrl: () => "http://127.0.0.1:11435",
-      getModel: () => "laya:multilingual",
-      getTimeoutMs: () => 5000,
-      fallback: fallback.fn,
-      spawnSyncFn: (() => ({
-        pid: 1,
-        output: [],
-        stdout: JSON.stringify(scores),
-        stderr: "",
-        status: 0,
-        signal: null,
-        error: undefined,
-      })) as never,
-    });
+    const { classify, fallback } = classifierFor([
+      { first: { happy: 0.6, surprised: 0.4 }, final: { happy: 0.2, surprised: 0.1, neutral: 0.7 } },
+    ]);
 
     expect(classify(["続きを進めます。"])).toEqual(["neutral"]);
     expect(fallback.calls).toHaveLength(0);
@@ -198,26 +141,10 @@ describe("createOllayaEmotionClassifier（spawnSync を差し替えた単体テ�
   });
 
   it("一部の文だけ壊れた応答（null）なら、その文だけ fallback で埋める", () => {
-    const scores = [
+    const { classify, fallback } = classifierFor([
       { first: { happy: 0.6, surprised: 0.1 }, final: { happy: 0.9, surprised: 0.05, neutral: 0.05 } },
       null,
-    ];
-    const fallback = makeFallback();
-    const classify = createOllayaEmotionClassifier({
-      getBaseUrl: () => "http://127.0.0.1:11435",
-      getModel: () => "laya:multilingual",
-      getTimeoutMs: () => 5000,
-      fallback: fallback.fn,
-      spawnSyncFn: (() => ({
-        pid: 1,
-        output: [],
-        stdout: JSON.stringify(scores),
-        stderr: "",
-        status: 0,
-        signal: null,
-        error: undefined,
-      })) as never,
-    });
+    ]);
 
     expect(classify(["a", "b"])).toEqual(["happy", "neutral"]);
     // fallback に渡るのは壊れていた1文だけ
@@ -225,97 +152,37 @@ describe("createOllayaEmotionClassifier（spawnSync を差し替えた単体テ�
   });
 
   it("1段目で happy が過半未満（0.41）なら、2段目で0.93でも neutral にする", () => {
-    const scores = [
+    const { classify, fallback } = classifierFor([
       { first: { happy: 0.41, surprised: 0.99 }, final: { happy: 0.93, surprised: 0.05, neutral: 0.02 } },
-    ];
-    const fallback = makeFallback();
-    const classify = createOllayaEmotionClassifier({
-      getBaseUrl: () => "http://127.0.0.1:11435",
-      getModel: () => "laya:multilingual",
-      getTimeoutMs: () => 5000,
-      fallback: fallback.fn,
-      spawnSyncFn: (() => ({
-        pid: 1,
-        output: [],
-        stdout: JSON.stringify(scores),
-        stderr: "",
-        status: 0,
-        signal: null,
-        error: undefined,
-      })) as never,
-    });
+    ]);
 
     expect(classify(["もう、またやってしまいました！"])).toEqual(["neutral"]);
     expect(fallback.calls).toHaveLength(0);
   });
 
   it("1段目で sad が過半以上（0.6）かつ2段目で0.9なら sad にする", () => {
-    const scores = [{ first: { sad: 0.6, surprised: 0.1 }, final: { sad: 0.9, surprised: 0.05, neutral: 0.05 } }];
-    const fallback = makeFallback();
-    const classify = createOllayaEmotionClassifier({
-      getBaseUrl: () => "http://127.0.0.1:11435",
-      getModel: () => "laya:multilingual",
-      getTimeoutMs: () => 5000,
-      fallback: fallback.fn,
-      spawnSyncFn: (() => ({
-        pid: 1,
-        output: [],
-        stdout: JSON.stringify(scores),
-        stderr: "",
-        status: 0,
-        signal: null,
-        error: undefined,
-      })) as never,
-    });
+    const { classify, fallback } = classifierFor([
+      { first: { sad: 0.6, surprised: 0.1 }, final: { sad: 0.9, surprised: 0.05, neutral: 0.05 } },
+    ]);
 
     expect(classify(["すみません、修正し直します。"])).toEqual(["sad"]);
     expect(fallback.calls).toHaveLength(0);
   });
 
   it("relaxed / surprised には過半ルールが掛からない（1段目0.45でも2段目0.6なら relaxed にする）", () => {
-    const scores = [{ first: { relaxed: 0.45, happy: 0.3 }, final: { relaxed: 0.6, happy: 0.3, neutral: 0.1 } }];
-    const fallback = makeFallback();
-    const classify = createOllayaEmotionClassifier({
-      getBaseUrl: () => "http://127.0.0.1:11435",
-      getModel: () => "laya:multilingual",
-      getTimeoutMs: () => 5000,
-      fallback: fallback.fn,
-      spawnSyncFn: (() => ({
-        pid: 1,
-        output: [],
-        stdout: JSON.stringify(scores),
-        stderr: "",
-        status: 0,
-        signal: null,
-        error: undefined,
-      })) as never,
-    });
+    const { classify, fallback } = classifierFor([
+      { first: { relaxed: 0.45, happy: 0.3 }, final: { relaxed: 0.6, happy: 0.3, neutral: 0.1 } },
+    ]);
 
     expect(classify(["結果を待ちます。"])).toEqual(["relaxed"]);
     expect(fallback.calls).toHaveLength(0);
   });
 
   it("first が欠けた応答なら、その文だけ fallback で埋める", () => {
-    const scores = [
+    const { classify, fallback } = classifierFor([
       { first: { happy: 0.6, surprised: 0.1 }, final: { happy: 0.9, surprised: 0.05, neutral: 0.05 } },
       { final: { sad: 0.9, surprised: 0.05, neutral: 0.05 } },
-    ];
-    const fallback = makeFallback();
-    const classify = createOllayaEmotionClassifier({
-      getBaseUrl: () => "http://127.0.0.1:11435",
-      getModel: () => "laya:multilingual",
-      getTimeoutMs: () => 5000,
-      fallback: fallback.fn,
-      spawnSyncFn: (() => ({
-        pid: 1,
-        output: [],
-        stdout: JSON.stringify(scores),
-        stderr: "",
-        status: 0,
-        signal: null,
-        error: undefined,
-      })) as never,
-    });
+    ]);
 
     expect(classify(["a", "b"])).toEqual(["happy", "neutral"]);
     // fallback に渡るのは first が欠けていた1文だけ
@@ -323,22 +190,9 @@ describe("createOllayaEmotionClassifier（spawnSync を差し替えた単体テ�
   });
 
   it("応答配列の長さが texts と食い違えば全文を fallback する", () => {
-    const fallback = makeFallback();
-    const classify = createOllayaEmotionClassifier({
-      getBaseUrl: () => "http://127.0.0.1:11435",
-      getModel: () => "laya:multilingual",
-      getTimeoutMs: () => 5000,
-      fallback: fallback.fn,
-      spawnSyncFn: (() => ({
-        pid: 1,
-        output: [],
-        stdout: JSON.stringify([{ happy: 1, relaxed: 0, surprised: 0, sad: 0, angry: 0, neutral: 0 }]),
-        stderr: "",
-        status: 0,
-        signal: null,
-        error: undefined,
-      })) as never,
-    });
+    const { classify, fallback } = classifierFor([
+      { happy: 1, relaxed: 0, surprised: 0, sad: 0, angry: 0, neutral: 0 },
+    ]);
 
     expect(classify(["a", "b"])).toEqual(["neutral", "neutral"]);
     expect(fallback.calls).toEqual([["a", "b"]]);
@@ -378,6 +232,9 @@ describe("createOllayaEmotionClassifier（実プロセス経由の結合テス�
 
   // ★ 実装の2段階（1回目 `questions.a` / `questions.b`、2回目 `questions.final`）を模す。
   //   どちらの回も `body.state` で判定するので、同じ文には一貫した勝者を返す。
+  //   `isTorn` は1段目が過半（`GROUP_A_MAJORITY`）を取れない文で、`CHILD_SCRIPT` の
+  //   `first[wa] = pa[wa]` / `first[wb] = pb[wb]`（子プロセス側の組み立て）が
+  //   実プロセス経由でしか検証できない経路を通す。
   const STUB_SCRIPT = [
     'const http = require("http");',
     "const server = http.createServer((req, res) => {",
@@ -387,17 +244,20 @@ describe("createOllayaEmotionClassifier（実プロセス経由の結合テス�
     '    const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));',
     "    const q = body.questions || {};",
     '    const isHappy = body.state.includes("やりました");',
+    '    const isTorn = body.state.includes("迷い");',
+    '    const groupAWinner = isTorn || isHappy ? "happy" : "sad";',
     "    if (q.a && q.b) {",
     '      if (q.a.type !== "choice" || q.b.type !== "choice") {',
     '        res.writeHead(400, { "Content-Type": "application/json" });',
     '        res.end(JSON.stringify({ error: "expected choice questions for a/b" }));',
     "        return;",
     "      }",
-    "      const pa = { happy: isHappy ? 0.9 : 0.05, angry: 0.05, sad: isHappy ? 0.05 : 0.9 };",
+    "      const pa = isTorn",
+    "        ? { happy: 0.45, angry: 0.3, sad: 0.25 }",
+    "        : { happy: isHappy ? 0.9 : 0.05, angry: 0.05, sad: isHappy ? 0.05 : 0.9 };",
     "      const pb = { relaxed: 0.1, surprised: 0.9 };",
-    '      const winnerA = isHappy ? "happy" : "sad";',
     "      const answers = {",
-    '        a: { type: "choice", choice: winnerA, confidence: pa[winnerA], probabilities: pa },',
+    '        a: { type: "choice", choice: groupAWinner, confidence: pa[groupAWinner], probabilities: pa },',
     '        b: { type: "choice", choice: "surprised", confidence: pb.surprised, probabilities: pb },',
     "      };",
     '      res.writeHead(200, { "Content-Type": "application/json" });',
@@ -411,11 +271,10 @@ describe("createOllayaEmotionClassifier（実プロセス経由の結合テス�
     '        res.end(JSON.stringify({ error: "expected a 3-way final choice including neutral" }));',
     "        return;",
     "      }",
-    '      const winner = isHappy ? "happy" : "sad";',
     "      const pf = {};",
-    "      criteriaKeys.forEach((k) => { pf[k] = k === winner ? 0.9 : 0.05; });",
+    "      criteriaKeys.forEach((k) => { pf[k] = k === groupAWinner ? 0.9 : 0.05; });",
     "      const answers = {",
-    '        final: { type: "choice", choice: winner, confidence: pf[winner], probabilities: pf },',
+    '        final: { type: "choice", choice: groupAWinner, confidence: pf[groupAWinner], probabilities: pf },',
     "      };",
     '      res.writeHead(200, { "Content-Type": "application/json" });',
     "      res.end(JSON.stringify({ model: body.model, answers }));",
@@ -458,6 +317,23 @@ describe("createOllayaEmotionClassifier（実プロセス経由の結合テス�
     });
 
     expect(classify(["やりました！", "残念です。"])).toEqual(["happy", "sad"]);
+    expect(fallback.calls).toHaveLength(0);
+  });
+
+  it("★ 1段目の勝者が過半未満なら、2段目の confidence が高くても neutral にする（first の組み立てを実プロセスで確認）", async () => {
+    const baseUrl = await startStub();
+
+    const fallback = makeFallback();
+    const classify = createOllayaEmotionClassifier({
+      getBaseUrl: () => baseUrl,
+      getModel: () => "laya:multilingual",
+      getTimeoutMs: () => 5000,
+      fallback: fallback.fn,
+    });
+
+    // 1段目 happy 0.45 / angry 0.3 / sad 0.25（過半未満）、2段目は happy 0.9。
+    // `first[wa]` に `pb[wb]`（surprised 0.9）が紛れ込む取り違えがあれば happy になって落ちる
+    expect(classify(["迷いがあります。"])).toEqual(["neutral"]);
     expect(fallback.calls).toHaveLength(0);
   });
 

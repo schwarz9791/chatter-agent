@@ -6,6 +6,9 @@
  *   neutral から選ばせる。6感情を一度に選ばせるより、平叙文が surprised や sad に流れにくい。
  * ★ 2段目の最上位の確率が下限（`EMOTION_FLOOR`）に届かなければ neutral に倒す。人はいつも
  *   感情を表に出しているわけではないので、確信が持てないときの既定を neutral 側に置く。
+ * ★ `GROUP_A` の感情は、1段目で過半を取れていなければ neutral に倒す（`GROUP_A_MAJORITY`）。
+ *   快・不快の向きで迷った文は、2段目で候補が減ると確率が膨らみ、失敗の報告を happy と
+ *   言い切るような逆の感情になる。
  * ★ 判定基準（`CRITERIA`）は感情そのもの（嬉しい・驚き・詫び・苛立ち）を軸に書く。
  *   出来事の種類（「予期しない事実」等）で書くと、ただの説明文までその出来事の感情に
  *   引き寄せられる。
@@ -21,7 +24,7 @@
  */
 
 import { spawnSync } from "child_process";
-import { EMOTION_KEYS, pickEmotion } from "./emotionScores";
+import { pickEmotion } from "./emotionScores";
 import type { Emotion } from "../core/types";
 
 /** choice の選択肢（英語）。 */
@@ -47,19 +50,25 @@ const EMOTION_FLOOR = 0.8;
  * 見分けがつきにくい表情なので、他の感情より緩める。
  */
 const RELAXED_FLOOR = 0.5;
+/** `GROUP_A` の感情が1段目で取るべき確率。3択の過半に届かなければ、向きを迷っているとみなす。 */
+const GROUP_A_MAJORITY = 0.5;
+
+/** 子プロセスが1文ごとに返すもの。`first` は1段目の勝者2つの確率、`final` は2段目の確率。 */
+interface StageScores {
+  first: Record<string, number>;
+  final: Record<string, number>;
+}
 
 /**
  * 子プロセス（Node、CommonJS として `node -e` に渡す）の中で実行するスクリプト。
- * stdin から `{ texts, baseUrl, model }` を読み、stdout に `(Record<Emotion, number> | null)[]`
- * （2段目の確率。2段目に残らなかった感情は0）を JSON で書く。壊れた応答・接続エラーはその文だけ `null` にして続行する（1文の失敗で残りを
- * 諦めない）。
+ * stdin から `{ texts, baseUrl, model }` を読み、stdout に `(StageScores | null)[]` を JSON で書く。
+ * 壊れた応答・接続エラーはその文だけ `null` にして続行する（1文の失敗で残りを諦めない）。
  *
  * ★ テンプレートリテラルの入れ子を避けるため、文字列連結だけで組んである（コード生成時の
  *   エスケープ事故を避けるため）。
  */
 const CHILD_SCRIPT = [
   'const fs = require("fs");',
-  `const KEYS = ${JSON.stringify(EMOTION_KEYS)};`,
   `const CRITERIA = ${JSON.stringify(CRITERIA)};`,
   `const INSTRUCTIONS = ${JSON.stringify(EMOTION_QUESTION_INSTRUCTIONS)};`,
   `const GROUP_A = ${JSON.stringify(GROUP_A)};`,
@@ -95,19 +104,22 @@ const CHILD_SCRIPT = [
   "  return best;",
   "}",
   "async function classifyOne(baseUrl, model, text) {",
-  "  const first = await ask(baseUrl, model, text, { a: choice(GROUP_A), b: choice(GROUP_B) });",
-  "  const pa = probs(first && first.a, GROUP_A);",
-  "  const pb = probs(first && first.b, GROUP_B);",
+  "  const s1 = await ask(baseUrl, model, text, { a: choice(GROUP_A), b: choice(GROUP_B) });",
+  "  const pa = probs(s1 && s1.a, GROUP_A);",
+  "  const pb = probs(s1 && s1.b, GROUP_B);",
   "  if (!pa || !pb) return null;",
-  '  const finalKeys = [top(pa, GROUP_A), top(pb, GROUP_B), "neutral"];',
-  "  const second = await ask(baseUrl, model, text, { final: choice(finalKeys) });",
-  "  const pf = probs(second && second.final, finalKeys);",
+  "  const wa = top(pa, GROUP_A);",
+  "  const wb = top(pb, GROUP_B);",
+  '  const finalKeys = [wa, wb, "neutral"];',
+  "  const s2 = await ask(baseUrl, model, text, { final: choice(finalKeys) });",
+  "  const pf = probs(s2 && s2.final, finalKeys);",
   "  if (!pf) return null;",
-  "  const scores = {};",
-  "  for (const k of KEYS) {",
-  "    scores[k] = finalKeys.indexOf(k) >= 0 ? pf[k] : 0;",
-  "  }",
-  "  return scores;",
+  "  const first = {};",
+  "  first[wa] = pa[wa];",
+  "  first[wb] = pb[wb];",
+  "  const final = {};",
+  "  for (const k of finalKeys) final[k] = pf[k];",
+  "  return { first: first, final: final };",
   "}",
   "(async () => {",
   '  const input = JSON.parse(fs.readFileSync(0, "utf-8"));',
@@ -134,12 +146,16 @@ export interface OllayaEmotionClassifierDeps {
   spawnSyncFn?: typeof spawnSync;
 }
 
-/** 最上位の感情を選び、その確率が下限に届かなければ neutral にする。壊れていれば `null`。 */
-function pickWithFloor(scores: Record<string, number> | null): Emotion | null {
-  const top = pickEmotion(scores);
+/** 2段目の最上位の感情を選び、確信が足りなければ neutral にする。壊れていれば `null`。 */
+function decide(result: unknown): Emotion | null {
+  if (typeof result !== "object" || result === null) return null;
+  const { first, final } = result as Partial<StageScores>;
+  if (typeof first !== "object" || first === null) return null;
+  const top = pickEmotion(final);
   if (top === null || top === "neutral") return top;
+  if (GROUP_A.includes(top) && !(first[top]! >= GROUP_A_MAJORITY)) return "neutral";
   const floor = top === "relaxed" ? RELAXED_FLOOR : EMOTION_FLOOR;
-  return scores![top]! >= floor ? top : "neutral";
+  return final![top]! >= floor ? top : "neutral";
 }
 
 /**
@@ -175,7 +191,7 @@ export function createOllayaEmotionClassifier(deps: OllayaEmotionClassifierDeps)
     }
     if (!Array.isArray(parsed) || parsed.length !== texts.length) return deps.fallback(texts);
 
-    const emotions = (parsed as unknown[]).map((scores) => pickWithFloor(scores as Record<string, number> | null));
+    const emotions = (parsed as unknown[]).map(decide);
     const brokenIndices: number[] = [];
     emotions.forEach((e, i) => {
       if (e === null) brokenIndices.push(i);

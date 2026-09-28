@@ -34,12 +34,16 @@ import type { Summarize, SummaryOutcome } from "./types";
  *   利用制限の通知や拒否文を stdout に返すことがあり、それをそのまま採用してしまう
  *   事故をこの上限で弾く。上限との比較は原文と同じ単位（文字数 or 語数）で行う。
  *
+ * ★ 要約が原文と別の文字体系（単位）で返ってきたら採用しない。上限を原文の単位で数えているので、
+ *   単位が食い違うと上限が実質効かず、原文と別の言語で読み上げられてしまうため。
+ *
  * @param spoken 実際に読み上げる形（`toSpeechSentences` を通した後）
  * @param originalText 比較相手の原文。**整形済みのテキストで比べること**
  */
 export function isAcceptableSummary(spoken: string, originalText: string): boolean {
   if (spoken.length === 0 || spoken.length >= originalText.length) return false;
   const limit = summaryLengthLimit(originalText);
+  if (summaryLengthLimit(spoken).unit !== limit.unit) return false;
   const spokenLength = limit.unit === "words" ? countWords(spoken) : spoken.length;
   return spokenLength <= limit.max * 2;
 }
@@ -210,7 +214,7 @@ export function createSummaryPipeline(deps: SummaryPipelineDeps): Summarize {
       //   同じ1箇所）が行う
       const spoken = toSpeechSentences(summary).join("\n");
 
-      // 「空でない かつ 原文より短い」だけでなく、上限も見る（→ isAcceptableSummary）。
+      // 「空でない かつ 原文より短い」だけでなく、上限と言語も見る（→ isAcceptableSummary）。
       // CLI が exit 0 のまま利用制限の通知や拒否文を stdout に返す事故を弾くため。
       if (!isAcceptableSummary(spoken, text)) {
         log("invalid", startedAt, text.length, spoken.length);

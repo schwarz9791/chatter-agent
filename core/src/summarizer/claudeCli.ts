@@ -19,6 +19,12 @@ export interface BuildSummaryArgsOptions {
   model: string;
 }
 
+const SUMMARY_SETTINGS_OVERRIDE = JSON.stringify({
+  language: "en",
+  claudeMdExcludes: ["**/CLAUDE.md"],
+  autoMemoryEnabled: false,
+});
+
 /**
  * 要約 CLI の引数を組み立てる純粋関数（`execFileSync` を呼ばずに単体テストできるように分離）。
  *
@@ -39,12 +45,6 @@ export interface BuildSummaryArgsOptions {
  * - `--bare` は選ばない。hooks を skip できるが `ANTHROPIC_API_KEY` が必須で、OAuth ログイン
  *   運用（実測環境がそう）では使えない
  */
-const SUMMARY_SETTINGS_OVERRIDE = JSON.stringify({
-  language: "en",
-  claudeMdExcludes: ["**/CLAUDE.md"],
-  autoMemoryEnabled: false,
-});
-
 export function buildSummaryArgs(instruction: string, opts: BuildSummaryArgsOptions): string[] {
   const args = [
     "-p",

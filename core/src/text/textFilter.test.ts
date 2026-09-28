@@ -388,6 +388,16 @@ describe("splitIntoSentences", () => {
       const result = splitIntoSentences("Hold on… let me check.");
       expect(result).toEqual(["Hold on… let me check."]);
     });
+
+    it("小文字の単位(ms.)のピリオドでは分割する", () => {
+      const result = splitIntoSentences("It took 200 ms. Next I ran the tests.");
+      expect(result).toEqual(["It took 200 ms.", "Next I ran the tests."]);
+    });
+
+    it("文頭の大文字の略語では分割しない", () => {
+      const result = splitIntoSentences("E.g. this one works.");
+      expect(result).toEqual(["E.g. this one works."]);
+    });
   });
   it("行頭の番号付きリストの番号では切らない", () => {
     expect(splitIntoSentences("1. Install deps. Then build.\n2. Run tests.")).toEqual([

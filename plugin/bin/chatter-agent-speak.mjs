@@ -1424,6 +1424,11 @@ function writeDefaultEmotionKeywordsIfAbsent(filePath) {
 *
 * [#51]: https://github.com/schwarz9791/chatter-agent/issues/51
 */
+const SUMMARY_SETTINGS_OVERRIDE = JSON.stringify({
+	language: "en",
+	claudeMdExcludes: ["**/CLAUDE.md"],
+	autoMemoryEnabled: false
+});
 /**
 * 要約 CLI の引数を組み立てる純粋関数（`execFileSync` を呼ばずに単体テストできるように分離）。
 *
@@ -1444,11 +1449,6 @@ function writeDefaultEmotionKeywordsIfAbsent(filePath) {
 * - `--bare` は選ばない。hooks を skip できるが `ANTHROPIC_API_KEY` が必須で、OAuth ログイン
 *   運用（実測環境がそう）では使えない
 */
-const SUMMARY_SETTINGS_OVERRIDE = JSON.stringify({
-	language: "en",
-	claudeMdExcludes: ["**/CLAUDE.md"],
-	autoMemoryEnabled: false
-});
 function buildSummaryArgs(instruction, opts) {
 	const args = [
 		"-p",
@@ -2136,7 +2136,7 @@ function cleanTextForSpeech(text) {
 	cleaned = cleaned.replace(/`([^`]+)`/g, "$1");
 	return cleaned;
 }
-const ABBREVIATIONS = "e\\.g|i\\.e|etc|vs|Mr|Mrs|Ms|Dr|Prof|Jr|Sr|St|approx";
+const ABBREVIATIONS = "[Ee]\\.g|[Ii]\\.e|etc|vs|Mr|Mrs|Ms|Dr|Prof|Jr|Sr|St|[Aa]pprox";
 /**
 * Split text into individual sentences for sequential speech synthesis.
 * Splits on Japanese sentence-ending punctuation (。！？!?) and newlines, and on an
@@ -2146,7 +2146,7 @@ const ABBREVIATIONS = "e\\.g|i\\.e|etc|vs|Mr|Mrs|Ms|Dr|Prof|Jr|Sr|St|approx";
 * Returns trimmed sentences (including empty strings as spacing information).
 */
 function splitIntoSentences(text) {
-	return text.split(new RegExp(`(?<=[。！？!?])|(?<!\\.\\.)(?<!\\b(?:${ABBREVIATIONS})\\.)(?<!(?:^|[\\n\\r])[ \\t]*\\d+\\.)(?<=\\.)(?=[ \\t])|[\\n\\r]+`, "i")).map((s) => s.trim());
+	return text.split(new RegExp(`(?<=[。！？!?])|(?<!\\.\\.)(?<!\\b(?:${ABBREVIATIONS})\\.)(?<!(?:^|[\\n\\r])[ \\t]*\\d+\\.)(?<=\\.)(?=[ \\t])|[\\n\\r]+`)).map((s) => s.trim());
 }
 
 //#endregion
@@ -2553,12 +2553,16 @@ function wrapSummaryInput(text) {
 *   利用制限の通知や拒否文を stdout に返すことがあり、それをそのまま採用してしまう
 *   事故をこの上限で弾く。上限との比較は原文と同じ単位（文字数 or 語数）で行う。
 *
+* ★ 要約が原文と別の文字体系（単位）で返ってきたら採用しない。上限を原文の単位で数えているので、
+*   単位が食い違うと上限が実質効かず、原文と別の言語で読み上げられてしまうため。
+*
 * @param spoken 実際に読み上げる形（`toSpeechSentences` を通した後）
 * @param originalText 比較相手の原文。**整形済みのテキストで比べること**
 */
 function isAcceptableSummary(spoken, originalText) {
 	if (spoken.length === 0 || spoken.length >= originalText.length) return false;
 	const limit = summaryLengthLimit(originalText);
+	if (summaryLengthLimit(spoken).unit !== limit.unit) return false;
 	return (limit.unit === "words" ? countWords(spoken) : spoken.length) <= limit.max * 2;
 }
 /**

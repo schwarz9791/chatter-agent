@@ -124,6 +124,16 @@ describe("isAcceptableSummary", () => {
     expect(isAcceptableSummary(spoken, original)).toBe(false);
   });
 
+  it("原文が英語・要約が日本語なら不採用にする（単位が食い違う）", () => {
+    const original = Array.from({ length: 200 }, (_, i) => `original${i}`).join(" ");
+    expect(isAcceptableSummary("短い要約です。", original)).toBe(false);
+  });
+
+  it("原文が日本語・要約が英語なら不採用にする（単位が食い違う）", () => {
+    const original = "あ".repeat(1000);
+    expect(isAcceptableSummary("This is a short sentence.", original)).toBe(false);
+  });
+
   it("空の要約は不採用にする", () => {
     expect(isAcceptableSummary("", "あ".repeat(1000))).toBe(false);
   });

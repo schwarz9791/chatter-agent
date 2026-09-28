@@ -50,7 +50,9 @@ export function cleanTextForSpeech(text: string): string {
 }
 
 // English abbreviations whose trailing period is not a sentence end.
-const ABBREVIATIONS = "e\\.g|i\\.e|etc|vs|Mr|Mrs|Ms|Dr|Prof|Jr|Sr|St|approx";
+// Matching is case-sensitive so that lowercase units such as `ms.` still end a sentence;
+// only abbreviations that can start a sentence list both cases.
+const ABBREVIATIONS = "[Ee]\\.g|[Ii]\\.e|etc|vs|Mr|Mrs|Ms|Dr|Prof|Jr|Sr|St|[Aa]pprox";
 
 /**
  * Split text into individual sentences for sequential speech synthesis.
@@ -65,7 +67,6 @@ export function splitIntoSentences(text: string): string[] {
   const parts = text.split(
     new RegExp(
       `(?<=[。！？!?])|(?<!\\.\\.)(?<!\\b(?:${ABBREVIATIONS})\\.)(?<!(?:^|[\\n\\r])[ \\t]*\\d+\\.)(?<=\\.)(?=[ \\t])|[\\n\\r]+`,
-      "i",
     ),
   );
 

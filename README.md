@@ -4,7 +4,7 @@
 
 **Have a VRM character read Claude Code's messages aloud, in real time.**
 
-It takes the message text straight from Claude Code's `MessageDisplay` hook; the server formats it and synthesizes speech. The display-side apps (a macOS desktop resident app / Android XR glasses) receive it, play it, and reflect it in the VRM character's facial expressions, motion, and lip sync.
+It takes the message text straight from Claude Code's `MessageDisplay` hook; the server formats it and synthesizes speech. The display-side apps (a macOS desktop resident app / Android XR glasses and headsets) receive it, play it, and reflect it in the VRM character's facial expressions, motion, and lip sync.
 
 **Claude Code only, for now.** Speech is captured through Claude Code's `MessageDisplay` hook, so a tool without an equivalent hook gives it nothing to capture. Widening this is on the roadmap.
 
@@ -61,7 +61,7 @@ There are four deliverables.
 | **Server** (`chatter-agent-server`) | Works |
 | **CLI player** (`chatter-agent-player`) | Works. Also doubles as the reference implementation of the protocol |
 | **macOS client** (`chatter-mascot`) | Works. Sits resident in a transparent window, and the VRM reads speech aloud with facial expressions, motion, and lip sync. Settings can be changed from the app |
-| **Android XR client** (same Unity project. Targets XREAL Aura) | Emulator only. Stands in space in OpenXR's Full Space and connects to the server over LAN. **Not yet verified on real hardware** |
+| **Android XR client** (same Unity project. Targets XREAL Aura / Galaxy XR) | Emulator only. Stands in space in OpenXR's Full Space, and the room shows through the background on both glasses and headsets. Connects to the server over LAN. **Not yet verified on real hardware** |
 
 ## Building
 
@@ -266,9 +266,8 @@ cd chatter-mascot
 ## Roadmap
 
 - Support for coding agents other than Claude
-- Support for moving around in XR space to some degree, and spatial anchor support
+- Spatial anchor support (keeping a repositioned placement across restarts)
 - CI setup and distribution to various app stores
-- Galaxy XR support
 - Letting it run alongside Home Scene apps on Android XR
 - Making it work on Android glasses (INAIR Pod / Viture Neckband, etc.)
 

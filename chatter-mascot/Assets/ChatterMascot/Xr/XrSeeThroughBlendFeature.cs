@@ -12,15 +12,16 @@ using UnityEditor.XR.OpenXR.Features;
 namespace ChatterMascot.Xr
 {
     /// <summary>
-    /// environment blend mode を ADDITIVE にし、ランタイムが ADDITIVE を持たなければ ALPHA_BLEND にする。
-    /// 描かなかった所（背景のアルファ 0 の黒）から部屋が見えるようにするため。
-    /// グラス（光学シースルー）は OPAQUE / ADDITIVE、ヘッドセット（ビデオパススルー）は OPAQUE / ALPHA_BLEND を持つ。
+    /// ランタイムが推奨する順（<c>xrEnumerateEnvironmentBlendModes</c> の並び）で最初の OPAQUE 以外の
+    /// environment blend mode を要求する。描かなかった所（背景のアルファ 0 の黒）から部屋が見えるように
+    /// するため。列挙できなければ ADDITIVE を要求する。
     ///
-    /// ★ <b>どちらを要求するかは、ランタイムが持つモードを列挙して決める。</b> <c>SetEnvironmentBlendMode</c> は
-    ///   次のフレームで適用する予約で、<c>GetEnvironmentBlendMode</c> は予約を反映しない。「要求して通らなければ
+    /// ★ <b>何を要求するかは、ランタイムが持つモードを列挙して決める。</b> <c>SetEnvironmentBlendMode</c> は
+    ///   後で適用される予約で、<c>GetEnvironmentBlendMode</c> は予約を反映しない。「要求して通らなければ
     ///   次」とは書けず、最後に要求したモードを持たなければ OPAQUE に戻される。
-    /// ★ <b>AR Camera（パススルー）では代わりにならない。</b> あちらは ALPHA_BLEND しか要求しないので、
-    ///   グラスでは OPAQUE に戻される。
+    /// ★ <b>AR Camera（パススルー）では代わりにならない。</b> <c>ARCameraFeature</c> はパススルーの有無に
+    ///   応じて ALPHA_BLEND / OPAQUE を要求し、ADDITIVE は要求しない。グラスでは OPAQUE に戻される。併用すると、
+    ///   カメラ停止時の OPAQUE の予約でこちらの要求が上書きされうる。
     /// ★ 呼ばれるのはセッションの準備時（<c>XrSetupConfigValues</c>）だけ（<c>ARCameraFeature</c> と同じ形）。
     /// </summary>
 #if UNITY_EDITOR
@@ -60,16 +61,20 @@ namespace ChatterMascot.Xr
         protected override void OnEnvironmentBlendModeChange(XrEnvironmentBlendMode mode)
         {
             var available = EnumerateBlendModes();
-            // 列挙できなければ ADDITIVE を要求する（グラスでの見え方を保つ）
-            var target = available == null || available.Contains((int)XrEnvironmentBlendMode.Additive)
+            var target = available == null
                 ? XrEnvironmentBlendMode.Additive
-                : available.Contains((int)XrEnvironmentBlendMode.AlphaBlend)
-                    ? XrEnvironmentBlendMode.AlphaBlend
-                    : mode;
+                : (XrEnvironmentBlendMode)available.FirstOrDefault(m => m != (int)XrEnvironmentBlendMode.Opaque);
+            var list = available == null ? "列挙できず" : string.Join(", ", available.Select(m => (XrEnvironmentBlendMode)m));
+
+            if (target == 0)
+            {
+                Debug.Log($"[Mascot] XR: environment blend mode は OPAQUE 以外を持たないので {mode} のまま（持つモード: {list}）");
+                return;
+            }
             if (target == mode) return;
 
             SetEnvironmentBlendMode(target);
-            Debug.Log($"[Mascot] XR: environment blend mode を {mode} から {target} へ要求しました");
+            Debug.Log($"[Mascot] XR: environment blend mode を {mode} から {target} へ要求しました（持つモード: {list}）");
         }
 
         private int[] EnumerateBlendModes()
@@ -77,17 +82,31 @@ namespace ChatterMascot.Xr
             try
             {
                 var getProcAddr = Marshal.GetDelegateForFunctionPointer<GetInstanceProcAddrFn>(xrGetInstanceProcAddr);
-                if (getProcAddr(_instance, "xrEnumerateEnvironmentBlendModes", out var fn) != XrResult.Success
-                    || fn == IntPtr.Zero)
+                var getProcAddrResult = getProcAddr(_instance, "xrEnumerateEnvironmentBlendModes", out var fn);
+                if (getProcAddrResult != XrResult.Success || fn == IntPtr.Zero)
+                {
+                    Debug.LogWarning($"[Mascot] XR: environment blend mode を列挙できませんでした: xrGetInstanceProcAddr → {getProcAddrResult}");
                     return null;
+                }
 
                 var enumerate = Marshal.GetDelegateForFunctionPointer<EnumerateEnvironmentBlendModesFn>(fn);
-                if (enumerate(_instance, _systemId, PrimaryStereo, 0, out var count, null) != XrResult.Success)
+                var countResult = enumerate(_instance, _systemId, PrimaryStereo, 0, out var count, null);
+                if (countResult != XrResult.Success)
+                {
+                    Debug.LogWarning($"[Mascot] XR: environment blend mode を列挙できませんでした: xrEnumerateEnvironmentBlendModes → {countResult}");
                     return null;
+                }
+
                 var modes = new int[count];
-                return enumerate(_instance, _systemId, PrimaryStereo, count, out count, modes) == XrResult.Success
-                    ? modes
-                    : null;
+                var enumerateResult = enumerate(_instance, _systemId, PrimaryStereo, count, out count, modes);
+                if (enumerateResult != XrResult.Success)
+                {
+                    Debug.LogWarning($"[Mascot] XR: environment blend mode を列挙できませんでした: xrEnumerateEnvironmentBlendModes → {enumerateResult}");
+                    return null;
+                }
+
+                Array.Resize(ref modes, (int)count);
+                return modes;
             }
             catch (Exception e)
             {

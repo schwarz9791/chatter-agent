@@ -305,7 +305,7 @@ Android のログは `adb logcat -s Unity`。★★ **Android では 401 と「�
 
 ★ **`XR_Glasses` AVD の Home Space パネルは、カメラを不透明の黒でクリアしても部屋が透けて見える。**
 フレームバッファの alpha に関わらず**黒は見えない**（光学シースルーの模擬。黒 = 光が無い）。
-`XR_Headset2` では同じ APK が不透明の黒いパネルになる。下の「代替案: Home Space + 2Dパネル」にあった
+XR Headset（Google Play XR API v1 のイメージ）では同じ APK が不透明の黒いパネルになる。下の「代替案: Home Space + 2Dパネル」にあった
 「パネル背景を透過できるか」はエミュレータの範囲で答えが出た —— グラスでは何もしなくても透けるが、
 **暗い色は実背景に負けて薄まる**。`XR_Glasses` のパネルには `_ × [] [ ]` のタイトルバーが付く。
 
@@ -772,8 +772,8 @@ hips の平行移動は 1cm 未満で、**root motion は焼かれていない**
 
 ### 背景に部屋を透かす（environment blend mode。[#119](https://github.com/schwarz9791/chatter-agent/issues/119)）
 
-**ランタイムが持つ environment blend mode を列挙し、ADDITIVE があれば ADDITIVE、無くて ALPHA_BLEND があれば
-ALPHA_BLEND にする。** 描かなかった所（カメラの背景はアルファ 0 の黒）から部屋が見える。グラス（光学シースルー）は
+**ランタイムの推奨順（`xrEnumerateEnvironmentBlendModes` の並び）で最初の OPAQUE 以外の environment blend mode
+にする。** 描かなかった所（カメラの背景はアルファ 0 の黒）から部屋が見える。グラス（光学シースルー）は
 加算で重ね、ヘッドセット（ビデオパススルー）はカメラ映像にアルファで重ねる。自前の OpenXR feature
 （`XrSeeThroughBlendFeature`）が `OnEnvironmentBlendModeChange` で要求する（呼ばれるのはセッションの準備時だけ）。
 
@@ -794,10 +794,13 @@ Get を見て次を要求する形だと、どのランタイムでも最後の�
 列挙に失敗したら ADDITIVE を要求する。
 
 ★ **ログの `(Selected)` は予約が適用される前の値。** ADDITIVE / ALPHA_BLEND が効いていても
-`XR_ENVIRONMENT_BLEND_MODE_OPAQUE (Selected)` と出るので、効いたかどうかは見え方で確かめる。
+`XR_ENVIRONMENT_BLEND_MODE_OPAQUE (Selected)` と出るので、効いたかどうかは見え方で確かめる。持つモードは
+`[Mascot] XR: environment blend mode …（持つモード: …）` の行で見る。
 
 ★ **AR Camera（`ARCameraFeature` + `ARCameraManager`。パッケージの「パススルー」）では代わりにならない。**
-あちらは ALPHA_BLEND しか要求しないので、グラスでは OPAQUE に戻される。
+`ARCameraFeature.OnEnvironmentBlendModeChange`（`com.unity.xr.androidxr-openxr`）はパススルーの有無に応じて
+ALPHA_BLEND / OPAQUE を要求し、ADDITIVE は要求しない。グラスでは OPAQUE に戻される。併用すると、カメラ停止時
+（`AndroidOpenXRCameraSubsystem` の `SetPassthrough(false)`）の OPAQUE の予約でこちらの要求が上書きされうる。
 
 ★ **Extensions は要らない。** Extensions の Environment Blend Mode 機能は 1.3.0 で削除され、「Unity OpenXR
 Android XR の AR Camera を使え」とある。Extensions の Passthrough は「メッシュ形の穴」で、背景全体ではない。
@@ -1035,7 +1038,7 @@ Android版 Claude アプリ等と並べられる。引き換えに空間的な�
 
 Android XR Emulator で確認できるのは Full Space での表示・空間固定の配置・アニメーション・発話まで。
 **確認できないもの**: 実際のフレームレート、実機の視野角での見え方、ハンドトラッキング精度、
-背景の部屋（Full Space では黒い。→「背景に部屋を透かす」で ADDITIVE にするまでは）。
+実際の部屋（カメラ映像・光学シースルー越し）に重ねたときの見え方（エミュレータの背景はシミュレートされた室内）。
 
 ## 参考: `~/dev/android-xr-test`
 

@@ -305,7 +305,7 @@ Android のログは `adb logcat -s Unity`。★★ **Android では 401 と「�
 
 ★ **`XR_Glasses` AVD の Home Space パネルは、カメラを不透明の黒でクリアしても部屋が透けて見える。**
 フレームバッファの alpha に関わらず**黒は見えない**（光学シースルーの模擬。黒 = 光が無い）。
-`XR_Headset2` では同じ APK が不透明の黒いパネルになる。下の「代替案: Home Space + 2Dパネル」にあった
+XR Headset（Google Play XR API v1 のイメージ）では同じ APK が不透明の黒いパネルになる。下の「代替案: Home Space + 2Dパネル」にあった
 「パネル背景を透過できるか」はエミュレータの範囲で答えが出た —— グラスでは何もしなくても透けるが、
 **暗い色は実背景に負けて薄まる**。`XR_Glasses` のパネルには `_ × [] [ ]` のタイトルバーが付く。
 
@@ -426,7 +426,7 @@ adb shell rm $D/animations/happy/<名前>.vrma
 Android ビルドは OpenXR（`com.unity.xr.androidxr-openxr`）で Full Space に入り、キャラクターを空間に固定して立たせる
 （[#99](https://github.com/schwarz9791/chatter-agent/issues/99)）。起動後は手でつまんで置き直せる
 （[#121](https://github.com/schwarz9791/chatter-agent/issues/121)。→ 下「キャラを手で置き直す」）。
-背景は environment blend mode を ADDITIVE にして部屋を透かす（→ 下「背景に部屋を透かす」）。
+背景は environment blend mode を ADDITIVE（グラス）か ALPHA_BLEND（ヘッドセット）にして部屋を透かす（→ 下「背景に部屋を透かす」）。
 Android XR Extensions for Unity（`com.google.xr.extensions`）は入れない（[#119](https://github.com/schwarz9791/chatter-agent/issues/119)。理由も同じ節）。
 実機（XREAL Aura）での見え方・視野・距離感は [#100](https://github.com/schwarz9791/chatter-agent/issues/100)。
 
@@ -772,24 +772,42 @@ hips の平行移動は 1cm 未満で、**root motion は焼かれていない**
 
 ### 背景に部屋を透かす（environment blend mode。[#119](https://github.com/schwarz9791/chatter-agent/issues/119)）
 
-**グラスでは environment blend mode を ADDITIVE にする。** 描かなかった所（カメラの背景はアルファ 0 の黒）から
-部屋が見える。自前の OpenXR feature（`XrAdditiveBlendFeature`）が `OnEnvironmentBlendModeChange` で ADDITIVE を
-要求する（呼ばれるのはセッションの準備時だけ）。ADDITIVE を持たないランタイム（ヘッドセット）では要求しても既定のまま。
+**ランタイムの推奨順（`xrEnumerateEnvironmentBlendModes` の並び）で最初の OPAQUE 以外の environment blend mode
+にする。** 描かなかった所（カメラの背景はアルファ 0 の黒）から部屋が見える。グラス（光学シースルー）は
+加算で重ね、ヘッドセット（ビデオパススルー）はカメラ映像にアルファで重ねる。自前の OpenXR feature
+（`XrSeeThroughBlendFeature`）が `OnEnvironmentBlendModeChange` で要求する（呼ばれるのはセッションの準備時だけ）。
 
-★★ **グラスのランタイムは OPAQUE / ADDITIVE しか持たず、既定は OPAQUE。** `XR_Glasses` のログに
-`Available Environment Blend Modes: (2)` → `XR_ENVIRONMENT_BLEND_MODE_OPAQUE (Selected)` /
-`XR_ENVIRONMENT_BLEND_MODE_ADDITIVE` と出る。OPAQUE のままだと背景は黒く、エミュレータの減光
-（Environment Visibility）のスライダーも動かせない。
+| ランタイム | 持つモード（既定は OPAQUE） | 選ぶもの |
+|---|---|---|
+| グラス（`XR_Glasses`） | OPAQUE / ADDITIVE | ADDITIVE |
+| ヘッドセット（`XR_Headset2`） | OPAQUE / ALPHA_BLEND | ALPHA_BLEND |
+
+ログには `Available Environment Blend Modes: (2)` に続けて持つモードが並ぶ。OPAQUE のままだと背景は黒く、
+グラスのエミュレータでは減光（Environment Visibility）のスライダーも動かせない。
+
+★★ **「要求して通らなければ次を要求する」とは書けない。** `SetEnvironmentBlendMode` は後で適用される予約
+（ネイティブ側の `m_NextBlendMode`）で、直後の `GetEnvironmentBlendMode` は予約前の値を返す。`XR_Headset2` で
+ADDITIVE → ALPHA_BLEND と要求した直後の Get は OPAQUE を返し、それでも ALPHA_BLEND が効いた（2026-09-28）。
+Get を見て次を要求する形だと、どのランタイムでも最後の要求が予約に残り、それを持たないランタイム（グラスに
+とっての ALPHA_BLEND）では OPAQUE に戻される。列挙は `xrGetInstanceProcAddr` から
+`xrEnumerateEnvironmentBlendModes` を引いて呼ぶ（IL2CPP でも `Marshal.GetDelegateForFunctionPointer` で動く）。
+列挙に失敗したら ADDITIVE を要求する。
+
+★ **ログの `(Selected)` は予約が適用される前の値。** ADDITIVE / ALPHA_BLEND が効いていても
+`XR_ENVIRONMENT_BLEND_MODE_OPAQUE (Selected)` と出るので、効いたかどうかは見え方で確かめる。持つモードは
+`[Mascot] XR: environment blend mode …（持つモード: …）` の行で見る。
 
 ★ **AR Camera（`ARCameraFeature` + `ARCameraManager`。パッケージの「パススルー」）では代わりにならない。**
-あちらは ALPHA_BLEND を要求するが、グラスには無いので OPAQUE に戻される。
+`ARCameraFeature.OnEnvironmentBlendModeChange`（`com.unity.xr.androidxr-openxr`）はパススルーの有無に応じて
+ALPHA_BLEND / OPAQUE を要求し、ADDITIVE は要求しない。グラスでは OPAQUE に戻される。併用すると、カメラ停止時
+（`AndroidOpenXRCameraSubsystem` の `SetPassthrough(false)`）の OPAQUE の予約でこちらの要求が上書きされうる。
 
 ★ **Extensions は要らない。** Extensions の Environment Blend Mode 機能は 1.3.0 で削除され、「Unity OpenXR
 Android XR の AR Camera を使え」とある。Extensions の Passthrough は「メッシュ形の穴」で、背景全体ではない。
 さらに 1.3.1 はマニフェストに大文字の `android.software.xr.api.SPATIAL`（`required="true"`）を混ぜる
 （`androidxr-openxr` 1.4.1 が直したのと同じバグ。1.3.2 で修正）。
 
-★ 加算合成なので、キャラクターは暗い所ほど透けて見える。光学シースルーのグラスの見え方そのもの
+★ グラスは加算合成なので、キャラクターは暗い所ほど透けて見える。光学シースルーのグラスの見え方そのもの
 （実機での見え方は #100）。
 
 ★ **自前の OpenXR feature は、設定アセットに登録されるまで `GetFeature<T>()` で見つからない。** batchmode の
@@ -878,7 +896,8 @@ Android XR は Vulkan 必須なので、この機能を切って回避するこ�
 | AVD（システムイメージ） | 結果 |
 |---|---|
 | `XR_Glasses`（Google Play XR Preview API v4） | `xrDesktopMode=full-space-unmanaged` で起動し、セッションは `FOCUSED` まで進む。空間固定・縮尺（0.18。髪は spring bone への焼き込みで XR 化前と同じ形）・待機モーション・発話 → ack まで通る |
-| `XR_Headset2`（Google Play XR API v1） | アプリは `READY` まで進むが、`com.android.systemui` が `Buffer processing hung up due to stuck fence. Indicates GPU hang` で ANR する。**使わない** |
+| `XR_Headset2`（Google Play XR API v3） | `full-space-unmanaged` で `FOCUSED` まで進み、ALPHA_BLEND で部屋（シミュレートされた室内）が見える（2026-09-28） |
+| XR Headset（Google Play XR API v1） | アプリは `READY` まで進むが、`com.android.systemui` が `Buffer processing hung up due to stuck fence. Indicates GPU hang` で ANR する。**使わない** |
 
 - スワップチェーンはテクスチャ配列が `XR_ERROR_FEATURE_UNSUPPORTED` で一度失敗し、配列なしに落ちて描ける
 - 背景は黒く、部屋は見えなかった。原因は environment blend mode が OPAQUE のままだったこと（→「背景に部屋を透かす」。2026-09-19 に ADDITIVE にして見えるようになった）
@@ -905,7 +924,7 @@ Android XR は Vulkan 必須なので、この機能を切って回避するこ�
 
 | 項目 | 値 | なぜ |
 |---|---|---|
-| XR Plug-in Management | **Android にだけ** OpenXR ローダー。feature は Android XR Support / Hand Interaction Profile / Android XR: Session / Android XR: Planes と、自前の Chatter Mascot: Additive Blend の5つ | Standalone に割り当てないので macOS ビルドは変わらない。Session は Planes の Project Validation が要求するので有効化する（有効にすると、パッケージが `OpenXRLifeCycleFeature` も連動して有効にする） |
+| XR Plug-in Management | **Android にだけ** OpenXR ローダー。feature は Android XR Support / Hand Interaction Profile / Android XR: Session / Android XR: Planes と、自前の Chatter Mascot: See-Through Blend の5つ | Standalone に割り当てないので macOS ビルドは変わらない。Session は Planes の Project Validation が要求するので有効化する（有効にすると、パッケージが `OpenXRLifeCycleFeature` も連動して有効にする） |
 | Graphics API（Android） | **Vulkan 単独** | URP で Android XR を使うときの必須設定 |
 | `Mobile_Renderer` の Post Processing | **無効**（`postProcessData` を外す） | Project Validation の error。`PC_Renderer` は触らない |
 
@@ -1019,7 +1038,7 @@ Android版 Claude アプリ等と並べられる。引き換えに空間的な�
 
 Android XR Emulator で確認できるのは Full Space での表示・空間固定の配置・アニメーション・発話まで。
 **確認できないもの**: 実際のフレームレート、実機の視野角での見え方、ハンドトラッキング精度、
-背景の部屋（Full Space では黒い。→「背景に部屋を透かす」で ADDITIVE にするまでは）。
+実際の部屋（カメラ映像・光学シースルー越し）に重ねたときの見え方（エミュレータの背景はシミュレートされた室内）。
 
 ## 参考: `~/dev/android-xr-test`
 

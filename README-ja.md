@@ -4,7 +4,7 @@
 
 **Claude Code の発言を、VRM キャラクターがリアルタイムで読み上げるシステム。**
 
-Claude Code の `MessageDisplay` hook から発言テキストを直接受け取り、サーバーが整形して音声に合成します。表示側アプリ（macOS のデスクトップ常駐 / Android XR グラス）はそれを受け取って鳴らし、VRM キャラクターの表情・モーション・リップシンクに反映します。
+Claude Code の `MessageDisplay` hook から発言テキストを直接受け取り、サーバーが整形して音声に合成します。表示側アプリ（macOS のデスクトップ常駐 / Android XR のグラス・ヘッドセット）はそれを受け取って鳴らし、VRM キャラクターの表情・モーション・リップシンクに反映します。
 
 **いまは Claude Code のみです。** 発言の捕捉を `MessageDisplay` hook に頼っているので、同等の hook を持たないツールでは捕まえる先がありません（対応はロードマップに入れています）。
 
@@ -61,7 +61,7 @@ Claude Code
 | **サーバー**（`chatter-agent-server`） | 動きます |
 | **CLI プレーヤー**（`chatter-agent-player`） | 動きます。プロトコルの参照実装も兼ねています |
 | **macOS クライアント**（`chatter-mascot`） | 動きます。透過ウィンドウで常駐し、VRM が表情・モーション・リップシンク付きで読み上げます。設定はアプリから変えられます |
-| **Android XR クライアント**（同じ Unity プロジェクト。XREAL Aura 想定） | エミュレータまで。OpenXR の Full Space で空間に立ち、LAN 越しにサーバーへ繋がります。**実機は未確認** |
+| **Android XR クライアント**（同じ Unity プロジェクト。XREAL Aura / Galaxy XR 想定） | エミュレータまで。OpenXR の Full Space で空間に立ち、グラスでもヘッドセットでも背景に部屋が透けます。LAN 越しにサーバーへ繋がります。**実機は未確認** |
 
 ## ビルド
 
@@ -265,9 +265,8 @@ cd chatter-mascot
 ## ロードマップ
 
 - Claude 以外のコーディングエージェントへの対応
-- XR 空間である程度動き回る対応、空間アンカー対応
+- 空間アンカー対応（置き直した位置を再起動しても保つ）
 - CI 整備と各種アプリストアへの配信
-- Galaxy XR 対応
 - Android XR で Home Scene アプリと同居できるようにする
 - Android グラス（INAIR Pod / Viture Neckband など）で動くようにする
 

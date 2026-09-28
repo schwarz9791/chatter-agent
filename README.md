@@ -265,7 +265,6 @@ cd chatter-mascot
 
 ## Roadmap
 
-- Multi-language support — extend sentence splitting, summarization, and emotion classification beyond Japanese (TTS is already swappable; see [`docs/kokoro.md`](./docs/kokoro.md))
 - Support for coding agents other than Claude
 - Support for moving around in XR space to some degree, and spatial anchor support
 - CI setup and distribution to various app stores

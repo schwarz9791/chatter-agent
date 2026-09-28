@@ -2433,7 +2433,7 @@ const SUMMARY_CHARS_MAX = 300;
 const SUMMARY_CHARS_PER_SENTENCE = 60;
 const SUMMARY_WORDS_MIN = 20;
 const SUMMARY_WORDS_MAX = 60;
-const SUMMARY_WORDS_PER_SENTENCE = 12;
+const SUMMARY_WORDS_PER_SENTENCE = 16;
 const SUMMARY_SENTENCES_MIN = 2;
 const SUMMARY_SENTENCES_MAX = 5;
 function clamp(value, min, max) {
@@ -2458,7 +2458,7 @@ function summaryLengthLimit(text) {
 	return {
 		unit: "words",
 		max,
-		sentences: clamp(Math.round(max / 12), 2, 5)
+		sentences: clamp(Math.round(max / 16), 2, 5)
 	};
 }
 /**

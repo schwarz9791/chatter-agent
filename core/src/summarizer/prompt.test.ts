@@ -7,6 +7,7 @@ import {
   SUMMARY_SENTENCES_MIN,
   SUMMARY_WORDS_MAX,
   SUMMARY_WORDS_MIN,
+  SUMMARY_WORDS_PER_SENTENCE,
   buildSummaryInstruction,
   countWords,
   summaryLengthLimit,
@@ -73,9 +74,11 @@ describe("summaryLengthLimit", () => {
     expect(summaryLengthLimit("one word").sentences).toBe(SUMMARY_SENTENCES_MIN);
   });
 
-  it("sentences は上限を超えない（words、上限語数のとき）", () => {
+  it("sentences は上限語数を1文あたりの語数で割った数になり、上限を超えない（words）", () => {
     const text = Array.from({ length: 10_000 }, (_, i) => `word${i}`).join(" ");
-    expect(summaryLengthLimit(text).sentences).toBe(SUMMARY_SENTENCES_MAX);
+    const { sentences } = summaryLengthLimit(text);
+    expect(sentences).toBe(Math.round(SUMMARY_WORDS_MAX / SUMMARY_WORDS_PER_SENTENCE));
+    expect(sentences).toBeLessThanOrEqual(SUMMARY_SENTENCES_MAX);
   });
 });
 

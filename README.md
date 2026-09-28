@@ -119,10 +119,29 @@ cd chatter-mascot
 
 ### Installing the Claude Code plugin
 
+**Straight from GitHub** (`--sparse` fetches only the plugin part):
+
+```bash
+claude plugin marketplace add schwarz9791/chatter-agent --sparse .claude-plugin plugin
+claude plugin install chatter-agent@chatter-agent
+```
+
+To update, refresh the marketplace and then update the plugin. Updates arrive when the plugin's
+`version` goes up.
+
+```bash
+claude plugin marketplace update chatter-agent
+claude plugin update chatter-agent@chatter-agent
+```
+
+**From a clone** (for development):
+
 ```bash
 claude plugin marketplace add ./
 claude plugin install chatter-agent@chatter-agent
 ```
+
+In this case the clone itself is what runs, so pulling and restarting your session is enough to pick up new changes.
 
 **Restart your session.** You can check whether it took by looking at the speech record.
 

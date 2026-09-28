@@ -119,10 +119,29 @@ cd chatter-mascot
 
 ### Claude Code プラグインの導入
 
+**GitHub から直接入れる**（`--sparse` でプラグインの部分だけを取ってきます）:
+
+```bash
+claude plugin marketplace add schwarz9791/chatter-agent --sparse .claude-plugin plugin
+claude plugin install chatter-agent@chatter-agent
+```
+
+更新するときは、marketplace を読み直してからプラグインを更新します。更新が届くのは、プラグインの
+`version` が上がったときです。
+
+```bash
+claude plugin marketplace update chatter-agent
+claude plugin update chatter-agent@chatter-agent
+```
+
+**クローンから入れる**（開発向け）:
+
 ```bash
 claude plugin marketplace add ./
 claude plugin install chatter-agent@chatter-agent
 ```
+
+この場合はクローンがそのまま使われるので、pull してセッションを開き直せば新しい中身になります。
 
 **セッションを再起動してください。** 入ったかどうかは発話の記録で確かめられます。
 

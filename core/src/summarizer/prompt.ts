@@ -15,7 +15,7 @@ export const SUMMARY_CHARS_MIN = 100;
 export const SUMMARY_CHARS_MAX = 300;
 export const SUMMARY_CHARS_PER_SENTENCE = 60;
 
-export const SUMMARY_WORDS_MIN = 20;
+export const SUMMARY_WORDS_MIN = 30;
 export const SUMMARY_WORDS_MAX = 60;
 export const SUMMARY_WORDS_PER_SENTENCE = 16;
 

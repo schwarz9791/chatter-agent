@@ -19,6 +19,12 @@ export interface BuildSummaryArgsOptions {
   model: string;
 }
 
+const SUMMARY_SETTINGS_OVERRIDE = JSON.stringify({
+  language: "en",
+  claudeMdExcludes: ["**/CLAUDE.md"],
+  autoMemoryEnabled: false,
+});
+
 /**
  * 要約 CLI の引数を組み立てる純粋関数（`execFileSync` を呼ばずに単体テストできるように分離）。
  *
@@ -51,6 +57,11 @@ export function buildSummaryArgs(instruction: string, opts: BuildSummaryArgsOpti
     "--no-session-persistence",
     // ユーザーの MCP サーバーを起動させない（要約に不要な起動コストを避ける）
     "--strict-mcp-config",
+    // ユーザーの応答言語の設定・CLAUDE.md・auto memory を要約に持ち込ませない。これらは
+    // 「原文と同じ言語で」という指示より強く効き、原文の言語を別の言語に訳させてしまう。
+    // `--settings` は既存の設定へのマージなので、settings.json 由来の認証は生きたまま
+    "--settings",
+    SUMMARY_SETTINGS_OVERRIDE,
     // プロンプトインジェクション対策: 要約対象のテキストは信頼できない引用（取得した Web
     // ページ、issue 本文など）を含みうる。そこに仕込まれた指示で秘密を読ませ、それが
     // stdout（＝要約結果。そのまま読み上げられ speech.jsonl に永続化され全 WebSocket

@@ -102,10 +102,10 @@ hook 方式への転換で、`textFilter.ts` が**上流と要件で食い違う
 
 | ファイル | 改変 |
 |---|---|
-| `text/textFilter.ts` | ヘッダのみ（**未改変**。`Modified` 行なし） |
-| `text/textFilter.test.ts` | ヘッダのみ（**未改変**） |
-| `emotion/ruleBasedEmotionClassifier.ts` | `export type Emotion = ...` の定義を削除し、`core/types` から `import type` + `export type` で再輸出。キーワード辞書を `defaultEmotionKeywords.ts` へ分離し、コンストラクタで差し替えられるようにした。`relaxed` を neutral に吸収する抑制の撤廃、疑問符での `surprised` 加点の撤廃、謝罪語が同居する文で `happy` を持ち上げない扱いを加えた |
-| `emotion/ruleBasedEmotionClassifier.test.ts` | 期待値を新しい設計に合わせて書き換え、作業状況と表情の対応を固定するテストを追加 |
+| `text/textFilter.ts` | ヘッダに `Modified` 行を足した。`splitIntoSentences` に、英文のピリオドで分割する処理を加えた（略語・行頭のリスト番号・小数・三点リーダーでは切らない） |
+| `text/textFilter.test.ts` | ヘッダに `Modified` 行を足し、英文のピリオドでの分割のテストを加えた |
+| `emotion/ruleBasedEmotionClassifier.ts` | `export type Emotion = ...` の定義を削除し、`core/types` から `import type` + `export type` で再輸出。キーワード辞書を `defaultEmotionKeywords.ts` へ分離し、コンストラクタで差し替えられるようにした。`relaxed` を neutral に吸収する抑制の撤廃、疑問符での `surprised` 加点の撤廃、謝罪語が同居する文で `happy` を持ち上げない扱いを加えた。仮名・漢字を含まない文は判定せず neutral にする扱いを加えた |
+| `emotion/ruleBasedEmotionClassifier.test.ts` | 期待値を新しい設計に合わせて書き換え、作業状況と表情の対応を固定するテストを追加。仮名・漢字を含まない文が neutral になることを固定するテストも追加 |
 | `emotion/defaultEmotionKeywords.ts` | 辞書データを分離。キーの順を `Emotion` の宣言順に揃えたうえで、**語彙を全面的に入れ替えた** |
 
 `Emotion` を `core/types` 側に寄せたのは、この union が VRM の標準 expression 名と一対一で、`speech.jsonl` の契約そのものだから。感情判定器はその契約の実装であって、定義元ではない。

@@ -221,6 +221,20 @@ describe("RuleBasedEmotionClassifier", () => {
     });
   });
 
+  describe("仮名・漢字を含まないテキスト（辞書が対象外）", () => {
+    it("英語の成功報告でもneutralと判定される", () => {
+      expect(classifier.classify("The build succeeded! All tests passed.")).toBe("neutral");
+    });
+
+    it("英語の謝罪でもneutralと判定される", () => {
+      expect(classifier.classify("I'm sorry, this could not be fixed...")).toBe("neutral");
+    });
+
+    it("記号や数字だけのテキストはneutralと判定される", () => {
+      expect(classifier.classify("v1.2.3 -> v1.3.0!!")).toBe("neutral");
+    });
+  });
+
   describe("Claude Code実際の返信パターン", () => {
     it("ファイル作成の説明", () => {
       const text = "vitest.config.tsファイルを作成しました。テストの設定を含んでいます。";

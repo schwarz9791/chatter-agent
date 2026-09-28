@@ -19,25 +19,33 @@ import { toSpeechSentences } from "../text/speechText";
 import { findCommandPath } from "../core/commandPath";
 import type { AiSummaryBackend } from "../core/config";
 import { buildFmSummaryArgs, buildSummaryArgs, resolveFmCommandPath, runClaudeCli } from "./claudeCli";
-import { SUMMARY_INSTRUCTION, SUMMARY_MAX_CHARS } from "./prompt";
+import { buildSummaryInstruction, countWords, summaryLengthLimit, wrapSummaryInput } from "./prompt";
 import type { Summarize, SummaryOutcome } from "./types";
 
 /**
  * 要約として採用してよいか。**純粋関数。**
  *
  * ★ 同期の pipeline（ここ）と非同期のプレビュー（`summaryPreview.ts`）が
- *   **同じ規則を見る**ために切り出してある。片方だけ直すと、設定パネルの
- *   「テスト要約」が通るのに本番では原文が読み上げられる（またはその逆）という、
+ *   **同じ規則を見る**ために切り出してある。片方だけ直すと、テスト要約
+ *   （`POST /v1/summary/preview`）が通るのに本番では原文が読み上げられる（またはその逆）という、
  *   いちばん切り分けにくいズレになる。
  *
- * ★ 上限を `SUMMARY_MAX_CHARS`（120）の2倍にしている根拠は下の判定箇所のコメント参照
- *   （`claude -p` が exit 0 のままレート制限の通知を stdout に出す事故を実測で踏んでいる）。
+ * ★ 上限を `summaryLengthLimit(originalText)` の2倍にしている。CLI が exit 0 のまま
+ *   利用制限の通知や拒否文を stdout に返すことがあり、それをそのまま採用してしまう
+ *   事故をこの上限で弾く。上限との比較は原文と同じ単位（文字数 or 語数）で行う。
+ *
+ * ★ 要約が原文と別の文字体系（単位）で返ってきたら採用しない。上限を原文の単位で数えているので、
+ *   単位が食い違うと上限が実質効かず、原文と別の言語で読み上げられてしまうため。
  *
  * @param spoken 実際に読み上げる形（`toSpeechSentences` を通した後）
- * @param originalLength 比較相手の原文の長さ。**整形済みの長さで比べること**
+ * @param originalText 比較相手の原文。**整形済みのテキストで比べること**
  */
-export function isAcceptableSummary(spoken: string, originalLength: number): boolean {
-  return spoken.length > 0 && spoken.length < originalLength && spoken.length <= SUMMARY_MAX_CHARS * 2;
+export function isAcceptableSummary(spoken: string, originalText: string): boolean {
+  if (spoken.length === 0 || spoken.length >= originalText.length) return false;
+  const limit = summaryLengthLimit(originalText);
+  if (summaryLengthLimit(spoken).unit !== limit.unit) return false;
+  const spokenLength = limit.unit === "words" ? countWords(spoken) : spoken.length;
+  return spokenLength <= limit.max * 2;
 }
 
 export interface SummaryPipelineDeps {
@@ -170,14 +178,18 @@ export function createSummaryPipeline(deps: SummaryPipelineDeps): Summarize {
       const sessionId = randomUUID();
       registerSessionId(sessionId);
 
+      const instruction = buildSummaryInstruction(summaryLengthLimit(text));
       const args =
         backend === "fm"
-          ? buildFmSummaryArgs(SUMMARY_INSTRUCTION)
-          : buildSummaryArgs(SUMMARY_INSTRUCTION, { sessionId, model: deps.getModel() });
+          ? buildFmSummaryArgs(instruction)
+          : buildSummaryArgs(instruction, {
+              sessionId,
+              model: deps.getModel(),
+            });
       const result = runClaudeCli({
         commandPath,
         args,
-        text,
+        text: wrapSummaryInput(text),
         homeDir: deps.homeDir,
         timeoutMs: deps.getTimeoutMs(),
       });
@@ -202,15 +214,9 @@ export function createSummaryPipeline(deps: SummaryPipelineDeps): Summarize {
       //   同じ1箇所）が行う
       const spoken = toSpeechSentences(summary).join("\n");
 
-      // ★ A1（issue #38 レビュー）: 「空でない かつ 原文より短い」だけでなく、上限文字数も見る。
-      //   `claude -p` が exit 0 のままレート制限の通知（`Claude usage limit reached...`）や
-      //   拒否文を stdout に出すと、これまではそれがそのまま要約として採用されていた
-      //   （原文はどこにも残らない。実測で 744文字 → 335文字が ok で通り、そのまま読み上げられた）。
-      //   SUMMARY_MAX_CHARS（120）の2倍（240文字）にする根拠: 実測の ok 7件の要約長は
-      //   65 / 80 / 82 / 102 / 116 / 118 / 335 で、240 で切ると外れ値の335だけが弾かれ他は
-      //   全部通る。これより厳しくすると、数十秒待った末に invalid で原文フォールバックする
-      //   回数が増え、遅延だけ払って効果ゼロになる。
-      if (!isAcceptableSummary(spoken, text.length)) {
+      // 「空でない かつ 原文より短い」だけでなく、上限と言語も見る（→ isAcceptableSummary）。
+      // CLI が exit 0 のまま利用制限の通知や拒否文を stdout に返す事故を弾くため。
+      if (!isAcceptableSummary(spoken, text)) {
         log("invalid", startedAt, text.length, spoken.length);
         return text;
       }

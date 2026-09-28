@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { runSummaryPreview, type SummaryPreviewDeps } from "./summaryPreview";
+import { wrapSummaryInput } from "./prompt";
 
 let dir: string;
 let homeDir: string;
@@ -33,12 +34,17 @@ import * as fs from "node:fs";
 const argv = process.argv.slice(2);
 const mode = process.env.RECORDER_MODE ?? "short";
 const recordLog = process.env.RECORD_LOG;
+const stdinContent = fs.readFileSync(0, "utf-8");
 
 if (recordLog) {
   const i = argv.indexOf("--session-id");
   fs.appendFileSync(
     recordLog,
-    JSON.stringify({ sessionId: i >= 0 ? argv[i + 1] : null, disable: process.env.CHATTER_AGENT_DISABLE ?? null }) + "\\n",
+    JSON.stringify({
+      sessionId: i >= 0 ? argv[i + 1] : null,
+      disable: process.env.CHATTER_AGENT_DISABLE ?? null,
+      stdin: stdinContent,
+    }) + "\\n",
   );
 }
 
@@ -50,7 +56,7 @@ if (mode === "fail") {
 } else if (mode === "flood") {
   process.stdout.write("x".repeat(4 * 1024 * 1024));
 } else if (mode === "cat") {
-  process.stdout.write(fs.readFileSync(0, "utf-8"));
+  process.stdout.write(stdinContent);
 } else {
   process.stdout.write(process.env.RECORDER_REPLY ?? "短い要約です。");
 }
@@ -92,7 +98,9 @@ describe("runSummaryPreview", () => {
     const recordLog = path.join(dir, "record.jsonl");
     process.env.RECORD_LOG = recordLog;
     await runSummaryPreview(LONG_TEXT, makeDeps());
-    const line = JSON.parse(fs.readFileSync(recordLog, "utf-8").trim()) as { disable: string | null };
+    const line = JSON.parse(fs.readFileSync(recordLog, "utf-8").trim()) as {
+      disable: string | null;
+    };
     expect(line.disable).toBe("1");
   });
 
@@ -114,7 +122,9 @@ describe("runSummaryPreview", () => {
     );
 
     expect(registeredBeforeRun).toBe(true);
-    const line = JSON.parse(fs.readFileSync(recordLog, "utf-8").trim()) as { sessionId: string };
+    const line = JSON.parse(fs.readFileSync(recordLog, "utf-8").trim()) as {
+      sessionId: string;
+    };
     expect(registered).toEqual([line.sessionId]);
   });
 
@@ -138,6 +148,16 @@ describe("runSummaryPreview", () => {
     expect(result.outcome).toBe("internal");
     expect(result.summary).toBeNull();
     expect(fs.existsSync(recordLog)).toBe(false);
+  });
+
+  it("CLI への stdin は <text> タグで包んだ原文になる", async () => {
+    const recordLog = path.join(dir, "record.jsonl");
+    process.env.RECORD_LOG = recordLog;
+    await runSummaryPreview(LONG_TEXT, makeDeps());
+    const line = JSON.parse(fs.readFileSync(recordLog, "utf-8").trim()) as {
+      stdin: string;
+    };
+    expect(line.stdin).toBe(wrapSummaryInput(LONG_TEXT));
   });
 
   it("PATH に無いコマンドは no-command（CLI を起こさない）", async () => {
@@ -195,6 +215,15 @@ describe("runSummaryPreview", () => {
     expect(result.outcome).toBe("invalid");
   });
 
+  /** 英語原文では isAcceptableSummary が語数で上限を見る（本番と同じ規則） */
+  it("英語原文で語数が上限の2倍を超えた出力は invalid", async () => {
+    const englishText = Array.from({ length: 200 }, (_, i) => `original${i}`).join(" "); // limit.max = 40 words
+    process.env.RECORDER_REPLY = Array.from({ length: 81 }, (_, i) => `w${i}`).join(" ");
+    const result = await runSummaryPreview(englishText, makeDeps());
+    expect(result.outcome).toBe("invalid");
+    expect(result.summary).toBeNull();
+  });
+
   /** ★ 失敗のとき原文を返さない（テストの答えとして紛らわしい） */
   it("★ 失敗しても summary は null（原文を返さない）", async () => {
     process.env.RECORDER_MODE = "fail";
@@ -211,11 +240,16 @@ describe("runSummaryPreview", () => {
     //   fmCommandPath でフェイク CLI に差し替える（getCommand は claude 専用なので見ない）
     const result = await runSummaryPreview(
       LONG_TEXT,
-      makeDeps({ getBackend: () => "fm", fmCommandPath: writeRecorderScript() }),
+      makeDeps({
+        getBackend: () => "fm",
+        fmCommandPath: writeRecorderScript(),
+      }),
     );
     expect(result.outcome).toBe("ok");
 
-    const line = JSON.parse(fs.readFileSync(recordLog, "utf-8").trim()) as { sessionId: string | null };
+    const line = JSON.parse(fs.readFileSync(recordLog, "utf-8").trim()) as {
+      sessionId: string | null;
+    };
     expect(line.sessionId).toBeNull();
   });
 

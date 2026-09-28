@@ -59,6 +59,17 @@ describe("buildSummaryArgs", () => {
     expect(args[idx + 1]).toBe("haiku");
   });
 
+  it("--settings でユーザーの応答言語・CLAUDE.md・auto memory を打ち消す", () => {
+    const args = buildSummaryArgs("x", { sessionId: "s", model: "" });
+    const idx = args.indexOf("--settings");
+    expect(idx).toBeGreaterThan(-1);
+    expect(JSON.parse(args[idx + 1] ?? "")).toEqual({
+      language: "en",
+      claudeMdExcludes: ["**/CLAUDE.md"],
+      autoMemoryEnabled: false,
+    });
+  });
+
   it("--setting-sources は渡さない（settings.json 由来の認証を壊すため採用しなかった）", () => {
     const args = buildSummaryArgs("x", { sessionId: "s", model: "" });
     expect(args).not.toContain("--setting-sources");
@@ -84,6 +95,7 @@ describe("buildFmSummaryArgs", () => {
       "--session-id",
       "--no-session-persistence",
       "--strict-mcp-config",
+      "--settings",
       "--disallowedTools",
       "--model",
     ]) {

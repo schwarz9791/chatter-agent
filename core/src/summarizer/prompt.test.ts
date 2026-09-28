@@ -1,55 +1,197 @@
 import { describe, it, expect } from "vitest";
-import { SUMMARY_INSTRUCTION, SUMMARY_MAX_CHARS } from "./prompt";
+import {
+  SUMMARY_CHARS_MAX,
+  SUMMARY_CHARS_MIN,
+  SUMMARY_CJ_RATIO_THRESHOLD,
+  SUMMARY_RATIO,
+  SUMMARY_SENTENCES_MAX,
+  SUMMARY_SENTENCES_MIN,
+  SUMMARY_WORDS_MAX,
+  SUMMARY_WORDS_MIN,
+  SUMMARY_WORDS_PER_SENTENCE,
+  buildSummaryInstruction,
+  countWords,
+  summaryLengthLimit,
+  wrapSummaryInput,
+} from "./prompt";
 
-describe("SUMMARY_INSTRUCTION", () => {
-  it("SUMMARY_MAX_CHARS の値を実際に含む（プロンプトの文言と定数がズレていないこと）", () => {
-    expect(SUMMARY_INSTRUCTION).toContain(`${SUMMARY_MAX_CHARS}文字以内`);
+describe("summaryLengthLimit", () => {
+  it("仮名を含む原文は文字数（chars）で数える", () => {
+    expect(summaryLengthLimit("これはひらがなを含む文章です").unit).toBe("chars");
+    expect(summaryLengthLimit("カタカナだけの文章").unit).toBe("chars");
   });
 
-  it("★ 禁止リストの行が「記号」を単独では含まない（！／？を残せという口調ルールと矛盾しないこと）", () => {
-    // 感情判定（emotion/ruleBasedEmotionClassifier.ts の sentenceEndPatterns）はほぼ全部が
-    // ！ / ？ / … / ♪ / 絵文字。「記号を含めるな」と「！を残せ」が両方書いてあると、
-    // モデルがどちらかにしか従えず、句読点扱いの ！ ？ まで削られて成功報告や謝罪が
-    // neutral に潰れる（VRM が感情に反応しなくなる）。禁止リストの行から
-    // 「記号」という語そのものが消えていることを見る（"Markdown記法" は "記号" の
-    // 部分文字列ではないので誤検知しない）。
-    const negativeLine = SUMMARY_INSTRUCTION.split("\n").find((line) => line.includes("含めない"));
-    expect(negativeLine).toBeDefined();
-    if (!negativeLine) return;
-    expect(negativeLine).not.toContain("記号");
+  it("仮名を含まない英語の原文は語数（words）で数える", () => {
+    expect(summaryLengthLimit("This is an English sentence.").unit).toBe("words");
   });
 
-  it("原文に近い口語調を求め、です・ます調を固定しない", () => {
-    expect(SUMMARY_INSTRUCTION).toContain("原文に近い口語調");
-    expect(SUMMARY_INSTRUCTION).not.toContain("です・ます調");
+  it("漢字だけの中国語相当の原文は分かち書きしない言語として文字数（chars）で数える", () => {
+    expect(summaryLengthLimit("这是一个中文句子没有假名").unit).toBe("chars");
+  });
+
+  it("英単語が混じっていても仮名があれば文字数（chars）で数える", () => {
+    expect(summaryLengthLimit("これは API を呼び出す処理です").unit).toBe("chars");
+  });
+
+  it("英語の文に日本語の単語が1語混じるだけでは語数（words）のまま", () => {
+    const text = "This is an English sentence with one 日本語 word mixed in for testing purposes today and tomorrow.";
+    expect(summaryLengthLimit(text).unit).toBe("words");
+  });
+
+  it("英単語・識別子・数字が多く半角空白を挟む日本語の技術文は文字数（chars）で数える", () => {
+    const text = "PR #125 の未解決コメントはゼロです。 14 件すべて閉じました。 git show --stat で 1 insertion";
+    expect(summaryLengthLimit(text).unit).toBe("chars");
+  });
+
+  it("漢字・仮名の割合が閾値ちょうどなら文字数（chars）で数える", () => {
+    const atThreshold = "字字" + "a".repeat(8); // 空白以外10文字中2文字が漢字 → ちょうど閾値
+    expect(SUMMARY_CJ_RATIO_THRESHOLD).toBe(0.2);
+    expect(summaryLengthLimit(atThreshold).unit).toBe("chars");
+  });
+
+  it("漢字・仮名の割合が閾値をわずかに下回ると語数（words）で数える", () => {
+    const belowThreshold = "字" + "a".repeat(9); // 空白以外10文字中1文字が漢字 → 閾値未満
+    expect(summaryLengthLimit(belowThreshold).unit).toBe("words");
+  });
+
+  it("空文字は語数（words）で数える（空白以外の文字が無いときの既定）", () => {
+    expect(summaryLengthLimit("").unit).toBe("words");
+  });
+
+  it("chars: 下限を下回る原文長は下限にクランプする", () => {
+    expect(summaryLengthLimit("あ").max).toBe(SUMMARY_CHARS_MIN);
+  });
+
+  it("chars: 下限と上限の間では比率どおりに計算する", () => {
+    const text = "あ".repeat(1000);
+    expect(summaryLengthLimit(text).max).toBe(Math.round(1000 * SUMMARY_RATIO));
+  });
+
+  it("chars: 上限を超える原文長は上限にクランプする", () => {
+    const text = "あ".repeat(100_000);
+    expect(summaryLengthLimit(text).max).toBe(SUMMARY_CHARS_MAX);
+  });
+
+  it("words: 下限を下回る語数は下限にクランプする", () => {
+    expect(summaryLengthLimit("one word").max).toBe(SUMMARY_WORDS_MIN);
+    expect(summaryLengthLimit("").max).toBe(SUMMARY_WORDS_MIN);
+  });
+
+  it("words: 下限と上限の間では比率どおりに計算する", () => {
+    const wordCount = 200;
+    const text = Array.from({ length: wordCount }, (_, i) => `word${i}`).join(" ");
+    expect(summaryLengthLimit(text).max).toBe(Math.round(wordCount * SUMMARY_RATIO));
+  });
+
+  it("words: 上限を超える語数は上限にクランプする", () => {
+    const text = Array.from({ length: 10_000 }, (_, i) => `word${i}`).join(" ");
+    expect(summaryLengthLimit(text).max).toBe(SUMMARY_WORDS_MAX);
+  });
+
+  it("sentences は下限を下回らない（chars）", () => {
+    expect(summaryLengthLimit("あ").sentences).toBe(SUMMARY_SENTENCES_MIN);
+  });
+
+  it("sentences は上限を超えない（chars、上限文字数のとき）", () => {
+    expect(summaryLengthLimit("あ".repeat(100_000)).sentences).toBe(SUMMARY_SENTENCES_MAX);
+  });
+
+  it("sentences は下限を下回らない（words）", () => {
+    expect(summaryLengthLimit("one word").sentences).toBe(SUMMARY_SENTENCES_MIN);
+  });
+
+  it("sentences は上限語数を1文あたりの語数で割った数になり、上限を超えない（words）", () => {
+    const text = Array.from({ length: 10_000 }, (_, i) => `word${i}`).join(" ");
+    const { sentences } = summaryLengthLimit(text);
+    expect(sentences).toBe(Math.round(SUMMARY_WORDS_MAX / SUMMARY_WORDS_PER_SENTENCE));
+    expect(sentences).toBeLessThanOrEqual(SUMMARY_SENTENCES_MAX);
+  });
+});
+
+describe("countWords", () => {
+  it("空白区切りで語数を数える", () => {
+    expect(countWords("one two three")).toBe(3);
+  });
+
+  it("空文字は0語", () => {
+    expect(countWords("")).toBe(0);
+    expect(countWords("   ")).toBe(0);
+  });
+});
+
+describe("buildSummaryInstruction", () => {
+  const charsLimit = { unit: "chars" as const, max: 150, sentences: 3 };
+  const wordsLimit = { unit: "words" as const, max: 40, sentences: 4 };
+
+  it("chars のときは上限値と characters を含む", () => {
+    const instruction = buildSummaryInstruction(charsLimit);
+    expect(instruction).toContain("150 characters");
+    expect(instruction).toContain("at most 3 sentences");
+  });
+
+  it("words のときは上限値と words を含む", () => {
+    const instruction = buildSummaryInstruction(wordsLimit);
+    expect(instruction).toContain("40 words");
+    expect(instruction).toContain("at most 4 sentences");
+  });
+
+  it("原文と同じ言語で要約させる指示を含み、日本語に固定しない", () => {
+    expect(buildSummaryInstruction(charsLimit)).toContain("same language as the original");
+    expect(buildSummaryInstruction(charsLimit)).not.toContain("日本語");
+  });
+
+  it("一人称で書き手の声のまま話すことを求める", () => {
+    expect(buildSummaryInstruction(charsLimit)).toContain("first person");
   });
 
   /**
-   * ★ 「口語調で書く」ルールと矛盾する丁寧語の例示を残さない。CLAUDE.md で砕けた口調を
-   *   指示しているセッションでは、例示につられて要約だけ丁寧語になりうる。
+   * ★ Must remove 側は「Markdown decoration」「quotation marks」「emoji」とだけ書き、句読点扱いの `!` `?` を
+   *   含めない。感情判定（`emotion/ruleBasedEmotionClassifier.ts` の `sentenceEndPatterns`）は
+   *   ほぼ全部が ！ / ？ / … / ♪ / 絵文字なので、句読点の `!` `?` まで除去対象にすると、
+   *   モデルが指示に従うほど長い成功報告や謝罪が neutral に潰れる。
    */
-  it("★ 口調の例示に丁寧語（言い切りの「〜できました！」「すみません、〜」）を含まない", () => {
-    expect(SUMMARY_INSTRUCTION).not.toContain("できました！");
-    expect(SUMMARY_INSTRUCTION).not.toContain("すみません、");
+  it("★ Must remove の行が「!」「?」を対象に含まない（句読点として使ってよい旨と矛盾しないこと）", () => {
+    const instruction = buildSummaryInstruction(charsLimit);
+    const mustRemoveSection = instruction.split("## Must remove")[1]!.split("## Formatting")[0]!;
+    expect(mustRemoveSection).not.toContain("!");
+    expect(mustRemoveSection).not.toContain("?");
+    expect(instruction).toContain("`!` and `?` are punctuation");
   });
 
-  it("発言の主体と依頼の向きを原文のまま保つことを含む", () => {
-    expect(SUMMARY_INSTRUCTION).toContain("発言の主体（誰が）と依頼の向き（誰に）を原文のまま保つ");
+  it("原文より長くしないことを求める", () => {
+    expect(buildSummaryInstruction(charsLimit)).toContain("Never make it longer than the original");
   });
 
-  it("肯定・否定の反転を禁じる", () => {
-    expect(SUMMARY_INSTRUCTION).toContain("原文の肯定・否定を反転させない");
+  it("肯定・否定の反転や疑問文と平叙文の入れ替えを禁じる", () => {
+    const instruction = buildSummaryInstruction(charsLimit);
+    expect(instruction).toContain("do not flip positive/negative statements");
+    expect(instruction).toContain("do not turn questions into statements");
   });
 
-  it("数字はぼかすのは可だが、原文と違う数字の言い切りは禁じる", () => {
-    const line = SUMMARY_INSTRUCTION.split("\n").find((l) => l.includes("数字"));
-    expect(line).toBeDefined();
-    expect(line).toContain("ぼかしてよい");
-    expect(line).toContain("原文と違う数字を言い切らない");
+  it("感情とトーンのニュアンスを保つことを求める", () => {
+    expect(buildSummaryInstruction(charsLimit)).toContain("emotional nuance and tone");
   });
 
-  it("原文に無い内容を足すことと、いちばん伝えたい内容を落とすことを禁じる", () => {
-    expect(SUMMARY_INSTRUCTION).toContain("原文に書かれていない内容を付け加えないこと");
-    expect(SUMMARY_INSTRUCTION).toContain("原文でいちばん伝えたい内容を省略しないこと");
+  it("数字はぼかしてよいが、原文と違う数字は言い切らないことを求める", () => {
+    expect(buildSummaryInstruction(charsLimit)).toContain("Numbers may be rounded off");
+    expect(buildSummaryInstruction(charsLimit)).toContain("never state a different number");
+  });
+
+  it("原文に無い情報を足さないことを求める", () => {
+    expect(buildSummaryInstruction(charsLimit)).toContain("Do not add information that isn't in the original");
+  });
+
+  it("原文が AI コーディングアシスタントの発言であるという前提を含む", () => {
+    expect(buildSummaryInstruction(charsLimit)).toContain("AI coding assistant");
+  });
+
+  it("原文は <text> タグの中で渡す旨を含み、原文自体は埋め込まない", () => {
+    expect(buildSummaryInstruction(charsLimit)).toContain("<text>");
+  });
+});
+
+describe("wrapSummaryInput", () => {
+  it("原文を <text> タグで囲む", () => {
+    expect(wrapSummaryInput("こんにちは")).toBe("<text>\nこんにちは\n</text>");
   });
 });

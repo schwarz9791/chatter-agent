@@ -26,8 +26,8 @@ import type { Summarize, SummaryOutcome } from "./types";
  * 要約として採用してよいか。**純粋関数。**
  *
  * ★ 同期の pipeline（ここ）と非同期のプレビュー（`summaryPreview.ts`）が
- *   **同じ規則を見る**ために切り出してある。片方だけ直すと、設定パネルの
- *   「テスト要約」が通るのに本番では原文が読み上げられる（またはその逆）という、
+ *   **同じ規則を見る**ために切り出してある。片方だけ直すと、テスト要約
+ *   （`POST /v1/summary/preview`）が通るのに本番では原文が読み上げられる（またはその逆）という、
  *   いちばん切り分けにくいズレになる。
  *
  * ★ 上限を `summaryLengthLimit(originalText)` の2倍にしている。CLI が exit 0 のまま

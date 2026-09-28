@@ -1,5 +1,5 @@
 /**
- * 設定パネルの「テスト要約」（#76 の `POST /v1/summary/preview`）。
+ * テスト要約（`POST /v1/summary/preview`）。
  *
  * ★★ **`createSummaryPipeline` をそのまま回さないこと。** issue #76 は
  *   「`isEnabled: () => true` / `getMaxPerDrain: () => 1` で1回だけ回す」と書いているが、

@@ -169,6 +169,10 @@ spool を見る（走査直後に到着した分の取りこぼし防止）。
 **`plugin/bin/chatter-agent-speak.mjs` はコミットする成果物。** `core/src/` を直したら
 `npm run build` してコミットする（CI の `bundle` ジョブが一致を検証する）。
 
+**`plugin/` の中身が変わったら `version` を上げる。** `plugin/.claude-plugin/plugin.json` と
+`.claude-plugin/marketplace.json` の2箇所を揃える。上げ忘れると、git の marketplace から入れた
+環境に変更が届かない（→ [`docs/plugin.md`](./docs/plugin.md)「バージョン」）。
+
 **`ChatterMascot.Runtime` を「描画に依存しない層」のまま保つ。** 契約・状態機械・探索順・画角の計算が
 EditMode だけでテストできているのは、この層が描画に依存していないから。
 
@@ -199,6 +203,7 @@ cd chatter-mascot
 - [ ] **ドキュメント更新の検討** —— `docs/` / `docs/knowledge/` / `README.md` に追記するものがないか検討し、あればユーザーに提案する
 - [ ] `npm run typecheck` / `npm run lint` / `npm run format` / `npm run test:run` が通ること
 - [ ] `src/cli/` を触ったら `npm run build` してバンドルもコミットする
+- [ ] `plugin/` の中身（バンドルを含む）が変わったら、`plugin.json` と `marketplace.json` の `version` を上げる
 
 ## ドキュメント索引
 

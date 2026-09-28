@@ -167,6 +167,23 @@ Claude Code が置換するので、そちらは確実に効く。
 > ★ `cp` が `-i` の alias になっている環境では確認プロンプトで**黙って上書きされない**。
 > `/bin/cp -f` のように alias を迂回すること（これも1回踏んだ）。
 
+## バージョン
+
+**`plugin/` の中身（`bin/` のバンドル・`scripts/`・`hooks/hooks.json`）が変わったら `version` を上げる。**
+`plugin/.claude-plugin/plugin.json` と `.claude-plugin/marketplace.json` の2箇所を同じ値にする。
+0.x の間は、機能の追加や挙動の変更なら minor、不具合の修正だけなら patch を上げる。
+
+GitHub など git の marketplace から入れた環境では、キャッシュのコピーが走る。Claude Code は
+`plugin.json` の `version`（無ければ marketplace 側の値）で更新の要否を決めるので、上げ忘れると
+`/plugin` の更新が「最新」と判定され、**変更が利用者に届かない**。
+
+ローカルディレクトリとして登録した開発環境は、登録元のディレクトリがそのまま走る（上の ★）。
+`version` に関係なく、pull してセッションを開き直すか `/reload-plugins` すれば新しい中身になる。
+`/plugin` の更新が「最新」と出ても、走っているものには影響しない。
+
+2箇所が揃っているかは、リポジトリのルートで `claude plugin validate .` を叩けば分かる
+（食い違うと警告が出る。食い違ったときは `plugin.json` の値が使われる）。
+
 ## 検証
 
 `npm run verify:phase-a`（CI の `verify` ジョブでも回る）は、**payload を実際の hook の stdin に流す**。

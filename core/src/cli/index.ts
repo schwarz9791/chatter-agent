@@ -123,6 +123,9 @@ function main(): void {
       speakPrompts: config.get("speakPrompts"),
       spoolMaxAgeMs: config.get("spoolMaxAgeHours") * 60 * 60 * 1000,
       classify,
+      // Ollaya は neutral を「感情が乗っていない」という判定そのものとして返すので、
+      // 原文全体の判定による補完は行わない
+      neutralMeansUnjudged: config.get("emotionClassifier") !== "ollaya",
       summarize,
     });
   } finally {

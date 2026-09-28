@@ -229,6 +229,12 @@ export interface DrainDeps {
    */
   classify: (texts: string[]) => Emotion[];
   /**
+   * 文ごとの neutral を「手がかりが無くて判定できなかった」とみなすか。true のときだけ、
+   * 要約されたメッセージの neutral の文を原文全体の判定で補う。neutral を「感情が乗っていない」
+   * という判定として返すバックエンドでは false。
+   */
+  neutralMeansUnjudged: boolean;
+  /**
    * 長いメッセージを要約する。**throw しない**（→ summarizer/types.ts の Summarize）。
    *
    * 既定値は持たせない。渡し忘れを型で落とすため（要約が無言でスキップされる方が、
@@ -774,13 +780,14 @@ function processMessage(
   //   1回の呼び出しが数秒かかるため、文の数だけ呼ぶと発話が文の数×数秒遅れてしまう
   const ownEmotions = spoken.length > 0 ? deps.classify(spoken) : [];
 
-  // 要約で記号が落ちると文単位の判定は neutral に潰れやすい。原文全体の判定を
-  // 保険として持っておきたいが、classify はメッセージ単位で1回だけ呼ぶ契約なので
-  // 無条件には呼ばない。★ 要約が効いていて、かつ文単位の判定が1つでも neutral に
-  // 落ちたときだけ、原文をもう一度 classify する（要素数1の配列で呼んで先頭を取る）。
-  // 全部の文が自力で判定できていれば呼ばない —— 要約が効いたメッセージでも
-  // 呼び出し回数を1回に抑えられる
-  const sharedEmotion = summarized && ownEmotions.includes("neutral") ? deps.classify([sentences.join("\n")])[0] : null;
+  // neutral を「判定できなかった」とみなすバックエンドに限り、要約で手がかりが落ちて
+  // neutral に潰れた文を原文全体の判定で補う（要素数1の配列で呼んで先頭を取る）。
+  // 原文全体は複数文をまとめた1つの入力なので、1文ずつの判定とは別条件になる。
+  // classify はメッセージ単位で1回だけ呼ぶ契約なので、無条件には呼ばない
+  const sharedEmotion =
+    deps.neutralMeansUnjudged && summarized && ownEmotions.includes("neutral")
+      ? deps.classify([sentences.join("\n")])[0]
+      : null;
 
   // ★ メッセージ1つ分をまとめて1回だけ publish すること。分けて呼ぶと `ts` が割れる
   //   （`speechLog.append` は呼び出しごとに1回だけ時刻を取る）。1メッセージ内で

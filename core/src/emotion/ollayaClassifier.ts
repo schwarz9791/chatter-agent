@@ -1,7 +1,18 @@
 /**
  * Ollaya（ローカルの Jev 互換 decision model ランタイム、`ollaya.dev`）へ、1文ずつ
- * `/v1/systemone` の score（`noul`）で問い合わせる感情分類器。
+ * `/v1/systemone` の choice で問い合わせる感情分類器。
  *
+ * ★ 2段階で聞く。1段目で `GROUP_A` と `GROUP_B` からそれぞれ1つ選ばせ、2段目でその2つと
+ *   neutral から選ばせる。6感情を一度に選ばせるより、平叙文が surprised や sad に流れにくい。
+ * ★ 2段目の最上位の確率が下限（`EMOTION_FLOOR`）に届かなければ neutral に倒す。人はいつも
+ *   感情を表に出しているわけではないので、確信が持てないときの既定を neutral 側に置く。
+ * ★ `GROUP_A` の感情は、1段目で過半を取れていなければ neutral に倒す（`GROUP_A_MAJORITY`）。
+ *   快・不快の向きで迷った文は、2段目で候補が減ると確率が膨らみ、失敗の報告を happy と
+ *   言い切るような逆の感情になる。
+ * ★ 判定基準（`CRITERIA`）は感情そのもの（嬉しい・驚き・詫び・苛立ち）を軸に書く。
+ *   出来事の種類（「予期しない事実」等）で書くと、ただの説明文までその出来事の感情に
+ *   引き寄せられる。
+ * ★ 選択肢の説明は短く保つ（長いと判定時に切り詰められる）。
  * ★ **CLI（chatter-agent-speak）は同期実行**なので、Node の `fetch`（非同期）はメイン
  *   プロセスの中では直接使えない。1メッセージぶんの文をまとめて子プロセス（`spawnSync`）に
  *   渡し、子の中で非同期に問い合わせて結果をまとめて返すことで、プロセス起動のコストを
@@ -13,68 +24,102 @@
  */
 
 import { spawnSync } from "child_process";
-import { EMOTION_KEYS, pickEmotion } from "./emotionScores";
+import { pickEmotion } from "./emotionScores";
 import type { Emotion } from "../core/types";
 
-/**
- * 感情ごとの判定基準（英語）。sad / angry はコーディングエージェント自身の状況に
- * 当てはめて判定させる（作業の手戻りや謝罪を拾うため）。
- */
-const EMOTION_DESC: Record<Emotion, string> = {
-  happy: "A report that something went well: finished work, tests passing, review feedback addressed.",
-  relaxed: "Waiting for a result, doing a routine check, or calmly describing the current state.",
-  surprised: "An unexpected discovery: a fact or bug nobody anticipated, told with a sense of surprise.",
-  sad:
-    "Something did not go as hoped. Examples: a sub-agent has not reported back, work had to be " +
-    'sent back, an apology ("I\'m sorry"), or realizing something was overlooked.',
-  angry:
-    "The agent's own failure or an unexpected breakdown. Examples: a test failed unexpectedly, " +
-    "the agent's own change caused a regression, or the same mistake was made twice.",
-  neutral: "A flat statement of fact with no emotional ups or downs.",
+/** choice の選択肢（英語）。 */
+const CRITERIA: Record<Emotion, string> = {
+  happy: "Glad that something went well: work finished, tests passing.",
+  relaxed: "Calmly waiting for a result, or relieved after finishing something.",
+  surprised: "Astonished by an unexpected result or bug.",
+  sad: "Sorry or disappointed: an apology, rework, or a mistake noticed.",
+  angry: "Frustrated at its own failure: a broken test, a regression, a repeated mistake.",
+  neutral: "No particular emotion: a routine progress report, plan, question, or plain explanation.",
 };
+
+const EMOTION_QUESTION_INSTRUCTIONS = "Which emotion does this remark by a coding agent express?";
+
+/** 1段目で比べさせる組。似た向きの感情どうしを先に比べさせ、勝者だけを neutral と比べる。 */
+const GROUP_A: readonly Emotion[] = ["happy", "angry", "sad"];
+const GROUP_B: readonly Emotion[] = ["relaxed", "surprised"];
+
+/** 2段目の最上位の確率がこれに届かなければ neutral として扱う。 */
+const EMOTION_FLOOR = 0.8;
+/**
+ * relaxed だけの下限。relaxed は穏やかで確率が高く出にくく、一方で誤っても neutral と
+ * 見分けがつきにくい表情なので、他の感情より緩める。
+ */
+const RELAXED_FLOOR = 0.5;
+/** `GROUP_A` の感情が1段目で取るべき確率。3択の過半に届かなければ、向きを迷っているとみなす。 */
+const GROUP_A_MAJORITY = 0.5;
+
+/** 子プロセスが1文ごとに返すもの。`first` は1段目の勝者2つの確率、`final` は2段目の確率。 */
+interface StageScores {
+  first: Record<string, number>;
+  final: Record<string, number>;
+}
 
 /**
  * 子プロセス（Node、CommonJS として `node -e` に渡す）の中で実行するスクリプト。
- * stdin から `{ texts, baseUrl, model }` を読み、stdout に `(Record<Emotion, number> | null)[]` を
- * JSON で書く。壊れた応答・接続エラーはその文だけ `null` にして続行する（1文の失敗で残りを
- * 諦めない）。
+ * stdin から `{ texts, baseUrl, model }` を読み、stdout に `(StageScores | null)[]` を JSON で書く。
+ * 壊れた応答・接続エラーはその文だけ `null` にして続行する（1文の失敗で残りを諦めない）。
  *
  * ★ テンプレートリテラルの入れ子を避けるため、文字列連結だけで組んである（コード生成時の
  *   エスケープ事故を避けるため）。
  */
 const CHILD_SCRIPT = [
   'const fs = require("fs");',
-  `const KEYS = ${JSON.stringify(EMOTION_KEYS)};`,
-  `const DESC = ${JSON.stringify(EMOTION_DESC)};`,
-  "function payloadFor(model, text) {",
-  "  const questions = {};",
-  "  for (const k of KEYS) {",
-  '    var suffix = (k === "sad" || k === "angry")',
-  '      ? " Sad and angry tend to score low; when the criteria fit, score them true without hesitation."',
-  '      : "";',
-  "    questions[k] = {",
-  '      type: "noul",',
-  '      instructions: "Does this remark by a coding agent carry the following emotion? \\"" + k + "\\": " + DESC[k] + "." + suffix,',
-  '      criteria: { true: "present", false: "not present" },',
-  "    };",
-  "  }",
-  "  return { model: model, state: text, questions: questions };",
+  `const CRITERIA = ${JSON.stringify(CRITERIA)};`,
+  `const INSTRUCTIONS = ${JSON.stringify(EMOTION_QUESTION_INSTRUCTIONS)};`,
+  `const GROUP_A = ${JSON.stringify(GROUP_A)};`,
+  `const GROUP_B = ${JSON.stringify(GROUP_B)};`,
+  "function choice(keys) {",
+  "  const criteria = {};",
+  "  for (const k of keys) criteria[k] = CRITERIA[k];",
+  '  return { type: "choice", instructions: INSTRUCTIONS, criteria: criteria };',
   "}",
-  "async function classifyOne(baseUrl, model, text) {",
+  "async function ask(baseUrl, model, text, questions) {",
   '  const res = await fetch(baseUrl + "/v1/systemone", {',
   '    method: "POST",',
   '    headers: { "Content-Type": "application/json" },',
-  "    body: JSON.stringify(payloadFor(model, text)),",
+  "    body: JSON.stringify({ model: model, state: text, questions: questions }),",
   "  });",
   "  if (!res.ok) return null;",
   "  const obj = await res.json();",
-  "  const scores = {};",
-  "  for (const k of KEYS) {",
-  "    const v = obj && obj.answers && obj.answers[k] ? obj.answers[k].noul : undefined;",
-  '    if (typeof v !== "number") return null;',
-  "    scores[k] = v;",
+  "  return obj && obj.answers ? obj.answers : null;",
+  "}",
+  "function probs(answer, keys) {",
+  "  const p = answer ? answer.probabilities : undefined;",
+  '  if (typeof p !== "object" || p === null) return null;',
+  "  for (const k of keys) {",
+  '    if (typeof p[k] !== "number") return null;',
   "  }",
-  "  return scores;",
+  "  return p;",
+  "}",
+  "function top(p, keys) {",
+  "  let best = keys[0];",
+  "  for (const k of keys) {",
+  "    if (p[k] > p[best]) best = k;",
+  "  }",
+  "  return best;",
+  "}",
+  "async function classifyOne(baseUrl, model, text) {",
+  "  const s1 = await ask(baseUrl, model, text, { a: choice(GROUP_A), b: choice(GROUP_B) });",
+  "  const pa = probs(s1 && s1.a, GROUP_A);",
+  "  const pb = probs(s1 && s1.b, GROUP_B);",
+  "  if (!pa || !pb) return null;",
+  "  const wa = top(pa, GROUP_A);",
+  "  const wb = top(pb, GROUP_B);",
+  '  const finalKeys = [wa, wb, "neutral"];',
+  "  const s2 = await ask(baseUrl, model, text, { final: choice(finalKeys) });",
+  "  const pf = probs(s2 && s2.final, finalKeys);",
+  "  if (!pf) return null;",
+  "  const first = {};",
+  "  first[wa] = pa[wa];",
+  "  first[wb] = pb[wb];",
+  "  const final = {};",
+  "  for (const k of finalKeys) final[k] = pf[k];",
+  "  return { first: first, final: final };",
   "}",
   "(async () => {",
   '  const input = JSON.parse(fs.readFileSync(0, "utf-8"));',
@@ -99,6 +144,18 @@ export interface OllayaEmotionClassifierDeps {
   fallback: (texts: string[]) => Emotion[];
   /** テスト用。既定 `child_process.spawnSync` */
   spawnSyncFn?: typeof spawnSync;
+}
+
+/** 2段目の最上位の感情を選び、確信が足りなければ neutral にする。壊れていれば `null`。 */
+function decide(result: unknown): Emotion | null {
+  if (typeof result !== "object" || result === null) return null;
+  const { first, final } = result as Partial<StageScores>;
+  if (typeof first !== "object" || first === null) return null;
+  const top = pickEmotion(final);
+  if (top === null || top === "neutral") return top;
+  if (GROUP_A.includes(top) && !(first[top]! >= GROUP_A_MAJORITY)) return "neutral";
+  const floor = top === "relaxed" ? RELAXED_FLOOR : EMOTION_FLOOR;
+  return final![top]! >= floor ? top : "neutral";
 }
 
 /**
@@ -134,7 +191,7 @@ export function createOllayaEmotionClassifier(deps: OllayaEmotionClassifierDeps)
     }
     if (!Array.isArray(parsed) || parsed.length !== texts.length) return deps.fallback(texts);
 
-    const emotions = (parsed as unknown[]).map((scores) => pickEmotion(scores as Record<string, number> | null));
+    const emotions = (parsed as unknown[]).map(decide);
     const brokenIndices: number[] = [];
     emotions.forEach((e, i) => {
       if (e === null) brokenIndices.push(i);

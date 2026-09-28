@@ -3942,7 +3942,7 @@ function processMessage(item, hasNewer, deps, state) {
 		summarized: false
 	};
 	const ownEmotions = spoken.length > 0 ? deps.classify(spoken) : [];
-	const sharedEmotion = summarized && ownEmotions.includes("neutral") ? deps.classify([sentences.join("\n")])[0] : null;
+	const sharedEmotion = deps.neutralMeansUnjudged && summarized && ownEmotions.includes("neutral") ? deps.classify([sentences.join("\n")])[0] : null;
 	if (spoken.length > 0) deps.publish(spoken.map((text, i) => {
 		const ownEmotion = ownEmotions[i] ?? "neutral";
 		return {
@@ -4118,6 +4118,7 @@ function main() {
 			speakPrompts: config.get("speakPrompts"),
 			spoolMaxAgeMs: config.get("spoolMaxAgeHours") * 60 * 60 * 1e3,
 			classify,
+			neutralMeansUnjudged: config.get("emotionClassifier") !== "ollaya",
 			summarize
 		});
 	} finally {

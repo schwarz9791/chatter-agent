@@ -74,6 +74,8 @@ function drain(overrides: Partial<DrainDeps> = {}) {
     speakPrompts: true,
     spoolMaxAgeMs: 6 * HOUR,
     classify: (texts) => texts.map(() => "neutral"),
+    // 既定は補完あり（辞書式・fm 相当）。補完を止める挙動そのものを見るテストだけ個別に差し替える
+    neutralMeansUnjudged: true,
     // 既定は素通し（要約しない）。要約の挙動そのものを見るテストだけ個別に差し替える
     summarize: (text) => text,
     now: () => clock,
@@ -1218,6 +1220,27 @@ describe("感情判定", () => {
     expect(calls).toHaveLength(2);
     expect(calls[0]).toEqual(["要約その1！", "要約その2？", "要約その3。"]);
     expect(calls[1]).toEqual(["元のメッセージです。"]);
+  });
+
+  it("★ neutralMeansUnjudged: false では、要約が効いて neutral の文があっても原文をもう一度 classify しない。neutral のまま", () => {
+    appendDelta("m1", 0, "元のメッセージです。", true);
+    const calls: string[][] = [];
+    drain({
+      neutralMeansUnjudged: false,
+      summarize: () => "要約その1！要約その2？要約その3。",
+      classify: (texts) => {
+        calls.push(texts);
+        return texts.map((text) => (text.includes("元の") ? "happy" : "neutral"));
+      },
+    });
+
+    const rows = records();
+    expect(rows.map((r) => r.text)).toEqual(["要約その1！", "要約その2？", "要約その3。"]);
+    // neutral は「感情が乗っていない」という判定そのものなので、原文由来の emotion で補わない
+    expect(rows.map((r) => r.emotion)).toEqual(["neutral", "neutral", "neutral"]);
+    // ★ classify は1回だけ（原文をもう一度呼ばない）
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual(["要約その1！", "要約その2？", "要約その3。"]);
   });
 
   /**

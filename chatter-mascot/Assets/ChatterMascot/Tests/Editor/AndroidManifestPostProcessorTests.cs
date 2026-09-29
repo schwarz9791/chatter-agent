@@ -11,9 +11,26 @@ namespace ChatterMascot.Tests
     {
         private static readonly XNamespace AndroidNs = "http://schemas.android.com/apk/res/android";
 
-        private static XDocument BuildManifest(bool withApplication = true, string cleartext = null)
+        private const string LauncherClass = "tech.sukima.chattermascot.ChatterMascotGameActivity";
+
+        private static XDocument BuildManifest(
+            bool withApplication = true, string cleartext = null, bool withActivity = true,
+            string activityName = "com.unity3d.player.UnityPlayerGameActivity")
         {
             var application = new XElement("application");
+            if (withActivity)
+            {
+                application.Add(new XElement(
+                    "activity",
+                    new XAttribute(AndroidNs + "name", activityName),
+                    new XAttribute(AndroidNs + "exported", "true"),
+                    new XElement("intent-filter"),
+                    new XElement(
+                        "meta-data",
+                        new XAttribute(AndroidNs + "name", "unityplayer.UnityActivity"),
+                        new XAttribute(AndroidNs + "value", "true"))));
+            }
+
             if (cleartext != null)
             {
                 application.SetAttributeValue(AndroidNs + "usesCleartextTraffic", cleartext);
@@ -81,7 +98,7 @@ namespace ChatterMascot.Tests
         [Test]
         public void DoesNotDuplicateExistingPermissions()
         {
-            var document = BuildManifest(cleartext: "true");
+            var document = BuildManifest(cleartext: "true", activityName: LauncherClass);
             document.Root.Add(new XElement(
                 "uses-permission", new XAttribute(AndroidNs + "name", "android.permission.INTERNET")));
             document.Root.Add(new XElement(
@@ -105,6 +122,53 @@ namespace ChatterMascot.Tests
         public void ThrowsWhenRootElementIsNotManifest()
         {
             var document = new XDocument(new XElement("not-manifest"));
+
+            Assert.Throws<BuildFailedException>(() => AndroidManifestPostProcessor.Apply(document));
+        }
+
+        [Test]
+        public void RenamesTheUnityActivity()
+        {
+            var document = BuildManifest();
+
+            var changed = AndroidManifestPostProcessor.Apply(document);
+
+            Assert.That(changed, Is.True);
+            var activity = document.Root.Element("application").Element("activity");
+            Assert.That(activity.Attribute(AndroidNs + "name")?.Value, Is.EqualTo(LauncherClass));
+        }
+
+        [Test]
+        public void KeepsOtherActivityAttributesAndChildrenWhenRenaming()
+        {
+            var document = BuildManifest();
+
+            AndroidManifestPostProcessor.Apply(document);
+
+            var activity = document.Root.Element("application").Element("activity");
+            Assert.That(activity.Attribute(AndroidNs + "exported")?.Value, Is.EqualTo("true"));
+            Assert.That(activity.Element("intent-filter"), Is.Not.Null);
+            Assert.That(activity.Element("meta-data"), Is.Not.Null);
+        }
+
+        [Test]
+        public void AlreadyRenamedActivityIsLeftAlone()
+        {
+            var document = BuildManifest(cleartext: "true", activityName: LauncherClass);
+            document.Root.Add(new XElement(
+                "uses-permission", new XAttribute(AndroidNs + "name", "android.permission.INTERNET")));
+            document.Root.Add(new XElement(
+                "uses-permission", new XAttribute(AndroidNs + "name", "android.permission.HAND_TRACKING")));
+
+            var changed = AndroidManifestPostProcessor.Apply(document);
+
+            Assert.That(changed, Is.False);
+        }
+
+        [Test]
+        public void ThrowsWhenUnityActivityIsMissing()
+        {
+            var document = BuildManifest(withActivity: false);
 
             Assert.Throws<BuildFailedException>(() => AndroidManifestPostProcessor.Apply(document));
         }

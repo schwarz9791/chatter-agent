@@ -69,9 +69,9 @@ echo "転送しました: tcp:8570 -> tcp:$REVERSE_PORT"
 
 "$ADB" install -r "$APK"
 
-# ★ エントリポイントは GameActivity。 Unity 6 のテンプレートはこの Activity 名で
-#   AndroidManifest.xml に登録する。
-"$ADB" shell am start -n "$APP_ID/com.unity3d.player.UnityPlayerGameActivity"
+# ★ エントリポイントは GameActivity のサブクラス。AndroidManifestPostProcessor が
+#   AndroidManifest.xml の起動 Activity をこの名前へ差し替える。
+"$ADB" shell am start -n "$APP_ID/tech.sukima.chattermascot.ChatterMascotGameActivity"
 
 if [ "$NO_LOGCAT" = "--no-logcat" ]; then
   echo "起動しました（--no-logcat のため logcat は追いません）"

@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Xml.Linq;
 using UnityEditor.Android;
 using UnityEditor.Build;
@@ -9,8 +10,12 @@ namespace ChatterMascot.EditorTools
 {
     /// <summary>
     /// Gradle プロジェクト生成の直後に <c>AndroidManifest.xml</c> へ
-    /// <c>INTERNET</c> 権限と <c>usesCleartextTraffic</c>、<c>HAND_TRACKING</c> 権限を足す
-    /// （#97 / #98 / #121）。
+    /// <c>INTERNET</c> 権限と <c>usesCleartextTraffic</c>、<c>HAND_TRACKING</c> 権限を足し、
+    /// 起動 Activity を自前のサブクラスへ差し替える（#97 / #98 / #121 / #156）。
+    ///
+    /// ★ <b>起動 Activity の差し替えもここでやる。</b> Unity の GameActivity 入口は destroy で
+    ///   プロセスを終わらせないため、終了処理を持つサブクラス（<c>ChatterMascotGameActivity</c>）へ
+    ///   <c>android:name</c> を書き換える。マニフェストの仕組みを1つに保つ理由は次項と同じ。
     ///
     /// ★ <b><c>HAND_TRACKING</c> はここで足す。</b> Hand Interaction Profile（<c>XR_EXT_hand_interaction</c>）
     ///   も同じ権限を要る（Android XR パッケージの doc）が、パッケージ側は
@@ -38,6 +43,8 @@ namespace ChatterMascot.EditorTools
         private static readonly XNamespace AndroidNs = "http://schemas.android.com/apk/res/android";
         private const string InternetPermission = "android.permission.INTERNET";
         private const string HandTrackingPermission = "android.permission.HAND_TRACKING";
+        private const string UnityActivityMetaData = "unityplayer.UnityActivity";
+        private const string LauncherActivityClass = "tech.sukima.chattermascot.ChatterMascotGameActivity";
 
         public int callbackOrder => 0;
 
@@ -72,9 +79,11 @@ namespace ChatterMascot.EditorTools
         }
 
         /// <summary>
-        /// <paramref name="document"/> へ INTERNET / HAND_TRACKING 権限と <c>usesCleartextTraffic</c> を足す。
+        /// <paramref name="document"/> へ INTERNET / HAND_TRACKING 権限と <c>usesCleartextTraffic</c> を足し、
+        /// Unity の起動 Activity を <see cref="LauncherActivityClass"/> へ差し替える。
         /// 変更したら true、既に満たしていれば false。<c>manifest</c> / <c>application</c>
-        /// 要素が読めなければ <see cref="BuildFailedException"/>。
+        /// 要素が読めない、または起動 Activity が見つからなければ <see cref="BuildFailedException"/>
+        /// （差し替え漏れは終了処理の抜けた APK になる）。
         /// テストから呼ぶために <c>public</c>。
         /// </summary>
         public static bool Apply(XDocument document)
@@ -91,13 +100,37 @@ namespace ChatterMascot.EditorTools
                 throw new BuildFailedException("[Build] AndroidManifest.xml に application 要素がありません");
             }
 
+            var renamedActivity = EnsureLauncherActivity(application);
             var addedInternet = EnsurePermission(manifest, InternetPermission);
             var addedHandTracking = EnsurePermission(manifest, HandTrackingPermission);
             var addedCleartext = EnsureCleartextTraffic(application);
+            if (renamedActivity) Debug.Log($"[Build] AndroidManifest.xml: 起動 Activity を {LauncherActivityClass} へ差し替え");
             if (addedInternet) Debug.Log("[Build] AndroidManifest.xml: INTERNET を追加");
             if (addedHandTracking) Debug.Log("[Build] AndroidManifest.xml: HAND_TRACKING を追加");
             if (addedCleartext) Debug.Log("[Build] AndroidManifest.xml: usesCleartextTraffic を追加");
-            return addedInternet || addedHandTracking || addedCleartext;
+            return renamedActivity || addedInternet || addedHandTracking || addedCleartext;
+        }
+
+        /// <summary>
+        /// <c>unityplayer.UnityActivity</c> の meta-data を持つ Activity の名前を差し替える。
+        /// 書き換えたら true、既に差し替え済みなら false、見つからなければ例外。
+        /// </summary>
+        private static bool EnsureLauncherActivity(XElement application)
+        {
+            foreach (var activity in application.Elements("activity"))
+            {
+                var isUnityActivity = activity.Elements("meta-data")
+                    .Any(m => m.Attribute(AndroidNs + "name")?.Value == UnityActivityMetaData);
+                if (!isUnityActivity) continue;
+
+                if (activity.Attribute(AndroidNs + "name")?.Value == LauncherActivityClass) return false;
+
+                activity.SetAttributeValue(AndroidNs + "name", LauncherActivityClass);
+                return true;
+            }
+
+            throw new BuildFailedException(
+                $"[Build] AndroidManifest.xml に {UnityActivityMetaData} を持つ activity がありません");
         }
 
         /// <summary>足したら true。</summary>

@@ -428,7 +428,7 @@ APP=tech.sukima.chattermascot
 
 # 同期が終わったら、もう一度起動し直すと反映される
 $ADB shell am force-stop $APP
-$ADB shell am start -n $APP/com.unity3d.player.UnityPlayerGameActivity
+$ADB shell am start -n $APP/tech.sukima.chattermascot.ChatterMascotGameActivity
 ```
 
 ★ **反映は次回の起動から。** 同期はバックグラウンドで走るが、モデル・モーションを読むのは

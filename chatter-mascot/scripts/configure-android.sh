@@ -147,6 +147,6 @@ if [ -n "$NO_RESTART" ]; then
   echo "再起動していません。設定は次回の起動時に読み込まれます（--no-restart）"
 else
   "$ADB" shell am force-stop "$APP_ID"
-  "$ADB" shell am start -n "$APP_ID/com.unity3d.player.UnityPlayerGameActivity"
+  "$ADB" shell am start -n "$APP_ID/tech.sukima.chattermascot.ChatterMascotGameActivity"
   echo "再起動しました（設定は起動時にだけ読み込まれます）"
 fi

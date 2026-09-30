@@ -387,7 +387,7 @@ cd chatter-mascot
 ```
 
 `run-android.sh` は `adb reverse tcp:8570 tcp:${CHATTER_AGENT_PORT:-8570}` → `install -r` →
-`am start` → `adb logcat -s Unity` の順に行う。`adb` は
+`am start` → `adb logcat -s Unity ChatterMascot` の順に行う。`adb` は
 `$HOME/Library/Android/sdk/platform-tools/adb`（`ADB` 環境変数で上書き可）。この経路が効くのは
 端末の `settings.json` に `connection` が無いときだけ（サーバーから見るとループバック接続。
 LAN 越しの接続やトークンの検証は下の「接続」の C を使う）。
@@ -428,7 +428,7 @@ APP=tech.sukima.chattermascot
 
 # 同期が終わったら、もう一度起動し直すと反映される
 $ADB shell am force-stop $APP
-$ADB shell am start -n $APP/com.unity3d.player.UnityPlayerGameActivity
+$ADB shell am start -n $APP/tech.sukima.chattermascot.ChatterMascotGameActivity
 ```
 
 ★ **反映は次回の起動から。** 同期はバックグラウンドで走るが、モデル・モーションを読むのは

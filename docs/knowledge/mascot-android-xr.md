@@ -54,7 +54,8 @@ VRM の読み込み直後、`VrmStage.Adopt` が `VrmMaterialCheck.Inspect` の�
 `Assets/Plugins/Android/AndroidManifest.xml` は無い。`AndroidManifestPostProcessor`
 （`IPostGenerateGradleAndroidProject`。`path` は unityLibrary のルートで、
 `src/main/AndroidManifest.xml` を `XDocument` で編集する）が `INTERNET` と
-`<application android:usesCleartextTraffic="true">` を保証する。冪等で、失敗したら
+`<application android:usesCleartextTraffic="true">` を保証し、起動 Activity を自前のサブクラスへ
+差し替える（→ 下の「起動 Activity は…」）。冪等で、失敗したら
 `BuildFailedException` でビルドを止める（注入漏れを成功扱いにしないため）。★ **Unity は後処理が
 `BuildFailedException` を投げても APK を出力先へ書き出してから `Failed` を返す**（`usesCleartextTraffic` の
 無い APK が残ることを確かめた）ので、`build-android.sh` は失敗したら成果物を消す。静的な1枚を置かないのは、
@@ -73,6 +74,72 @@ aapt2 dump xmltree Build/ChatterMascot.apk --file AndroidManifest.xml
 
 ★ `MacPostBuild` は plist に `XDocument` を禁じている（DOCTYPE の問題）が、`AndroidManifest.xml` に
 DOCTYPE は無いので `XDocument` でよい。
+
+### ★★ 起動 Activity は GameActivity のサブクラスにして、`onDestroy` で自分のプロセスを殺す（[#156](https://github.com/schwarz9791/chatter-agent/issues/156)）
+
+**Unity 6 の GameActivity 入口は、destroy でプロセスを終わらせない。** `UnityPlayer.destroy()` は
+`cleanupResourcesForDestroy()` → `unloadNative()` だけで、`Process.killProcess` を呼ぶ `kill()` の呼び出し元は
+従来の Activity 入口（`UnityPlayerForActivityOrService`）だけ（`unity-classes.jar` を `javap` で確かめた）。
+Unity は `Starting Idle Loop` に入ってネイティブのメインを抜けないので、**GameActivity の `onDestroy` は
+戻ってこない**（UI スレッドごと止まる）。
+
+普段はシステムがプロセスを殺すので表に出ない。表に出るのはタスク一覧の **Clear all** で:
+
+1. Activity を pause → stop → destroy で畳ませ、猶予ののち `Destroy timeout of remove-task, attempt to kill Task`
+   で kill しに行く
+2. **このとき Activity がまだ STOPPED でなければ kill を見送る**（`Killing … remove task` が続かない）
+3. 残ったプロセスは約10秒でキャッシュ済みアプリのフリーザーに凍結される（`ActivityManager: freezing <pid>`）
+4. 次の起動は新しいプロセスを作らず、この抜け殻に Activity を作り直す。`dumpsys activity activities` では
+   `state=RESUMED` なのに `reportedDrawn=false` で、ホーム環境の中央にスピナーが出続ける。
+   **`am force-stop` で戻る**（エミュレータの再起動は要らない）
+
+stop が猶予に間に合うかは負荷次第の競争。Android XR エミュレータ（`XR_Glasses`、API 34）での実測
+（2026-09-29）: 猶予は `APP_CMD_PAUSE` から 1.3〜2.0 秒。kill された回は PAUSE → `APP_CMD_STOP` が
+1.4〜1.9 秒、見送られた回は 2.4〜3.5 秒だった。モデルの同期の直後など、重い回ほど踏みやすい。
+
+**手当て**: `ChatterMascotGameActivity`（`Assets/Plugins/Android/`）の `onDestroy` で、
+`super.onDestroy()` を呼ばずに `Process.killProcess(myPid())`。`AndroidManifestPostProcessor` が
+起動 Activity の `android:name` をこれへ差し替える（`UnityPlayerGameActivity` という名前で探す。Unity の目印
+`unityplayer.UnityActivity` の meta-data で探すと、入口を Activity と GameActivity の両方にしたとき、先に並ぶ
+`UnityPlayerActivity` を取り違える）。Unity の終了処理（OpenXR セッションの破棄、`wantsToQuit` での ack の
+送り切り）は飛ぶが、システムが kill する普段の経路でも途中で切られている。`am stack remove`（終了処理を通らず即 kill）でも
+再起動は正常だった。手当ての後、負荷をかけた Clear all で kill が見送られた回でも、
+`ChatterMascot: onDestroy: プロセスを終了します` の直後にプロセスが消え、次の起動は正常に上がった。
+
+★ **XR Management が同じ GameActivity 名の宣言を別に足す。** XR Management
+（`AndroidManifestProcessor`）は入口の設定を見て、`com.unity3d.player.UnityPlayerGameActivity` を
+直書きした子要素なしの `<activity>` を `xrmanifest.androidlib` に足す。名前を差し替えた後は
+マージで1つにまとまらないので、マージ後のマニフェストに孤立した宣言として残る（exported でも
+intent-filter 持ちでもないので今は無害）。`IAndroidManifestRequirementProvider` で activity の下に
+要素を足す XR feature を有効にすると、その要素は起動 Activity ではなくこちらに付く。feature を
+増やすときに見直す。
+
+効かなかった手当て（同じ罠を踏まないため）:
+
+| やり方 | 結果 |
+|---|---|
+| `super.onDestroy()` の**後**で kill | `super` が戻らないので実行されない |
+| `onUnityPlayerUnloaded` / `onUnityPlayerQuitted` で kill | この経路では呼ばれない |
+| 別スレッドで時間差の kill | プロセスごとフリーザーに凍結され、スレッドが起きられない |
+
+#### ★ 確かめ方: `am stack remove` では再現しない
+
+`am stack remove <taskId>` は待たずに即 kill する別経路なので、この競争が起きない。本物の Clear all は
+adb から押せる:
+
+```bash
+adb shell input keyevent KEYCODE_APP_SWITCH     # タスク一覧を開く（開いているときに送ると閉じる）
+adb shell input keyevent KEYCODE_TAB            # フォーカスが overview_clear_all に当たるまで
+adb shell uiautomator dump /sdcard/ui.xml       # focused="true" の resource-id で確かめる
+adb shell input keyevent KEYCODE_ENTER
+```
+
+- Tab でフォーカスが `Recents` から動かなくなったときは、エミュレータの入力をマウス・キーボードモードに
+  切り替えたら動いた
+- 見送られる側を確実に踏むには、ゲスト内で busy loop を回して負荷をかける
+  （`adb shell 'nohup sh -c "while :; do :; done" >/dev/null 2>&1 & echo $!'` を6本。止めるときは控えた pid を `kill`）
+- 開発者オプションの「アクティビティを保持しない」（`always_finish_activities`）は、このイメージでは
+  ホームへ戻っても destroy が来ず、代わりにならない
 
 ### シーンに焼かれたデスクトップ限定コンポーネントはビルド時に剥がす
 

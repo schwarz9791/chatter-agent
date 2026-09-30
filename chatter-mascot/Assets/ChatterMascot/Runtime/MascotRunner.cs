@@ -432,9 +432,7 @@ namespace ChatterMascot
 
         private Task _assetSync;
 
-        /// <summary>
-        /// 同期が走っているか。<c>SyncAsync</c> は例外を漏らさないので、<c>IsCompleted</c> で終わったか分かる。
-        /// </summary>
+        /// <summary>同期が走っているか。</summary>
         public bool AssetSyncRunning => _assetSync != null && !_assetSync.IsCompleted;
 
         /// <summary>

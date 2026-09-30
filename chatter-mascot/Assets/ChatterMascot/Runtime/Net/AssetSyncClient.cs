@@ -97,8 +97,7 @@ namespace ChatterMascot.Net
         /// ★ 呼び出し側は <c>await</c> せずに返った <c>Task</c> を持ち、<c>IsCompleted</c> で
         ///   同期中かを判定する（<c>MascotRunner.TryStartAssetSync</c>）。<b>ここで例外を漏らさないこと。</b>
         ///   誰も <c>await</c> しない <c>Task</c> が fault すると、その例外は
-        ///   <b>誰にも観測されずに捨てられる</b>（<c>SpeechClient.RunAsync</c> と同じ理由）。また、
-        ///   漏らさないから <c>IsCompleted</c> だけで「終わった」と判定できる。
+        ///   <b>誰にも観測されずに捨てられる</b>（<c>SpeechClient.RunAsync</c> と同じ理由）。
         /// </summary>
         public async Task SyncAsync()
         {

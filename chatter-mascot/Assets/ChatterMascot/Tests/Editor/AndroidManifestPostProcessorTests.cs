@@ -152,9 +152,9 @@ namespace ChatterMascot.Tests
         }
 
         [Test]
-        public void AlreadyRenamedActivityIsLeftAlone()
+        public void RenamingAloneCountsAsAChange()
         {
-            var document = BuildManifest(cleartext: "true", activityName: LauncherClass);
+            var document = BuildManifest(cleartext: "true");
             document.Root.Add(new XElement(
                 "uses-permission", new XAttribute(AndroidNs + "name", "android.permission.INTERNET")));
             document.Root.Add(new XElement(
@@ -162,7 +162,31 @@ namespace ChatterMascot.Tests
 
             var changed = AndroidManifestPostProcessor.Apply(document);
 
-            Assert.That(changed, Is.False);
+            Assert.That(changed, Is.True);
+            var activity = document.Root.Element("application").Element("activity");
+            Assert.That(activity.Attribute(AndroidNs + "name")?.Value, Is.EqualTo(LauncherClass));
+        }
+
+        [Test]
+        public void RenamesOnlyTheGameActivityWhenBothEntriesExist()
+        {
+            var document = BuildManifest();
+            var application = document.Root.Element("application");
+            application.AddFirst(new XElement(
+                "activity",
+                new XAttribute(AndroidNs + "name", "com.unity3d.player.UnityPlayerActivity"),
+                new XElement(
+                    "meta-data",
+                    new XAttribute(AndroidNs + "name", "unityplayer.UnityActivity"),
+                    new XAttribute(AndroidNs + "value", "true"))));
+
+            AndroidManifestPostProcessor.Apply(document);
+
+            var activities = application.Elements("activity").ToList();
+            Assert.That(
+                activities[0].Attribute(AndroidNs + "name")?.Value,
+                Is.EqualTo("com.unity3d.player.UnityPlayerActivity"));
+            Assert.That(activities[1].Attribute(AndroidNs + "name")?.Value, Is.EqualTo(LauncherClass));
         }
 
         [Test]

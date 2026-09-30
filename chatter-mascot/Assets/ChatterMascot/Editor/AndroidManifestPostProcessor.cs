@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Linq;
 using System.Xml.Linq;
 using UnityEditor.Android;
 using UnityEditor.Build;
@@ -15,7 +14,7 @@ namespace ChatterMascot.EditorTools
     ///
     /// ★ <b>起動 Activity の差し替えもここでやる。</b> Unity の GameActivity 入口は destroy で
     ///   プロセスを終わらせないため、終了処理を持つサブクラス（<c>ChatterMascotGameActivity</c>）へ
-    ///   <c>android:name</c> を書き換える。マニフェストの仕組みを1つに保つ理由は次項と同じ。
+    ///   <c>android:name</c> を書き換える。マニフェストの仕組みを1つに保つ理由は下の「静的に置かないか」と同じ。
     ///
     /// ★ <b><c>HAND_TRACKING</c> はここで足す。</b> Hand Interaction Profile（<c>XR_EXT_hand_interaction</c>）
     ///   も同じ権限を要る（Android XR パッケージの doc）が、パッケージ側は
@@ -43,7 +42,7 @@ namespace ChatterMascot.EditorTools
         private static readonly XNamespace AndroidNs = "http://schemas.android.com/apk/res/android";
         private const string InternetPermission = "android.permission.INTERNET";
         private const string HandTrackingPermission = "android.permission.HAND_TRACKING";
-        private const string UnityActivityMetaData = "unityplayer.UnityActivity";
+        private const string UnityGameActivityClass = "com.unity3d.player.UnityPlayerGameActivity";
         private const string LauncherActivityClass = "tech.sukima.chattermascot.ChatterMascotGameActivity";
 
         public int callbackOrder => 0;
@@ -112,25 +111,23 @@ namespace ChatterMascot.EditorTools
         }
 
         /// <summary>
-        /// <c>unityplayer.UnityActivity</c> の meta-data を持つ Activity の名前を差し替える。
+        /// Unity の GameActivity（<c>UnityPlayerGameActivity</c>）の名前を差し替える。
         /// 書き換えたら true、既に差し替え済みなら false、見つからなければ例外。
         /// </summary>
         private static bool EnsureLauncherActivity(XElement application)
         {
             foreach (var activity in application.Elements("activity"))
             {
-                var isUnityActivity = activity.Elements("meta-data")
-                    .Any(m => m.Attribute(AndroidNs + "name")?.Value == UnityActivityMetaData);
-                if (!isUnityActivity) continue;
+                var name = activity.Attribute(AndroidNs + "name");
+                if (name?.Value == LauncherActivityClass) return false;
+                if (name?.Value != UnityGameActivityClass) continue;
 
-                if (activity.Attribute(AndroidNs + "name")?.Value == LauncherActivityClass) return false;
-
-                activity.SetAttributeValue(AndroidNs + "name", LauncherActivityClass);
+                name.Value = LauncherActivityClass;
                 return true;
             }
 
             throw new BuildFailedException(
-                $"[Build] AndroidManifest.xml に {UnityActivityMetaData} を持つ activity がありません");
+                $"[Build] AndroidManifest.xml に {UnityGameActivityClass} の activity がありません");
         }
 
         /// <summary>足したら true。</summary>

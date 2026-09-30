@@ -99,11 +99,20 @@ stop が猶予に間に合うかは負荷次第の競争。Android XR エミュ�
 
 **手当て**: `ChatterMascotGameActivity`（`Assets/Plugins/Android/`）の `onDestroy` で、
 `super.onDestroy()` を呼ばずに `Process.killProcess(myPid())`。`AndroidManifestPostProcessor` が
-起動 Activity の `android:name` をこれへ差し替える（Unity の目印 `unityplayer.UnityActivity` の meta-data で
-探す）。Unity の終了処理（OpenXR セッションの破棄、`wantsToQuit` での ack の送り切り）は飛ぶが、
-システムが kill する普段の経路でも途中で切られている。`am stack remove`（終了処理を通らず即 kill）でも
+起動 Activity の `android:name` をこれへ差し替える（`UnityPlayerGameActivity` という名前で探す。Unity の目印
+`unityplayer.UnityActivity` の meta-data で探すと、入口を Activity と GameActivity の両方にしたとき、先に並ぶ
+`UnityPlayerActivity` を取り違える）。Unity の終了処理（OpenXR セッションの破棄、`wantsToQuit` での ack の
+送り切り）は飛ぶが、システムが kill する普段の経路でも途中で切られている。`am stack remove`（終了処理を通らず即 kill）でも
 再起動は正常だった。手当ての後、負荷をかけた Clear all で kill が見送られた回でも、
 `ChatterMascot: onDestroy: プロセスを終了します` の直後にプロセスが消え、次の起動は正常に上がった。
+
+★ **XR Management が同じ GameActivity 名の宣言を別に足す。** XR Management
+（`AndroidManifestProcessor`）は入口の設定を見て、`com.unity3d.player.UnityPlayerGameActivity` を
+直書きした子要素なしの `<activity>` を `xrmanifest.androidlib` に足す。名前を差し替えた後は
+マージで1つにまとまらないので、マージ後のマニフェストに孤立した宣言として残る（exported でも
+intent-filter 持ちでもないので今は無害）。`IAndroidManifestRequirementProvider` で activity の下に
+要素を足す XR feature を有効にすると、その要素は起動 Activity ではなくこちらに付く。feature を
+増やすときに見直す。
 
 効かなかった手当て（同じ罠を踏まないため）:
 

@@ -79,4 +79,4 @@ if [ "$NO_LOGCAT" = "--no-logcat" ]; then
 fi
 
 echo "Unity のログを表示します（Ctrl-C で終了）"
-"$ADB" logcat -s Unity
+"$ADB" logcat -s Unity ChatterMascot

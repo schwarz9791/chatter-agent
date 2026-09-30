@@ -37,6 +37,9 @@ namespace ChatterMascot.Settings
         /// </summary>
         public const string AssetSync = "assetSync";
 
+        /// <summary>今すぐ同期する。XR の設定パネルだけに出す。押した瞬間だけ意味を持つ（値は持たない）。</summary>
+        public const string AssetSyncNow = "assetSyncNow";
+
         public const string Speaker = "speaker";
         public const string Volume = "volume";
         public const string Speed = "speed";
@@ -324,10 +327,17 @@ namespace ChatterMascot.Settings
             // ── キャラクター ─────────────────────────────────
             items.Add(SettingSpec.Section("キャラクター"));
             items.Add(BuildXrHeightChoice(c, settings));
+            var syncOn = settings.AssetSync != SettingsMapping.AssetSyncOff;
             items.Add(SettingSpec.Bool(
                 SettingKeys.AssetSync, "モデルとモーションを同期",
-                settings.AssetSync != SettingsMapping.AssetSyncOff,
+                syncOn,
                 note: "次回の起動から反映されます"));
+            // ★ note はどの状態でも出す。有無が変わると XrSettingsPanel.Signature が変わってパネルが
+            //   行を作り直し、縮尺と中心がずれて、押そうとした行がずれる。
+            items.Add(SettingSpec.Button(
+                SettingKeys.AssetSyncNow, "今すぐ同期",
+                enabled: syncOn && !c.AssetSyncRunning,
+                note: c.AssetSyncRunning ? "同期しています…" : !syncOn ? "同期が OFF の間は使えません" : "サーバーから取り直します"));
 
             // ── モーション ───────────────────────────────────
             items.Add(SettingSpec.Section("モーション"));

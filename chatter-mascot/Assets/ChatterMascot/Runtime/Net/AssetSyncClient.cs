@@ -17,7 +17,7 @@ namespace ChatterMascot.Net
     /// ★ <c>AudioFetcher</c> と同じ形にしてある（<c>UnityWebRequest</c> + <c>Authorization: Bearer</c>、
     ///   秒単位のタイムアウト）。★ <b>発話経路と独立に走らせること。</b> 失敗はログだけにして、
     ///   テキストと音声の配信を止めない——呼び出し側は <see cref="SyncAsync"/> を
-    ///   <c>_ = client.SyncAsync()</c> の fire-and-forget で起こす。
+    ///   <c>await</c> せず、返った <c>Task</c> を持って終わったか（<c>IsCompleted</c>）で同期中かを判定する。
     /// </summary>
     public sealed class AssetSyncClient
     {
@@ -94,8 +94,8 @@ namespace ChatterMascot.Net
         /// <c>VrmMotionPlayer</c> は起動時に1回だけ読むので、ここで取得しても今のセッションの
         /// 見た目は変わらない。
         ///
-        /// ★ 呼び出し側は <c>_ = client.SyncAsync()</c> の fire-and-forget で起こす想定
-        ///   （<c>MascotRunner.StartAssetSyncIfNeeded</c>）。<b>ここで例外を漏らさないこと。</b>
+        /// ★ 呼び出し側は <c>await</c> せずに返った <c>Task</c> を持ち、<c>IsCompleted</c> で
+        ///   同期中かを判定する（<c>MascotRunner.TryStartAssetSync</c>）。<b>ここで例外を漏らさないこと。</b>
         ///   誰も <c>await</c> しない <c>Task</c> が fault すると、その例外は
         ///   <b>誰にも観測されずに捨てられる</b>（<c>SpeechClient.RunAsync</c> と同じ理由）。
         /// </summary>
@@ -178,14 +178,16 @@ namespace ChatterMascot.Net
         ///
         /// ★ <b>何も変わらなかった起動では出さない。</b> 定常状態ではマニフェストしか流れないので、
         ///   毎回出すと「変わっていない」ことを知らせるだけの通知が起動のたびに出る。
+        ///   ただし<b>手で起こしたとき（<paramref name="requested"/>）は出す</b>——押したのに
+        ///   何も出ないと、効いたのか分からない。
         ///
         /// ★ <b>取りきれなかったことを隠さない。</b> 細い回線では1回の起動で終わらない。
         ///   「次の起動で続きを取る」と言えば、もう一度立ち上げればよいと分かる。
         /// </summary>
-        public static string DescribeResult(int fetched, int planned, int deleted)
+        public static string DescribeResult(int fetched, int planned, int deleted, bool requested = false)
         {
             // 取りに行くものも消すものも無かった＝定常状態
-            if (planned <= 0 && deleted <= 0) return null;
+            if (planned <= 0 && deleted <= 0) return requested ? "モデルとモーションは最新です。" : null;
 
             // ★ 1件も取れなかったときに「更新した」と言わないこと。取りに行って
             //   全部こぼしたのと、取って反映待ちなのは、次にやることが違う

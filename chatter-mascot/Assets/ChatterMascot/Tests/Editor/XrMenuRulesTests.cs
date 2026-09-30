@@ -142,6 +142,59 @@ namespace ChatterMascot.Tests
             }
         }
 
+        private static float GearGap(float h) =>
+            XrMenuRules.GearHeightAboveHead(h) - XrMenuRules.InvokerWorldSizeMeters * 0.5f * XrMenuRules.GearScale(h);
+
+        [Test]
+        public void GearGapIsClampedToItsMinimumForATinyCharacter()
+        {
+            Assert.That(GearGap(0.05f), Is.EqualTo(XrMenuRules.GearMinGapMeters).Within(1e-6f));
+        }
+
+        [Test]
+        public void GearGapIsProportionalToHeightForALifeSizeCharacter()
+        {
+            Assert.That(GearGap(1.6f), Is.EqualTo(XrMenuRules.GearGapToHeightRatio * 1.6f).Within(1e-5f));
+        }
+
+        [Test]
+        public void GearHeightAboveHeadIsMonotonicNonDecreasingWithHeight()
+        {
+            var previous = XrMenuRules.GearHeightAboveHead(0.15f);
+            for (var h = 0.2f; h <= 3.0f; h += 0.1f)
+            {
+                var current = XrMenuRules.GearHeightAboveHead(h);
+                Assert.That(current, Is.GreaterThanOrEqualTo(previous));
+                previous = current;
+            }
+        }
+
+        [Test]
+        public void GearHitRadiusNeverReachesBelowTheTopOfTheHead()
+        {
+            for (var h = 0.15f; h <= 3.0f; h += 0.1f)
+            {
+                Assert.That(XrMenuRules.GearHitRadius(h), Is.LessThanOrEqualTo(XrMenuRules.GearHeightAboveHead(h)));
+            }
+        }
+
+        [Test]
+        public void GearHitRadiusKeepsItsFullSizeWhenThereIsRoom()
+        {
+            Assert.That(XrMenuRules.GearHitRadius(1.6f),
+                Is.EqualTo(XrMenuRules.InvokerHitRadiusMeters * XrMenuRules.GearScale(1.6f)).Within(1e-5f));
+        }
+
+        [Test]
+        public void GearPlacementStaysFinitePositiveForInvalidInput()
+        {
+            foreach (var h in new[] { 0f, -1f, float.NaN, float.PositiveInfinity })
+            {
+                Assert.That(float.IsFinite(XrMenuRules.GearHeightAboveHead(h)) && XrMenuRules.GearHeightAboveHead(h) > 0f, Is.True);
+                Assert.That(float.IsFinite(XrMenuRules.GearHitRadius(h)) && XrMenuRules.GearHitRadius(h) > 0f, Is.True);
+            }
+        }
+
         [Test]
         public void GearScaleFallsBackToOneForNonPositiveOrNonFiniteInput()
         {

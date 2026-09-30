@@ -16,7 +16,7 @@ namespace ChatterMascot.Xr
         /// キャラクターをつまんだ・離した後、頭上の歯車を出しておく秒数。既定値。
         ///
         /// ★ 歯車へレイを動かして押すまでの猶予。歯車に当たっている間は延び続ける。
-        /// ★ 歩行範囲の円（<c>XrWalk</c>）も同じ値を使う —— 揃って消える。
+        /// ★ 歩行範囲の円（<c>XrWalk</c>）も同じ秒数を使う。
         /// </summary>
         public const float GearVisibleSeconds = 10f;
 
@@ -113,7 +113,7 @@ namespace ChatterMascot.Xr
         public const float InvokerHitRadiusMeters = 0.05f;
 
         /// <summary>頭頂と歯車の下端の間隔を、キャラクターの表示身長のこの割合にする。既定値。</summary>
-        public const float GearGapToHeightRatio = 0.07f;
+        public const float GearGapToHeightRatio = 0.1f;
 
         /// <summary><see cref="GearGapToHeightRatio"/> で決めた間隔の下限（m）。既定値。</summary>
         public const float GearMinGapMeters = 0.01f;
@@ -137,6 +137,10 @@ namespace ChatterMascot.Xr
         /// ★ 球を頭頂より下へ出さない。つまみは歯車を先に判定する
         ///   （<c>XrGrab.TryGrab</c> → <c>XrSettingsBridge.TryHandlePinch</c>）ので、球が頭へ
         ///   かかっていると、歯車が出ている間に頭をつまむとパネルが開いてしまう。
+        /// ★ 限界: 見下ろしてつまむと、頭の上面を狙ったレイは頭に届く前に球を通るので歯車に
+        ///   取られる（見下ろす角度が深いほど範囲が広い）。キャラと歯車の近い方を優先しても、
+        ///   球の方が手前で当たるので直らない。真上からつまみ上げることはまず無いので、歯車を
+        ///   頭の近くに出すことを優先している。
         /// </summary>
         public static float GearHitRadius(float characterHeightMeters)
         {

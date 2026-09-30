@@ -146,9 +146,9 @@ namespace ChatterMascot.Tests
             XrMenuRules.GearHeightAboveHead(h) - XrMenuRules.InvokerWorldSizeMeters * 0.5f * XrMenuRules.GearScale(h);
 
         [Test]
-        public void GearGapKeepsItsMinimumForASmallCharacter()
+        public void GearGapIsClampedToItsMinimumForATinyCharacter()
         {
-            Assert.That(GearGap(0.15f), Is.GreaterThanOrEqualTo(XrMenuRules.GearMinGapMeters));
+            Assert.That(GearGap(0.05f), Is.EqualTo(XrMenuRules.GearMinGapMeters).Within(1e-6f));
         }
 
         [Test]

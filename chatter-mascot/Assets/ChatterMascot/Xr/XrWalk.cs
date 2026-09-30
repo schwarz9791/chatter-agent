@@ -36,7 +36,7 @@ namespace ChatterMascot.Xr
         public const float DefaultRadius = 0.20f;
         public const float MaxRadius = 0.60f;
 
-        /// <summary>歩行範囲の円を出しておく秒数。歯車と揃えて一緒に消える。</summary>
+        /// <summary>歩行範囲の円を出しておく秒数。歯車と同じ秒数。</summary>
         private const float CircleVisibleSeconds = XrMenuRules.GearVisibleSeconds;
         private const float OutOfRangeCircleSeconds = 3f;
         private const float HandleAzimuthOffsetDegrees = 45f;

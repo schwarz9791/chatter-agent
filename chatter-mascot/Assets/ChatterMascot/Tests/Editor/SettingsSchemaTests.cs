@@ -740,7 +740,39 @@ namespace ChatterMascot.Tests
 
             var spec = Find(SettingsSchema.Build(c), SettingKeys.AssetSyncNow);
             Assert.That(spec.Enabled, Is.True);
-            Assert.That(spec.Note, Is.Empty);
+            Assert.That(spec.Note, Is.Not.Empty);
+        }
+
+        [Test]
+        public void XrAssetSyncNowKeepsShowingSyncingWhenSyncIsTurnedOffMidway()
+        {
+            var c = XrContext();
+            c.Settings = MascotSettings.Defaults.WithAssetSync(SettingsMapping.AssetSyncOff);
+            c.AssetSyncRunning = true;
+
+            var spec = Find(SettingsSchema.Build(c), SettingKeys.AssetSyncNow);
+            Assert.That(spec.Enabled, Is.False);
+            Assert.That(spec.Note, Does.Contain("同期しています"));
+        }
+
+        /// <summary>★ note の有無が変わるとパネルが作り直されるため、どの状態でも note を出す</summary>
+        [Test]
+        public void XrAssetSyncNowAlwaysHasANote()
+        {
+            foreach (var (mode, running) in new[]
+            {
+                (SettingsMapping.AssetSyncAuto, false),
+                (SettingsMapping.AssetSyncAuto, true),
+                (SettingsMapping.AssetSyncOff, false),
+            })
+            {
+                var c = XrContext();
+                c.Settings = MascotSettings.Defaults.WithAssetSync(mode);
+                c.AssetSyncRunning = running;
+
+                var spec = Find(SettingsSchema.Build(c), SettingKeys.AssetSyncNow);
+                Assert.That(spec.Note, Is.Not.Empty, $"mode={mode} running={running}");
+            }
         }
 
         [Test]

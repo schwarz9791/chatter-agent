@@ -17,7 +17,7 @@ namespace ChatterMascot.Net
     /// ★ <c>AudioFetcher</c> と同じ形にしてある（<c>UnityWebRequest</c> + <c>Authorization: Bearer</c>、
     ///   秒単位のタイムアウト）。★ <b>発話経路と独立に走らせること。</b> 失敗はログだけにして、
     ///   テキストと音声の配信を止めない——呼び出し側は <see cref="SyncAsync"/> を
-    ///   <c>_ = client.SyncAsync()</c> の fire-and-forget で起こす。
+    ///   <c>await</c> せず、返った <c>Task</c> を持って終わったか（<c>IsCompleted</c>）で同期中かを判定する。
     /// </summary>
     public sealed class AssetSyncClient
     {
@@ -94,10 +94,11 @@ namespace ChatterMascot.Net
         /// <c>VrmMotionPlayer</c> は起動時に1回だけ読むので、ここで取得しても今のセッションの
         /// 見た目は変わらない。
         ///
-        /// ★ 呼び出し側は <c>_ = client.SyncAsync()</c> の fire-and-forget で起こす想定
-        ///   （<c>MascotRunner.StartAssetSyncIfNeeded</c>）。<b>ここで例外を漏らさないこと。</b>
+        /// ★ 呼び出し側は <c>await</c> せずに返った <c>Task</c> を持ち、<c>IsCompleted</c> で
+        ///   同期中かを判定する（<c>MascotRunner.TryStartAssetSync</c>）。<b>ここで例外を漏らさないこと。</b>
         ///   誰も <c>await</c> しない <c>Task</c> が fault すると、その例外は
-        ///   <b>誰にも観測されずに捨てられる</b>（<c>SpeechClient.RunAsync</c> と同じ理由）。
+        ///   <b>誰にも観測されずに捨てられる</b>（<c>SpeechClient.RunAsync</c> と同じ理由）。また、
+        ///   漏らさないから <c>IsCompleted</c> だけで「終わった」と判定できる。
         /// </summary>
         public async Task SyncAsync()
         {

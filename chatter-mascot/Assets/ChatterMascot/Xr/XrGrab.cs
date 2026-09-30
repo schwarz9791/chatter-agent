@@ -83,6 +83,9 @@ namespace ChatterMascot.Xr
         /// <summary>モデルを掴んだ時刻（<c>Time.unscaledTime</c>）。</summary>
         private float _grabbedAt;
 
+        /// <summary>モデルを掴んだ時点の <c>ModelAnchor</c> の位置。</summary>
+        private Vector3 _anchorAtGrab;
+
         /// <summary>面を指していないときの奥行きのフォールバックに使う距離。面を指している間は
         /// 指した点までの距離で更新し続け、指さなくなった瞬間の値をそのまま引き継ぐ。</summary>
         private float _heldDistance;
@@ -336,6 +339,7 @@ namespace ChatterMascot.Xr
 
             _dragging = false;
             _grabbedAt = Time.unscaledTime;
+            _anchorAtGrab = _stage.ModelAnchor.position;
             if (_settings != null) _settings.ShowGearForAWhile();
             Debug.Log($"[Mascot] XR grab: 掴みました hand={hand.Name}");
         }
@@ -362,11 +366,17 @@ namespace ChatterMascot.Xr
 
             // ★ ドラッグと決まるまで歩行を止めない。SetModelGrabbed を呼ぶと、歩いている最中なら
             //   向き直りへ倒れて向きが変わる —— タップが位置・向き・歩行に触らないようにする。
+            //   歩き続けたぶんは掴んだ時点の基準に入っていないので、ここで足す（足さないと
+            //   ドラッグに入った瞬間に掴んだ時点の位置へ引き戻される）。
             if (!_dragging)
             {
                 if (Time.unscaledTime - _grabbedAt < TapMaxSeconds) return;
                 _dragging = true;
                 _walk?.SetModelGrabbed(true);
+                var moved = _stage.ModelAnchor.position - _anchorAtGrab;
+                moved.y = 0f;
+                _slip += moved;
+                _grabOffset += moved;
             }
 
             var ray = ReadAimRay(hand, offset);

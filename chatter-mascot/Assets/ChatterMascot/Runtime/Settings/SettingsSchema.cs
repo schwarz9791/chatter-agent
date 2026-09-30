@@ -332,10 +332,12 @@ namespace ChatterMascot.Settings
                 SettingKeys.AssetSync, "モデルとモーションを同期",
                 syncOn,
                 note: "次回の起動から反映されます"));
+            // ★ note はどの状態でも出す。有無が変わると XrSettingsPanel.Signature が変わってパネルが
+            //   行を作り直し、縮尺と中心がずれて、押そうとした行がずれる。
             items.Add(SettingSpec.Button(
                 SettingKeys.AssetSyncNow, "今すぐ同期",
                 enabled: syncOn && !c.AssetSyncRunning,
-                note: !syncOn ? "同期が OFF の間は使えません" : c.AssetSyncRunning ? "同期しています…" : ""));
+                note: c.AssetSyncRunning ? "同期しています…" : !syncOn ? "同期が OFF の間は使えません" : "サーバーから取り直します"));
 
             // ── モーション ───────────────────────────────────
             items.Add(SettingSpec.Section("モーション"));

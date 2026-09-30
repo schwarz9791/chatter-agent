@@ -3,12 +3,12 @@ using UnityEngine;
 namespace ChatterMascot.Xr
 {
     /// <summary>
-    /// 設定パネルの呼び出し口（頭上の歯車 / 手のひらのボタン）を出すかどうかの判定。
-    /// <b>純粋関数。</b>
+    /// 設定パネルの呼び出し口（頭上の歯車 / 手のひらのボタン）を出すかどうかの判定と、歯車の
+    /// 置き方（大きさ・頭上の高さ・当たり判定の半径）。<b>純粋関数。</b>
     ///
-    /// ★ <b>当たり判定そのものはここに無い。</b> レイが何に当たったか・関節姿勢が取れているかは
+    /// ★ <b>当たったかどうかの判定はここに無い。</b> レイが何に当たったか・関節姿勢が取れているかは
     ///   呼び出し側（<c>XrSettingsBridge</c> / <c>XrHandTracking</c>）が決め、時刻や向きの内積
-    ///   だけをここへ渡す。ここは経過時間の算数と、内積のヒステリシスだけを持つ。
+    ///   だけをここへ渡す。ここは経過時間の算数・内積のヒステリシス・表示身長からの寸法だけを持つ。
     /// </summary>
     public static class XrMenuRules
     {
@@ -16,8 +16,9 @@ namespace ChatterMascot.Xr
         /// キャラクターをつまんだ・離した後、頭上の歯車を出しておく秒数。既定値。
         ///
         /// ★ 歯車へレイを動かして押すまでの猶予。歯車に当たっている間は延び続ける。
+        /// ★ 歩行範囲の円（<c>XrWalk</c>）も同じ値を使う —— 揃って消える。
         /// </summary>
-        public const float GearVisibleSeconds = 5f;
+        public const float GearVisibleSeconds = 10f;
 
         /// <summary>
         /// 呼び出し口を出すか。
@@ -103,6 +104,43 @@ namespace ChatterMascot.Xr
         {
             if (!float.IsFinite(characterHeightMeters) || characterHeightMeters <= 0f) return 1f;
             return Mathf.Clamp(Mathf.Sqrt(characterHeightMeters / GearReferenceHeightMeters), 1f, GearScaleMax);
+        }
+
+        /// <summary>呼び出し口（歯車・手のひらボタン）の見た目の大きさ（m）。基本の大きさ。既定値。</summary>
+        public const float InvokerWorldSizeMeters = 0.035f;
+
+        /// <summary>呼び出し口の当たり判定の半径（m）。見た目より大きく取る。既定値。</summary>
+        public const float InvokerHitRadiusMeters = 0.05f;
+
+        /// <summary>頭頂と歯車の下端の間隔を、キャラクターの表示身長のこの割合にする。既定値。</summary>
+        public const float GearGapToHeightRatio = 0.07f;
+
+        /// <summary><see cref="GearGapToHeightRatio"/> で決めた間隔の下限（m）。既定値。</summary>
+        public const float GearMinGapMeters = 0.01f;
+
+        /// <summary>
+        /// 頭頂から歯車の<b>中心</b>までの高さ（m）。
+        ///
+        /// ★ 間隔は歯車の<b>下端</b>から測る。中心から測ると、歯車を大きくしたぶん下端が頭へ
+        ///   食い込む。
+        /// </summary>
+        public static float GearHeightAboveHead(float characterHeightMeters)
+        {
+            var valid = float.IsFinite(characterHeightMeters) && characterHeightMeters > 0f;
+            var gap = valid ? Mathf.Max(GearMinGapMeters, characterHeightMeters * GearGapToHeightRatio) : GearMinGapMeters;
+            return gap + InvokerWorldSizeMeters * 0.5f * GearScale(characterHeightMeters);
+        }
+
+        /// <summary>
+        /// 歯車の当たり判定の半径（m）。
+        ///
+        /// ★ 球を頭頂より下へ出さない。つまみは歯車を先に判定する
+        ///   （<c>XrGrab.TryGrab</c> → <c>XrSettingsBridge.TryHandlePinch</c>）ので、球が頭へ
+        ///   かかっていると、歯車が出ている間に頭をつまむとパネルが開いてしまう。
+        /// </summary>
+        public static float GearHitRadius(float characterHeightMeters)
+        {
+            return Mathf.Min(InvokerHitRadiusMeters * GearScale(characterHeightMeters), GearHeightAboveHead(characterHeightMeters));
         }
     }
 }

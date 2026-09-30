@@ -11,8 +11,9 @@ using UnityEngine.XR.ARSubsystems;
 namespace ChatterMascot.Xr
 {
     /// <summary>
-    /// 手でつまんで動かし、離したら平面へ置き直す。掴む対象はモデル本体と、歩行範囲の円の
-    /// ハンドル（<see cref="XrWalk"/>）の2つ —— aim レイ・pinchValue のヒステリシス・掴みの
+    /// 手でつまんで動かし、離したら平面へ置き直す。すぐ離したつまみはタップとして、歯車と歩行範囲を
+    /// 出すだけにする。掴む対象はモデル本体と、歩行範囲の円のハンドル（<see cref="XrWalk"/>）の
+    /// 2つ —— aim レイ・pinchValue のヒステリシス・掴みの
     /// 排他はここに一本化したまま、先に設定パネル・歯車、次にハンドル、最後にモデルの順で見る。
     /// どれにも当たらなかったつまみは、歩行範囲の中を指した「行き先の指示」として扱う。
     ///
@@ -38,6 +39,14 @@ namespace ChatterMascot.Xr
 
         /// <summary>つまんでいる間、アンカーを行き先へ寄せる速さ（1/秒）。大きいほど遅れが小さい。</summary>
         private const float HeldFollowRate = 20f;
+
+        /// <summary>
+        /// つまんでからこれだけ経つまではドラッグとみなさない。その前に離したらタップ。既定値。
+        ///
+        /// ★ 判定は時間だけで見る。手の移動量は見ない —— つまんだ瞬間に aim が飛ぶ環境
+        ///   （<c>XR_Glasses</c> エミュレータ）では、移動量で判定すると触っただけでドラッグに入る。
+        /// </summary>
+        private const float TapMaxSeconds = 0.3f;
 
         private XROrigin _origin;
         private VrmStage _stage;
@@ -67,6 +76,12 @@ namespace ChatterMascot.Xr
 
         /// <summary>掴んでいるのがハンドルか（false ならモデル本体）。</summary>
         private bool _grabbedHandle;
+
+        /// <summary>掴んだモデルをドラッグとして動かしているか。<see cref="TapMaxSeconds"/> が経つまでは false。</summary>
+        private bool _dragging;
+
+        /// <summary>モデルを掴んだ時刻（<c>Time.unscaledTime</c>）。</summary>
+        private float _grabbedAt;
 
         /// <summary>面を指していないときの奥行きのフォールバックに使う距離。面を指している間は
         /// 指した点までの距離で更新し続け、指さなくなった瞬間の値をそのまま引き継ぐ。</summary>
@@ -319,7 +334,8 @@ namespace ChatterMascot.Xr
                 _hasLastPlanePoint = false;
             }
 
-            _walk?.SetModelGrabbed(true);
+            _dragging = false;
+            _grabbedAt = Time.unscaledTime;
             if (_settings != null) _settings.ShowGearForAWhile();
             Debug.Log($"[Mascot] XR grab: 掴みました hand={hand.Name}");
         }
@@ -342,6 +358,15 @@ namespace ChatterMascot.Xr
             {
                 _walk.DragHandle(ReadAimRay(hand, offset));
                 return;
+            }
+
+            // ★ ドラッグと決まるまで歩行を止めない。SetModelGrabbed を呼ぶと、歩いている最中なら
+            //   向き直りへ倒れて向きが変わる —— タップが位置・向き・歩行に触らないようにする。
+            if (!_dragging)
+            {
+                if (Time.unscaledTime - _grabbedAt < TapMaxSeconds) return;
+                _dragging = true;
+                _walk?.SetModelGrabbed(true);
             }
 
             var ray = ReadAimRay(hand, offset);
@@ -395,6 +420,15 @@ namespace ChatterMascot.Xr
             {
                 _walk?.ReleaseHandle();
                 Debug.Log("[Mascot] XR grab: 歩行範囲のハンドルを離しました");
+                return;
+            }
+
+            if (!_dragging)
+            {
+                // ★ タップ。歯車と歩行範囲を出すだけで、位置・向き・歩行範囲の中心は変えない
+                _walk?.ShowArea();
+                if (_settings != null) _settings.ShowGearForAWhile();
+                Debug.Log("[Mascot] XR grab: タップしました");
                 return;
             }
 

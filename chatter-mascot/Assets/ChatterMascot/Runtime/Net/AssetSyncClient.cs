@@ -178,14 +178,16 @@ namespace ChatterMascot.Net
         ///
         /// ★ <b>何も変わらなかった起動では出さない。</b> 定常状態ではマニフェストしか流れないので、
         ///   毎回出すと「変わっていない」ことを知らせるだけの通知が起動のたびに出る。
+        ///   ただし<b>手で起こしたとき（<paramref name="requested"/>）は出す</b>——押したのに
+        ///   何も出ないと、効いたのか分からない。
         ///
         /// ★ <b>取りきれなかったことを隠さない。</b> 細い回線では1回の起動で終わらない。
         ///   「次の起動で続きを取る」と言えば、もう一度立ち上げればよいと分かる。
         /// </summary>
-        public static string DescribeResult(int fetched, int planned, int deleted)
+        public static string DescribeResult(int fetched, int planned, int deleted, bool requested = false)
         {
             // 取りに行くものも消すものも無かった＝定常状態
-            if (planned <= 0 && deleted <= 0) return null;
+            if (planned <= 0 && deleted <= 0) return requested ? "モデルとモーションは最新です。" : null;
 
             // ★ 1件も取れなかったときに「更新した」と言わないこと。取りに行って
             //   全部こぼしたのと、取って反映待ちなのは、次にやることが違う

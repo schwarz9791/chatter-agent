@@ -617,7 +617,7 @@ namespace ChatterMascot.Tests
             Assert.That(keys, Is.EqualTo(new[]
             {
                 SettingKeys.Mute,
-                null, SettingKeys.XrHeight, SettingKeys.AssetSync,
+                null, SettingKeys.XrHeight, SettingKeys.AssetSync, SettingKeys.AssetSyncNow,
                 null, SettingKeys.MotionPreview, SettingKeys.MotionPreviewPlay,
                 SettingKeys.Walk, SettingKeys.CursorGaze, SettingKeys.Blink,
                 null, SettingKeys.ResetPosition, SettingKeys.ResetAll,
@@ -707,6 +707,46 @@ namespace ChatterMascot.Tests
         {
             var spec = Find(SettingsSchema.Build(XrContext()), SettingKeys.AssetSync);
             Assert.That(spec.Note, Does.Contain("次回の起動"));
+        }
+
+        [Test]
+        public void XrAssetSyncNowIsDisabledWithANoteWhenSyncIsOff()
+        {
+            var c = XrContext();
+            c.Settings = MascotSettings.Defaults.WithAssetSync(SettingsMapping.AssetSyncOff);
+
+            var spec = Find(SettingsSchema.Build(c), SettingKeys.AssetSyncNow);
+            Assert.That(spec.Enabled, Is.False);
+            Assert.That(spec.Note, Is.Not.Empty);
+        }
+
+        [Test]
+        public void XrAssetSyncNowIsDisabledWhileSyncing()
+        {
+            var c = XrContext();
+            c.Settings = MascotSettings.Defaults.WithAssetSync(SettingsMapping.AssetSyncAuto);
+            c.AssetSyncRunning = true;
+
+            var spec = Find(SettingsSchema.Build(c), SettingKeys.AssetSyncNow);
+            Assert.That(spec.Enabled, Is.False);
+            Assert.That(spec.Note, Does.Contain("同期しています"));
+        }
+
+        [Test]
+        public void XrAssetSyncNowIsEnabledWhenSyncIsOnAndIdle()
+        {
+            var c = XrContext();
+            c.Settings = MascotSettings.Defaults.WithAssetSync(SettingsMapping.AssetSyncAuto);
+
+            var spec = Find(SettingsSchema.Build(c), SettingKeys.AssetSyncNow);
+            Assert.That(spec.Enabled, Is.True);
+            Assert.That(spec.Note, Is.Empty);
+        }
+
+        [Test]
+        public void DesktopDoesNotOfferAssetSyncNow()
+        {
+            Assert.That(SettingsSchema.Build(Context()).Select(s => s.Key), Does.Not.Contain(SettingKeys.AssetSyncNow));
         }
 
         /// <summary>★ ラベルは aim レイ向けの言い回しに変わるが、キーは Desktop と同じ</summary>

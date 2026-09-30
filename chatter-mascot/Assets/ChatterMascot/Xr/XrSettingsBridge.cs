@@ -27,9 +27,6 @@ namespace ChatterMascot.Xr
 
         // ── 見た目の既定値（実測値ではない） ─────────────────────
         private const float InvokerCanvasPixels = 96f;
-        private const float InvokerWorldSizeMeters = 0.035f;
-        private const float GearAboveHeadMeters = 0.09f;
-        private const float InvokerHitRadiusMeters = 0.05f;
 
         /// <summary>「すべての設定をリセット」の確認待ちの猶予（秒）。既定値。</summary>
         private const float ResetAllConfirmSeconds = 4f;
@@ -37,6 +34,7 @@ namespace ChatterMascot.Xr
         private const string CloseLabel = "閉じる";
         private const string ResetAllConfirmNote = "もう一度押すとすべての設定をリセットします";
         private const string NoMotionToPlayNote = "選べるモーションがありません";
+        private const string AssetSyncNotStartedNote = "同期を始められませんでした";
 
         private VrmStage _stage;
         private XROrigin _origin;
@@ -72,6 +70,11 @@ namespace ChatterMascot.Xr
         /// と同じ形）。
         /// </summary>
         private int? _lastMotionClipCount;
+
+        /// <summary>直近に <see cref="RebuildContext"/> で見た同期の実行状態（<see cref="WatchAssetSync"/> が見る）。</summary>
+        private bool _lastAssetSyncRunning;
+
+        private MascotRunner _runner;
 
         public void Begin(VrmStage stage, XROrigin origin, XrGrab grab, XrWalk walk)
         {
@@ -111,6 +114,7 @@ namespace ChatterMascot.Xr
             UpdateInvokers(now);
             WatchResetAllConfirmExpiry(now);
             WatchMotionClips();
+            WatchAssetSync();
         }
 
         /// <summary>
@@ -142,6 +146,27 @@ namespace ChatterMascot.Xr
             if (count == _lastMotionClipCount) return;
 
             Refresh();
+        }
+
+        /// <summary>
+        /// 同期がパネルを開いている間に始まった・終わったら、ボタンの状態を追いつかせる
+        /// （<see cref="WatchMotionClips"/> と同じ形）。
+        /// </summary>
+        private void WatchAssetSync()
+        {
+            if (!_panel.IsOpen) return;
+
+            var runner = ResolveRunner();
+            if ((runner != null && runner.AssetSyncRunning) == _lastAssetSyncRunning) return;
+
+            Refresh();
+        }
+
+        /// <summary>★ 1回引いたら使い回す（毎フレーム走査しない）。</summary>
+        private MascotRunner ResolveRunner()
+        {
+            if (_runner == null) _runner = FindFirstObjectByType<MascotRunner>();
+            return _runner;
         }
 
         // ── XrGrab から毎フレーム渡される入力 ───────────────────────
@@ -264,6 +289,10 @@ namespace ChatterMascot.Xr
             var character = CharacterComponent();
             _context.MotionClips = SettingsSchema.MotionPreviewChoices(character != null ? character.MotionClips : null);
             _lastMotionClipCount = character != null ? character.MotionClips?.Count : null;
+
+            var runner = ResolveRunner();
+            _context.AssetSyncRunning = runner != null && runner.AssetSyncRunning;
+            _lastAssetSyncRunning = _context.AssetSyncRunning;
         }
 
         private IReadOnlyList<SettingSpec> BuildItems()
@@ -337,6 +366,18 @@ namespace ChatterMascot.Xr
                 {
                     var on = SettingsPanelJson.ParseBool(value, host.Current.AssetSync != SettingsMapping.AssetSyncOff);
                     host.Apply(host.Current.WithAssetSync(on ? SettingsMapping.AssetSyncAuto : SettingsMapping.AssetSyncOff));
+                    Refresh();
+                    return;
+                }
+
+                case SettingKeys.AssetSyncNow:
+                {
+                    // 同期が OFF なら何もしない（行は無効化してあるが念のため）
+                    if (host.Current.AssetSync == SettingsMapping.AssetSyncOff) return;
+                    var runner = ResolveRunner();
+                    var started = runner != null && runner.TryStartAssetSync(requested: true);
+                    // ★ 始められたら前回の失敗の note を消す。残すと「同期しています…」を覆ってしまう
+                    Notice(SettingKeys.AssetSyncNow, started ? null : AssetSyncNotStartedNote);
                     Refresh();
                     return;
                 }
@@ -516,8 +557,8 @@ namespace ChatterMascot.Xr
 
         /// <summary>
         /// 歯車の位置と大きさを合わせる。<b>大きさはキャラクターの表示身長に応じて
-        /// <see cref="XrMenuRules.GearScale"/> で伸ばす。</b> コライダーは歯車と同じ GameObject にあるので
-        /// 当たり判定の半径も一緒に伸びる。
+        /// <see cref="XrMenuRules.GearScale"/> で伸ばす。</b> 当たり判定の半径は歯車の大きさとは別に
+        /// <see cref="XrMenuRules.GearHitRadius"/> で決め、毎回設定し直す。
         /// </summary>
         private void PositionGear()
         {
@@ -525,10 +566,13 @@ namespace ChatterMascot.Xr
             var anchorPosition = _stage.ModelAnchor.position;
             var topY = collider != null ? collider.bounds.max.y : anchorPosition.y;
 
-            var k = XrMenuRules.GearScale(collider != null ? collider.bounds.size.y : 0f);
-            _gear.transform.localScale = Vector3.one * (InvokerWorldSizeMeters / InvokerCanvasPixels) * k;
+            var h = collider != null ? collider.bounds.size.y : 0f;
+            var k = XrMenuRules.GearScale(h);
+            var scale = XrMenuRules.InvokerWorldSizeMeters / InvokerCanvasPixels * k;
+            _gear.transform.localScale = Vector3.one * scale;
+            _gearCollider.radius = XrMenuRules.GearHitRadius(h) / scale;
 
-            var position = new Vector3(anchorPosition.x, topY + GearAboveHeadMeters * k, anchorPosition.z);
+            var position = new Vector3(anchorPosition.x, topY + XrMenuRules.GearHeightAboveHead(h), anchorPosition.z);
             _gear.transform.SetPositionAndRotation(position, _origin.Camera.transform.rotation);
         }
 
@@ -550,7 +594,7 @@ namespace ChatterMascot.Xr
             var canvas = go.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.WorldSpace;
 
-            var scale = InvokerWorldSizeMeters / InvokerCanvasPixels;
+            var scale = XrMenuRules.InvokerWorldSizeMeters / InvokerCanvasPixels;
             go.transform.localScale = Vector3.one * scale;
 
             var iconGo = new GameObject("Icon", typeof(RectTransform));
@@ -584,7 +628,7 @@ namespace ChatterMascot.Xr
 
             // ★ 当たり判定は見た目より大きく取る（XrWalkAreaView のハンドルと同じ理由）
             var sphereCollider = go.AddComponent<SphereCollider>();
-            sphereCollider.radius = InvokerHitRadiusMeters / scale;
+            sphereCollider.radius = XrMenuRules.InvokerHitRadiusMeters / scale;
             collider = sphereCollider;
 
             go.SetActive(false);

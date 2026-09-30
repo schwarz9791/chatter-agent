@@ -36,7 +36,8 @@ namespace ChatterMascot.Xr
         public const float DefaultRadius = 0.20f;
         public const float MaxRadius = 0.60f;
 
-        private const float CircleVisibleSeconds = 15f;
+        /// <summary>歩行範囲の円を出しておく秒数。歯車と揃えて一緒に消える。</summary>
+        private const float CircleVisibleSeconds = XrMenuRules.GearVisibleSeconds;
         private const float OutOfRangeCircleSeconds = 3f;
         private const float HandleAzimuthOffsetDegrees = 45f;
 
@@ -231,8 +232,21 @@ namespace ChatterMascot.Xr
         {
             if (!Active) return;
 
-            _hideCircleAt = System.Math.Max(_hideCircleAt, Time.realtimeSinceStartupAsDouble + OutOfRangeCircleSeconds);
+            ShowAreaFor(OutOfRangeCircleSeconds);
             Debug.Log("[Mascot] XR walk: 範囲外を指したので歩行範囲を出します");
+        }
+
+        /// <summary>
+        /// 中心は動かさずに、円を <see cref="CircleVisibleSeconds"/> だけ出す（キャラクターをタップしたとき）。
+        /// 既に出ている円の残り時間は縮めない。未配置なら何もしない。
+        /// </summary>
+        public void ShowArea() => ShowAreaFor(CircleVisibleSeconds);
+
+        private void ShowAreaFor(float seconds)
+        {
+            if (!Active) return;
+
+            _hideCircleAt = System.Math.Max(_hideCircleAt, Time.realtimeSinceStartupAsDouble + seconds);
         }
 
         /// <summary>

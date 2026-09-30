@@ -176,6 +176,14 @@ namespace ChatterMascot.Tests
             Assert.That(AssetSyncClient.DescribeResult(0, 0, 0), Is.Null);
         }
 
+        /// <summary>手で起こしたときは、押したのに何も出ないと効いたのか分からないので言う。</summary>
+        [Test]
+        public void RequestedUnchangedSyncSaysItIsUpToDate()
+        {
+            Assert.That(AssetSyncClient.DescribeResult(0, 0, 0, requested: true), Does.Contain("最新"));
+            Assert.That(AssetSyncClient.DescribeResult(0, 0, 0, requested: false), Is.Null);
+        }
+
         [Test]
         public void FullSyncMentionsTheNextLaunch()
         {

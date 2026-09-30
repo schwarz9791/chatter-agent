@@ -421,8 +421,26 @@ namespace ChatterMascot
         }
 
         /// <summary>
+        /// 起動時の同期。ファイルの値（<see cref="_assetSyncMode"/>）が OFF なら何もしない。
+        /// 手で起こすときは呼び出し側が設定の現在値を見て <see cref="TryStartAssetSync"/> を呼ぶ。
+        /// </summary>
+        private void StartAssetSyncIfNeeded()
+        {
+            if (_assetSyncMode == SettingsMapping.AssetSyncOff) return;
+            TryStartAssetSync(requested: false);
+        }
+
+        private Task _assetSync;
+
+        /// <summary>
+        /// 同期が走っているか。<c>SyncAsync</c> は例外を漏らさないので、<c>IsCompleted</c> で終わったか分かる。
+        /// </summary>
+        public bool AssetSyncRunning => _assetSync != null && !_assetSync.IsCompleted;
+
+        /// <summary>
         /// <c>synced/</c> の更新を起こす（#117。<c>ResolveServerUrl</c> の<u>後</u>——接続先とトークンが
-        /// 要る）。
+        /// 要る）。<paramref name="requested"/> は手で起こしたか（結果を端末に出す条件が変わる）。
+        /// 起こせたら <c>true</c>。同期できない環境・例外・既に走っている間（起動時のものを含む）は <c>false</c>。
         ///
         /// ★ デスクトップでは何もしない。サーバーと同じファイルシステムを直接読んでいるので
         ///   同期の意味が無い（→ <c>Vrm.AssetPath</c> の doc）。
@@ -432,39 +450,42 @@ namespace ChatterMascot
         /// ★ 発話経路と独立に走らせる。ここで例外を漏らすと <c>Awake</c> ごと止まり、
         ///   シーンの残りの初期化に道連れが出る——握りつぶしてログだけ出す。
         /// </summary>
-        private void StartAssetSyncIfNeeded()
+        public bool TryStartAssetSync(bool requested)
         {
+            if (AssetSyncRunning) return false;
+
             try
             {
                 var env = AssetEnvFactory.Current();
-                if (env.HasUserConfigDirectory) return;
-                if (_assetSyncMode == SettingsMapping.AssetSyncOff) return;
+                if (env.HasUserConfigDirectory) return false;
 
                 // ★ 完全修飾で呼ぶこと（→ Start() の同じ注意）。serverUrl は -serverUrl や
                 //   settings.json の値をそのまま持ちうるので、ここでも検査してから使う
-                if (!ChatterMascot.Net.ServerUrl.IsValid(serverUrl)) return;
+                if (!ChatterMascot.Net.ServerUrl.IsValid(serverUrl)) return false;
 
                 var syncedRoot = AssetPath.Join(env.PersistentDataPath, AssetPath.SyncedDirectory);
-                if (string.IsNullOrEmpty(syncedRoot)) return;
+                if (string.IsNullOrEmpty(syncedRoot)) return false;
 
                 var client = new AssetSyncClient(
                     AudioFetcher.DeriveAudioBaseUrl(serverUrl), AssetSyncTimeoutMs, ServerToken, syncedRoot);
                 client.Log += message => Debug.Log("[Mascot] " + message);
                 client.Warn += message => Debug.LogWarning("[Mascot] " + message);
-                // ★ 変わったときだけ端末に出す。反映は次回の起動なので、その場で
-                //   見た目が変わらないことを文面でそのまま言う（→ DescribeResult）
+                // ★ 変わったときだけ端末に出す（手で起こしたときは変化なしも出す）。反映は次回の
+                //   起動なので、その場で見た目が変わらないことを文面でそのまま言う（→ DescribeResult）
                 client.Completed += (fetched, planned, deleted) =>
-                    DeviceToast.Show(AssetSyncClient.DescribeResult(fetched, planned, deleted));
+                    DeviceToast.Show(AssetSyncClient.DescribeResult(fetched, planned, deleted, requested));
                 // ★ マニフェストの取得・解釈に失敗したことも端末に出す。サーバーが落ちている・
                 //   端末が別の Wi-Fi にいる・トークンが古い、という一番踏む失敗が無音にならないため
                 client.Failed += DeviceToast.Show;
 
                 Debug.Log("[Mascot] synced/ の更新を起こします。反映は次回の起動からです");
-                _ = client.SyncAsync();
+                _assetSync = client.SyncAsync();
+                return true;
             }
             catch (Exception e)
             {
                 Debug.LogWarning("[Mascot] synced/ の更新を起こせませんでした: " + e.Message);
+                return false;
             }
         }
 

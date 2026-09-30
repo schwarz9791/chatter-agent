@@ -77,6 +77,9 @@ namespace ChatterMascot.Settings
         /// </summary>
         public IReadOnlyList<SettingChoice> XrHeightChoices { get; set; }
 
+        /// <summary>モデルとモーションの同期が走っているか。XR だけが使う。</summary>
+        public bool AssetSyncRunning { get; set; }
+
         /// <summary>
         /// 「モーションを確認」で選択中の id（<c>"idle/Hub_Idle01.vrma"</c> の形）。
         ///

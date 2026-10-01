@@ -311,7 +311,7 @@ cc-mascot の「キャラクターサイズ」はコンテナ（ウィンドウ�
 | **選んだモデルが実際に読まれる** | ★★ 再起動すると `設定: …/models/mascot.vrm` を読む。名称順で先に来る `aaa-decoy.vrm` に**負けない**（以前は負けていた） |
 | **ショートカットの記録** | ★★ `⌃⌥J` を記録。キー押下の直後から連写しても**古い表記（`⌃⌥M`）が出ない**（以前は `CMStopRecording` が成功時にも元の文字列へ戻していた）。`settings.json` に `ctrl+opt+j`、メニューバーの表記もその場で変わる |
 | **音量 0.3 / 1.5** | ★ `ps` に `/usr/bin/afplay -v 0.3 …` / `-v 1.5`（`< 1` で判定していたら出ない）。★ **この 1.5 は #85 のレビュー C-4 で無くなった** —— 上限は 1.0（→ 下の節）。読み直すときは 30% / 100% で見ること |
-| 話す速さ / 要約 / 話者 | ★ `config.json` に `ttsSpeedScale` / `aiSummaryEnabled` / `ttsSpeakerId`（**Unity は `config.json` を直接書いていない**） |
+| 話す速さ / 要約 / 話者 | ★ `config.json` に `ttsSpeedScale` / `aiSummaryEnabled` / 声のキー（現在のエンジンが AivisSpeech なら `ttsSpeakerId`、Kokoro なら `kokoroVoiceId`）（**Unity は `config.json` を直接書いていない**） |
 
 ★ #76 で残りの項目（透明な場所での右クリック / 大きさのスライダー / ドラッグ中の再描画 /
 3つのスライダー連続操作 / VRM を選ぶ（`.vroid` はグレーアウト、`models/mascot.vrm` に固定名でコピー）/

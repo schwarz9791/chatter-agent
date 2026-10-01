@@ -10,11 +10,12 @@ via `resolveKokoroSpawn` in `core/src/server/engineProcess.ts`
 
 **For Japanese, AivisSpeech (the default) is recommended.** Kokoro is meant for other languages.
 
-There is no settings-panel UI for switching `ttsEngine` yet
-([#148](https://github.com/schwarz9791/chatter-agent/issues/148)). `ttsEngine` cannot be written
-through the control API (it only takes effect after a restart; see "書けないキーは3種類ある" in
-[`protocol.md`](./protocol.md)), so switch it by editing `config.json` or via the environment
-variable, then restart the server.
+`ttsEngine` can be switched at runtime with `PATCH /v1/config {"ttsEngine": "openai"}` (loopback
+only); the server re-runs its engine launch decision and stops only an engine it launched itself.
+The settings-panel UI for it comes with ChatterAgent
+([#148](https://github.com/schwarz9791/chatter-agent/issues/148)). Editing `config.json` directly
+changes where speech is synthesized from the next sentence, but the launch decision is only
+re-run on restart.
 
 ## Setup (macOS / Apple Silicon)
 
@@ -68,10 +69,17 @@ Add the following to `~/.config/chatter-agent/config.json`:
 
 | Key | Meaning |
 |---|---|
-| `ttsEngine` | `"openai"`. Treat `ttsBaseUrl` as an OpenAI-compatible API |
-| `ttsBaseUrl` | The origin of Kokoro-FastAPI. **Do not include `/v1`** (the client appends the path; a trailing `/v1` is normalized away if you do). Defaults to `http://127.0.0.1:8880` for this engine — omit it unless Kokoro-FastAPI runs elsewhere |
-| `ttsSpeakerId` | The voice ID (e.g. `af_heart`). Defaults to `af_heart` for this engine — omit it, or pick another from `GET /v1/speakers` (chatter-agent's control API) or the voice list in the settings panel. Composite specs such as `af_bella+af_sky` or weighted ones like `af_bella(2)+af_sky(1)` are accepted |
+| `ttsEngine` | `"openai"`. Use `kokoroBaseUrl` / `kokoroVoiceId` and talk to an OpenAI-compatible API |
+| `kokoroBaseUrl` | The origin of Kokoro-FastAPI. **Do not include `/v1`** (the client appends the path; a trailing `/v1` is normalized away if you do). Defaults to `http://127.0.0.1:8880` — omit it unless Kokoro-FastAPI runs elsewhere. Not writable through the control API |
+| `kokoroVoiceId` | The voice ID (e.g. `af_heart`). Defaults to `af_heart` — omit it, or pick another from `GET /v1/speakers` (chatter-agent's control API) or the voice list in the settings panel. Composite specs such as `af_bella+af_sky` or weighted ones like `af_bella(2)+af_sky(1)` are accepted |
 | `kokoroDir` | Absolute path to the clone above (`~/...` and relative paths are also accepted and get expanded/resolved). When `ttsSpawnCommand` is empty, the server launches `uv run --no-sync uvicorn …` from here. Left empty, the server does not launch Kokoro |
+
+`ttsBaseUrl` / `ttsSpeakerId` are for AivisSpeech only and are not used by this engine.
+
+**Migrating from an earlier setup** that put Kokoro values in `ttsBaseUrl` / `ttsSpeakerId`: move them to
+`kokoroBaseUrl` / `kokoroVoiceId`. A non-numeric `ttsSpeakerId` such as `af_heart` is now rejected
+and falls back to the AivisSpeech default with a warning, and the server logs a migration warning
+at startup when `ttsEngine` is `"openai"` but only the old keys are set.
 
 Restart `chatter-agent-server` after editing. If the engine is not running, the server launches it
 when the startup reachability check fails (`ttsSpawn: true`, the default). Startup takes a while;
@@ -89,10 +97,10 @@ docker run --rm -p 127.0.0.1:8880:8880 <image name from the Kokoro-FastAPI READM
 
 - ★★ **Always bind the host side explicitly, as in `-p 127.0.0.1:8880:8880`.** With just
   `-p 8880:8880` the port is published on every interface, exposing the speech API to your LAN
-  even though `ttsBaseUrl` points at loopback
+  even though `kokoroBaseUrl` points at loopback
 - ★ **Docker Desktop on Mac cannot use the GPU (MPS).** The container runs on the CPU and is
   slower than the native `uv venv` setup
 - In this setup `chatter-agent-server` does not start the container (`kokoroDir` only applies to
   launching a local clone with `uv`). Start and stop the container yourself; in `config.json`,
-  setting `ttsEngine: "openai"` is enough (leave `kokoroDir` empty; `ttsBaseUrl` / `ttsSpeakerId`
+  setting `ttsEngine: "openai"` is enough (leave `kokoroDir` empty; `kokoroBaseUrl` / `kokoroVoiceId`
   only need to be set if you're not using the defaults above)

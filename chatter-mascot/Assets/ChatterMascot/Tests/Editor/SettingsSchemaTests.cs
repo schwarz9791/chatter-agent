@@ -145,6 +145,30 @@ namespace ChatterMascot.Tests
             Assert.That(spec.Note, Does.Contain("CHATTER_AGENT_TTS_SPEAKER_ID"));
         }
 
+        [Test]
+        public void SpeakerKeyFollowsTheEngine()
+        {
+            Assert.That(CoreConfigKeys.SpeakerKeyFor("openai"), Is.EqualTo(CoreConfigKeys.KokoroVoiceId));
+            Assert.That(CoreConfigKeys.SpeakerKeyFor("voicevox"), Is.EqualTo(CoreConfigKeys.SpeakerId));
+            Assert.That(CoreConfigKeys.SpeakerKeyFor(null), Is.EqualTo(CoreConfigKeys.SpeakerId));
+        }
+
+        /// <summary>★ Kokoro のときは声のキーが <c>kokoroVoiceId</c> になり、env の見る先もそちらへ移る</summary>
+        [Test]
+        public void ChecksTheKokoroVoiceKeyForTheEnvironmentOverrideWhenTheEngineIsKokoro()
+        {
+            var context = Context();
+            context.TtsEngine = "openai";
+
+            context.CoreEnvOverridden = new[] { CoreConfigKeys.SpeakerId };
+            Assert.That(Find(SettingsSchema.Build(context), SettingKeys.Speaker).Enabled, Is.True);
+
+            context.CoreEnvOverridden = new[] { CoreConfigKeys.KokoroVoiceId };
+            var spec = Find(SettingsSchema.Build(context), SettingKeys.Speaker);
+            Assert.That(spec.Enabled, Is.False);
+            Assert.That(spec.Note, Does.Contain("CHATTER_AGENT_KOKORO_VOICE_ID"));
+        }
+
         /// <summary>★ 要約エンジン・感情判定も同じ扱い（環境変数名まで note に出す）</summary>
         [Test]
         public void DisablesTheSummaryBackendAndEmotionClassifierWhenTheEnvironmentOverridesThem()

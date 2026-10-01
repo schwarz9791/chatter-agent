@@ -52,19 +52,12 @@ const READONLY_EXECUTABLE: readonly ConfigKey[] = [
  *   起きないというのは**いちばん悪い見え方**（壊れているのか自分の操作が悪いのか分からない）。
  *   403 で明示的に断る方が親切。
  */
-const READONLY_UNTIL_RESTART: readonly ConfigKey[] = [
-  "host",
-  "port",
-  "allowedOrigins",
-  // ★ 起こすかどうかの判断（`resolveEngineSpawn` / `resolveKokoroSpawn`）は起動時の1回きり。
-  //   パネルから切り替えても、次の合成の宛先だけが変わって spawn の判断はやり直されない
-  "ttsEngine",
-];
+const READONLY_UNTIL_RESTART: readonly ConfigKey[] = ["host", "port", "allowedOrigins"];
 
 /**
  * (c) **本文の外部送信路になる。**
  *
- * `ttsBaseUrl` を書き換えると、以後 `ttsFor(currentVoice())` は Claude Code の
+ * `ttsBaseUrl` / `kokoroBaseUrl` を書き換えると、以後 `ttsFor(currentVoice())` は Claude Code の
  * **全メッセージ本文**をそのホストの合成 API（`ttsEngine` が `"voicevox"` なら `/audio_query`、
  * `"openai"` なら `/v1/audio/speech`）へ POST する。`currentVoice()` は
  * 毎回 `config.get` するので（→ `server/index.ts`）**再起動も要らず、次の1文から**そうなる。
@@ -74,13 +67,16 @@ const READONLY_UNTIL_RESTART: readonly ConfigKey[] = [
  * `ollayaBaseUrl` も同じ理由。感情判定が `"ollaya"` のとき、以後の全メッセージ本文が
  * そのホストの `/v1/systemone` へ POST される。
  *
- * ★ 設定パネルはこれらのキーを一度も書かない（書くのは `ttsSpeakerId` / `ttsSpeedScale` /
+ * ★ 設定パネルはこれらのキーを一度も書かない（書くのは `ttsSpeakerId` / `kokoroVoiceId` / `ttsSpeedScale` /
  *   `aiSummaryEnabled` / `aiSummaryBackend` / `emotionClassifier` など）。塞いでも UI は何も失わない。
+ *
+ * ★ `ttsEngine` は載せない。選べるのは `config.json` に固定された2つの接続先のどちらかだけで、
+ *   新しい宛先は生まれない。
  *
  * ★ `playerServerUrl` は載せない。player は**受け手**なので、向き先を変えても
  *   本文が外へ出ることはない（別のサーバーの音声を再生させられるだけ）。
  */
-const READONLY_EXFILTRATION: readonly ConfigKey[] = ["ttsBaseUrl", "ollayaBaseUrl"];
+const READONLY_EXFILTRATION: readonly ConfigKey[] = ["ttsBaseUrl", "kokoroBaseUrl", "ollayaBaseUrl"];
 
 const READONLY_KEYS: readonly ConfigKey[] = [
   ...READONLY_EXECUTABLE,

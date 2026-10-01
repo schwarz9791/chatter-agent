@@ -426,12 +426,12 @@ LAN からなら `GET, HEAD, OPTIONS` を返す。
 | キー | 理由 |
 |---|---|
 | `ttsSpawnCommand` / `ttsSpawnArgs` / `playerCommand` / `playerArgs` / `aiSummaryCommand` / `kokoroDir` | **(a) コマンド実行に繋がる。** ループバック限定でも「設定を1行書き換えるだけで任意コマンド実行」は別格の壊れ方をする。`kokoroDir` は `cwd` として Kokoro-FastAPI の起動に渡るので、`ttsSpawnCommand` と同じ壊れ方をする。**緩めないこと** |
-| `host` / `port` / `allowedOrigins` / `ttsEngine` | **(b) 効かない。** 再起動まで反映されないので、UI から触れる意味が無いうえに「効かない設定」という最悪の見え方になる。`ttsEngine` は、起こすかどうかの判断が起動時の1回きりのため —— 切り替えても次の合成の宛先だけが変わり、spawn の判断はやり直されない |
-| `ttsBaseUrl` | **(c) 本文の外部送信路になる。** 書き換えると以後**全メッセージ本文**がそのホストの合成 API（`ttsEngine` が `"voicevox"` なら `/audio_query`、`"openai"` なら `/v1/audio/speech`）へ POST される（`currentVoice()` は毎回読み直すので**再起動も要らない**）。しかも音が鳴らなくなるだけなので、**症状は「無音」だけ**で気付けない。**緩めないこと** |
+| `host` / `port` / `allowedOrigins` | **(b) 効かない。** 再起動まで反映されないので、UI から触れる意味が無いうえに「効かない設定」という最悪の見え方になる |
+| `ttsBaseUrl` / `kokoroBaseUrl` | **(c) 本文の外部送信路になる。** 書き換えると以後**全メッセージ本文**がそのホストの合成 API（`ttsEngine` が `"voicevox"` なら `/audio_query`、`"openai"` なら `/v1/audio/speech`）へ POST される（`currentVoice()` は毎回読み直すので**再起動も要らない**）。しかも音が鳴らなくなるだけなので、**症状は「無音」だけ**で気付けない。**緩めないこと**。`ttsEngine` は固定された2つの接続先のどちらかを選ぶだけなので、ここには載せない（書ける。切り替えるとサーバーが起動判定をやり直す） |
 | `ollayaBaseUrl` | **(c) 本文の外部送信路になる。** `ttsBaseUrl` と同じ理由。感情判定が `"ollaya"` のとき、以後**全メッセージ本文**がそのホストの `/v1/systemone` へ POST される。**緩めないこと**（issue #107） |
 
 ★ **`defaults` は既定値そのもの**（`createDefaultConfig()`）。設定 UI の「すべての設定をリセット」が
-これを使って書き戻す。★ **クライアントに既定値を書き写させないこと** —— 写した瞬間に
+これを使って書き戻す。エンジンごとの声と接続先は別のキー（`ttsSpeakerId` / `kokoroVoiceId` など）で持つので、`ttsEngine` に依らず同じ値になる。★ **クライアントに既定値を書き写させないこと** —— 写した瞬間に
 「core を直したのにクライアントだけ古い既定に戻す」がありうる。
 
 ★ **環境変数が勝っているキーは 409 `env_override`。** 優先順位は「環境変数 > ファイル > 既定」なので、

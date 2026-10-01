@@ -367,7 +367,8 @@ XR の設定パネルの「歩く」からその場で切り替えられる（�
 パネルには出さないが、往復や「すべての設定をリセット」でも落とさない（`MascotSettings.ResetKeepingConnection`）。「大きさ」はここに無く
 `window.json` が権威を持つ（スライダーは現在の高さ ÷ 540 の写し）。音声スタイル・話す速さ・
 要約の ON/OFF は core の `~/.config/chatter-agent/config.json` が持ち、設定パネルは
-`PATCH /v1/config` 経由で書く（→ [`protocol.md`](./protocol.md)「制御 API」）。音量が Unity 側で
+`PATCH /v1/config` 経由で書く（音声スタイルは現在のエンジンの声のキー —— AivisSpeech なら
+`ttsSpeakerId`、Kokoro なら `kokoroVoiceId` —— へ書く）（→ [`protocol.md`](./protocol.md)「制御 API」）。音量が Unity 側で
 速さが core 側なのは紛らわしいが理由がある —— 音量は**再生側のつまみ**で合成し直さなくても効き、
 速さは**合成のパラメータ**で `audio_query` を変えない限り WAV が変わらない。`volume` は
 0.0〜1.0（パネルには 0〜100% で出る）。

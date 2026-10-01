@@ -802,10 +802,24 @@ http
     check("★ 同じ値の PATCH では起こし直さない", spawnCount() === 2, server?.log ?? "");
     check("★ 起こしたエンジンは生きたまま", alive(pidB), `pid=${pidB}`);
 
+    // ★ 生きているエンジンでは修正前の条件でも素通りする。**落ちた**エンジンで確かめること
+    process.kill(-pidB, "SIGTERM"); // detached で起こしているのでプロセスグループごと
+    check("起こしたエンジンを外から止めた", await until(() => !alive(pidB), 5000), `pid=${pidB}`);
+    const sameAfterCrash = await patchEngine("voicevox");
+    check("落ちた後の同じ値の PATCH も通る", sameAfterCrash.status === 200, `status=${sameAfterCrash.status}`);
+    await sleep(500);
+    check("★ 落ちたエンジンは同じ値の PATCH で起こし直さない", spawnCount() === 2, server?.log ?? "");
+
+    // サーバーの終了で道連れにできるかは、切り替えで起こし直した別のエンジンで確かめる
+    await patchEngine("openai");
+    await patchEngine("voicevox");
+    check("★ 切り替え直せば起こし直す", await until(() => spawnCount() === 3, 10_000), server?.log ?? "");
+    const pidC = pidOf((server?.log ?? "").slice((server?.log ?? "").lastIndexOf("[Engine] 起動しました") - 1));
+
     await client.close();
     await stopServer();
-    const goneB = await until(() => !alive(pidB), 5000);
-    check("★ サーバーを止めると起こしたエンジンも落ちる", goneB, `pid=${pidB}`);
+    const goneC = Number.isInteger(pidC) && (await until(() => !alive(pidC), 5000));
+    check("★ サーバーを止めると起こしたエンジンも落ちる", goneC, `pid=${pidC}`);
   }
 } catch (err) {
   console.error("\n\x1b[31m検証中に例外が発生しました\x1b[0m");

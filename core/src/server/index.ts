@@ -279,10 +279,9 @@ async function main(): Promise<void> {
    * ★ 起動時のエンジン起動判定（条件3）はこちらを直接呼ぶ。`recheckEngine` 経由にすると
    *   60秒の間引きに引っかかって「繋がらないのに繋がった扱い」になりうる。
    */
-  const probeEngine = async (): Promise<EngineProbe> => {
+  const probeEngine = async (voice: Voice = currentVoice()): Promise<EngineProbe> => {
     // ★ await の前に進めること。同時に走った2本が二重に診断を出さないようにする
     lastEngineCheckAt = Date.now();
-    const voice = currentVoice();
     return await checkEngine(ttsFor(voice), voice.speakerId);
   };
 
@@ -307,8 +306,8 @@ async function main(): Promise<void> {
    * `ttsSpawn=false` / リモート / コマンドが無い）。終了処理はこれを見て止める。
    */
   let engine: EngineProcess | null = null;
-  /** `engine` を起こしたときの `ttsEngine`。`engine` と対で更新する */
-  let engineKind: TtsEngineKind | null = null;
+  /** 起動判定をした時点の `ttsEngine`。`switchEngine` は、これと今の値を比べる */
+  let decidedEngine: TtsEngineKind | null = null;
   /** 終了処理が始まったか。**起動判定が spawn する直前に見る**（下の `startEngineIfNeeded`） */
   let stopping = false;
 
@@ -318,7 +317,7 @@ async function main(): Promise<void> {
    * 条件は5つで、全部満たすときだけ起こす:
    * 1. `ttsEnabled` / 2. `ttsSpawn` / 3. **起動時の疎通確認に失敗した** /
    * 4. 接続先（`currentVoice()` の `baseUrl`）がループバック / 5. コマンドが解決できた（4と5は `resolveEngineSpawn` /
-   * `resolveKokoroSpawn`。どちらを使うかは `ttsSpawnCommand` と `ttsEngine` で決まる）
+   * `resolveKokoroSpawn`。どちらを使うかは `ttsEngine` で決まる）
    *
    * ★ **条件3が要。** 「まず繋いでみて、居なければ起こす」ことで、GUI 併用・verify のスタブ・
    *   別ポート運用のすべてが追加の分岐なしで素通りする（ポート衝突の判定コードが要らない）。
@@ -326,10 +325,12 @@ async function main(): Promise<void> {
    * [#51]: https://github.com/schwarz9791/chatter-agent/issues/51
    */
   const startEngineIfNeeded = async (): Promise<void> => {
+    const voice = currentVoice();
+    decidedEngine = voice.engine;
     if (!config.get("ttsEnabled")) return; // 条件1（理由は上の起動ログで既出）
 
     // ★ 条件3。この1回は spawn の有無に関わらず必ず走り、話者 ID の診断もここで出る
-    if ((await probeEngine()) === "reachable") return;
+    if ((await probeEngine(voice)) === "reachable") return;
 
     if (!config.get("ttsSpawn")) {
       // ★ 黙らない。切ったまま忘れた人の症状が「無音」だけになるのが最悪の失敗の仕方
@@ -338,23 +339,15 @@ async function main(): Promise<void> {
       return;
     }
 
-    // ★ `ttsSpawnCommand` を明示したら、エンジン種別に関わらずそれを使う（従来どおり）。
-    //   空なら `ttsEngine` で分岐 —— voicevox は既知候補（`resolveEngineSpawn`）、
-    //   openai は `kokoroDir` から Kokoro-FastAPI を起こす（`resolveKokoroSpawn`）
-    const voice = currentVoice();
-    const ttsSpawnCommand = config.get("ttsSpawnCommand");
+    // ★ `ttsSpawnCommand` / `ttsSpawnArgs` は AivisSpeech 専用。Kokoro は `kokoroDir` からだけ起こす
     const plan =
-      ttsSpawnCommand || voice.engine === "voicevox"
+      voice.engine === "voicevox"
         ? resolveEngineSpawn({
             baseUrl: voice.baseUrl,
-            command: ttsSpawnCommand,
+            command: config.get("ttsSpawnCommand"),
             args: config.get("ttsSpawnArgs"),
           })
-        : resolveKokoroSpawn({
-            baseUrl: voice.baseUrl,
-            kokoroDir: config.get("kokoroDir"),
-            args: config.get("ttsSpawnArgs"),
-          });
+        : resolveKokoroSpawn({ baseUrl: voice.baseUrl, kokoroDir: config.get("kokoroDir") });
 
     if ("skip" in plan) {
       // 条件4 / 条件5。どちらも従来どおりの 503 運用に落ちるだけ。
@@ -379,7 +372,6 @@ async function main(): Promise<void> {
 
     if (stopping) return;
     engine = startEngine(plan);
-    engineKind = voice.engine;
 
     // ★ **起動を待たない。** ここで疎通を確かめ直すと、モデルロード中なので必ず失敗し、
     //   「繋がりません」という嘘の警告が出る。代わりに間引きを巻き戻して、最初の合成失敗で
@@ -430,12 +422,14 @@ async function main(): Promise<void> {
    *   触らない。止めるのは、Kokoro が常駐でメモリを占めるため。
    * ★ 参照は `stop()` が済むまで残す。終了処理の `engine?.stop()` が途中の停止も覆える
    *   （`stop()` は冪等）
+   * ★ 同じ値の PATCH では何もしない。落ちたエンジンは起こし直さない（「落ちても再起動しない」と
+   *   同じ方針）。`onConfigPatched` には変わっていないキーも届く（`buildConfigPatch`）ので、
+   *   ここで今の値と比べる
    */
   const switchEngine = async (): Promise<void> => {
-    if (engine !== null && !engine.exited() && engineKind === config.get("ttsEngine")) return;
+    if (config.get("ttsEngine") === decidedEngine) return;
     await engine?.stop();
     engine = null;
-    engineKind = null;
     await startEngineIfNeeded();
   };
 
@@ -552,17 +546,6 @@ async function main(): Promise<void> {
   console.log(`[Server] listening on ws://${bound.host}:${bound.port}`);
   if (config.get("ttsEnabled")) {
     console.log(`[Server] audio: http://${bound.host}:${bound.port}/audio/ (engine: ${currentVoice().baseUrl})`);
-    // ★ Kokoro 向けの値を AivisSpeech のキーに書いた設定は、Kokoro には効かず既定の接続先・声で
-    //   鳴る。黙って既定に落ちると原因に辿り着けないので、名指しで知らせる
-    if (
-      config.get("ttsEngine") === "openai" &&
-      ((config.originOf("ttsBaseUrl") !== "default" && config.originOf("kokoroBaseUrl") === "default") ||
-        (config.originOf("ttsSpeakerId") !== "default" && config.originOf("kokoroVoiceId") === "default"))
-    ) {
-      console.warn(
-        "[Server] ttsBaseUrl / ttsSpeakerId は AivisSpeech 専用になりました。Kokoro は kokoroBaseUrl / kokoroVoiceId で指定してください",
-      );
-    }
   } else {
     console.log("[Server] ttsEnabled=false: 音声は配りません（クライアントは無音で ack します）");
   }

@@ -342,7 +342,8 @@ server（音声合成）だけが読むキーは「音声合成エンジン」�
 判定は `listSpeakers` に**繋がったか**だけで、`ttsSpeakerId` が実在するかは混ぜない
 ——混ぜると、スタブが生きているのに話者 ID だけ間違えている状態で**二重起動**する。
 
-- `ttsSpawnCommand` が空なら、AivisSpeech.app の既知の場所を順に見る:
+- `ttsSpawnCommand` / `ttsSpawnArgs` は AivisSpeech 専用（Kokoro は `kokoroDir` からだけ起こす）。
+  `ttsSpawnCommand` が空なら、AivisSpeech.app の既知の場所を順に見る:
   `/Applications/AivisSpeech.app/Contents/Resources/AivisSpeech-Engine/run` →
   `~/Applications/…` の同じパス。**指定した値が見つからないとき、既知候補にフォールバックしない**
   （指定を黙って別のバイナリに読み替えるのは、最も気づきにくい失敗の仕方になる）
@@ -369,8 +370,9 @@ server（音声合成）だけが読むキーは「音声合成エンジン」�
   （`ttsEnabled` を後から変えた、後から AivisSpeech をインストールした）は、サーバーを再起動すれば
   反映される。切り替えのときに**止めるのは自分が起こしたエンジンだけ**（`engine !== null`）で、
   GUI が上げた AivisSpeech のような共有物は触らない。止める理由は、Kokoro が常駐でメモリを
-  占めること。「誰が起こしたエンジンなのか」の追跡は `engine` / `engineKind` の対で持ち、
-  切り替えは Promise のチェーンで直列にする（疎通確認と PATCH が重なっても二重に起こさない）。
+  占めること。「誰が起こしたエンジンなのか」の追跡は `engine`（起こした子）と
+  `decidedEngine`（起動判定をした時点の `ttsEngine`）で持ち、同じ値の PATCH では何もしない
+  （落ちたエンジンは起こし直さない）。切り替えは Promise のチェーンで直列にする（疎通確認と PATCH が重なっても二重に起こさない）。
   `config.json` を直接直した場合は検知しないので、spawn の判断は再起動まで変わらない
 - 停止は**プロセスグループごと**（`detached: true` で起こし、`process.kill(-pid, …)`）。
   `run` は PyInstaller のバイナリで**自分の子を持つ**ので、`child.kill()` では孫が残ってポートを掴み続ける

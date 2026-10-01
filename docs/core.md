@@ -384,13 +384,11 @@ server / player はこのファイルを読みも書きもしない（読むの�
   `ttsSpeakerId` は非負整数しか受けない（Kokoro の声 ID を書き違えても既定値に倒れ、警告が出る）。
   Kokoro は `kokoroBaseUrl` / `kokoroVoiceId`（既定 `http://127.0.0.1:8880` / `"af_heart"`）。
   設定パネルの「すべての設定をリセット」は `createDefaultConfig()` をそのまま書く（`ttsEngine` は戻さない）。
-  `ttsEngine: "openai"` なのに `ttsBaseUrl` / `ttsSpeakerId` だけが書かれている（Kokoro 用の値を移して
-  いない）と、起動時に移行の警告を1回出す。
   cc-mascot はエンジンを自分で `--port 8564` で spawn するので、そちらに繋ぐなら明示的に指定する
   ★ `kokoroBaseUrl` は **`/v1` を含まない origin** を書くこと（パスはクライアントが足す。
   書いてしまっても `tts/openaiClient.ts` が末尾の `/v1` を正規化してから連結する）
 - `ttsSpeakerId` は文字列で、数値のスタイル ID を文字列化して持つ。`kokoroVoiceId` は `af_heart`
-  のような英字の声 ID で、Kokoro-FastAPI は `af_bella+af_sky` のような合成指定や
+  のような英字の声 ID（数字だけの値は AivisSpeech の ID の混入として拒む）で、Kokoro-FastAPI は `af_bella+af_sky` のような合成指定や
   `af_bella(2)+af_sky(1)` のような重み付けも受ける ——
   存在確認（`TtsEngine.hasVoice`）はエンジンごとの書き方を知ったうえで判定する。
   起動時に声の一覧（`listVoices()`）で存在を検査し、無ければ候補を並べて警告する
@@ -406,8 +404,8 @@ server / player はこのファイルを読みも書きもしない（読むの�
   ★ `POST /v1/tts/preview` は 409 `tts_disabled`。ここを見ずに合成へ入ると、待ち切って
   `503 synthesis_unavailable` になり、設定パネルには「エンジンに繋がりません」と出る ——
   本当の理由は利用者自身が切ったことなので、名指しで断る
-- `ttsSpawnCommand` が空のときの探し方は `ttsEngine` で決まる —— `"voicevox"` なら
-  AivisSpeech.app の既知の場所、`"openai"` なら `kokoroDir` から Kokoro-FastAPI（`uv`）を起こす
+- `ttsSpawnCommand` / `ttsSpawnArgs` は **AivisSpeech 専用**（空なら AivisSpeech.app の既知の場所）。
+  Kokoro は `kokoroDir` から Kokoro-FastAPI（`uv`）だけを起こす
   （→ `server/engineProcess.ts` の `resolveKokoroSpawn`。実機の確認は
   [`knowledge/core.md`](./knowledge/core.md)「エンジンを起こす」）
 - `kokoroDir` は Kokoro-FastAPI を clone したディレクトリ。**既定は空文字で、そのときは起こさない**

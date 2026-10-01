@@ -393,6 +393,12 @@ describe("kokoroBaseUrl / kokoroVoiceId", () => {
     expect(s.get("kokoroVoiceId")).toBe("af_heart");
   });
 
+  it("★ kokoroVoiceId に AivisSpeech のスタイル ID（数字だけ）は書けず既定値に倒れる", () => {
+    write({ kokoroVoiceId: "888753760" });
+    expect(store().get("kokoroVoiceId")).toBe("af_heart");
+    expect(store({ CHATTER_AGENT_KOKORO_VOICE_ID: "888753760" }).get("kokoroVoiceId")).toBe("af_heart");
+  });
+
   it("ttsEngine を切り替えても ttsBaseUrl / ttsSpeakerId は AivisSpeech の値のまま", () => {
     write({ ttsEngine: "openai" });
     const s = store();

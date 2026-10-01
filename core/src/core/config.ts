@@ -140,9 +140,9 @@ export interface ChatterAgentConfig {
    */
   ttsSpawn: boolean;
   /**
-   * 起こすエンジンの実行パス。空のときの探し方は `ttsEngine` で決まる（→ `server/engineProcess.ts`）
-   * —— `"voicevox"` なら AivisSpeech.app の既知の場所（`/Applications/…` →
-   * `~/Applications/…`）、`"openai"` なら `kokoroDir` から Kokoro-FastAPI（`uv`）を起こす。
+   * 起こす AivisSpeech（`ttsEngine: "voicevox"`）の実行パス。**AivisSpeech 専用**で、Kokoro は
+   * `kokoroDir` からだけ起こす。空のときは AivisSpeech.app の既知の場所（`/Applications/…` →
+   * `~/Applications/…`。→ `server/engineProcess.ts`）を探す。
    *
    * ★ 明示した値が見つからないとき、既知の候補へ**フォールバックしない**。
    *   指定を黙って別のバイナリに読み替えるのは最悪の失敗の仕方になる。
@@ -153,9 +153,8 @@ export interface ChatterAgentConfig {
    */
   ttsSpawnCommand: string;
   /**
-   * 起こすときの引数。空なら使う側の接続先（`ttsBaseUrl` / `kokoroBaseUrl`）から導く —— `"voicevox"` は `--host <host>
-   * --port <port>`、`"openai"`（Kokoro-FastAPI）は `run --no-sync uvicorn api.src.main:app
-   * --host <host> --port <port>`（→ `server/engineProcess.ts` の `resolveKokoroSpawn`）。
+   * AivisSpeech を起こすときの引数（**AivisSpeech 専用**。Kokoro の引数は常に導出する）。
+   * 空なら `ttsBaseUrl` から `--host <host> --port <port>` を導く。
    *
    * ★ **指定すると導出は行われない**（追加ではなく置換）。自分で書くならエンジンが要る
    *   引数を全部自分で書くこと。「足りない分だけ補う」形は挙動が読めなくなる。
@@ -163,8 +162,8 @@ export interface ChatterAgentConfig {
   ttsSpawnArgs: string[];
   /**
    * Kokoro-FastAPI（`ttsEngine: "openai"`）を clone したディレクトリ。
-   * `ttsSpawnCommand` が空のときの起こし方（`server/engineProcess.ts` の
-   * `resolveKokoroSpawn`）が `cwd` と `PYTHONPATH` の起点として使う。
+   * 起こし方（`server/engineProcess.ts` の `resolveKokoroSpawn`）が `cwd` と `PYTHONPATH` の
+   * 起点として使う。
    *
    * ★ **既定は空文字で、そのときは起こさない。** AivisSpeech と違って決まったインストール先が
    *   無く、導入（依存とモデルの取得）はユーザーに済ませてもらう前提のため。
@@ -506,6 +505,15 @@ const parseSpeakerId: Parser<string> = (raw) => {
 // のような値がそのまま listen() へ渡る
 const parseNonEmptyString: Parser<string> = (raw) => (typeof raw === "string" && raw.trim() ? raw.trim() : undefined);
 
+/**
+ * `kokoroVoiceId`（Kokoro の声 ID）専用。数字だけの値は AivisSpeech のスタイル ID の混入として
+ * 既定値に倒し、警告で見えるようにする（通すと全文が 503 になる）。
+ */
+const parseKokoroVoiceId: Parser<string> = (raw) => {
+  const v = parseNonEmptyString(raw);
+  return v !== undefined && /^\d+$/.test(v) ? undefined : v;
+};
+
 // 環境変数（カンマ区切りの文字列）と config.json（配列）の両方を受ける。
 // 要素が1つでも文字列以外なら、部分的に取り込まず配列ごと undefined にする
 // （「一部だけ有効な許可リスト」は事故ると気づきにくいので、丸ごと既定値に倒す）
@@ -642,7 +650,7 @@ const SPECS = {
   ttsBaseUrl: { env: "CHATTER_AGENT_TTS_URL", parse: makeUrlParser(["http:", "https:"]) },
   ttsSpeakerId: { env: "CHATTER_AGENT_TTS_SPEAKER_ID", parse: parseSpeakerId },
   kokoroBaseUrl: { env: "CHATTER_AGENT_KOKORO_URL", parse: makeUrlParser(["http:", "https:"]) },
-  kokoroVoiceId: { env: "CHATTER_AGENT_KOKORO_VOICE_ID", parse: parseNonEmptyString },
+  kokoroVoiceId: { env: "CHATTER_AGENT_KOKORO_VOICE_ID", parse: parseKokoroVoiceId },
   ttsSpeedScale: { env: "CHATTER_AGENT_TTS_SPEED_SCALE", parse: parseSpeedScale },
   synthesisTimeoutMs: { env: "CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS", parse: parseTimeoutMs },
   ttsSpawn: { env: "CHATTER_AGENT_TTS_SPAWN", parse: parseBoolean },

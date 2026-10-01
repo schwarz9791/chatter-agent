@@ -298,6 +298,14 @@ const parseSpeakerId = (raw) => {
 	return Number.isSafeInteger(n) && n >= 0 ? String(n) : void 0;
 };
 const parseNonEmptyString = (raw) => typeof raw === "string" && raw.trim() ? raw.trim() : void 0;
+/**
+* `kokoroVoiceId`（Kokoro の声 ID）専用。数字だけの値は AivisSpeech のスタイル ID の混入として
+* 既定値に倒し、警告で見えるようにする（通すと全文が 503 になる）。
+*/
+const parseKokoroVoiceId = (raw) => {
+	const v = parseNonEmptyString(raw);
+	return v !== void 0 && /^\d+$/.test(v) ? void 0 : v;
+};
 const parseStringList = (raw) => {
 	let items;
 	if (typeof raw === "string") items = raw.split(",");
@@ -454,7 +462,7 @@ const SPECS = {
 	},
 	kokoroVoiceId: {
 		env: "CHATTER_AGENT_KOKORO_VOICE_ID",
-		parse: parseNonEmptyString
+		parse: parseKokoroVoiceId
 	},
 	ttsSpeedScale: {
 		env: "CHATTER_AGENT_TTS_SPEED_SCALE",

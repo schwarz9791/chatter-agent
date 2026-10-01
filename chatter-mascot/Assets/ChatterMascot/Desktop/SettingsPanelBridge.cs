@@ -497,8 +497,8 @@ namespace ChatterMascot.Desktop
 
                 // ── core 側 ───────────────────────────────
                 case SettingKeys.Speaker:
-                    // ★ 話者 ID はエンジンにより数値・文字列のどちらもある。core が文字列でも
-                    //   数値でも受けるので、ここでは空でないことだけ見て素通しする
+                    // ★ 話者 ID の形はエンジンごとに違い（AivisSpeech は数字だけ、Kokoro は英字の声 ID）、
+                    //   core が声のキーごとに検証する。ここでは空でないことだけ見て素通しする
                     if (string.IsNullOrEmpty(value))
                     {
                         Notice(key, _context.Text.SpeakerIdUnreadable);

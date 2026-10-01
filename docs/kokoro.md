@@ -72,14 +72,14 @@ Add the following to `~/.config/chatter-agent/config.json`:
 | `ttsEngine` | `"openai"`. Use `kokoroBaseUrl` / `kokoroVoiceId` and talk to an OpenAI-compatible API |
 | `kokoroBaseUrl` | The origin of Kokoro-FastAPI. **Do not include `/v1`** (the client appends the path; a trailing `/v1` is normalized away if you do). Defaults to `http://127.0.0.1:8880` — omit it unless Kokoro-FastAPI runs elsewhere. Not writable through the control API |
 | `kokoroVoiceId` | The voice ID (e.g. `af_heart`). Defaults to `af_heart` — omit it, or pick another from `GET /v1/speakers` (chatter-agent's control API) or the voice list in the settings panel. Composite specs such as `af_bella+af_sky` or weighted ones like `af_bella(2)+af_sky(1)` are accepted |
-| `kokoroDir` | Absolute path to the clone above (`~/...` and relative paths are also accepted and get expanded/resolved). When `ttsSpawnCommand` is empty, the server launches `uv run --no-sync uvicorn …` from here. Left empty, the server does not launch Kokoro |
+| `kokoroDir` | Absolute path to the clone above (`~/...` and relative paths are also accepted and get expanded/resolved). The server launches `uv run --no-sync uvicorn …` from here. Left empty, the server does not launch Kokoro |
 
-`ttsBaseUrl` / `ttsSpeakerId` are for AivisSpeech only and are not used by this engine.
+`ttsBaseUrl` / `ttsSpeakerId` / `ttsSpawnCommand` / `ttsSpawnArgs` are for AivisSpeech only and are not
+used by this engine (Kokoro is launched only from `kokoroDir`).
 
 **Migrating from an earlier setup** that put Kokoro values in `ttsBaseUrl` / `ttsSpeakerId`: move them to
 `kokoroBaseUrl` / `kokoroVoiceId`. A non-numeric `ttsSpeakerId` such as `af_heart` is now rejected
-and falls back to the AivisSpeech default with a warning, and the server logs a migration warning
-at startup when `ttsEngine` is `"openai"` but only the old keys are set.
+and falls back to the AivisSpeech default with a warning.
 
 Restart `chatter-agent-server` after editing. If the engine is not running, the server launches it
 when the startup reachability check fails (`ttsSpawn: true`, the default). Startup takes a while;

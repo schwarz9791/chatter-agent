@@ -213,6 +213,12 @@ describe("PATCH /v1/config", () => {
     expect(body(res)).toEqual({ error: "invalid_value", key: "ttsSpeakerId" });
   });
 
+  it("★ kokoroVoiceId に AivisSpeech のスタイル ID は書けない（400）", () => {
+    const res = api().patchConfig({ kokoroVoiceId: "888753760" });
+    expect(res.status).toBe(400);
+    expect(body(res)).toEqual({ error: "invalid_value", key: "kokoroVoiceId" });
+  });
+
   /** ★★ 会話全文の外部送信路（#76 のレビュー A-2）。塞いでも設定パネルは何も失わない */
   it("★★ ttsBaseUrl は 403 readonly_key。writable にも載らない", () => {
     const res = api().patchConfig({ ttsBaseUrl: "http://collector.example" });

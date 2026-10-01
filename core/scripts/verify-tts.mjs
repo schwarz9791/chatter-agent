@@ -674,29 +674,38 @@ try {
   }
 
   {
-    show("㉕ ★ 実行中の ttsEngine 切り替え: 起動判定がやり直され、自分で起こしたエンジンだけが止まる");
+    show("㉕ ★ 実行中の ttsEngine 切り替え: 起動判定がやり直され、自分で起こした AivisSpeech だけが止まる");
     await stopServer();
     // ★ `ttsEngine` を env で固定しないこと（固定すると PATCH が 409 になる）。既定の voicevox で始める。
-    //   起こす相手は使い捨てのスタブに限る（`CHATTER_AGENT_TTS_SPAWN_COMMAND` を必ず渡す）
-    const kokoroPort = PORT + 3;
-    const KOKORO_WAV_SECONDS = 0.5;
-    const stubKokoro = path.join(root, "stub-kokoro");
+    //   起こす相手は使い捨てのスタブに限る（`CHATTER_AGENT_TTS_SPAWN_COMMAND` を必ず渡す）。
+    //   `ttsSpawnCommand` は AivisSpeech 専用なので、Kokoro 側は常駐のスタブ（openai の口）へ向ける
+    const voicevoxPort = PORT + 3;
+    const SPAWNED_WAV_SECONDS = 0.5;
+    const stubVoicevox = path.join(root, "stub-voicevox");
     fs.writeFileSync(
-      stubKokoro,
+      stubVoicevox,
       `#!/usr/bin/env node
 const http = require("node:http");
 const args = process.argv.slice(2);
 const host = args[args.indexOf("--host") + 1];
 const port = Number(args[args.indexOf("--port") + 1]);
-const wav = Buffer.from(${JSON.stringify(makeWav(KOKORO_WAV_SECONDS).toString("base64"))}, "base64");
+const wav = Buffer.from(${JSON.stringify(makeWav(SPAWNED_WAV_SECONDS).toString("base64"))}, "base64");
 http
   .createServer((req, res) => {
-    if (req.url.startsWith("/v1/audio/voices")) {
+    if (req.url.startsWith("/speakers")) {
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ voices: [{ id: ${JSON.stringify(OPENAI_VOICE_ID)}, name: "Heart" }] }));
+      res.end(JSON.stringify([{ name: "スタブ", speaker_uuid: "u", styles: [{ id: ${SPEAKER_ID}, name: "ノーマル" }] }]));
       return;
     }
-    if (req.url.startsWith("/v1/audio/speech")) {
+    if (req.url.startsWith("/audio_query")) {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ accent_phrases: [] }));
+      });
+      return;
+    }
+    if (req.url.startsWith("/synthesis")) {
       req.resume();
       req.on("end", () => {
         res.writeHead(200, { "content-type": "audio/wav" });
@@ -709,17 +718,29 @@ http
   .listen(port, host);
 `,
     );
-    fs.chmodSync(stubKokoro, 0o755);
+    fs.chmodSync(stubVoicevox, 0o755);
 
     await startServer(
       serverEnv({
         CHATTER_AGENT_TTS_ENGINE: undefined,
-        CHATTER_AGENT_KOKORO_URL: `http://127.0.0.1:${kokoroPort}`,
-        CHATTER_AGENT_TTS_SPAWN_COMMAND: stubKokoro,
+        CHATTER_AGENT_TTS_URL: `http://127.0.0.1:${voicevoxPort}`,
+        CHATTER_AGENT_TTS_SPAWN_COMMAND: stubVoicevox,
       }),
     );
-    await until(() => (server?.log ?? "").includes("音声合成エンジンに繋がりました"), 5000);
-    check("疎通できるので最初は起こさない", !(server?.log ?? "").includes("[Engine] 起動しました"), server?.log ?? "");
+    const spawnedAtStart = await until(() => (server?.log ?? "").includes("[Engine] 起動しました"), 10_000);
+    check("★ 起動時に AivisSpeech のスタブを起こした", spawnedAtStart, server?.log ?? "");
+    const pidOf = (log) => Number(/\[Engine\] 起動しました \(pid=(\d+)\)/.exec(log)?.[1]);
+    const pidA = pidOf(server?.log ?? "");
+    check("起こしたエンジンの pid がログに出る", Number.isInteger(pidA), server?.log ?? "");
+    const spawnCount = () => (server?.log ?? "").split("[Engine] 起動しました").length - 1;
+    const alive = (pid) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
 
     const patchEngine = (value) =>
       fetch(`${base}/v1/config`, {
@@ -727,7 +748,7 @@ http
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ttsEngine: value }),
       });
-    /** 200 か 503 の間は取り直す（起こした直後のエンジンはまだ上がっていない） */
+    /** 200 か 503 以外になるまで取り直す（起こした直後のエンジンはまだ上がっていない） */
     const fetchAudio = async (record) => {
       for (let i = 0; i < 100; i++) {
         const res = await fetch(`${base}${audioPath(record)}`);
@@ -739,56 +760,52 @@ http
     };
 
     const client = await connect();
-    const before = server?.log.length ?? 0;
+
     const toOpenai = await patchEngine("openai");
     check("★ PATCH {ttsEngine:openai} が通る", toOpenai.status === 200, `status=${toOpenai.status}`);
-    const started = await until(() => (server?.log ?? "").slice(before).includes("[Engine] 起動しました"), 10_000);
-    check("★ 切り替えでサーバーが合成エンジンを起こした", started, (server?.log ?? "").slice(before));
-    const stubPid = Number(/\[Engine\] 起動しました \(pid=(\d+)\)/.exec((server?.log ?? "").slice(before))?.[1]);
-    check("起こしたエンジンの pid がログに出る", Number.isInteger(stubPid), (server?.log ?? "").slice(before));
+    const closedA = Number.isInteger(pidA) && (await until(() => !alive(pidA), 10_000));
+    check("★ 自分が起こした AivisSpeech は止まる", closedA, `pid=${pidA}`);
+    check("★ openai への切り替えでは何も起こさない", spawnCount() === 1, server?.log ?? "");
 
     const recordA = enqueue("openai に切り替えた後の発言です。");
     await until(() => client.frames.some((f) => f.seq === recordA.seq), 5000);
-    const synthBefore = synthesized.length;
+    const openaiBefore = openaiRequests.length;
     const audioA = await fetchAudio(recordA);
-    check("★ 次の GET は起こしたエンジン（openai の口）へ行く", audioA.status === 200, JSON.stringify(audioA));
     check(
-      "★ 起こしたスタブの WAV が返る",
-      audioA.bytes === makeWav(KOKORO_WAV_SECONDS).byteLength,
+      "★ 次の GET は openai の口（Kokoro）へ行く",
+      audioA.status === 200 && audioA.bytes === WAV.byteLength,
       JSON.stringify(audioA),
     );
-    check("voicevox のスタブは叩かれていない", synthesized.length === synthBefore, JSON.stringify(synthesized));
+    check("openai の口が叩かれた", openaiRequests.length === openaiBefore + 1, JSON.stringify(openaiRequests));
 
     const toVoicevox = await patchEngine("voicevox");
     check("★ PATCH {ttsEngine:voicevox} が通る", toVoicevox.status === 200, `status=${toVoicevox.status}`);
-    const closed =
-      Number.isInteger(stubPid) &&
-      (await until(() => {
-        try {
-          process.kill(stubPid, 0);
-          return false;
-        } catch {
-          return true;
-        }
-      }, 10_000));
-    check("★ 自分が起こしたエンジンは止まる", closed, `pid=${stubPid}`);
+    const respawned = await until(() => spawnCount() === 2, 10_000);
+    check("★ 切り替えで AivisSpeech を起こし直す", respawned, server?.log ?? "");
+    const pidB = pidOf((server?.log ?? "").slice((server?.log ?? "").lastIndexOf("[Engine] 起動しました") - 1));
+    check("新しい pid は前と違う", Number.isInteger(pidB) && pidB !== pidA, `A=${pidA} B=${pidB}`);
 
     const recordB = enqueue("voicevox に戻した後の発言です。");
     await until(() => client.frames.some((f) => f.seq === recordB.seq), 5000);
+    const openaiMid = openaiRequests.length;
     const audioB = await fetchAudio(recordB);
     check(
-      "★ 次の GET は voicevox のスタブへ戻る",
-      audioB.status === 200 && audioB.bytes === WAV.byteLength,
+      "★ 次の GET は起こした AivisSpeech のスタブへ行く",
+      audioB.status === 200 && audioB.bytes === makeWav(SPAWNED_WAV_SECONDS).byteLength,
       JSON.stringify(audioB),
     );
-    check("voicevox のスタブが合成した", synthesized.length === synthBefore + 1, JSON.stringify(synthesized));
-    check(
-      "★ voicevox 側は疎通できているので起こし直さない",
-      (server?.log ?? "").split("[Engine] 起動しました").length === 2,
-      server?.log ?? "",
-    );
+    check("openai の口は叩かれていない", openaiRequests.length === openaiMid, JSON.stringify(openaiRequests));
+
+    const same = await patchEngine("voicevox");
+    check("同じ値の PATCH も通る", same.status === 200, `status=${same.status}`);
+    await sleep(500);
+    check("★ 同じ値の PATCH では起こし直さない", spawnCount() === 2, server?.log ?? "");
+    check("★ 起こしたエンジンは生きたまま", alive(pidB), `pid=${pidB}`);
 
     await client.close();
+    await stopServer();
+    const goneB = await until(() => !alive(pidB), 5000);
+    check("★ サーバーを止めると起こしたエンジンも落ちる", goneB, `pid=${pidB}`);
   }
 } catch (err) {
   console.error("\n\x1b[31m検証中に例外が発生しました\x1b[0m");

@@ -253,15 +253,10 @@ const ESPEAK_DATA_CANDIDATES = [
 ];
 
 export interface ResolveKokoroSpawnDeps {
-  /** `ttsBaseUrl`。`makeUrlParser` を通っているので必ず妥当な絶対 URL */
+  /** `kokoroBaseUrl`。`makeUrlParser` を通っているので必ず妥当な絶対 URL */
   baseUrl: string;
   /** `kokoroDir`。空なら起こさない */
   kokoroDir: string;
-  /**
-   * `ttsSpawnArgs`。空なら `run --no-sync uvicorn api.src.main:app --host <host> --port <port>`
-   * を組む。指定すると**置換**（`buildArgs` と同じ規則。cwd と env はこの引数に関わらず組む）。
-   */
-  args?: readonly string[];
   /** テスト用。既定 `fs.existsSync` */
   exists?: (filePath: string) => boolean;
   /** テスト用。既定 `os.homedir()` */
@@ -305,7 +300,7 @@ function expandKokoroDir(kokoroDir: string, homeDir: string): string {
  *
  * ★ **環境変数の表はここが権威。** Kokoro-FastAPI 側の起動スクリプトが変わるとずれうる。
  *
- * ★ **`--host` は必ず渡す（`args` が空のとき）。** 既定の `0.0.0.0` のまま起こすと LAN に
+ * ★ **`--host` は必ず渡す。** 既定の `0.0.0.0` のまま起こすと LAN に
  *   公開される（`buildArgs` / `resolveOllayaSpawn` と同じ判断）。
  */
 export function resolveKokoroSpawn(deps: ResolveKokoroSpawnDeps): EngineSpawnResolution {
@@ -329,10 +324,7 @@ export function resolveKokoroSpawn(deps: ResolveKokoroSpawnDeps): EngineSpawnRes
   if (uv === undefined) return { skip: "not-found", tried: searchedPaths(UV_COMMAND, env), subject: "uv" };
 
   const { host, port } = hostAndPort(url);
-  const runArgs =
-    deps.args && deps.args.length > 0
-      ? [...deps.args]
-      : ["run", "--no-sync", "uvicorn", "api.src.main:app", "--host", host, "--port", port];
+  const runArgs = ["run", "--no-sync", "uvicorn", "api.src.main:app", "--host", host, "--port", port];
 
   const kokoroEnv: Record<string, string> = {
     PYTHONPATH: `${dir}${path.delimiter}${path.join(dir, "api")}`,
@@ -482,13 +474,11 @@ export function describeEngineSkip(skip: EngineSpawnSkip, subject = "合成エ�
  */
 export interface EngineProcess {
   /**
-   * ★ **`pid` と `exited()` に本番の呼び出し元は無い**（`index.ts` は `stop()` しか呼ばない）。
-   *   テストの観測点として意図的に残してある。**再起動しない方針が確定している**ので
-   *   ヘルスチェック等の用途が生まれる見込みも無い —— 次に読む人が用途を探さなくて済むように
-   *   ここに書いておく（→ PR #52 のレビュー）。
+   * ★ `exited()` は Ollaya の起動判定（`index.ts`）が、自分が起こしたものがまだ生きているかを
+   *   見るのに使う。`pid` はテストの観測点。
    */
   readonly pid: number | undefined;
-  /** 既に終わっているか（テストの観測点。上記参照） */
+  /** 既に終わっているか */
   exited: () => boolean;
   /** プロセスグループごと止める */
   stop: () => Promise<void>;

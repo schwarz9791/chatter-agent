@@ -356,8 +356,10 @@ server / player はこのファイルを読みも書きもしない（読むの�
 |---|---|---|
 | `ttsEngine` | `"voicevox"`（`"voicevox" \| "openai"`） | `CHATTER_AGENT_TTS_ENGINE` |
 | `ttsEnabled` | `true` | `CHATTER_AGENT_TTS_ENABLED` |
-| `ttsBaseUrl` | `ttsEngine` から導く（→下記） | `CHATTER_AGENT_TTS_URL` |
-| `ttsSpeakerId` | `ttsEngine` から導く（→下記） | `CHATTER_AGENT_TTS_SPEAKER_ID` |
+| `ttsBaseUrl` | `http://127.0.0.1:10101`（AivisSpeech 専用） | `CHATTER_AGENT_TTS_URL` |
+| `ttsSpeakerId` | `"888753760"`（AivisSpeech 専用。非負整数のみ） | `CHATTER_AGENT_TTS_SPEAKER_ID` |
+| `kokoroBaseUrl` | `http://127.0.0.1:8880`（Kokoro-FastAPI 専用） | `CHATTER_AGENT_KOKORO_URL` |
+| `kokoroVoiceId` | `"af_heart"`（Kokoro 専用） | `CHATTER_AGENT_KOKORO_VOICE_ID` |
 | `ttsSpeedScale` | `1.0` | `CHATTER_AGENT_TTS_SPEED_SCALE` |
 | `synthesisTimeoutMs` | `30000` | `CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS` |
 | `ttsSpawn` | `true` | `CHATTER_AGENT_TTS_SPAWN` |
@@ -365,24 +367,30 @@ server / player はこのファイルを読みも書きもしない（読むの�
 | `ttsSpawnArgs` | `[]` | `CHATTER_AGENT_TTS_SPAWN_ARGS` |
 | `kokoroDir` | `""`（空なら Kokoro を起こさない） | `CHATTER_AGENT_KOKORO_DIR` |
 
-- ★ `ttsEngine` は `ttsBaseUrl` をどの API 契約で叩くかを決める（→ `tts/ttsEngine.ts`）。
-  `"voicevox"` は AivisSpeech / VOICEVOX 互換（`tts/voicevoxClient.ts`）、`"openai"` は OpenAI
-  互換（`tts/openaiClient.ts`。第一の相手は Kokoro-FastAPI → [`kokoro.md`](./kokoro.md)）。
-  制御 API からは書けない（再起動まで反映されない区分。→ `protocol.md`「書けないキーは3種類ある」）
-  —— 起こすかどうかの判断は起動時の1回きりで、切り替えても spawn の判断はやり直されない
-- ★ `ttsBaseUrl` / `ttsSpeakerId` の既定値は `ttsEngine` から導く（`ttsEngineDefaults`。
-  → `core/config.ts`）。`"voicevox"` は `http://127.0.0.1:10101` / `"888753760"`
-  （AivisSpeech 標準構成の Anneli・ノーマル）、`"openai"` は `http://127.0.0.1:8880` /
-  `"af_heart"`（Kokoro-FastAPI 標準構成）。file にも環境変数にも書かれていなければこの既定に
-  なるので、`ttsEngine: "openai"` だけ書けば足りる。設定パネルの「すべての設定をリセット」も
-  今の `ttsEngine` に合わせたこの既定を書く（→ `server/controlApi.ts` の `getConfig`）。
+- ★ `ttsEngine` は、どの API 契約で・どの接続先と声のキーを使うかを決める（→ `tts/ttsEngine.ts`）。
+  `"voicevox"` は AivisSpeech / VOICEVOX 互換（`tts/voicevoxClient.ts`。`ttsBaseUrl` / `ttsSpeakerId`）、
+  `"openai"` は OpenAI 互換（`tts/openaiClient.ts`。第一の相手は Kokoro-FastAPI →
+  [`kokoro.md`](./kokoro.md)。`kokoroBaseUrl` / `kokoroVoiceId`）。
+  **エンジンに応じたキーの選択は `server/index.ts` の `currentVoice()` の1か所だけ**で、spawn 計画も
+  起動ログもこれを通す。
+- ★ `ttsEngine` は制御 API から書ける。接続先はどちらも `config.json` で決まっていて、起こす
+  コマンドも (a) 区分のキーで固定されているので、外部送信路にならない。切り替えると、サーバーは
+  起動判定をやり直す（→ `server/index.ts` の `switchEngine`）。**止めるのは自分が起こしたものだけ**
+  （GUI で上げた AivisSpeech は止めない）。起動判定は Promise のチェーンで直列にしてあり、
+  疎通確認と切り替えが重なっても二重に起こさない。`config.json` を直接直した場合は、合成の宛先は
+  次の文から変わるが、spawn の判断は再起動まで変わらない
+- ★ `ttsBaseUrl` / `ttsSpeakerId` は **AivisSpeech 専用**で、既定値は固定
+  （`http://127.0.0.1:10101` / `"888753760"`。AivisSpeech 標準構成の Anneli・ノーマル）。
+  `ttsSpeakerId` は非負整数しか受けない（Kokoro の声 ID を書き違えても既定値に倒れ、警告が出る）。
+  Kokoro は `kokoroBaseUrl` / `kokoroVoiceId`（既定 `http://127.0.0.1:8880` / `"af_heart"`）。
+  設定パネルの「すべての設定をリセット」は `createDefaultConfig()` をそのまま書く（`ttsEngine` は戻さない）。
   cc-mascot はエンジンを自分で `--port 8564` で spawn するので、そちらに繋ぐなら明示的に指定する
-  ★ `ttsEngine: "openai"` のときは **`/v1` を含まない origin** を書くこと（パスはクライアントが足す。
+  ★ `kokoroBaseUrl` は **`/v1` を含まない origin** を書くこと（パスはクライアントが足す。
   書いてしまっても `tts/openaiClient.ts` が末尾の `/v1` を正規化してから連結する）
-- `ttsSpeakerId` は文字列。VOICEVOX 系は数値のスタイル ID（文字列化して持つ）、Kokoro のような
-  OpenAI 互換エンジンは `af_heart` のような英字の声 ID になる（Kokoro-FastAPI はさらに
-  `af_bella+af_sky` のような合成指定や `af_bella(2)+af_sky(1)` のような重み付けも受ける ——
-  存在確認（`TtsEngine.hasVoice`）はエンジンごとの書き方を知ったうえで判定する）。
+- `ttsSpeakerId` は文字列で、数値のスタイル ID を文字列化して持つ。`kokoroVoiceId` は `af_heart`
+  のような英字の声 ID（数字だけの値は AivisSpeech の ID の混入として拒む）で、Kokoro-FastAPI は `af_bella+af_sky` のような合成指定や
+  `af_bella(2)+af_sky(1)` のような重み付けも受ける ——
+  存在確認（`TtsEngine.hasVoice`）はエンジンごとの書き方を知ったうえで判定する。
   起動時に声の一覧（`listVoices()`）で存在を検査し、無ければ候補を並べて警告する
   （設定ミスの症状が「無音」なので、これが無いと切り分けできない）。
   ★ ここで起動を止めないこと。止めるとテキストの配信まで巻き添えになり、クライアントからは
@@ -396,8 +404,8 @@ server / player はこのファイルを読みも書きもしない（読むの�
   ★ `POST /v1/tts/preview` は 409 `tts_disabled`。ここを見ずに合成へ入ると、待ち切って
   `503 synthesis_unavailable` になり、設定パネルには「エンジンに繋がりません」と出る ——
   本当の理由は利用者自身が切ったことなので、名指しで断る
-- `ttsSpawnCommand` が空のときの探し方は `ttsEngine` で決まる —— `"voicevox"` なら
-  AivisSpeech.app の既知の場所、`"openai"` なら `kokoroDir` から Kokoro-FastAPI（`uv`）を起こす
+- `ttsSpawnCommand` / `ttsSpawnArgs` は **AivisSpeech 専用**（空なら AivisSpeech.app の既知の場所）。
+  Kokoro は `kokoroDir` から Kokoro-FastAPI（`uv`）だけを起こす
   （→ `server/engineProcess.ts` の `resolveKokoroSpawn`。実機の確認は
   [`knowledge/core.md`](./knowledge/core.md)「エンジンを起こす」）
 - `kokoroDir` は Kokoro-FastAPI を clone したディレクトリ。**既定は空文字で、そのときは起こさない**
@@ -489,7 +497,7 @@ server / player はこのファイルを読みも書きもしない（読むの�
   - `"fm"`: macOS 27 以降の Apple Foundation Models CLI。メッセージ全体を1回だけ `--schema` 付きで
     判定し、同じ感情を全部の文に適用する（→ `emotion/fmClassifier.ts`）
   - `"dictionary"`: 既存のルールベース（`emotion/ruleBasedEmotionClassifier.ts`）をそのまま使う
-- `ollayaBaseUrl` は `ttsBaseUrl` と同じ理由（本文の外部送信路になる）で制御 API から書けない
+- `ollayaBaseUrl` は `ttsBaseUrl` / `kokoroBaseUrl` と同じ理由（本文の外部送信路になる）で制御 API から書けない
 - `ollayaSpawn` は Ollaya が居なければ `chatter-agent-server` が起こすか（`ttsSpawn` と同じ役回り。
   → `server/engineProcess.ts` の `resolveOllayaSpawn`）。`ollaya serve` は `--host`/`--port` を
   持たないので、`OLLAYA_HOST`（`host:port` 形式の環境変数）で bind 先を渡す

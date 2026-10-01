@@ -497,15 +497,15 @@ namespace ChatterMascot.Desktop
 
                 // ── core 側 ───────────────────────────────
                 case SettingKeys.Speaker:
-                    // ★ 話者 ID はエンジンにより数値・文字列のどちらもある。core が文字列でも
-                    //   数値でも受けるので、ここでは空でないことだけ見て素通しする
+                    // ★ 話者 ID の形はエンジンごとに違い（AivisSpeech は数字だけ、Kokoro は英字の声 ID）、
+                    //   core が声のキーごとに検証する。ここでは空でないことだけ見て素通しする
                     if (string.IsNullOrEmpty(value))
                     {
                         Notice(key, _context.Text.SpeakerIdUnreadable);
                         return;
                     }
                     _context.SpeakerId = value;
-                    Queue(CoreConfigKeys.SpeakerId, value, key);
+                    Queue(CoreConfigKeys.SpeakerKeyFor(_context.TtsEngine), value, key);
                     return;
 
                 case SettingKeys.Speed:
@@ -764,6 +764,7 @@ namespace ChatterMascot.Desktop
         {
             return string.Join("\u001f", new[]
             {
+                _context.TtsEngine ?? string.Empty,
                 _context.SpeakerId ?? string.Empty,
                 _context.SpeedScale.ToString("R", CultureInfo.InvariantCulture),
                 _context.SummaryEnabled ? "1" : "0",
@@ -783,7 +784,10 @@ namespace ChatterMascot.Desktop
             var values = root["values"] as JObject;
             if (values != null)
             {
-                var speaker = values[CoreConfigKeys.SpeakerId];
+                var engine = values[CoreConfigKeys.TtsEngine];
+                if (engine != null) _context.TtsEngine = engine.ToString();
+
+                var speaker = values[CoreConfigKeys.SpeakerKeyFor(_context.TtsEngine)];
                 if (speaker != null) _context.SpeakerId = speaker.ToString();
 
                 var speed = values[CoreConfigKeys.SpeedScale];
@@ -992,8 +996,8 @@ namespace ChatterMascot.Desktop
 
             foreach (var key in new[]
                      {
-                         CoreConfigKeys.SpeakerId, CoreConfigKeys.SpeedScale, CoreConfigKeys.SummaryEnabled,
-                         CoreConfigKeys.AiSummaryBackend, CoreConfigKeys.EmotionClassifier,
+                         CoreConfigKeys.SpeakerId, CoreConfigKeys.KokoroVoiceId, CoreConfigKeys.SpeedScale,
+                         CoreConfigKeys.SummaryEnabled, CoreConfigKeys.AiSummaryBackend, CoreConfigKeys.EmotionClassifier,
                      })
             {
                 var value = defaults[key];
@@ -1182,7 +1186,8 @@ namespace ChatterMascot.Desktop
         {
             switch (coreKey)
             {
-                case CoreConfigKeys.SpeakerId: return SettingKeys.Speaker;
+                case CoreConfigKeys.SpeakerId:
+                case CoreConfigKeys.KokoroVoiceId: return SettingKeys.Speaker;
                 case CoreConfigKeys.SpeedScale: return SettingKeys.Speed;
                 case CoreConfigKeys.SummaryEnabled: return SettingKeys.SummaryEnabled;
                 case CoreConfigKeys.AiSummaryBackend: return SettingKeys.AiSummaryBackend;

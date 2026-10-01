@@ -151,22 +151,6 @@ function getSummarizerLogPath(e = currentPathEnv()) {
 * - 壊れた JSON では直前の値を維持する（書き込み途中を読んだ瞬間に挙動が飛ばないように）
 * - 不正値・未知キーは警告して既定値で動き続ける（**throw しない**）
 */
-/**
-* `ttsEngine` ごとの `ttsBaseUrl` / `ttsSpeakerId` の既定値。
-*
-* ★ **1か所にまとめること。** `createDefaultConfig()` と `createConfigStore()` のマージ
-*   （`ttsEngine` を切り替えたのに `ttsBaseUrl` / `ttsSpeakerId` が別エンジン向けの値の
-*   ままになる事故）、`controlApi.ts` の「すべての設定をリセット」の3か所が同じ値を要る。
-*/
-function ttsEngineDefaults(engine) {
-	return engine === "openai" ? {
-		ttsBaseUrl: "http://127.0.0.1:8880",
-		ttsSpeakerId: "af_heart"
-	} : {
-		ttsBaseUrl: "http://127.0.0.1:10101",
-		ttsSpeakerId: "888753760"
-	};
-}
 function createDefaultConfig() {
 	return {
 		port: 8570,
@@ -178,7 +162,10 @@ function createDefaultConfig() {
 		allowedOrigins: [],
 		ttsEnabled: true,
 		ttsEngine: "voicevox",
-		...ttsEngineDefaults("voicevox"),
+		ttsBaseUrl: "http://127.0.0.1:10101",
+		ttsSpeakerId: "888753760",
+		kokoroBaseUrl: "http://127.0.0.1:8880",
+		kokoroVoiceId: "af_heart",
 		ttsSpeedScale: 1,
 		synthesisTimeoutMs: 3e4,
 		ttsSpawn: true,
@@ -302,34 +289,23 @@ function makeRangeParser(min, max) {
 }
 const parseSpeedScale = makeRangeParser(.5, 2);
 /**
-* `ttsSpeakerId` 専用。VOICEVOX 系（数値のスタイル ID）と Kokoro のような OpenAI 互換
-* エンジン（`af_heart` のような英字の声 ID）の両方を、1つの文字列キーで受ける。
-*
-* - 非負整数（`number` でも、数字だけの文字列でも）→ `String(n)` に正規化する
-*   （前後の空白や桁の表記ゆれを1つの形に揃える）
-* - それ以外の非空文字列 → trim してそのまま通す（英字の声 ID はここを通る）
-* - 負の数・空文字・空白だけの文字列は既定値に倒す
-*
-* ★ **数値らしい文字列（符号・小数点・指数を含む）は、非負整数のときだけ通す。**
-*   `"-1"` / `"1.5"` / `"+3"` / `"1e3"` は英字の声 ID ではなく「数値のつもりで書いたが
-*   非負整数ではない」値なので、`number` で渡したときの `-1` や `1.5` と同じく既定値に
-*   倒す —— 文字列と数値とで挙動を揃える。数値に見えない文字列（`af_heart` 等）は
-*   この判定に掛からず、従来どおりそのまま通る。
+* `ttsSpeakerId`（AivisSpeech のスタイル ID）専用。非負の安全な整数（`number` でも、数字だけの
+* 文字列でも）だけを通し、`String(n)` に正規化する。それ以外は既定値に倒す。
+* Kokoro の声 ID（`af_heart` 等）が混ざったときも倒れるので、書き違いが警告として見える。
 */
-const NUMERIC_LOOKING = /^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i;
 const parseSpeakerId = (raw) => {
-	if (typeof raw === "number") return Number.isInteger(raw) && raw >= 0 ? String(raw) : void 0;
-	if (typeof raw !== "string") return void 0;
-	const trimmed = raw.trim();
-	if (!trimmed) return void 0;
-	if (NUMERIC_LOOKING.test(trimmed)) {
-		if (!/^\d+$/.test(trimmed)) return void 0;
-		const n = Number(trimmed);
-		return Number.isSafeInteger(n) ? String(n) : void 0;
-	}
-	return trimmed;
+	const n = typeof raw === "number" ? raw : typeof raw === "string" && /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : NaN;
+	return Number.isSafeInteger(n) && n >= 0 ? String(n) : void 0;
 };
 const parseNonEmptyString = (raw) => typeof raw === "string" && raw.trim() ? raw.trim() : void 0;
+/**
+* `kokoroVoiceId`（Kokoro の声 ID）専用。数字だけの値は AivisSpeech のスタイル ID の混入として
+* 既定値に倒し、警告で見えるようにする（通すと全文が 503 になる）。
+*/
+const parseKokoroVoiceId = (raw) => {
+	const v = parseNonEmptyString(raw);
+	return v !== void 0 && /^\d+$/.test(v) ? void 0 : v;
+};
 const parseStringList = (raw) => {
 	let items;
 	if (typeof raw === "string") items = raw.split(",");
@@ -480,6 +456,14 @@ const SPECS = {
 		env: "CHATTER_AGENT_TTS_SPEAKER_ID",
 		parse: parseSpeakerId
 	},
+	kokoroBaseUrl: {
+		env: "CHATTER_AGENT_KOKORO_URL",
+		parse: makeUrlParser(["http:", "https:"])
+	},
+	kokoroVoiceId: {
+		env: "CHATTER_AGENT_KOKORO_VOICE_ID",
+		parse: parseKokoroVoiceId
+	},
 	ttsSpeedScale: {
 		env: "CHATTER_AGENT_TTS_SPEED_SCALE",
 		parse: parseSpeedScale
@@ -608,31 +592,11 @@ function createConfigStore(deps = {}) {
 		if (raw !== void 0) envValues[key] = raw;
 	}
 	const overrides = collect(envValues, "環境変数");
-	/**
-	* `ttsBaseUrl` / `ttsSpeakerId` が env にも file にも無ければ、今の `ttsEngine` 向けの
-	* 既定で埋める。**`overrides` / `fileValues` 自体は書き換えない**ので `originOf` は
-	* 引き続き `"default"` を返す。
-	*
-	* ★ **`deps.defaults` を丸ごと信じない。** 差し替えられた既定（テストが `defaults` を
-	*   注入する場合）が別のエンジンの値を持っていても、実際に効いている `ttsEngine`
-	*   （env / file を merge 済みの値）から導くので食い違わない。
-	*/
-	function fillTtsEngineDefaults(base) {
-		const hasBaseUrl = Object.hasOwn(fileValues, "ttsBaseUrl") || Object.hasOwn(overrides, "ttsBaseUrl");
-		const hasSpeakerId = Object.hasOwn(fileValues, "ttsSpeakerId") || Object.hasOwn(overrides, "ttsSpeakerId");
-		if (hasBaseUrl && hasSpeakerId) return base;
-		const engineDefaults = ttsEngineDefaults(base.ttsEngine);
-		return {
-			...base,
-			...hasBaseUrl ? {} : { ttsBaseUrl: engineDefaults.ttsBaseUrl },
-			...hasSpeakerId ? {} : { ttsSpeakerId: engineDefaults.ttsSpeakerId }
-		};
-	}
 	let fileValues = {};
-	let merged = fillTtsEngineDefaults({
+	let merged = {
 		...defaults,
 		...overrides
-	});
+	};
 	/** `${mtimeMs}:${size}`。ファイルが無いときは null */
 	let stamp = null;
 	let loaded = false;
@@ -673,11 +637,11 @@ function createConfigStore(deps = {}) {
 			const parsed = readFileValues();
 			if (parsed) fileValues = parsed;
 		}
-		merged = fillTtsEngineDefaults({
+		merged = {
 			...defaults,
 			...fileValues,
 			...overrides
-		});
+		};
 	}
 	/**
 	* ファイルを `collect()` に通さず生のまま返す。

@@ -132,21 +132,12 @@ describe("GET /v1/config", () => {
     expect(value.writable).not.toContain("ttsBaseUrl");
   });
 
-  /**
-   * ★`ttsEngine: "openai"` で運用中に「すべての設定をリセット」すると、リセットが
-   *   voicevox 向けの `ttsSpeakerId`（数値）を書いてしまい、Kokoro が以後ずっと無音になっていた。
-   */
-  it("★ defaults の ttsBaseUrl / ttsSpeakerId は今の ttsEngine に合わせる（openai）", () => {
+  it("★ ttsEngine を切り替えても defaults は変わらない（AivisSpeech の値と kokoro の既定を両方持つ）", () => {
     write({ ttsEngine: "openai" });
     const value = body<{ defaults: Record<string, unknown> }>(api({ config: store() }).getConfig());
-
-    expect(value.defaults.ttsBaseUrl).toBe("http://127.0.0.1:8880");
-    expect(value.defaults.ttsSpeakerId).toBe("af_heart");
-  });
-
-  it("ttsEngine が voicevox のままなら defaults は createDefaultConfig() と同じ", () => {
-    const value = body<{ defaults: Record<string, unknown> }>(api().getConfig());
     expect(value.defaults).toEqual(createDefaultConfig());
+    expect(value.defaults.ttsSpeakerId).toBe("888753760");
+    expect(value.defaults.kokoroVoiceId).toBe("af_heart");
   });
 });
 
@@ -206,6 +197,26 @@ describe("PATCH /v1/config", () => {
 
   it("再起動まで効かないキーも 403 readonly_key", () => {
     expect(api().patchConfig({ port: 9999 }).status).toBe(403);
+  });
+
+  it("★ ttsEngine は書けて、onConfigPatched に ttsEngine が渡る", () => {
+    const calls: string[][] = [];
+    const res = api({ onConfigPatched: (keys) => calls.push(keys) }).patchConfig({ ttsEngine: "openai" });
+    expect(res.status).toBe(200);
+    expect(calls).toEqual([["ttsEngine"]]);
+    expect(readFile().ttsEngine).toBe("openai");
+  });
+
+  it("★ ttsSpeakerId に Kokoro の声 ID は書けない（400）", () => {
+    const res = api().patchConfig({ ttsSpeakerId: "af_heart" });
+    expect(res.status).toBe(400);
+    expect(body(res)).toEqual({ error: "invalid_value", key: "ttsSpeakerId" });
+  });
+
+  it("★ kokoroVoiceId に AivisSpeech のスタイル ID は書けない（400）", () => {
+    const res = api().patchConfig({ kokoroVoiceId: "888753760" });
+    expect(res.status).toBe(400);
+    expect(body(res)).toEqual({ error: "invalid_value", key: "kokoroVoiceId" });
   });
 
   /** ★★ 会話全文の外部送信路（#76 のレビュー A-2）。塞いでも設定パネルは何も失わない */

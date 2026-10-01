@@ -25,20 +25,22 @@ describe("isWritableConfigKey", () => {
 
   /** (b) 再起動まで反映されないキー。「効かない設定」をパネルに出さないため */
   it("再起動まで効かないキーは書けない", () => {
-    for (const key of ["host", "port", "allowedOrigins", "ttsEngine"] as const) {
+    for (const key of ["host", "port", "allowedOrigins"] as const) {
       expect(isWritableConfigKey(key)).toBe(false);
     }
   });
 
-  /** ★ #106。理由は2つとも別々（kokoroDir はコマンド実行、ttsEngine は spawn 判断の起動時固定） */
-  it("★ kokoroDir / ttsEngine も書けない", () => {
+  /** kokoroDir はコマンド実行（a）。ttsEngine は接続先を選ぶだけなので書ける */
+  it("★ kokoroDir は書けず、ttsEngine は書ける", () => {
     expect(buildConfigPatch({}, { kokoroDir: "/opt/Kokoro-FastAPI" }, allDefault)).toEqual({
       ok: false,
       failure: { reason: "readonly_key", key: "kokoroDir" },
     });
+    expect(isWritableConfigKey("ttsEngine")).toBe(true);
     expect(buildConfigPatch({}, { ttsEngine: "openai" }, allDefault)).toEqual({
-      ok: false,
-      failure: { reason: "readonly_key", key: "ttsEngine" },
+      ok: true,
+      next: { ttsEngine: "openai" },
+      changed: ["ttsEngine"],
     });
   });
 
@@ -132,6 +134,14 @@ describe("buildConfigPatch", () => {
       failure: { reason: "readonly_key", key: "ttsBaseUrl" },
     });
     expect(isWritableConfigKey("ttsBaseUrl")).toBe(false);
+  });
+
+  it("★★ kokoroBaseUrl も readonly_key（外部送信路）。kokoroVoiceId は書ける", () => {
+    expect(buildConfigPatch({}, { kokoroBaseUrl: "http://collector.example" }, allDefault)).toEqual({
+      ok: false,
+      failure: { reason: "readonly_key", key: "kokoroBaseUrl" },
+    });
+    expect(isWritableConfigKey("kokoroVoiceId")).toBe(true);
   });
 
   /** ★ ollayaBaseUrl も ttsBaseUrl と同じ理由（本文の外部送信路になる）で readonly */

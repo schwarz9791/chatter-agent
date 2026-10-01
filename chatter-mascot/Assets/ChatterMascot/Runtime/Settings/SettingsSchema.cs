@@ -85,11 +85,22 @@ namespace ChatterMascot.Settings
     /// <summary>core の設定キー。<c>PATCH /v1/config</c> のボディと <c>origins</c> で使う</summary>
     public static class CoreConfigKeys
     {
+        public const string TtsEngine = "ttsEngine";
         public const string SpeakerId = "ttsSpeakerId";
+        public const string KokoroVoiceId = "kokoroVoiceId";
         public const string SpeedScale = "ttsSpeedScale";
         public const string SummaryEnabled = "aiSummaryEnabled";
         public const string AiSummaryBackend = "aiSummaryBackend";
         public const string EmotionClassifier = "emotionClassifier";
+
+        /// <summary>
+        /// 音声スタイルを書き込む core のキー。声はエンジンごとに別のキーが持つ
+        /// （Kokoro は <see cref="KokoroVoiceId"/>、それ以外は <see cref="SpeakerId"/>）。
+        /// </summary>
+        public static string SpeakerKeyFor(string engine)
+        {
+            return engine == "openai" ? KokoroVoiceId : SpeakerId;
+        }
     }
 
     /// <summary>
@@ -178,7 +189,7 @@ namespace ChatterMascot.Settings
             items.Add(SettingSpec.Section(text.SectionAudio));
 
             // ★ サーバーに繋がらなくても**項目は出す**。消すと「設定が無い」に見える
-            var speakerOverridden = c.IsCoreEnvOverridden(CoreConfigKeys.SpeakerId);
+            var speakerOverridden = c.IsCoreEnvOverridden(CoreConfigKeys.SpeakerKeyFor(c.TtsEngine));
             items.Add(SettingSpec.Choice(
                 SettingKeys.Speaker, text.VoiceStyle, c.SpeakerId, c.Speakers,
                 enabled: c.CoreReachable && c.Speakers.Count > 0 && !speakerOverridden,
@@ -605,7 +616,7 @@ namespace ChatterMascot.Settings
 
         private static string SpeakerNote(SettingsContext c, bool overridden)
         {
-            if (overridden) return EnvNote(c.Text, CoreConfigKeys.SpeakerId);
+            if (overridden) return EnvNote(c.Text, CoreConfigKeys.SpeakerKeyFor(c.TtsEngine));
             if (!c.CoreReachable) return c.CoreNote;
             if (c.Speakers.Count == 0) return c.Text.SpeakerListUnavailable;
             return c.Text.AppliesFromNextSentence;
@@ -635,6 +646,7 @@ namespace ChatterMascot.Settings
             switch (coreKey)
             {
                 case CoreConfigKeys.SpeakerId: return "CHATTER_AGENT_TTS_SPEAKER_ID";
+                case CoreConfigKeys.KokoroVoiceId: return "CHATTER_AGENT_KOKORO_VOICE_ID";
                 case CoreConfigKeys.SpeedScale: return "CHATTER_AGENT_TTS_SPEED_SCALE";
                 case CoreConfigKeys.SummaryEnabled: return "CHATTER_AGENT_AI_SUMMARY_ENABLED";
                 case CoreConfigKeys.AiSummaryBackend: return "CHATTER_AGENT_AI_SUMMARY_BACKEND";

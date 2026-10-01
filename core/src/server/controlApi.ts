@@ -26,7 +26,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { buildConfigPatch, writableConfigKeys } from "../core/configPatch";
-import { configKeys, createDefaultConfig, ttsEngineDefaults, type ConfigKey, type ConfigStore } from "../core/config";
+import { configKeys, createDefaultConfig, type ConfigKey, type ConfigStore } from "../core/config";
 import { writeFileAtomic } from "../core/atomicWrite";
 import { VERSION } from "../core/version";
 import { runSummaryPreview, type SummaryPreviewDeps } from "../summarizer/summaryPreview";
@@ -182,10 +182,7 @@ export function createControlApi(deps: ControlApiDeps): ControlApi {
         //   写した瞬間に「core を直したのにクライアントだけ古い既定に戻す」がありうる。
         //   設定パネルの「すべての設定をリセット」がこれを使う（#76）
         //
-        // ★ **`ttsBaseUrl` / `ttsSpeakerId` は今の `ttsEngine` に合わせる。** `createDefaultConfig()`
-        //   がそのまま返すのは `"voicevox"` 向けの値なので、`openai` 運用中にリセットすると
-        //   Kokoro に voicevox の話者 ID（数値）が渡り、以後ずっと無音になる
-        defaults: { ...createDefaultConfig(), ...ttsEngineDefaults(deps.config.get("ttsEngine")) },
+        defaults: createDefaultConfig(),
       });
     },
 

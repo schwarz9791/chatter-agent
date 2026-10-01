@@ -17,7 +17,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { createConfigStore } from "../core/config";
+import { createConfigStore, type TtsEngineKind } from "../core/config";
 import { acquireLock } from "../core/lock";
 import {
   getAnimationsDir,
@@ -244,12 +244,19 @@ async function main(): Promise<void> {
   //   サーバーを再起動するまで効かない。無音の原因として真っ先に疑ってほしい値なので、
   //   直したらすぐ効く方がよい（クライアント側の警告もそこを名指しする）。
   //   クライアントの生成は object literal と closure だけなので、GET のたびに作って問題ない
-  const currentVoice = (): Voice => ({
-    engine: config.get("ttsEngine"),
-    baseUrl: config.get("ttsBaseUrl"),
-    speakerId: config.get("ttsSpeakerId"),
-    speedScale: config.get("ttsSpeedScale"),
-  });
+  //
+  // ★ **エンジンに応じた接続先・声のキーの選択はここ1か所だけ。** spawn 計画や起動ログも
+  //   `ttsBaseUrl` を直接読まず、これを通す
+  const currentVoice = (): Voice => {
+    const kind = config.get("ttsEngine");
+    const kokoro = kind === "openai";
+    return {
+      engine: kind,
+      baseUrl: config.get(kokoro ? "kokoroBaseUrl" : "ttsBaseUrl"),
+      speakerId: config.get(kokoro ? "kokoroVoiceId" : "ttsSpeakerId"),
+      speedScale: config.get("ttsSpeedScale"),
+    };
+  };
   // ★ ファクトリは作らない。分岐はここ1行だけで、エンジンごとの生成先は `tts/` にある
   const ttsFor = (voice: Voice): TtsEngine => {
     const opts = {
@@ -272,10 +279,9 @@ async function main(): Promise<void> {
    * ★ 起動時のエンジン起動判定（条件3）はこちらを直接呼ぶ。`recheckEngine` 経由にすると
    *   60秒の間引きに引っかかって「繋がらないのに繋がった扱い」になりうる。
    */
-  const probeEngine = async (): Promise<EngineProbe> => {
+  const probeEngine = async (voice: Voice = currentVoice()): Promise<EngineProbe> => {
     // ★ await の前に進めること。同時に走った2本が二重に診断を出さないようにする
     lastEngineCheckAt = Date.now();
-    const voice = currentVoice();
     return await checkEngine(ttsFor(voice), voice.speakerId);
   };
 
@@ -300,6 +306,8 @@ async function main(): Promise<void> {
    * `ttsSpawn=false` / リモート / コマンドが無い）。終了処理はこれを見て止める。
    */
   let engine: EngineProcess | null = null;
+  /** 起動判定をした時点の `ttsEngine`。`switchEngine` は、これと今の値を比べる */
+  let decidedEngine: TtsEngineKind | null = null;
   /** 終了処理が始まったか。**起動判定が spawn する直前に見る**（下の `startEngineIfNeeded`） */
   let stopping = false;
 
@@ -308,8 +316,8 @@ async function main(): Promise<void> {
    *
    * 条件は5つで、全部満たすときだけ起こす:
    * 1. `ttsEnabled` / 2. `ttsSpawn` / 3. **起動時の疎通確認に失敗した** /
-   * 4. `ttsBaseUrl` がループバック / 5. コマンドが解決できた（4と5は `resolveEngineSpawn` /
-   * `resolveKokoroSpawn`。どちらを使うかは `ttsSpawnCommand` と `ttsEngine` で決まる）
+   * 4. 接続先（`currentVoice()` の `baseUrl`）がループバック / 5. コマンドが解決できた（4と5は `resolveEngineSpawn` /
+   * `resolveKokoroSpawn`。どちらを使うかは `ttsEngine` で決まる）
    *
    * ★ **条件3が要。** 「まず繋いでみて、居なければ起こす」ことで、GUI 併用・verify のスタブ・
    *   別ポート運用のすべてが追加の分岐なしで素通りする（ポート衝突の判定コードが要らない）。
@@ -317,10 +325,12 @@ async function main(): Promise<void> {
    * [#51]: https://github.com/schwarz9791/chatter-agent/issues/51
    */
   const startEngineIfNeeded = async (): Promise<void> => {
+    const voice = currentVoice();
+    decidedEngine = voice.engine;
     if (!config.get("ttsEnabled")) return; // 条件1（理由は上の起動ログで既出）
 
     // ★ 条件3。この1回は spawn の有無に関わらず必ず走り、話者 ID の診断もここで出る
-    if ((await probeEngine()) === "reachable") return;
+    if ((await probeEngine(voice)) === "reachable") return;
 
     if (!config.get("ttsSpawn")) {
       // ★ 黙らない。切ったまま忘れた人の症状が「無音」だけになるのが最悪の失敗の仕方
@@ -329,22 +339,15 @@ async function main(): Promise<void> {
       return;
     }
 
-    // ★ `ttsSpawnCommand` を明示したら、エンジン種別に関わらずそれを使う（従来どおり）。
-    //   空なら `ttsEngine` で分岐 —— voicevox は既知候補（`resolveEngineSpawn`）、
-    //   openai は `kokoroDir` から Kokoro-FastAPI を起こす（`resolveKokoroSpawn`）
-    const ttsSpawnCommand = config.get("ttsSpawnCommand");
+    // ★ `ttsSpawnCommand` / `ttsSpawnArgs` は AivisSpeech 専用。Kokoro は `kokoroDir` からだけ起こす
     const plan =
-      ttsSpawnCommand || config.get("ttsEngine") === "voicevox"
+      voice.engine === "voicevox"
         ? resolveEngineSpawn({
-            baseUrl: config.get("ttsBaseUrl"),
-            command: ttsSpawnCommand,
+            baseUrl: voice.baseUrl,
+            command: config.get("ttsSpawnCommand"),
             args: config.get("ttsSpawnArgs"),
           })
-        : resolveKokoroSpawn({
-            baseUrl: config.get("ttsBaseUrl"),
-            kokoroDir: config.get("kokoroDir"),
-            args: config.get("ttsSpawnArgs"),
-          });
+        : resolveKokoroSpawn({ baseUrl: voice.baseUrl, kokoroDir: config.get("kokoroDir") });
 
     if ("skip" in plan) {
       // 条件4 / 条件5。どちらも従来どおりの 503 運用に落ちるだけ。
@@ -402,6 +405,32 @@ async function main(): Promise<void> {
     } catch {
       return "unreachable";
     }
+  };
+
+  // ★ 起動判定は直列にする。疎通確認と `ttsEngine` の切り替えが重なっても二重に起こさない
+  let engineTask: Promise<void> = Promise.resolve();
+  const queueEngineTask = (task: () => Promise<void>): void => {
+    engineTask = engineTask
+      .then(task)
+      .catch((err: unknown) => console.error("[Server] 合成エンジンの起動判定に失敗:", err));
+  };
+
+  /**
+   * `ttsEngine` が切り替わったときの起動判定のやり直し。
+   *
+   * ★ **止めるのは自分が起こしたもの（`engine !== null`）だけ。** GUI で上げた AivisSpeech などは
+   *   触らない。止めるのは、Kokoro が常駐でメモリを占めるため。
+   * ★ 参照は `stop()` が済むまで残す。終了処理の `engine?.stop()` が途中の停止も覆える
+   *   （`stop()` は冪等）
+   * ★ 同じ値の PATCH では何もしない。落ちたエンジンは起こし直さない（「落ちても再起動しない」と
+   *   同じ方針）。`onConfigPatched` には変わっていないキーも届く（`buildConfigPatch`）ので、
+   *   ここで今の値と比べる
+   */
+  const switchEngine = async (): Promise<void> => {
+    if (config.get("ttsEngine") === decidedEngine) return;
+    await engine?.stop();
+    engine = null;
+    await startEngineIfNeeded();
   };
 
   const startOllayaIfNeeded = async (): Promise<void> => {
@@ -464,9 +493,10 @@ async function main(): Promise<void> {
       registerSessionId: (sessionId) => registerSummarizerSession(getSummarizerSessionsPath(), sessionId),
     },
     assetCatalog,
-    // ★ 起こすかどうかの判断は起動時の1回きりではない。設定パネルで `emotionClassifier` /
+    // ★ 起こすかどうかの判断は起動時の1回きりではない。設定パネルで `ttsEngine` / `emotionClassifier` /
     //   `ollayaSpawn` が変わったときも、そのつど判断し直す（他のキーの変更では何もしない）
     onConfigPatched: (keys) => {
+      if (keys.includes("ttsEngine")) queueEngineTask(switchEngine);
       if (keys.includes("emotionClassifier") || keys.includes("ollayaSpawn")) {
         void startOllayaIfNeeded().catch((err: unknown) => console.error("[Server] Ollaya の起動判定に失敗:", err));
       }
@@ -515,7 +545,7 @@ async function main(): Promise<void> {
   const bound = wsServer.address();
   console.log(`[Server] listening on ws://${bound.host}:${bound.port}`);
   if (config.get("ttsEnabled")) {
-    console.log(`[Server] audio: http://${bound.host}:${bound.port}/audio/ (engine: ${config.get("ttsBaseUrl")})`);
+    console.log(`[Server] audio: http://${bound.host}:${bound.port}/audio/ (engine: ${currentVoice().baseUrl})`);
   } else {
     console.log("[Server] ttsEnabled=false: 音声は配りません（クライアントは無音で ack します）");
   }
@@ -552,7 +582,7 @@ async function main(): Promise<void> {
   //
   // ★ エンジンを起こすのもここ（#51）。**`Ready` より後ろのまま**にすること —— 前に出すと
   //   起動が疎通待ちで伸び、上の理由がそのまま当てはまる状態に戻る
-  void startEngineIfNeeded().catch((err: unknown) => console.error("[Server] 合成エンジンの起動判定に失敗:", err));
+  queueEngineTask(startEngineIfNeeded);
   // ★ Ollaya も同じ理由で Ready より後ろ・起動を待たない
   void startOllayaIfNeeded().catch((err: unknown) => console.error("[Server] Ollaya の起動判定に失敗:", err));
 
@@ -602,7 +632,7 @@ async function checkEngine(tts: TtsEngine, speakerId: string): Promise<EnginePro
     if (err instanceof TtsHttpError) {
       console.warn(
         `[Server] 音声合成エンジンは応答しましたが声の一覧を返しません (${tts.baseUrl}, status=${err.status})。` +
-          "ttsEngine と ttsBaseUrl を確認してください",
+          "ttsEngine と接続先（ttsBaseUrl / kokoroBaseUrl）を確認してください",
       );
       return "reachable";
     }
@@ -621,7 +651,9 @@ async function checkEngine(tts: TtsEngine, speakerId: string): Promise<EnginePro
     return "reachable";
   }
 
-  console.warn(`[Server] ttsSpeakerId=${speakerId} はこのエンジンに存在しません。音声は 503 になります`);
+  console.warn(
+    `[Server] 声 ID ${speakerId}（ttsSpeakerId / kokoroVoiceId）はこのエンジンに存在しません。音声は 503 になります`,
+  );
   for (const voice of voices.slice(0, SPEAKER_HINT_LIMIT)) {
     console.warn(`[Server]   ${voice.id}  ${voice.label}`);
   }

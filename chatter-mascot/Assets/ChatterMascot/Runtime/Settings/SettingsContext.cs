@@ -118,6 +118,9 @@ namespace ChatterMascot.Settings
         /// <summary>話者の候補。空なら取得できていない</summary>
         public IReadOnlyList<SettingChoice> Speakers { get; set; } = NoChoices;
 
+        /// <summary>合成エンジン（<c>ttsEngine</c>）。声を書き込むキーがこれで変わる</summary>
+        public string TtsEngine { get; set; } = "voicevox";
+
         /// <summary>選択中の話者 ID（文字列）</summary>
         public string SpeakerId { get; set; } = "";
 

@@ -298,7 +298,7 @@ namespace ChatterMascot.Playback
             state.UnavailableWarnedAt = now;
             commands.Add(PlaybackCommand.Warn(
                 $"音声を用意できない状態が {state.UnavailableStreak} 件続いています（{reason}）。" +
-                "サーバー側の合成エンジンと ttsBaseUrl / ttsSpeakerId を確認してください"));
+                "サーバー側の合成エンジンと接続先・声（AivisSpeech は ttsBaseUrl / ttsSpeakerId、Kokoro は kokoroBaseUrl / kokoroVoiceId）を確認してください"));
         }
 
         /// <summary>ack を出すか、切断中なら溜める。</summary>

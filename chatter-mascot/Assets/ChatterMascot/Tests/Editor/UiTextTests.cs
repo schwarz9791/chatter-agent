@@ -25,8 +25,8 @@ namespace ChatterMascot.Tests
 
         private static readonly string[] CoreKeys =
         {
-            CoreConfigKeys.SpeakerId, CoreConfigKeys.SpeedScale, CoreConfigKeys.SummaryEnabled,
-            CoreConfigKeys.AiSummaryBackend, CoreConfigKeys.EmotionClassifier,
+            CoreConfigKeys.SpeakerId, CoreConfigKeys.KokoroVoiceId, CoreConfigKeys.SpeedScale,
+            CoreConfigKeys.SummaryEnabled, CoreConfigKeys.AiSummaryBackend, CoreConfigKeys.EmotionClassifier,
         };
 
         private static readonly string[] ErrorCodes =

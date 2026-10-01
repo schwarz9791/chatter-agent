@@ -62,29 +62,32 @@ export interface ChatterAgentConfig {
    */
   ttsEnabled: boolean;
   /**
-   * 音声合成エンジンの種類。`ttsBaseUrl` をどの API 契約で叩くかを決める（→ `tts/`）。
+   * 音声合成エンジンの種類。どの API 契約で、どの接続先・声のキーを使うかを決める（→ `tts/`）。
    *
    * - `"voicevox"`: AivisSpeech / VOICEVOX の互換 API（`tts/voicevoxClient.ts`）
    * - `"openai"`: OpenAI 互換の音声合成 API（`tts/openaiClient.ts`）。Kokoro-FastAPI が対象
    */
   ttsEngine: TtsEngineKind;
   /**
-   * 音声合成エンジンの baseUrl。既定は `ttsEngine` から導く（→ `ttsEngineDefaults`）——
-   * `"voicevox"` は AivisSpeech.app を単体起動したときの標準ポート、`"openai"` は
-   * Kokoro-FastAPI の標準ポート。（cc-mascot はエンジンを自分で spawn して 8564 を使うので、
-   * そちらとは別物）
-   *
-   * ★ `ttsEngine` が `"openai"` のときは **`/v1` を含まない origin** を書くこと
-   *   （パスはクライアントが足す）。
+   * AivisSpeech（`ttsEngine: "voicevox"`）専用の baseUrl。AivisSpeech.app を単体起動したときの
+   * 標準ポートが既定。（cc-mascot はエンジンを自分で spawn して 8564 を使うので、そちらとは別物）
+   * Kokoro の接続先は `kokoroBaseUrl`。
    */
   ttsBaseUrl: string;
   /**
-   * 声を選ぶ ID。VOICEVOX 系は数値のスタイル ID（文字列化して持つ）、Kokoro のような
-   * OpenAI 互換エンジンは `af_heart` のような英字の声 ID になる。
-   * 既定は `ttsEngine` から導く（→ `ttsEngineDefaults`）—— `"voicevox"` は AivisSpeech
-   * 標準同梱の Anneli（ノーマル）、`"openai"` は Kokoro-FastAPI 標準同梱の声。
+   * AivisSpeech（`ttsEngine: "voicevox"`）専用の声。数値のスタイル ID を文字列化して持つ。
+   * 既定は AivisSpeech 標準同梱の Anneli（ノーマル）。Kokoro の声は `kokoroVoiceId`。
    */
   ttsSpeakerId: string;
+  /**
+   * Kokoro-FastAPI（`ttsEngine: "openai"`）の origin。**`/v1` を含めないこと**（パスはクライアントが足す）。
+   */
+  kokoroBaseUrl: string;
+  /**
+   * Kokoro の声 ID。`af_heart` のような単体のほか、`af_bella+af_sky` / `af_bella(2)+af_sky(1)` の
+   * ような合成指定も受ける。
+   */
+  kokoroVoiceId: string;
   /**
    * 合成の話速。`"voicevox"` は `audio_query` が返した JSON の `speedScale` **だけ**を
    * 書き換えて `synthesis` に投げ（→ `tts/voicevoxClient.ts`）、`"openai"` は `speed` に
@@ -137,9 +140,9 @@ export interface ChatterAgentConfig {
    */
   ttsSpawn: boolean;
   /**
-   * 起こすエンジンの実行パス。空のときの探し方は `ttsEngine` で決まる（→ `server/engineProcess.ts`）
-   * —— `"voicevox"` なら AivisSpeech.app の既知の場所（`/Applications/…` →
-   * `~/Applications/…`）、`"openai"` なら `kokoroDir` から Kokoro-FastAPI（`uv`）を起こす。
+   * 起こす AivisSpeech（`ttsEngine: "voicevox"`）の実行パス。**AivisSpeech 専用**で、Kokoro は
+   * `kokoroDir` からだけ起こす。空のときは AivisSpeech.app の既知の場所（`/Applications/…` →
+   * `~/Applications/…`。→ `server/engineProcess.ts`）を探す。
    *
    * ★ 明示した値が見つからないとき、既知の候補へ**フォールバックしない**。
    *   指定を黙って別のバイナリに読み替えるのは最悪の失敗の仕方になる。
@@ -150,9 +153,8 @@ export interface ChatterAgentConfig {
    */
   ttsSpawnCommand: string;
   /**
-   * 起こすときの引数。空なら `ttsBaseUrl` から導く —— `"voicevox"` は `--host <host>
-   * --port <port>`、`"openai"`（Kokoro-FastAPI）は `run --no-sync uvicorn api.src.main:app
-   * --host <host> --port <port>`（→ `server/engineProcess.ts` の `resolveKokoroSpawn`）。
+   * AivisSpeech を起こすときの引数（**AivisSpeech 専用**。Kokoro の引数は常に導出する）。
+   * 空なら `ttsBaseUrl` から `--host <host> --port <port>` を導く。
    *
    * ★ **指定すると導出は行われない**（追加ではなく置換）。自分で書くならエンジンが要る
    *   引数を全部自分で書くこと。「足りない分だけ補う」形は挙動が読めなくなる。
@@ -160,8 +162,8 @@ export interface ChatterAgentConfig {
   ttsSpawnArgs: string[];
   /**
    * Kokoro-FastAPI（`ttsEngine: "openai"`）を clone したディレクトリ。
-   * `ttsSpawnCommand` が空のときの起こし方（`server/engineProcess.ts` の
-   * `resolveKokoroSpawn`）が `cwd` と `PYTHONPATH` の起点として使う。
+   * 起こし方（`server/engineProcess.ts` の `resolveKokoroSpawn`）が `cwd` と `PYTHONPATH` の
+   * 起点として使う。
    *
    * ★ **既定は空文字で、そのときは起こさない。** AivisSpeech と違って決まったインストール先が
    *   無く、導入（依存とモデルの取得）はユーザーに済ませてもらう前提のため。
@@ -332,19 +334,6 @@ export type AiSummaryBackend = "fm" | "claude";
 export type EmotionClassifierKind = "ollaya" | "fm" | "dictionary";
 export type TtsEngineKind = "voicevox" | "openai";
 
-/**
- * `ttsEngine` ごとの `ttsBaseUrl` / `ttsSpeakerId` の既定値。
- *
- * ★ **1か所にまとめること。** `createDefaultConfig()` と `createConfigStore()` のマージ
- *   （`ttsEngine` を切り替えたのに `ttsBaseUrl` / `ttsSpeakerId` が別エンジン向けの値の
- *   ままになる事故）、`controlApi.ts` の「すべての設定をリセット」の3か所が同じ値を要る。
- */
-export function ttsEngineDefaults(engine: TtsEngineKind): { ttsBaseUrl: string; ttsSpeakerId: string } {
-  return engine === "openai"
-    ? { ttsBaseUrl: "http://127.0.0.1:8880", ttsSpeakerId: "af_heart" }
-    : { ttsBaseUrl: "http://127.0.0.1:10101", ttsSpeakerId: "888753760" };
-}
-
 export function createDefaultConfig(): ChatterAgentConfig {
   return {
     port: 8570,
@@ -357,7 +346,10 @@ export function createDefaultConfig(): ChatterAgentConfig {
 
     ttsEnabled: true,
     ttsEngine: "voicevox",
-    ...ttsEngineDefaults("voicevox"),
+    ttsBaseUrl: "http://127.0.0.1:10101",
+    ttsSpeakerId: "888753760",
+    kokoroBaseUrl: "http://127.0.0.1:8880",
+    kokoroVoiceId: "af_heart",
     ttsSpeedScale: 1.0,
     synthesisTimeoutMs: 30_000,
     ttsSpawn: true,
@@ -499,39 +491,28 @@ const TTS_SPEED_SCALE_MAX = 2.0;
 const parseSpeedScale: Parser<number> = makeRangeParser(TTS_SPEED_SCALE_MIN, TTS_SPEED_SCALE_MAX);
 
 /**
- * `ttsSpeakerId` 専用。VOICEVOX 系（数値のスタイル ID）と Kokoro のような OpenAI 互換
- * エンジン（`af_heart` のような英字の声 ID）の両方を、1つの文字列キーで受ける。
- *
- * - 非負整数（`number` でも、数字だけの文字列でも）→ `String(n)` に正規化する
- *   （前後の空白や桁の表記ゆれを1つの形に揃える）
- * - それ以外の非空文字列 → trim してそのまま通す（英字の声 ID はここを通る）
- * - 負の数・空文字・空白だけの文字列は既定値に倒す
- *
- * ★ **数値らしい文字列（符号・小数点・指数を含む）は、非負整数のときだけ通す。**
- *   `"-1"` / `"1.5"` / `"+3"` / `"1e3"` は英字の声 ID ではなく「数値のつもりで書いたが
- *   非負整数ではない」値なので、`number` で渡したときの `-1` や `1.5` と同じく既定値に
- *   倒す —— 文字列と数値とで挙動を揃える。数値に見えない文字列（`af_heart` 等）は
- *   この判定に掛からず、従来どおりそのまま通る。
+ * `ttsSpeakerId`（AivisSpeech のスタイル ID）専用。非負の安全な整数（`number` でも、数字だけの
+ * 文字列でも）だけを通し、`String(n)` に正規化する。それ以外は既定値に倒す。
+ * Kokoro の声 ID（`af_heart` 等）が混ざったときも倒れるので、書き違いが警告として見える。
  */
-const NUMERIC_LOOKING = /^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i;
-
 const parseSpeakerId: Parser<string> = (raw) => {
-  if (typeof raw === "number") return Number.isInteger(raw) && raw >= 0 ? String(raw) : undefined;
-  if (typeof raw !== "string") return undefined;
-  const trimmed = raw.trim();
-  if (!trimmed) return undefined;
-  if (NUMERIC_LOOKING.test(trimmed)) {
-    // 非負整数の見た目（数字だけ）でなければ既定値に倒す
-    if (!/^\d+$/.test(trimmed)) return undefined;
-    const n = Number(trimmed);
-    return Number.isSafeInteger(n) ? String(n) : undefined;
-  }
-  return trimmed;
+  const n =
+    typeof raw === "number" ? raw : typeof raw === "string" && /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : NaN;
+  return Number.isSafeInteger(n) && n >= 0 ? String(n) : undefined;
 };
 
 // trim した値を返すこと。判定にだけ使って生値を返すと、CHATTER_AGENT_HOST=" 127.0.0.1 "
 // のような値がそのまま listen() へ渡る
 const parseNonEmptyString: Parser<string> = (raw) => (typeof raw === "string" && raw.trim() ? raw.trim() : undefined);
+
+/**
+ * `kokoroVoiceId`（Kokoro の声 ID）専用。数字だけの値は AivisSpeech のスタイル ID の混入として
+ * 既定値に倒し、警告で見えるようにする（通すと全文が 503 になる）。
+ */
+const parseKokoroVoiceId: Parser<string> = (raw) => {
+  const v = parseNonEmptyString(raw);
+  return v !== undefined && /^\d+$/.test(v) ? undefined : v;
+};
 
 // 環境変数（カンマ区切りの文字列）と config.json（配列）の両方を受ける。
 // 要素が1つでも文字列以外なら、部分的に取り込まず配列ごと undefined にする
@@ -668,6 +649,8 @@ const SPECS = {
   ttsEngine: { env: "CHATTER_AGENT_TTS_ENGINE", parse: parseTtsEngine },
   ttsBaseUrl: { env: "CHATTER_AGENT_TTS_URL", parse: makeUrlParser(["http:", "https:"]) },
   ttsSpeakerId: { env: "CHATTER_AGENT_TTS_SPEAKER_ID", parse: parseSpeakerId },
+  kokoroBaseUrl: { env: "CHATTER_AGENT_KOKORO_URL", parse: makeUrlParser(["http:", "https:"]) },
+  kokoroVoiceId: { env: "CHATTER_AGENT_KOKORO_VOICE_ID", parse: parseKokoroVoiceId },
   ttsSpeedScale: { env: "CHATTER_AGENT_TTS_SPEED_SCALE", parse: parseSpeedScale },
   synthesisTimeoutMs: { env: "CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS", parse: parseTimeoutMs },
   ttsSpawn: { env: "CHATTER_AGENT_TTS_SPAWN", parse: parseBoolean },
@@ -819,29 +802,8 @@ export function createConfigStore(deps: ConfigStoreDeps = {}): ConfigStore {
   }
   const overrides = collect(envValues, "環境変数");
 
-  /**
-   * `ttsBaseUrl` / `ttsSpeakerId` が env にも file にも無ければ、今の `ttsEngine` 向けの
-   * 既定で埋める。**`overrides` / `fileValues` 自体は書き換えない**ので `originOf` は
-   * 引き続き `"default"` を返す。
-   *
-   * ★ **`deps.defaults` を丸ごと信じない。** 差し替えられた既定（テストが `defaults` を
-   *   注入する場合）が別のエンジンの値を持っていても、実際に効いている `ttsEngine`
-   *   （env / file を merge 済みの値）から導くので食い違わない。
-   */
-  function fillTtsEngineDefaults(base: ChatterAgentConfig): ChatterAgentConfig {
-    const hasBaseUrl = Object.hasOwn(fileValues, "ttsBaseUrl") || Object.hasOwn(overrides, "ttsBaseUrl");
-    const hasSpeakerId = Object.hasOwn(fileValues, "ttsSpeakerId") || Object.hasOwn(overrides, "ttsSpeakerId");
-    if (hasBaseUrl && hasSpeakerId) return base;
-    const engineDefaults = ttsEngineDefaults(base.ttsEngine);
-    return {
-      ...base,
-      ...(hasBaseUrl ? {} : { ttsBaseUrl: engineDefaults.ttsBaseUrl }),
-      ...(hasSpeakerId ? {} : { ttsSpeakerId: engineDefaults.ttsSpeakerId }),
-    };
-  }
-
   let fileValues: Partial<ChatterAgentConfig> = {};
-  let merged: ChatterAgentConfig = fillTtsEngineDefaults({ ...defaults, ...overrides });
+  let merged: ChatterAgentConfig = { ...defaults, ...overrides };
   /** `${mtimeMs}:${size}`。ファイルが無いときは null */
   let stamp: string | null = null;
   let loaded = false;
@@ -899,7 +861,7 @@ export function createConfigStore(deps: ConfigStoreDeps = {}): ConfigStore {
       const parsed = readFileValues();
       if (parsed) fileValues = parsed;
     }
-    merged = fillTtsEngineDefaults({ ...defaults, ...fileValues, ...overrides });
+    merged = { ...defaults, ...fileValues, ...overrides };
   }
 
   /**

@@ -187,6 +187,9 @@ function serverEnv(overrides = {}) {
     CHATTER_AGENT_PORT: String(PORT),
     CHATTER_AGENT_TTS_URL: `http://127.0.0.1:${engine.address().port}`,
     CHATTER_AGENT_TTS_SPEAKER_ID: String(SPEAKER_ID),
+    // スタブは voicevox と openai の口を同じポートで持つので、Kokoro の宛先も同じにする
+    CHATTER_AGENT_KOKORO_URL: `http://127.0.0.1:${engine.address().port}`,
+    CHATTER_AGENT_KOKORO_VOICE_ID: OPENAI_VOICE_ID,
     CHATTER_AGENT_SYNTHESIS_TIMEOUT_MS: "3000",
     // ★ 感情判定は見ないシナリオなので固定する。既定（ollaya・spawn=true）のままだと、
     //   開発機に ollaya が入っていれば本物の `ollaya serve` が起動され、[Engine] 起動ログの
@@ -380,7 +383,7 @@ try {
     const record = enqueue("話者 ID を間違えたときの発言です。");
     await until(() => client.frames.some((f) => f.seq === record.seq), 5000);
 
-    check("★ 起動時の診断が値を名指しする", serverLogs().includes("ttsSpeakerId=999999"), serverLogs());
+    check("★ 起動時の診断が値を名指しする", serverLogs().includes("声 ID 999999（"), serverLogs());
     check(
       "★ 実在する話者 ID を候補として並べる（直せる形で出す）",
       serverLogs().includes(String(SPEAKER_ID)),
@@ -507,7 +510,7 @@ try {
     await startServer(
       serverEnv({
         CHATTER_AGENT_TTS_ENGINE: "openai",
-        CHATTER_AGENT_TTS_SPEAKER_ID: OPENAI_VOICE_ID,
+        CHATTER_AGENT_KOKORO_VOICE_ID: OPENAI_VOICE_ID,
         CHATTER_AGENT_TTS_SPEED_SCALE: "1.5",
       }),
     );
@@ -527,7 +530,7 @@ try {
       JSON.stringify(openaiRequests),
     );
     const seen = openaiRequests.at(-1);
-    check("★ voice は ttsSpeakerId どおり", seen?.voice === OPENAI_VOICE_ID, JSON.stringify(seen));
+    check("★ voice は kokoroVoiceId どおり", seen?.voice === OPENAI_VOICE_ID, JSON.stringify(seen));
     check("★ speed は ttsSpeedScale どおり", seen?.speed === 1.5, JSON.stringify(seen));
 
     show("⑱ ★ ttsEngine=openai: エンジンが落ちていたら 503（テキストの配信は止まらない）");
@@ -544,12 +547,12 @@ try {
   }
 
   {
-    show("⑲ ★ ttsEngine=openai: ttsSpeakerId が存在しないとき、起動時の診断が候補を出す");
+    show("⑲ ★ ttsEngine=openai: kokoroVoiceId が存在しないとき、起動時の診断が候補を出す");
     await stopServer();
     await startServer(
       serverEnv({
         CHATTER_AGENT_TTS_ENGINE: "openai",
-        CHATTER_AGENT_TTS_SPEAKER_ID: "no-such-voice",
+        CHATTER_AGENT_KOKORO_VOICE_ID: "no-such-voice",
       }),
     );
 
@@ -558,7 +561,7 @@ try {
     await until(() => client.frames.some((f) => f.seq === record.seq), 5000);
 
     const diagLog = server?.log ?? "";
-    check("★ 起動時の診断が値を名指しする", diagLog.includes("ttsSpeakerId=no-such-voice"), diagLog);
+    check("★ 起動時の診断が値を名指しする", diagLog.includes("声 ID no-such-voice（"), diagLog);
     check("★ 実在する声 ID を候補として並べる", diagLog.includes(OPENAI_VOICE_ID), diagLog);
 
     const res = await fetch(`${base}${audioPath(record)}`);
@@ -574,7 +577,7 @@ try {
     await startServer(
       serverEnv({
         CHATTER_AGENT_TTS_ENGINE: "openai",
-        CHATTER_AGENT_TTS_SPEAKER_ID: OPENAI_VOICE_ID,
+        CHATTER_AGENT_KOKORO_VOICE_ID: OPENAI_VOICE_ID,
       }),
     );
     // ★ 疎通の確認は Ready の後に走る。結論が出るまで待たないと、否定検査が空振りする
@@ -647,13 +650,13 @@ try {
   }
 
   {
-    show("㉔ ★ #149: openai で ttsBaseUrl が openai 互換ではない相手（404）を指しても、起こさず警告する");
+    show("㉔ ★ #149: openai で kokoroBaseUrl が openai 互換ではない相手（404）を指しても、起こさず警告する");
     await stopServer();
     openaiVoicesUnavailable = true;
     await startServer(
       serverEnv({
         CHATTER_AGENT_TTS_ENGINE: "openai",
-        CHATTER_AGENT_TTS_SPEAKER_ID: OPENAI_VOICE_ID,
+        CHATTER_AGENT_KOKORO_VOICE_ID: OPENAI_VOICE_ID,
       }),
     );
 
@@ -668,6 +671,155 @@ try {
     );
 
     openaiVoicesUnavailable = false;
+  }
+
+  {
+    show("㉕ ★ 実行中の ttsEngine 切り替え: 起動判定がやり直され、自分で起こした AivisSpeech だけが止まる");
+    await stopServer();
+    // ★ `ttsEngine` を env で固定しないこと（固定すると PATCH が 409 になる）。既定の voicevox で始める。
+    //   起こす相手は使い捨てのスタブに限る（`CHATTER_AGENT_TTS_SPAWN_COMMAND` を必ず渡す）。
+    //   `ttsSpawnCommand` は AivisSpeech 専用なので、Kokoro 側は常駐のスタブ（openai の口）へ向ける
+    const voicevoxPort = PORT + 3;
+    const SPAWNED_WAV_SECONDS = 0.5;
+    const stubVoicevox = path.join(root, "stub-voicevox");
+    fs.writeFileSync(
+      stubVoicevox,
+      `#!/usr/bin/env node
+const http = require("node:http");
+const args = process.argv.slice(2);
+const host = args[args.indexOf("--host") + 1];
+const port = Number(args[args.indexOf("--port") + 1]);
+const wav = Buffer.from(${JSON.stringify(makeWav(SPAWNED_WAV_SECONDS).toString("base64"))}, "base64");
+http
+  .createServer((req, res) => {
+    if (req.url.startsWith("/speakers")) {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify([{ name: "スタブ", speaker_uuid: "u", styles: [{ id: ${SPEAKER_ID}, name: "ノーマル" }] }]));
+      return;
+    }
+    if (req.url.startsWith("/audio_query")) {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ accent_phrases: [] }));
+      });
+      return;
+    }
+    if (req.url.startsWith("/synthesis")) {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "audio/wav" });
+        res.end(wav);
+      });
+      return;
+    }
+    res.writeHead(404).end();
+  })
+  .listen(port, host);
+`,
+    );
+    fs.chmodSync(stubVoicevox, 0o755);
+
+    await startServer(
+      serverEnv({
+        CHATTER_AGENT_TTS_ENGINE: undefined,
+        CHATTER_AGENT_TTS_URL: `http://127.0.0.1:${voicevoxPort}`,
+        CHATTER_AGENT_TTS_SPAWN_COMMAND: stubVoicevox,
+      }),
+    );
+    const spawnedAtStart = await until(() => (server?.log ?? "").includes("[Engine] 起動しました"), 10_000);
+    check("★ 起動時に AivisSpeech のスタブを起こした", spawnedAtStart, server?.log ?? "");
+    const pidOf = (log) => Number(/\[Engine\] 起動しました \(pid=(\d+)\)/.exec(log)?.[1]);
+    const pidA = pidOf(server?.log ?? "");
+    check("起こしたエンジンの pid がログに出る", Number.isInteger(pidA), server?.log ?? "");
+    const spawnCount = () => (server?.log ?? "").split("[Engine] 起動しました").length - 1;
+    const alive = (pid) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    const patchEngine = (value) =>
+      fetch(`${base}/v1/config`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ttsEngine: value }),
+      });
+    /** 200 か 503 以外になるまで取り直す（起こした直後のエンジンはまだ上がっていない） */
+    const fetchAudio = async (record) => {
+      for (let i = 0; i < 100; i++) {
+        const res = await fetch(`${base}${audioPath(record)}`);
+        const buf = await res.arrayBuffer();
+        if (res.status !== 503) return { status: res.status, bytes: buf.byteLength };
+        await sleep(100);
+      }
+      return { status: 503, bytes: 0 };
+    };
+
+    const client = await connect();
+
+    const toOpenai = await patchEngine("openai");
+    check("★ PATCH {ttsEngine:openai} が通る", toOpenai.status === 200, `status=${toOpenai.status}`);
+    const closedA = Number.isInteger(pidA) && (await until(() => !alive(pidA), 10_000));
+    check("★ 自分が起こした AivisSpeech は止まる", closedA, `pid=${pidA}`);
+    check("★ openai への切り替えでは何も起こさない", spawnCount() === 1, server?.log ?? "");
+
+    const recordA = enqueue("openai に切り替えた後の発言です。");
+    await until(() => client.frames.some((f) => f.seq === recordA.seq), 5000);
+    const openaiBefore = openaiRequests.length;
+    const audioA = await fetchAudio(recordA);
+    check(
+      "★ 次の GET は openai の口（Kokoro）へ行く",
+      audioA.status === 200 && audioA.bytes === WAV.byteLength,
+      JSON.stringify(audioA),
+    );
+    check("openai の口が叩かれた", openaiRequests.length === openaiBefore + 1, JSON.stringify(openaiRequests));
+
+    const toVoicevox = await patchEngine("voicevox");
+    check("★ PATCH {ttsEngine:voicevox} が通る", toVoicevox.status === 200, `status=${toVoicevox.status}`);
+    const respawned = await until(() => spawnCount() === 2, 10_000);
+    check("★ 切り替えで AivisSpeech を起こし直す", respawned, server?.log ?? "");
+    const pidB = pidOf((server?.log ?? "").slice((server?.log ?? "").lastIndexOf("[Engine] 起動しました") - 1));
+    check("新しい pid は前と違う", Number.isInteger(pidB) && pidB !== pidA, `A=${pidA} B=${pidB}`);
+
+    const recordB = enqueue("voicevox に戻した後の発言です。");
+    await until(() => client.frames.some((f) => f.seq === recordB.seq), 5000);
+    const openaiMid = openaiRequests.length;
+    const audioB = await fetchAudio(recordB);
+    check(
+      "★ 次の GET は起こした AivisSpeech のスタブへ行く",
+      audioB.status === 200 && audioB.bytes === makeWav(SPAWNED_WAV_SECONDS).byteLength,
+      JSON.stringify(audioB),
+    );
+    check("openai の口は叩かれていない", openaiRequests.length === openaiMid, JSON.stringify(openaiRequests));
+
+    const same = await patchEngine("voicevox");
+    check("同じ値の PATCH も通る", same.status === 200, `status=${same.status}`);
+    await sleep(500);
+    check("★ 同じ値の PATCH では起こし直さない", spawnCount() === 2, server?.log ?? "");
+    check("★ 起こしたエンジンは生きたまま", alive(pidB), `pid=${pidB}`);
+
+    // ★ 生きているエンジンでは修正前の条件でも素通りする。**落ちた**エンジンで確かめること
+    process.kill(-pidB, "SIGTERM"); // detached で起こしているのでプロセスグループごと
+    check("起こしたエンジンを外から止めた", await until(() => !alive(pidB), 5000), `pid=${pidB}`);
+    const sameAfterCrash = await patchEngine("voicevox");
+    check("落ちた後の同じ値の PATCH も通る", sameAfterCrash.status === 200, `status=${sameAfterCrash.status}`);
+    await sleep(500);
+    check("★ 落ちたエンジンは同じ値の PATCH で起こし直さない", spawnCount() === 2, server?.log ?? "");
+
+    // サーバーの終了で道連れにできるかは、切り替えで起こし直した別のエンジンで確かめる
+    await patchEngine("openai");
+    await patchEngine("voicevox");
+    check("★ 切り替え直せば起こし直す", await until(() => spawnCount() === 3, 10_000), server?.log ?? "");
+    const pidC = pidOf((server?.log ?? "").slice((server?.log ?? "").lastIndexOf("[Engine] 起動しました") - 1));
+
+    await client.close();
+    await stopServer();
+    const goneC = Number.isInteger(pidC) && (await until(() => !alive(pidC), 5000));
+    check("★ サーバーを止めると起こしたエンジンも落ちる", goneC, `pid=${pidC}`);
   }
 } catch (err) {
   console.error("\n\x1b[31m検証中に例外が発生しました\x1b[0m");

@@ -345,7 +345,7 @@ function noteUnavailable(state: PlaybackState, now: number, reason: string, comm
     kind: "warn",
     message:
       `音声を用意できない状態が ${state.unavailableStreak} 件続いています（${reason}）。` +
-      "サーバー側の合成エンジンと ttsBaseUrl / ttsSpeakerId を確認してください",
+      "サーバー側の合成エンジンと接続先・声（AivisSpeech は ttsBaseUrl / ttsSpeakerId、Kokoro は kokoroBaseUrl / kokoroVoiceId）を確認してください",
   });
 }
 

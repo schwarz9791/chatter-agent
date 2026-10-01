@@ -385,21 +385,6 @@ describe("resolveKokoroSpawn", () => {
     expect(result).toEqual({ skip: "not-found", tried: ["uv"], subject: "uv" });
   });
 
-  /** ★ `ttsSpawnArgs` を渡すと導出した args を丸ごと置換する（`buildArgs` と同じ規則） */
-  it("★ args を渡すと導出した run 引数を置換する（cwd と env はそのまま）", () => {
-    const { env } = withUv();
-    const result = kokoro({ env, args: ["run", "python", "-m", "custom_entrypoint"] });
-    expect(result).toMatchObject({ args: ["run", "python", "-m", "custom_entrypoint"], cwd: KOKORO_DIR });
-  });
-
-  it("args が空配列なら従来どおり導出する", () => {
-    const { env } = withUv();
-    const result = kokoro({ env, args: [] });
-    expect(result).toMatchObject({
-      args: ["run", "--no-sync", "uvicorn", "api.src.main:app", "--host", "127.0.0.1", "--port", "8880"],
-    });
-  });
-
   it("★ IPv6 のループバックを受け、--host からは角括弧が外れる", () => {
     const { env } = withUv();
     expect(kokoro({ baseUrl: "http://[::1]:8880", env })).toMatchObject({

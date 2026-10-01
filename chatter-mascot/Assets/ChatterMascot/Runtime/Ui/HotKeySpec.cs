@@ -183,7 +183,7 @@ namespace ChatterMascot.Ui
         ///   <c>settings.json</c> に往復できない値が入る（<see cref="Format"/> が空を返し、
         ///   次の起動でショートカットが消える）。
         /// </summary>
-        public static bool TryFromCode(uint keyCode, uint modifierMask, out HotKeySpec spec, out string error)
+        public static bool TryFromCode(uint keyCode, uint modifierMask, UiText text, out HotKeySpec spec, out string error)
         {
             spec = default(HotKeySpec);
 
@@ -193,7 +193,7 @@ namespace ChatterMascot.Ui
 
             if (mask == 0)
             {
-                error = "修飾キー（⌃ ⌥ ⇧ ⌘）を一緒に押してください";
+                error = text.HotKeyNeedsModifier;
                 return false;
             }
 
@@ -207,7 +207,7 @@ namespace ChatterMascot.Ui
 
             if (keyName == null)
             {
-                error = "このキーはショートカットに使えません";
+                error = text.HotKeyKeyNotAllowed;
                 return false;
             }
 
@@ -223,13 +223,13 @@ namespace ChatterMascot.Ui
         ///   種類ごとにコールバックを増やすと、リバース P/Invoke のデリゲートを
         ///   GC から守る対象が増える（→ <c>CMNative.h</c>）。
         /// </summary>
-        public static bool TryParseRecorded(string text, out HotKeySpec spec, out string error)
+        public static bool TryParseRecorded(string text, UiText ui, out HotKeySpec spec, out string error)
         {
             spec = default(HotKeySpec);
 
             if (string.IsNullOrEmpty(text))
             {
-                error = "記録の中身が空です";
+                error = ui.HotKeyRecordedEmpty;
                 return false;
             }
 
@@ -240,11 +240,11 @@ namespace ChatterMascot.Ui
                 || !uint.TryParse(parts[0].Trim(), out keyCode)
                 || !uint.TryParse(parts[1].Trim(), out mask))
             {
-                error = $"記録の形が読めません: \"{text}\"";
+                error = ui.HotKeyRecordedUnreadable(text);
                 return false;
             }
 
-            return TryFromCode(keyCode, mask, out spec, out error);
+            return TryFromCode(keyCode, mask, ui, out spec, out error);
         }
 
         /// <summary>

@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.Threading;
 using ChatterMascot.Settings;
+using ChatterMascot.Ui;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -318,7 +319,7 @@ namespace ChatterMascot.Tests
         [Test]
         public void XrHeightChoicesLabelsTheLastStepAsTheRealHeight()
         {
-            var choices = SettingsMapping.XrHeightChoices(SettingsMapping.XrHeightSteps(160f));
+            var choices = SettingsMapping.XrHeightChoices(SettingsMapping.XrHeightSteps(160f), UiText.Ja);
 
             Assert.That(choices.Count, Is.EqualTo(6));
             Assert.That(choices[0].Value, Is.EqualTo("15"));
@@ -330,14 +331,14 @@ namespace ChatterMascot.Tests
         [Test]
         public void XrHeightChoicesKeepsNullForALoadingModel()
         {
-            Assert.That(SettingsMapping.XrHeightChoices(null), Is.Null);
+            Assert.That(SettingsMapping.XrHeightChoices(null, UiText.Ja), Is.Null);
         }
 
         /// <summary>★ 同じ値の選択肢が並ぶと ‹ › を押しても表示が変わらず進めなくなる</summary>
         [Test]
         public void XrHeightChoicesHasNoDuplicateValues()
         {
-            var choices = SettingsMapping.XrHeightChoices(SettingsMapping.XrHeightSteps(30f));
+            var choices = SettingsMapping.XrHeightChoices(SettingsMapping.XrHeightSteps(30f), UiText.Ja);
 
             for (var i = 0; i < choices.Count; i++)
             {
@@ -352,7 +353,7 @@ namespace ChatterMascot.Tests
         [Test]
         public void XrHeightChoicesKeepsTheRealHeightLabelWhenDeduplicating()
         {
-            var choices = SettingsMapping.XrHeightChoices(SettingsMapping.XrHeightSteps(18.2f));
+            var choices = SettingsMapping.XrHeightChoices(SettingsMapping.XrHeightSteps(18.2f), UiText.Ja);
 
             Assert.That(choices[choices.Count - 1].Label, Does.StartWith("実寸"));
         }

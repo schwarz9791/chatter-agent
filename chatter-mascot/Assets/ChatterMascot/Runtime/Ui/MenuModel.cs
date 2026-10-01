@@ -74,7 +74,7 @@ namespace ChatterMascot.Ui
         public MenuState(
             bool muted, bool hidden, HotKeySpec muteHotKey, HotKeySpec hideHotKey,
             string productName, string version, int pid,
-            string icon1xPath, string icon2xPath)
+            string icon1xPath, string icon2xPath, UiText text)
         {
             Muted = muted;
             Hidden = hidden;
@@ -85,6 +85,7 @@ namespace ChatterMascot.Ui
             Pid = pid;
             Icon1xPath = icon1xPath;
             Icon2xPath = icon2xPath;
+            Text = text;
         }
 
         public bool Muted { get; }
@@ -96,6 +97,7 @@ namespace ChatterMascot.Ui
         public int Pid { get; }
         public string Icon1xPath { get; }
         public string Icon2xPath { get; }
+        public UiText Text { get; }
     }
 
     /// <summary>メニューの並びを決める唯一の場所。</summary>
@@ -104,27 +106,29 @@ namespace ChatterMascot.Ui
         public static MenuModel Build(MenuState state)
         {
             var product = string.IsNullOrEmpty(state.ProductName) ? "Chatter Mascot" : state.ProductName;
+            var text = state.Text;
 
             var entries = new List<MenuEntry>
             {
                 MenuEntry.Of(
                     MenuKeys.Mute,
-                    WithShortcut("ミュート", state.MuteHotKey),
+                    WithShortcut(text, text.MenuMute, state.MuteHotKey),
                     isChecked: state.Muted),
                 MenuEntry.Of(
                     MenuKeys.Hide,
                     WithShortcut(
-                        state.Hidden ? "キャラクターを表示する" : "キャラクターを隠す",
+                        text,
+                        state.Hidden ? text.MenuShow : text.MenuHide,
                         state.HideHotKey)),
-                MenuEntry.Of(MenuKeys.Settings, "設定を開く…"),
+                MenuEntry.Of(MenuKeys.Settings, text.MenuSettings),
                 MenuEntry.Separator(),
 
                 // ★ #76 で押せるようになった。押すと「について」の別ダイアログが開く。
                 //   ★ 版はラベルから外してツールチップへ移した —— ラベルに版を出していたのは
                 //   「Dock に居ないので、どれが動いているかの手掛かりがここしか無い」ためなので、
                 //   pid と同じ場所（ツールチップ）に残せば目的は保てる
-                MenuEntry.Of(MenuKeys.About, $"{product} について"),
-                MenuEntry.Of(MenuKeys.Quit, "終了"),
+                MenuEntry.Of(MenuKeys.About, text.About(product)),
+                MenuEntry.Of(MenuKeys.Quit, text.MenuQuit),
             };
 
             return new MenuModel
@@ -147,10 +151,10 @@ namespace ChatterMascot.Ui
         /// ★ <b>ショートカットはラベルに書くだけ</b>（→ <see cref="HotKeySpec.FormatSymbols"/>）。
         /// ★ <b>登録できていないときは表記を出さない</b> —— 効かないショートカットを案内しない。
         /// </summary>
-        private static string WithShortcut(string label, HotKeySpec hotKey)
+        private static string WithShortcut(UiText text, string label, HotKeySpec hotKey)
         {
             var symbols = hotKey.FormatSymbols();
-            return string.IsNullOrEmpty(symbols) ? label : $"{label}（{symbols}）";
+            return string.IsNullOrEmpty(symbols) ? label : text.MenuWithShortcut(label, symbols);
         }
     }
 }

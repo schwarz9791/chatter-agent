@@ -281,7 +281,7 @@ namespace ChatterMascot.Tests
         public void BuildsTheShortcutRowsFromTheOneList()
         {
             var settings = MascotSettings.Defaults;
-            var slots = SettingsSchema.HotKeySlots(settings);
+            var slots = SettingsSchema.HotKeySlots(settings, UiText.Ja);
             var items = SettingsSchema.Build(new SettingsContext { Settings = settings });
 
             Assert.That(slots.Count, Is.GreaterThanOrEqualTo(2));
@@ -577,7 +577,7 @@ namespace ChatterMascot.Tests
             return new SettingsContext
             {
                 Platform = SettingsPlatform.Xr,
-                XrHeightChoices = SettingsMapping.XrHeightChoices(SettingsMapping.XrHeightSteps(160f)),
+                XrHeightChoices = SettingsMapping.XrHeightChoices(SettingsMapping.XrHeightSteps(160f), UiText.Ja),
             };
         }
 
@@ -855,17 +855,17 @@ namespace ChatterMascot.Tests
         [Test]
         public void MotionPlayNoticeCoversAllSixResults()
         {
-            Assert.That(SettingsSchema.MotionPlayNotice(MotionPlayResult.Started, "happy/a.vrma"),
+            Assert.That(SettingsSchema.MotionPlayNotice(MotionPlayResult.Started, "happy/a.vrma", UiText.Ja),
                 Is.EqualTo("happy/a.vrma を再生します"));
-            Assert.That(SettingsSchema.MotionPlayNotice(MotionPlayResult.Busy, "happy/a.vrma"),
+            Assert.That(SettingsSchema.MotionPlayNotice(MotionPlayResult.Busy, "happy/a.vrma", UiText.Ja),
                 Is.EqualTo("再生中です。終わってからもう一度押してください"));
-            Assert.That(SettingsSchema.MotionPlayNotice(MotionPlayResult.IdleNotLoaded, "happy/a.vrma"),
+            Assert.That(SettingsSchema.MotionPlayNotice(MotionPlayResult.IdleNotLoaded, "happy/a.vrma", UiText.Ja),
                 Is.EqualTo("待機モーションの VRMA が読めていないので再生できません"));
-            Assert.That(SettingsSchema.MotionPlayNotice(MotionPlayResult.IdleDisabled, "happy/a.vrma"),
+            Assert.That(SettingsSchema.MotionPlayNotice(MotionPlayResult.IdleDisabled, "happy/a.vrma", UiText.Ja),
                 Is.EqualTo("待機モーションが OFF です"));
-            Assert.That(SettingsSchema.MotionPlayNotice(MotionPlayResult.NotLoaded, "happy/a.vrma"),
+            Assert.That(SettingsSchema.MotionPlayNotice(MotionPlayResult.NotLoaded, "happy/a.vrma", UiText.Ja),
                 Is.EqualTo("このモーションは読み込めていません"));
-            Assert.That(SettingsSchema.MotionPlayNotice(MotionPlayResult.Disposed, "happy/a.vrma"),
+            Assert.That(SettingsSchema.MotionPlayNotice(MotionPlayResult.Disposed, "happy/a.vrma", UiText.Ja),
                 Is.EqualTo("キャラクターが無効です"));
         }
     }

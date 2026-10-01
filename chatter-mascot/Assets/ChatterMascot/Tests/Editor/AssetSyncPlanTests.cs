@@ -180,7 +180,7 @@ namespace ChatterMascot.Tests
         [Test]
         public void RequestedUnchangedSyncSaysItIsUpToDate()
         {
-            Assert.That(AssetSyncClient.DescribeResult(0, 0, 0, requested: true), Does.Contain("最新"));
+            Assert.That(AssetSyncClient.DescribeResult(0, 0, 0, requested: true), Does.Contain("up to date"));
             Assert.That(AssetSyncClient.DescribeResult(0, 0, 0, requested: false), Is.Null);
         }
 
@@ -190,7 +190,7 @@ namespace ChatterMascot.Tests
             var message = AssetSyncClient.DescribeResult(3, 3, 0);
 
             Assert.That(message, Is.Not.Null);
-            Assert.That(message, Does.Contain("次に起動"));
+            Assert.That(message, Does.Contain("next launch"));
         }
 
         /// <summary>削除だけでも内容は変わっているので黙らない。</summary>
@@ -210,7 +210,7 @@ namespace ChatterMascot.Tests
             var message = AssetSyncClient.DescribeResult(1, 3, 0);
 
             Assert.That(message, Does.Contain("1/3"));
-            Assert.That(message, Does.Contain("続き"));
+            Assert.That(message, Does.Contain("the rest"));
         }
 
         /// <summary>
@@ -224,7 +224,7 @@ namespace ChatterMascot.Tests
             var message = AssetSyncClient.DescribeResult(0, 2, 0);
 
             Assert.That(message, Is.Not.Null);
-            Assert.That(message, Does.Not.Contain("更新しました"));
+            Assert.That(message, Does.Not.Contain("updated"));
         }
     }
 }

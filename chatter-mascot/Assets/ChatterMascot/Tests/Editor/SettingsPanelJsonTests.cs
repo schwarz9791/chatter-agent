@@ -11,7 +11,7 @@ namespace ChatterMascot.Tests
     {
         private static JObject Write(params SettingSpec[] items)
         {
-            return JObject.Parse(SettingsPanelJson.Write("設定", new List<SettingSpec>(items)));
+            return JObject.Parse(SettingsPanelJson.Write("設定", new List<SettingSpec>(items), UiText.Ja));
         }
 
         [Test]

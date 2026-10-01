@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading.Tasks;
+using ChatterMascot.Ui;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using UnityEngine.Networking;
@@ -28,7 +29,7 @@ namespace ChatterMascot.Net
         /// <summary>成功時のバイナリ（<c>POST /v1/tts/preview</c>）</summary>
         public byte[] Bytes { get; }
 
-        /// <summary>失敗の理由。<b>そのまま note に出せる日本語</b>にしてある</summary>
+        /// <summary>失敗の理由。<b>そのまま note に出せる、画面の言語の文言</b>にしてある</summary>
         public string Reason { get; }
 
         /// <summary>HTTP のステータス。転送エラーなら 0</summary>
@@ -82,6 +83,7 @@ namespace ChatterMascot.Net
         public readonly string BaseUrl;
         private readonly int _timeoutSeconds;
         private readonly string _token;
+        private readonly UiText _text;
 
         /// <param name="baseUrl"><c>http://host:port</c>（→ <see cref="ServerUrl.ToHttpBase"/>）</param>
         /// <param name="timeoutMs">
@@ -91,12 +93,13 @@ namespace ChatterMascot.Net
         /// <b>最悪2倍</b>まで粘るので、<b>どちらにも別の予算を渡すこと</b>。
         /// </param>
         /// <param name="token">非ループバックの接続に要る共有トークン。空か <c>null</c> なら付けない。</param>
-        public CoreConfigClient(string baseUrl, int timeoutMs, string token)
+        public CoreConfigClient(string baseUrl, int timeoutMs, string token, UiText text)
         {
             BaseUrl = baseUrl;
             // UnityWebRequest.timeout は秒単位の int。0 は「無制限」なので必ず 1 以上にする
             _timeoutSeconds = ToSeconds(timeoutMs);
             _token = token;
+            _text = text;
         }
 
         private static int ToSeconds(int timeoutMs)
@@ -236,7 +239,7 @@ namespace ChatterMascot.Net
             catch (Exception e)
             {
                 // ★ throw しない。設定パネルは「繋がらない」と同じ扱いにできればよい
-                return CoreResult.Failure("応答を読めませんでした: " + e.Message, request.responseCode);
+                return CoreResult.Failure(_text.ErrorResponseUnreadable(e.Message), request.responseCode);
             }
         }
 
@@ -251,11 +254,11 @@ namespace ChatterMascot.Net
             var status = request.responseCode;
             if (request.result == UnityWebRequest.Result.ConnectionError)
             {
-                return CoreResult.Failure("サーバーに繋がりません", 0);
+                return CoreResult.Failure(_text.CoreUnreachable, 0);
             }
 
             var body = request.downloadHandler != null ? request.downloadHandler.text : null;
-            return CoreResult.Failure(DescribeFailure(status, body), status);
+            return CoreResult.Failure(DescribeFailure(status, body, _text), status);
         }
 
         /// <summary>
@@ -273,23 +276,23 @@ namespace ChatterMascot.Net
         ///   ★ <b>別ホストのサーバーに繋いだ場合（<c>-serverUrl</c> / <c>connection.serverUrl</c>）は
         ///   そこが崩れる</b> —— 書き込みだけ 404 になるので、そこを直すならメソッドで出し分けること。
         /// </summary>
-        public static string DescribeFailure(long status, string body)
+        public static string DescribeFailure(long status, string body, UiText text)
         {
             if (status == 404) return ApiNotFound;
 
-            var described = DescribeError(body);
+            var described = DescribeError(body, text);
             if (!string.IsNullOrEmpty(described)) return described;
 
-            return "エラーが返りました（HTTP " + status + "）";
+            return text.ErrorHttp(status);
         }
 
         /// <summary>
-        /// 制御 API のエラー本文を日本語にする。
+        /// 制御 API のエラー本文を画面の言語にする。
         ///
         /// ★ <b>知らない <c>error</c> をそのまま出すこと。</b> 訳せないものを
         ///   「不明なエラー」に潰すと、サーバー側のログと突き合わせられなくなる。
         /// </summary>
-        public static string DescribeError(string body)
+        public static string DescribeError(string body, UiText text)
         {
             if (string.IsNullOrEmpty(body)) return null;
 
@@ -313,31 +316,33 @@ namespace ChatterMascot.Net
             switch (error.Value<string>())
             {
                 case "env_override":
-                    return "環境変数で固定されているので変えられません（" + key + "）";
+                    return text.ErrorEnvOverride(key);
                 case "readonly_key":
-                    return "この設定は変更できません（" + key + "）";
+                    return text.ErrorReadonlyKey(key);
                 case "invalid_value":
-                    return "値が範囲外です（" + key + "）";
+                    return text.ErrorInvalidValue(key);
                 case "unknown_key":
-                    return "知らない設定です（" + key + "）";
+                    return text.ErrorUnknownKey(key);
                 case "engine_unreachable":
-                    return "音声合成エンジンに繋がりません";
+                    return text.ErrorEngineUnreachable;
                 // ★ `engine_unreachable` は話者一覧（`GET /v1/speakers`）が返すもの。
                 //   テスト音声が失敗したときはこちらで、**理由が別**（合成まで届いて落ちた）
                 case "synthesis_unavailable":
-                    return "音声を合成できませんでした";
+                    return text.ErrorSynthesisUnavailable;
                 // ★ サーバー側で `ttsEnabled: false` にしている。「繋がらない」ではないので
                 //   名指しする（→ core の `controlApi.ttsPreview`）
                 case "tts_disabled":
-                    return "サーバー側で音声が無効になっています（ttsEnabled）";
+                    return text.ErrorTtsDisabled;
                 case "config_unreadable":
-                    return "config.json を読めないので書き込みませんでした";
+                    return text.ErrorConfigUnreadable;
                 case "config_unwritable":
-                    return "config.json に書けませんでした";
+                    return text.ErrorConfigUnwritable;
                 case "too_many_requests":
-                    return "続けて押しすぎです。少し待ってください";
+                    return text.ErrorTooManyRequests;
                 default:
-                    return error.Value<string>() + (string.IsNullOrEmpty(key) ? "" : "（" + key + "）");
+                    return string.IsNullOrEmpty(key)
+                        ? error.Value<string>()
+                        : text.ErrorUnknown(error.Value<string>(), key);
             }
         }
 

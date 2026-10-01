@@ -186,7 +186,7 @@ namespace ChatterMascot.Tests
             string error;
 
             // 0x2E = kVK_ANSI_M、0x1000|0x0800 = ctrl+opt
-            Assert.That(HotKeySpec.TryFromCode(0x2E, 0x1000 | 0x0800, out spec, out error), Is.True, error);
+            Assert.That(HotKeySpec.TryFromCode(0x2E, 0x1000 | 0x0800, UiText.Ja, out spec, out error), Is.True, error);
             Assert.That(spec.Format(), Is.EqualTo("ctrl+opt+m"));
             Assert.That(spec.FormatSymbols(), Is.EqualTo("⌃⌥M"));
         }
@@ -198,7 +198,7 @@ namespace ChatterMascot.Tests
             HotKeySpec spec;
             string error;
 
-            Assert.That(HotKeySpec.TryFromCode(0x2E, 0, out spec, out error), Is.False);
+            Assert.That(HotKeySpec.TryFromCode(0x2E, 0, UiText.Ja, out spec, out error), Is.False);
             Assert.That(error, Is.Not.Empty);
         }
 
@@ -213,7 +213,7 @@ namespace ChatterMascot.Tests
             string error;
 
             // 0x21 = kVK_ANSI_LeftBracket（表に載せていない）
-            Assert.That(HotKeySpec.TryFromCode(0x21, 0x1000, out spec, out error), Is.False);
+            Assert.That(HotKeySpec.TryFromCode(0x21, 0x1000, UiText.Ja, out spec, out error), Is.False);
             Assert.That(error, Is.Not.Empty);
         }
 
@@ -224,7 +224,7 @@ namespace ChatterMascot.Tests
             HotKeySpec spec;
             string error;
 
-            Assert.That(HotKeySpec.TryFromCode(0x2E, 0x1000 | 0x0800 | 0x00010000, out spec, out error), Is.True);
+            Assert.That(HotKeySpec.TryFromCode(0x2E, 0x1000 | 0x0800 | 0x00010000, UiText.Ja, out spec, out error), Is.True);
             Assert.That(spec.ModifierMask, Is.EqualTo(HotKeySpec.ModifierControl | HotKeySpec.ModifierOption));
         }
 
@@ -234,7 +234,7 @@ namespace ChatterMascot.Tests
             HotKeySpec spec;
             string error;
 
-            Assert.That(HotKeySpec.TryParseRecorded("46,6144", out spec, out error), Is.True, error);
+            Assert.That(HotKeySpec.TryParseRecorded("46,6144", UiText.Ja, out spec, out error), Is.True, error);
             Assert.That(spec.Format(), Is.EqualTo("ctrl+opt+m"));
         }
 
@@ -244,10 +244,10 @@ namespace ChatterMascot.Tests
             HotKeySpec spec;
             string error;
 
-            Assert.That(HotKeySpec.TryParseRecorded("", out spec, out error), Is.False);
-            Assert.That(HotKeySpec.TryParseRecorded("46", out spec, out error), Is.False);
-            Assert.That(HotKeySpec.TryParseRecorded("46,6144,1", out spec, out error), Is.False);
-            Assert.That(HotKeySpec.TryParseRecorded("あ,6144", out spec, out error), Is.False);
+            Assert.That(HotKeySpec.TryParseRecorded("", UiText.Ja, out spec, out error), Is.False);
+            Assert.That(HotKeySpec.TryParseRecorded("46", UiText.Ja, out spec, out error), Is.False);
+            Assert.That(HotKeySpec.TryParseRecorded("46,6144,1", UiText.Ja, out spec, out error), Is.False);
+            Assert.That(HotKeySpec.TryParseRecorded("あ,6144", UiText.Ja, out spec, out error), Is.False);
         }
 
         /// <summary>★ 記録 → 保存 → 読み直しが往復すること（保存形式は文字列）</summary>
@@ -256,7 +256,7 @@ namespace ChatterMascot.Tests
         {
             HotKeySpec recorded;
             string error;
-            Assert.That(HotKeySpec.TryParseRecorded("46,6144", out recorded, out error), Is.True);
+            Assert.That(HotKeySpec.TryParseRecorded("46,6144", UiText.Ja, out recorded, out error), Is.True);
 
             HotKeySpec reparsed;
             Assert.That(HotKeySpec.TryParse(recorded.Format(), out reparsed, out error), Is.True);

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using ChatterMascot.Ui;
 
 namespace ChatterMascot.Settings
 {
@@ -37,6 +38,9 @@ namespace ChatterMascot.Settings
         ///   変わらないことを保証する場所が2つになる。
         /// </summary>
         public SettingsPlatform Platform { get; set; } = SettingsPlatform.Desktop;
+
+        /// <summary>画面に出す文言の表。既定は日本語（→ <see cref="UiText.For"/>）</summary>
+        public UiText Text { get; set; } = UiText.Ja;
 
         // ── Unity 側が権威を持つ値 ─────────────────────────────
         public MascotSettings Settings { get; set; } = MascotSettings.Defaults;
@@ -103,7 +107,13 @@ namespace ChatterMascot.Settings
         public bool CoreReachable { get; set; }
 
         /// <summary>繋がらない理由。項目の <c>note</c> に出す</summary>
-        public string CoreNote { get; set; } = "サーバーに繋がりません";
+        public string CoreNote
+        {
+            get { return _coreNote ?? Text.CoreUnreachable; }
+            set { _coreNote = value; }
+        }
+
+        private string _coreNote;
 
         /// <summary>話者の候補。空なら取得できていない</summary>
         public IReadOnlyList<SettingChoice> Speakers { get; set; } = NoChoices;

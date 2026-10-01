@@ -178,7 +178,7 @@ namespace ChatterMascot.Settings
         /// ★ <b>同じ値が続く段は1つにまとめる</b>（→ <see cref="XrHeightSteps"/> の丸めの doc）。
         ///   同じ値の選択肢が並ぶと ‹ › を押しても表示が変わらず、進めなくなる。
         /// </summary>
-        public static IReadOnlyList<SettingChoice> XrHeightChoices(IReadOnlyList<float> steps)
+        public static IReadOnlyList<SettingChoice> XrHeightChoices(IReadOnlyList<float> steps, Ui.UiText text)
         {
             if (steps == null) return null;
 
@@ -190,7 +190,7 @@ namespace ChatterMascot.Settings
 
                 var value = Format(steps[i]);
                 var cm = ((int)Math.Round(steps[i])).ToString(CultureInfo.InvariantCulture);
-                var label = i == steps.Count - 1 ? $"実寸（{cm} cm）" : $"{cm} cm";
+                var label = i == steps.Count - 1 ? text.XrActualSize(cm) : $"{cm} cm";
                 choices.Add(new SettingChoice(value, label));
             }
             return choices;

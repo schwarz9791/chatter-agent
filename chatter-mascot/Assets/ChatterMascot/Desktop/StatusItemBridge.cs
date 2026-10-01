@@ -190,9 +190,13 @@ namespace ChatterMascot.Desktop
             private bool _activationPolicyApplied;
             private bool _shown;
 
+            /// <summary>画面の言語。端末の言語を読むのはここ1か所（→ <see cref="UiText.For"/>）。</summary>
+            private UiText _text;
+
             private void Start()
             {
                 _pid = Process.GetCurrentProcess().Id;
+                _text = UiText.For(Application.systemLanguage);
 
                 // ★ Start で取ること。MascotSettingsHost は AfterSceneLoad で生えた時点で
                 //   Instance が立ち、Start はすべての AfterSceneLoad の後に来るので順序が決まる
@@ -234,7 +238,7 @@ namespace ChatterMascot.Desktop
 
                 AllowInputWithoutFocus();
 
-                _panel = new SettingsPanelBridge(this, ResolveServerUrl(), ResolveServerToken(), ResolveRunner);
+                _panel = new SettingsPanelBridge(this, ResolveServerUrl(), ResolveServerToken(), ResolveRunner, _text);
                 _instance = this;
 
                 // ★ 検証用の入口。メニューバーも右クリックも自動化はできる（→ docs/knowledge/mascot-desktop.md）が、
@@ -707,7 +711,8 @@ namespace ChatterMascot.Desktop
                     version: Application.version,
                     pid: _pid,
                     icon1xPath: _icon1xPath,
-                    icon2xPath: _icon2xPath));
+                    icon2xPath: _icon2xPath,
+                    text: _text));
             }
 
             /// <summary>

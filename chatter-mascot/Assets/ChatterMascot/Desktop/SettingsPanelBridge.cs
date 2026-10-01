@@ -149,11 +149,12 @@ namespace ChatterMascot.Desktop
         private bool _refreshing;
         private bool _open;
 
-        public SettingsPanelBridge(ISettingsHost host, string serverUrl, string serverToken, Func<MascotRunner> runner)
+        public SettingsPanelBridge(ISettingsHost host, string serverUrl, string serverToken, Func<MascotRunner> runner, UiText text)
         {
             _host = host;
             _runner = runner;
-            _client = new CoreConfigClient(ServerUrl.ToHttpBase(serverUrl), RequestTimeoutMs, serverToken);
+            _context.Text = text;
+            _client = new CoreConfigClient(ServerUrl.ToHttpBase(serverUrl), RequestTimeoutMs, serverToken, text);
 
             _context.ProductName = Application.productName;
             _context.Version = Application.version;
@@ -247,7 +248,7 @@ namespace ChatterMascot.Desktop
                 return;
             }
             var json = SettingsPanelJson.Write(
-                _context.ProductName + " について", SettingsSchema.BuildAbout(_context));
+                _context.Text.About(_context.ProductName), SettingsSchema.BuildAbout(_context), _context.Text);
             if (!ChatterMascotNative.CM_PanelShow(AboutPanelId, json))
             {
                 Debug.LogWarning("[Native]「について」を開けませんでした");
@@ -500,7 +501,7 @@ namespace ChatterMascot.Desktop
                     //   数値でも受けるので、ここでは空でないことだけ見て素通しする
                     if (string.IsNullOrEmpty(value))
                     {
-                        Notice(key, "話者 ID を読めませんでした");
+                        Notice(key, _context.Text.SpeakerIdUnreadable);
                         return;
                     }
                     _context.SpeakerId = value;
@@ -549,7 +550,7 @@ namespace ChatterMascot.Desktop
                     _host.ResetWindow();
                     // ★ ここで WindowScale を読まないこと。反映は数フレーム遅れるので
                     //   まだ古い倍率が返る。スライダーは WatchWindowSize が追いつかせる
-                    Notice(key, "位置と大きさを既定に戻しました");
+                    Notice(key, _context.Text.PositionReset);
                     Push(update: true);
                     return;
 
@@ -605,21 +606,21 @@ namespace ChatterMascot.Desktop
         {
             HotKeySpec spec;
             string error;
-            if (!HotKeySpec.TryParseRecorded(recorded, out spec, out error))
+            if (!HotKeySpec.TryParseRecorded(recorded, _context.Text, out spec, out error))
             {
                 Reject(key, error);
                 return;
             }
 
             var taken = spec.Format();
-            var slots = SettingsSchema.HotKeySlots(settings);
+            var slots = SettingsSchema.HotKeySlots(settings, _context.Text);
             for (var i = 0; i < slots.Count; i++)
             {
                 // ★ 自分の行は飛ばす（同じ組み合わせを記録し直すのは重複ではない）
                 if (string.Equals(slots[i].Key, key, StringComparison.Ordinal)) continue;
                 if (!HotKeySpec.SameCombination(taken, slots[i].Value)) continue;
 
-                Reject(key, $"「{slots[i].Label}」と同じ組み合わせです");
+                Reject(key, _context.Text.HotKeyClashRejected(slots[i].Label));
                 return;
             }
 
@@ -723,7 +724,7 @@ namespace ChatterMascot.Desktop
                 _context.CoreReachable = config.Ok;
                 if (!config.Ok)
                 {
-                    _context.CoreNote = config.Reason ?? "サーバーに繋がりません";
+                    _context.CoreNote = config.Reason ?? _context.Text.CoreUnreachable;
                     _context.Speakers = new SettingChoice[0];
                     // ★ ログにも残すこと。パネルの note は**開いている間しか見えない**うえ、
                     //   3項目がまとめて無効になる原因（版の食い違い / 落ちている）は
@@ -826,7 +827,7 @@ namespace ChatterMascot.Desktop
                 var runner = _runner != null ? _runner() : null;
                 if (runner == null)
                 {
-                    Notice(SettingKeys.TtsPreview, "再生の準備ができていません");
+                    Notice(SettingKeys.TtsPreview, _context.Text.PlaybackNotReady);
                     Push(update: true);
                     return;
                 }
@@ -834,7 +835,7 @@ namespace ChatterMascot.Desktop
                 // ★ ミュート中は通常の再生経路が「声だけ消す」ので鳴らない。理由を出す
                 if (_host.Settings.Muted)
                 {
-                    Notice(SettingKeys.TtsPreview, "ミュート中なので鳴りません");
+                    Notice(SettingKeys.TtsPreview, _context.Text.MutedNoSound);
                     Push(update: true);
                     return;
                 }
@@ -873,13 +874,13 @@ namespace ChatterMascot.Desktop
             var clip = FindMotionClip(_host.MotionClips, id);
             if (clip == null)
             {
-                Notice(SettingKeys.MotionPreviewPlay, "選べるモーションがありません");
+                Notice(SettingKeys.MotionPreviewPlay, _context.Text.NoMotionToPlay);
                 Push(update: true);
                 return;
             }
 
             var result = _host.PlayMotion(clip);
-            Notice(SettingKeys.MotionPreviewPlay, SettingsSchema.MotionPlayNotice(result, id));
+            Notice(SettingKeys.MotionPreviewPlay, SettingsSchema.MotionPlayNotice(result, id, _context.Text));
             Push(update: true);
         }
 
@@ -923,8 +924,7 @@ namespace ChatterMascot.Desktop
             // 3. core 側
             var coreError = await ResetCoreAsync();
 
-            var message = "既定に戻しました";
-            if (removedModels > 0) message += $"（モデル {removedModels} 件を削除）";
+            var message = _context.Text.ResetDone(removedModels);
             if (!string.IsNullOrEmpty(modelsError)) message += " / " + modelsError;
             if (!string.IsNullOrEmpty(coreError)) message += " / " + coreError;
             Notice(SettingKeys.ResetAll, message);
@@ -939,13 +939,10 @@ namespace ChatterMascot.Desktop
 
             var options = new JObject
             {
-                ["title"] = "すべての設定をリセットしますか？",
-                ["message"] =
-                    "大きさ・位置・音量・モーション・ショートカット・音声スタイル・話す速さ・要約・"
-                    + "要約エンジン・感情判定の設定が既定に戻り、"
-                    + "選んだ VRM モデルのファイルも削除されます。この操作は取り消せません。",
-                ["ok"] = "リセットする",
-                ["cancel"] = "やめる",
+                ["title"] = _context.Text.ConfirmResetTitle,
+                ["message"] = _context.Text.ConfirmResetMessage,
+                ["ok"] = _context.Text.ConfirmResetOk,
+                ["cancel"] = _context.Text.ConfirmResetCancel,
                 ["destructive"] = true,
             };
             // ★★ ここも `runModal`（→ `ChooseVrm` の ★★）。押されるまで ack が止まる
@@ -958,7 +955,7 @@ namespace ChatterMascot.Desktop
         /// ★ <b>ディレクトリごと消さないこと。</b> <c>animations/</c> と同じ親を共有していないとはいえ、
         ///   ユーザーが置いた別のものが同居している可能性がある。拡張子で絞る。
         /// </summary>
-        private static int TryRemoveModels(out string error)
+        private int TryRemoveModels(out string error)
         {
             error = null;
             var removed = 0;
@@ -978,7 +975,7 @@ namespace ChatterMascot.Desktop
             }
             catch (Exception e)
             {
-                error = "モデルを消せませんでした: " + e.Message;
+                error = _context.Text.ResetModelsFailed(e.Message);
             }
             return removed;
         }
@@ -987,11 +984,11 @@ namespace ChatterMascot.Desktop
         private async Task<string> ResetCoreAsync()
         {
             var config = await _client.ConfigAsync();
-            if (!config.Ok) return "音声スタイル・話す速さ・要約などは戻せませんでした（" + config.Reason + "）";
+            if (!config.Ok) return _context.Text.ResetCoreFailed(config.Reason);
 
             var root = config.Body as JObject;
             var defaults = root != null ? root["defaults"] as JObject : null;
-            if (defaults == null) return "音声スタイル・話す速さ・要約などは戻せませんでした（既定値を取れません）";
+            if (defaults == null) return _context.Text.ResetCoreFailed(_context.Text.ResetCoreDefaultsUnavailable);
 
             foreach (var key in new[]
                      {
@@ -1003,7 +1000,7 @@ namespace ChatterMascot.Desktop
                 if (value == null) continue;
                 var result = await _client.PatchConfigAsync(key, value);
                 // ★ 環境変数で固定されているキーは 409。**失敗ではない**ので、そこで止めない
-                if (!result.Ok && result.Status != 409) return key + " を戻せませんでした（" + result.Reason + "）";
+                if (!result.Ok && result.Status != 409) return _context.Text.ResetKeyFailed(key, result.Reason);
             }
             return null;
         }
@@ -1026,7 +1023,7 @@ namespace ChatterMascot.Desktop
         {
             if (!ChatterMascotNative.IsAvailable)
             {
-                Notice(SettingKeys.Vrm, "ネイティブプラグインが無いのでファイルを選べません");
+                Notice(SettingKeys.Vrm, _context.Text.NativePluginMissing);
                 Push(update: true);
                 return;
             }
@@ -1038,9 +1035,9 @@ namespace ChatterMascot.Desktop
             var options = new JObject
             {
                 ["key"] = SettingKeys.VrmChosen,
-                ["title"] = "VRM モデルを選ぶ",
-                ["message"] = "選んだファイルは models/ にコピーされます",
-                ["button"] = "選ぶ",
+                ["title"] = _context.Text.ChooseVrmTitle,
+                ["message"] = _context.Text.ChooseVrmMessage,
+                ["button"] = _context.Text.ChooseVrmButton,
                 // ★ 拡張子は C# が持つ（ネイティブに "vrm" を書かない）
                 ["extensions"] = new JArray("vrm"),
             };
@@ -1066,7 +1063,7 @@ namespace ChatterMascot.Desktop
                 return;
             }
 
-            Notice(SettingKeys.Vrm, "次に起動したときから反映されます");
+            Notice(SettingKeys.Vrm, _context.Text.AppliesFromNextLaunch);
             Apply(_pending.Base(_host.Settings).WithVrmFileName(name));
             // ★ ここは作り直す。選んだモデル名は note に出るので、画面が自分で追いつけない
             Push(update: true);
@@ -1082,7 +1079,7 @@ namespace ChatterMascot.Desktop
                 var root = AssetPath.RuntimeDirectory(env);
                 if (string.IsNullOrEmpty(root))
                 {
-                    error = "設定の置き場所を決められませんでした";
+                    error = _context.Text.SettingsFolderUnknown;
                     return false;
                 }
 
@@ -1092,7 +1089,7 @@ namespace ChatterMascot.Desktop
                 var fileName = Path.GetFileName(source);
                 if (string.IsNullOrEmpty(fileName))
                 {
-                    error = "ファイル名を読めませんでした";
+                    error = _context.Text.FileNameUnreadable;
                     return false;
                 }
 
@@ -1113,7 +1110,7 @@ namespace ChatterMascot.Desktop
             }
             catch (Exception e)
             {
-                error = "コピーできませんでした: " + e.Message;
+                error = _context.Text.CopyFailed(e.Message);
                 return false;
             }
         }
@@ -1133,7 +1130,7 @@ namespace ChatterMascot.Desktop
             _lastMotionClipCount = motionClips?.Count;
             var items = SettingsSchema.Build(_context);
             var withNotices = ApplyNotices(items);
-            var json = SettingsPanelJson.Write(_context.ProductName + " の設定", withNotices);
+            var json = SettingsPanelJson.Write(_context.Text.SettingsTitle(_context.ProductName), withNotices, _context.Text);
 
             if (update) ChatterMascotNative.CM_PanelUpdate(SettingsPanelId, json);
             else if (!ChatterMascotNative.CM_PanelShow(SettingsPanelId, json))

@@ -138,12 +138,12 @@ namespace ChatterMascot.Settings
         ///   相手を書けば済むが、3本目からは組み合わせのぶん増える。<b>一覧を配って
         ///   自分以外と比べさせる</b>形なら、増えるのは<b>この配列の1行だけ</b>。
         /// </summary>
-        public static IReadOnlyList<HotKeySlot> HotKeySlots(MascotSettings settings)
+        public static IReadOnlyList<HotKeySlot> HotKeySlots(MascotSettings settings, UiText text)
         {
             return new[]
             {
-                new HotKeySlot(SettingKeys.MuteHotKey, "ミュートの切り替え", settings.MuteHotKey),
-                new HotKeySlot(SettingKeys.HideHotKey, "キャラクターの表示切り替え", settings.HideHotKey),
+                new HotKeySlot(SettingKeys.MuteHotKey, text.HotKeyMute, settings.MuteHotKey),
+                new HotKeySlot(SettingKeys.HideHotKey, text.HotKeyHide, settings.HideHotKey),
             };
         }
 
@@ -162,43 +162,44 @@ namespace ChatterMascot.Settings
         private static IReadOnlyList<SettingSpec> BuildDesktop(SettingsContext c)
         {
             var settings = c.Settings;
+            var text = c.Text;
             var items = new List<SettingSpec>();
 
             // ── キャラクター ─────────────────────────────────
-            items.Add(SettingSpec.Section("キャラクター"));
+            items.Add(SettingSpec.Section(text.SectionCharacter));
             items.Add(SettingSpec.Button(
-                SettingKeys.Vrm, "VRM モデルを選ぶ…",
-                note: string.IsNullOrEmpty(c.VrmFileName) ? "同梱のモデルを使っています" : c.VrmFileName));
+                SettingKeys.Vrm, text.ChooseVrm,
+                note: string.IsNullOrEmpty(c.VrmFileName) ? text.BundledModelNote : c.VrmFileName));
             items.Add(SettingSpec.Slider(
-                SettingKeys.Scale, "大きさ", c.WindowScale,
+                SettingKeys.Scale, text.Size, c.WindowScale,
                 SettingsMapping.ScaleMin, SettingsMapping.ScaleMax, SettingsMapping.ScaleStep));
 
             // ── オーディオ ───────────────────────────────────
-            items.Add(SettingSpec.Section("オーディオ"));
+            items.Add(SettingSpec.Section(text.SectionAudio));
 
             // ★ サーバーに繋がらなくても**項目は出す**。消すと「設定が無い」に見える
             var speakerOverridden = c.IsCoreEnvOverridden(CoreConfigKeys.SpeakerId);
             items.Add(SettingSpec.Choice(
-                SettingKeys.Speaker, "音声スタイル", c.SpeakerId, c.Speakers,
+                SettingKeys.Speaker, text.VoiceStyle, c.SpeakerId, c.Speakers,
                 enabled: c.CoreReachable && c.Speakers.Count > 0 && !speakerOverridden,
                 note: SpeakerNote(c, speakerOverridden)));
 
             // ★ 音量だけ % で出す。倍率のスライダー（大きさ・話す速さ）は生の数のまま ——
             //   あちらは「1.0 が等倍」に意味があるので、100% と書くとかえって分かりづらい
             items.Add(SettingSpec.Slider(
-                SettingKeys.Volume, "音量", settings.Volume,
+                SettingKeys.Volume, text.Volume, settings.Volume,
                 SettingsMapping.VolumeMin, SettingsMapping.VolumeMax, SettingsMapping.VolumeStep,
                 display: SettingDisplay.Percent));
 
             var speedOverridden = c.IsCoreEnvOverridden(CoreConfigKeys.SpeedScale);
             items.Add(SettingSpec.Slider(
-                SettingKeys.Speed, "話す速さ", c.SpeedScale,
+                SettingKeys.Speed, text.SpeakingSpeed, c.SpeedScale,
                 SettingsMapping.SpeedMin, SettingsMapping.SpeedMax, SettingsMapping.SpeedStep,
                 enabled: c.CoreReachable && !speedOverridden,
-                note: CoreNote(c, speedOverridden, CoreConfigKeys.SpeedScale, "次に喋る文から変わります")));
+                note: CoreNote(c, speedOverridden, CoreConfigKeys.SpeedScale, text.AppliesFromNextSentence)));
 
             items.Add(SettingSpec.Button(
-                SettingKeys.TtsPreview, "テスト音声を再生",
+                SettingKeys.TtsPreview, text.PlayTestVoice,
                 enabled: c.CoreReachable, note: c.CoreReachable ? "" : c.CoreNote));
 
             // ★ **「音声出力デバイス」はここに出さない**（#83）。`afplay` に出力先を指す引数が無く、
@@ -206,20 +207,19 @@ namespace ChatterMascot.Settings
             //   ★ Android / XR には出ない項目でもある（`AudioSource` にデバイス選択の API が無い）
 
             // ── モーション ───────────────────────────────────
-            items.Add(SettingSpec.Section("モーション"));
-            items.Add(SettingSpec.Bool(SettingKeys.IdleMotion, "待機モーション", settings.IdleMotion));
+            items.Add(SettingSpec.Section(text.SectionMotion));
+            items.Add(SettingSpec.Bool(SettingKeys.IdleMotion, text.IdleMotion, settings.IdleMotion));
 
             AddMotionPreview(items, c, settings);
 
-            items.Add(SettingSpec.Bool(SettingKeys.CursorGaze, "カーソルを目で追う", settings.CursorGaze));
-            items.Add(SettingSpec.Bool(SettingKeys.Blink, "まばたき", settings.Blink));
-            // ★ 倍率を UI 文言に持ち込まない。マシン・MSAA・電源状態で変わる数値で、
-            //   同じ PR の実測とすら食い違っていた。数字は docs/knowledge/mascot-unity.md 側で持つ。
+            items.Add(SettingSpec.Bool(SettingKeys.CursorGaze, text.CursorGaze, settings.CursorGaze));
+            items.Add(SettingSpec.Bool(SettingKeys.Blink, text.Blink, settings.Blink));
+            // ★ 注記に倍率を持ち込まないこと（→ UiText.FrameRateNote）。数字は docs/knowledge/mascot-unity.md 側で持つ。
             items.Add(SettingSpec.Choice(
-                SettingKeys.FrameRate, "フレームレート",
+                SettingKeys.FrameRate, text.FrameRate,
                 settings.FrameRate.ToString(CultureInfo.InvariantCulture),
                 FrameRateChoices(),
-                note: "60 fps は CPU 使用率が上がります"));
+                note: text.FrameRateNote));
 
             // ★ **「発話モーション」「クール系 / かわいい系」は出さない。** cc-mascot には
             //   あるが、chatter-agent に対応する実装が無い（#70 が未実装）。
@@ -227,37 +227,37 @@ namespace ChatterMascot.Settings
             //   発話に連動する体の動きではない。#70 が入ったらここに1行足す。
 
             // ── AI要約 ──────────────────────────────────────
-            items.Add(SettingSpec.Section("AI要約"));
+            items.Add(SettingSpec.Section(text.SectionAiSummary));
             var summaryOverridden = c.IsCoreEnvOverridden(CoreConfigKeys.SummaryEnabled);
             items.Add(SettingSpec.Bool(
-                SettingKeys.SummaryEnabled, "長いメッセージを要約してから読み上げる", c.SummaryEnabled,
+                SettingKeys.SummaryEnabled, text.SummarizeLongMessages, c.SummaryEnabled,
                 enabled: c.CoreReachable && !summaryOverridden,
                 note: CoreNote(c, summaryOverridden, CoreConfigKeys.SummaryEnabled,
-                    "要約には時間がかかります（間に合わなければ原文を読み上げます）")));
+                    text.SummarizeNote)));
             // ★ **「テスト要約を実行」は出さない。** 結果（要約文）を項目の note に出す形しか
             //   無く、原文が見えないので「要約されているか」が判断できないうえ、
             //   長い結果でパネルが伸びた。サーバー側の口
             //   （`POST /v1/summary/preview`）は残してあるので、確かめたいときは curl で叩く。
             var backendOverridden = c.IsCoreEnvOverridden(CoreConfigKeys.AiSummaryBackend);
             items.Add(SettingSpec.Choice(
-                SettingKeys.AiSummaryBackend, "要約エンジン", c.AiSummaryBackend, AiSummaryBackendChoices(),
+                SettingKeys.AiSummaryBackend, text.SummaryEngine, c.AiSummaryBackend, AiSummaryBackendChoices(),
                 enabled: c.CoreReachable && !backendOverridden,
                 note: CoreNote(c, backendOverridden, CoreConfigKeys.AiSummaryBackend,
-                    "fm は macOS 27 以降で使えます。使えないときは原文を読み上げます")));
+                    text.SummaryEngineNote)));
 
             // ── 感情判定 ─────────────────────────────────────
-            items.Add(SettingSpec.Section("感情判定"));
+            items.Add(SettingSpec.Section(text.SectionEmotion));
             var emotionOverridden = c.IsCoreEnvOverridden(CoreConfigKeys.EmotionClassifier);
             items.Add(SettingSpec.Choice(
-                SettingKeys.EmotionClassifier, "感情判定エンジン", c.EmotionClassifier, EmotionClassifierChoices(),
+                SettingKeys.EmotionClassifier, text.EmotionEngine, c.EmotionClassifier, EmotionClassifierChoices(text),
                 enabled: c.CoreReachable && !emotionOverridden,
                 note: CoreNote(c, emotionOverridden, CoreConfigKeys.EmotionClassifier,
-                    "fm は macOS 27 以降で使えます。使えないときは辞書式に戻ります")));
+                    text.EmotionEngineNote)));
 
             // ── ショートカット ────────────────────────────────
             // ★ 記録の仕方は**節の全部にかかる**ので見出しに付ける（→ SettingSpec.Section の ★★）
             items.Add(SettingSpec.Section(
-                "ショートカット", note: "「記録」を押してキーを押してください（修飾キーを1つ以上）"));
+                text.SectionShortcuts, note: text.ShortcutsNote));
             // ★ **ミュートのチェックボックスは出さない。** ミュートはメニューバー
             //   （アイコンが薄くなる）とショートカットで操作するもの、と割り切った。
             //   ここに置くと、ショートカットで切り替えたときに**パネルだけ古い状態のまま**になる。
@@ -267,7 +267,7 @@ namespace ChatterMascot.Settings
             // ★★ **並びは `HotKeySlots` が持つ**（→ あちらの ★★）。ここで直に並べると、
             //   ショートカットを1本足すたびに「画面の行」と「重複の判定」の両方に
             //   書き足すことになり、片方を忘れた瞬間に穴が空く
-            var slots = HotKeySlots(settings);
+            var slots = HotKeySlots(settings, text);
             for (var i = 0; i < slots.Count; i++)
             {
                 // ★★ **重複していたら画面に出すこと（第2層）。** パネルからの記録は
@@ -285,23 +285,23 @@ namespace ChatterMascot.Settings
 
                 items.Add(SettingSpec.HotKey(
                     slots[i].Key, slots[i].Label, Symbols(slots[i].Value),
-                    note: clash < 0 ? "" : $"「{slots[clash].Label}」と同じ組み合わせなので登録できません"));
+                    note: clash < 0 ? "" : text.HotKeyClashNote(slots[clash].Label)));
             }
 
             // ── リセット ─────────────────────────────────────
-            items.Add(SettingSpec.Section("リセット"));
-            items.Add(SettingSpec.Button(SettingKeys.ResetPosition, "キャラクターの位置と大きさをリセット"));
+            items.Add(SettingSpec.Section(text.SectionReset));
+            items.Add(SettingSpec.Button(SettingKeys.ResetPosition, text.ResetPosition));
             // ★★ **取り消せない操作。** models/ に置いた .vrm も消えるので、
             //   ネイティブの確認ダイアログを挟む（→ SettingsPanelBridge）
             items.Add(SettingSpec.Button(
-                SettingKeys.ResetAll, "すべての設定をリセット…",
-                note: "選んだモデルのファイルも消して、完全に初期状態へ戻します"));
+                SettingKeys.ResetAll, text.ResetAll,
+                note: text.ResetAllNote));
 
             // ★ **「このアプリについて」はここに出さない。** ライセンス本文が長く、
             //   設定パネルの大半を占めてしまう。メニューバーの「Chatter Mascot について」から
             //   別のダイアログで開く（→ AboutSchema）。
 
-            items.Add(SettingSpec.Button(SettingKeys.Quit, "終了"));
+            items.Add(SettingSpec.Button(SettingKeys.Quit, text.Quit));
 
             return items;
         }
@@ -320,39 +320,40 @@ namespace ChatterMascot.Settings
         private static IReadOnlyList<SettingSpec> BuildXr(SettingsContext c)
         {
             var settings = c.Settings;
+            var text = c.Text;
             var items = new List<SettingSpec>();
 
-            items.Add(SettingSpec.Bool(SettingKeys.Mute, "ミュート", settings.Muted));
+            items.Add(SettingSpec.Bool(SettingKeys.Mute, text.XrMute, settings.Muted));
 
             // ── キャラクター ─────────────────────────────────
-            items.Add(SettingSpec.Section("キャラクター"));
+            items.Add(SettingSpec.Section(text.SectionCharacter));
             items.Add(BuildXrHeightChoice(c, settings));
             var syncOn = settings.AssetSync != SettingsMapping.AssetSyncOff;
             items.Add(SettingSpec.Bool(
-                SettingKeys.AssetSync, "モデルとモーションを同期",
+                SettingKeys.AssetSync, text.XrSyncAssets,
                 syncOn,
-                note: "次回の起動から反映されます"));
+                note: text.XrSyncAssetsNote));
             // ★ note はどの状態でも出す。有無が変わると XrSettingsPanel.Signature が変わってパネルが
             //   行を作り直し、縮尺と中心がずれて、押そうとした行がずれる。
             items.Add(SettingSpec.Button(
-                SettingKeys.AssetSyncNow, "今すぐ同期",
+                SettingKeys.AssetSyncNow, text.XrSyncNow,
                 enabled: syncOn && !c.AssetSyncRunning,
-                note: c.AssetSyncRunning ? "同期しています…" : !syncOn ? "同期が OFF の間は使えません" : "サーバーから取り直します"));
+                note: c.AssetSyncRunning ? text.XrSyncing : !syncOn ? text.XrSyncOffNote : text.XrSyncNowNote));
 
             // ── モーション ───────────────────────────────────
-            items.Add(SettingSpec.Section("モーション"));
+            items.Add(SettingSpec.Section(text.SectionMotion));
             AddMotionPreview(items, c, settings);
-            items.Add(SettingSpec.Bool(SettingKeys.Walk, "歩く", settings.Walk));
-            items.Add(SettingSpec.Bool(SettingKeys.CursorGaze, "指している先を目で追う", settings.CursorGaze));
-            items.Add(SettingSpec.Bool(SettingKeys.Blink, "まばたき", settings.Blink));
+            items.Add(SettingSpec.Bool(SettingKeys.Walk, text.XrWalk, settings.Walk));
+            items.Add(SettingSpec.Bool(SettingKeys.CursorGaze, text.XrCursorGaze, settings.CursorGaze));
+            items.Add(SettingSpec.Bool(SettingKeys.Blink, text.Blink, settings.Blink));
 
             // ── リセット ─────────────────────────────────────
-            items.Add(SettingSpec.Section("リセット"));
-            items.Add(SettingSpec.Button(SettingKeys.ResetPosition, "キャラクターの位置をリセット"));
+            items.Add(SettingSpec.Section(text.SectionReset));
+            items.Add(SettingSpec.Button(SettingKeys.ResetPosition, text.XrResetPosition));
             // ★ モデルファイルは消さない（→ SettingKeys.ResetAll の Desktop 版との違い）。
             //   同期して取ってきたものを次の起動でまた取りに行けばよいので、消す必要が無い
             items.Add(SettingSpec.Button(
-                SettingKeys.ResetAll, "すべての設定をリセット", note: "接続先は残します"));
+                SettingKeys.ResetAll, text.XrResetAll, note: text.XrResetAllNote));
 
             return items;
         }
@@ -368,12 +369,12 @@ namespace ChatterMascot.Settings
             if (choices == null)
             {
                 return SettingSpec.Choice(
-                    SettingKeys.XrHeight, "大きさ", "", null,
-                    enabled: false, note: "モデルを読み込んでいます");
+                    SettingKeys.XrHeight, c.Text.Size, "", null,
+                    enabled: false, note: c.Text.XrLoadingModel);
             }
 
             return SettingSpec.Choice(
-                SettingKeys.XrHeight, "大きさ", SnappedXrHeightValue(choices, settings.XrHeight), choices);
+                SettingKeys.XrHeight, c.Text.Size, SnappedXrHeightValue(choices, settings.XrHeight), choices);
         }
 
         /// <summary>
@@ -417,11 +418,11 @@ namespace ChatterMascot.Settings
             var motionClips = c.MotionClips;
             var motionEnabled = settings.IdleMotion && motionClips != null && motionClips.Count > 0;
             var motionValue = EffectiveMotionPreview(motionClips, c.MotionPreview);
-            var label = c.Platform == SettingsPlatform.Xr ? "" : "モーションを確認";
+            var label = c.Platform == SettingsPlatform.Xr ? "" : c.Text.PreviewMotion;
             items.Add(SettingSpec.Choice(
                 SettingKeys.MotionPreview, label, motionValue, motionClips,
-                enabled: motionEnabled, note: MotionPreviewNote(motionClips, settings.IdleMotion)));
-            items.Add(SettingSpec.Button(SettingKeys.MotionPreviewPlay, "再生", enabled: motionEnabled));
+                enabled: motionEnabled, note: MotionPreviewNote(motionClips, settings.IdleMotion, c.Text)));
+            items.Add(SettingSpec.Button(SettingKeys.MotionPreviewPlay, c.Text.Play, enabled: motionEnabled));
         }
 
         /// <summary>
@@ -439,9 +440,9 @@ namespace ChatterMascot.Settings
             return new List<SettingSpec>
             {
                 SettingSpec.Text(
-                    SettingKeys.Version, "バージョン",
+                    SettingKeys.Version, c.Text.Version,
                     string.IsNullOrEmpty(c.Version) ? c.ProductName : c.ProductName + " " + c.Version),
-                SettingSpec.Text(SettingKeys.License, "ライセンス", c.LicenseText),
+                SettingSpec.Text(SettingKeys.License, c.Text.License, c.LicenseText),
             };
         }
 
@@ -474,13 +475,13 @@ namespace ChatterMascot.Settings
         }
 
         /// <summary>感情判定エンジンの選択肢。値は core の <c>emotionClassifier</c> とそのまま対応する</summary>
-        private static IReadOnlyList<SettingChoice> EmotionClassifierChoices()
+        private static IReadOnlyList<SettingChoice> EmotionClassifierChoices(UiText text)
         {
             return new[]
             {
                 new SettingChoice("ollaya", "Ollaya(laya)"),
                 new SettingChoice("fm", "fm"),
-                new SettingChoice("dictionary", "辞書式"),
+                new SettingChoice("dictionary", text.EmotionDictionary),
             };
         }
 
@@ -530,11 +531,11 @@ namespace ChatterMascot.Settings
         ///   こちらが直接の理由——<c>VrmMotionPlayer.Play</c> は待機モーション OFF の間
         ///   常に拒否するので、一覧の状態に関わらず押しても何も起きない。
         /// </summary>
-        private static string MotionPreviewNote(IReadOnlyList<SettingChoice> clips, bool idleMotionEnabled)
+        private static string MotionPreviewNote(IReadOnlyList<SettingChoice> clips, bool idleMotionEnabled, UiText text)
         {
-            if (!idleMotionEnabled) return "待機モーションが OFF の間は再生できません";
-            if (clips == null) return "モーションを読み込み中です";
-            if (clips.Count == 0) return "~/.config/chatter-agent/animations/<感情>/ に .vrma を置くと選べます";
+            if (!idleMotionEnabled) return text.MotionPreviewIdleOff;
+            if (clips == null) return text.MotionPreviewLoading;
+            if (clips.Count == 0) return text.MotionPreviewEmpty;
             return "";
         }
 
@@ -578,16 +579,16 @@ namespace ChatterMascot.Settings
         /// </summary>
         /// <param name="result">再生を試みた結果</param>
         /// <param name="id">試みたモーションの id（<see cref="MotionPreviewId"/> の形。<see cref="MotionPlayResult.Started"/> の文言にだけ使う）</param>
-        public static string MotionPlayNotice(MotionPlayResult result, string id)
+        public static string MotionPlayNotice(MotionPlayResult result, string id, UiText text)
         {
             switch (result)
             {
-                case MotionPlayResult.Started: return id + " を再生します";
-                case MotionPlayResult.Busy: return "再生中です。終わってからもう一度押してください";
-                case MotionPlayResult.IdleNotLoaded: return "待機モーションの VRMA が読めていないので再生できません";
-                case MotionPlayResult.IdleDisabled: return "待機モーションが OFF です";
-                case MotionPlayResult.NotLoaded: return "このモーションは読み込めていません";
-                case MotionPlayResult.Disposed: return "キャラクターが無効です";
+                case MotionPlayResult.Started: return text.MotionPlayStarted(id);
+                case MotionPlayResult.Busy: return text.MotionPlayBusy;
+                case MotionPlayResult.IdleNotLoaded: return text.MotionPlayIdleNotLoaded;
+                case MotionPlayResult.IdleDisabled: return text.MotionPlayIdleDisabled;
+                case MotionPlayResult.NotLoaded: return text.MotionPlayNotLoaded;
+                case MotionPlayResult.Disposed: return text.MotionPlayDisposed;
                 default: return "";
             }
         }
@@ -604,26 +605,23 @@ namespace ChatterMascot.Settings
 
         private static string SpeakerNote(SettingsContext c, bool overridden)
         {
-            if (overridden) return EnvNote(CoreConfigKeys.SpeakerId);
+            if (overridden) return EnvNote(c.Text, CoreConfigKeys.SpeakerId);
             if (!c.CoreReachable) return c.CoreNote;
-            if (c.Speakers.Count == 0) return "話者の一覧を取得できませんでした";
-            return "次に喋る文から変わります";
+            if (c.Speakers.Count == 0) return c.Text.SpeakerListUnavailable;
+            return c.Text.AppliesFromNextSentence;
         }
 
         private static string CoreNote(SettingsContext c, bool overridden, string coreKey, string normal)
         {
-            if (overridden) return EnvNote(coreKey);
+            if (overridden) return EnvNote(c.Text, coreKey);
             if (!c.CoreReachable) return c.CoreNote;
             return normal;
         }
 
-        /// <summary>
-        /// ★ <b>「効かない」ではなく「なぜ効かないか」を出すこと。</b> 環境変数で固定している
-        /// 本人にとっては意図どおりなので、環境変数名まで出せば「自分で決めた」と分かる。
-        /// </summary>
-        private static string EnvNote(string coreKey)
+        /// <summary>文言は <see cref="UiText.EnvOverridden"/>（なぜ効かないかを出す）。</summary>
+        private static string EnvNote(UiText text, string coreKey)
         {
-            return "環境変数（" + EnvNameOf(coreKey) + "）で固定されています";
+            return text.EnvOverridden(EnvNameOf(coreKey));
         }
 
         /// <summary>

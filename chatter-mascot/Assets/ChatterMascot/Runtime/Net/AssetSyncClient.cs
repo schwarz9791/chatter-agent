@@ -53,7 +53,7 @@ namespace ChatterMascot.Net
         public event Action<string> Failed;
 
         // ★ 端末に出す文面の改行は**リテラルに書く**（DescribeResult も同じ）。トーストは幅が
-        //   狭いので折り返したいが、切る位置は文面ごとに違う——「。」で機械的に折ると、
+        //   狭いので折り返したいが、切る位置は文面ごとに違う——文の区切りで機械的に折ると、
         //   切りたくない文まで巻き込む。
         //
         // ★ 3つとも2行目を揃える。躓いた理由は違っても**次にやることは同じ**（何もしなくてよい）
@@ -61,15 +61,15 @@ namespace ChatterMascot.Net
 
         /// <summary>マニフェストを取得できなかった（接続できない・応答が無い）ときの文面。</summary>
         internal const string ManifestUnreachableMessage =
-            "サーバーに繋がりません。\n以前に設定されたモデルとモーションを使用します。";
+            "Can't reach the server.\nUsing the previously set model and motions.";
 
         /// <summary>マニフェストは取得できたが読めなかった（契約から外れている）ときの文面。</summary>
         internal const string ManifestUnreadableMessage =
-            "サーバーの応答を読めませんでした。\n以前に設定されたモデルとモーションを使用します。";
+            "Couldn't read the server's response.\nUsing the previously set model and motions.";
 
         /// <summary>マニフェストは読めたが素材が1件も載っていなかったときの文面。</summary>
         internal const string ManifestEmptyMessage =
-            "サーバーにモデルとモーションがありません。\n以前に設定されたモデルとモーションを使用します。";
+            "The server has no model or motions.\nUsing the previously set model and motions.";
 
         public readonly string BaseUrl;
         private readonly int _timeoutSeconds;
@@ -187,22 +187,22 @@ namespace ChatterMascot.Net
         public static string DescribeResult(int fetched, int planned, int deleted, bool requested = false)
         {
             // 取りに行くものも消すものも無かった＝定常状態
-            if (planned <= 0 && deleted <= 0) return requested ? "モデルとモーションは最新です。" : null;
+            if (planned <= 0 && deleted <= 0) return requested ? "Model and motions are up to date." : null;
 
             // ★ 1件も取れなかったときに「更新した」と言わないこと。取りに行って
             //   全部こぼしたのと、取って反映待ちなのは、次にやることが違う
             if (planned > 0 && fetched <= 0)
             {
-                return "モデルとモーションを取得できませんでした。\n次に起動したときにやり直します。";
+                return "Couldn't download the model and motions.\nWill retry on next launch.";
             }
 
             if (fetched < planned)
             {
-                return $"モデルとモーションの一部を更新しました（{fetched}/{planned} 件）。\n" +
-                       "次に起動したときに続きを取りに行きます。";
+                return $"Updated some of the model and motions ({fetched}/{planned}).\n" +
+                       "Will fetch the rest on next launch.";
             }
 
-            return "モデルとモーションを更新しました。\n次に起動したときから反映されます。";
+            return "Model and motions updated.\nChanges take effect on next launch.";
         }
 
         private async Task<string> FetchManifestAsync()

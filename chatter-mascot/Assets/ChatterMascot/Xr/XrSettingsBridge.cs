@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using ChatterMascot.Settings;
+using ChatterMascot.Ui;
 using ChatterMascot.Vrm;
 using Unity.XR.CoreUtils;
 using UnityEngine;
@@ -30,11 +31,6 @@ namespace ChatterMascot.Xr
 
         /// <summary>「すべての設定をリセット」の確認待ちの猶予（秒）。既定値。</summary>
         private const float ResetAllConfirmSeconds = 4f;
-
-        private const string CloseLabel = "閉じる";
-        private const string ResetAllConfirmNote = "もう一度押すとすべての設定をリセットします";
-        private const string NoMotionToPlayNote = "選べるモーションがありません";
-        private const string AssetSyncNotStartedNote = "同期を始められませんでした";
 
         private VrmStage _stage;
         private XROrigin _origin;
@@ -82,6 +78,8 @@ namespace ChatterMascot.Xr
             _origin = origin;
             _grab = grab;
             _walk = walk;
+            // ★ XR で端末の言語を読むのはここだけ（→ UiText.For）
+            _context.Text = UiText.For(Application.systemLanguage);
 
             var panelGo = new GameObject("XR Settings Panel");
             // ★ Canvas は RequireComponent で即座に付くので、組み上がるまで（EnsureBuilt/Open の
@@ -251,7 +249,7 @@ namespace ChatterMascot.Xr
             _notices.Clear();
             _resetAllArmedUntil = double.NegativeInfinity;
             RebuildContext();
-            _panel.Open(_origin.Camera.transform, CloseLabel, BuildItems());
+            _panel.Open(_origin.Camera.transform, _context.Text.XrClose, BuildItems());
         }
 
         private void OnPanelClosed()
@@ -283,7 +281,7 @@ namespace ChatterMascot.Xr
 
             var realCm = _stage.RealHeightCm;
             _context.XrHeightChoices = realCm.HasValue
-                ? SettingsMapping.XrHeightChoices(SettingsMapping.XrHeightSteps(realCm.Value))
+                ? SettingsMapping.XrHeightChoices(SettingsMapping.XrHeightSteps(realCm.Value), _context.Text)
                 : null;
 
             var character = CharacterComponent();
@@ -314,7 +312,7 @@ namespace ChatterMascot.Xr
             var result = new List<SettingSpec>(items.Count);
             foreach (var spec in items)
             {
-                result.Add(spec.Key == SettingKeys.ResetAll ? SettingSpec.WithNote(spec, ResetAllConfirmNote) : spec);
+                result.Add(spec.Key == SettingKeys.ResetAll ? SettingSpec.WithNote(spec, _context.Text.XrResetAllConfirmNote) : spec);
             }
             return result;
         }
@@ -377,7 +375,7 @@ namespace ChatterMascot.Xr
                     var runner = ResolveRunner();
                     var started = runner != null && runner.TryStartAssetSync(requested: true);
                     // ★ 始められたら前回の失敗の note を消す。残すと「同期しています…」を覆ってしまう
-                    Notice(SettingKeys.AssetSyncNow, started ? null : AssetSyncNotStartedNote);
+                    Notice(SettingKeys.AssetSyncNow, started ? null : _context.Text.XrSyncNotStarted);
                     Refresh();
                     return;
                 }
@@ -468,13 +466,13 @@ namespace ChatterMascot.Xr
 
             if (character == null || clip == null)
             {
-                Notice(SettingKeys.MotionPreviewPlay, NoMotionToPlayNote);
+                Notice(SettingKeys.MotionPreviewPlay, _context.Text.NoMotionToPlay);
                 Refresh();
                 return;
             }
 
             var result = character.PreviewMotion(clip);
-            Notice(SettingKeys.MotionPreviewPlay, SettingsSchema.MotionPlayNotice(result, id));
+            Notice(SettingKeys.MotionPreviewPlay, SettingsSchema.MotionPlayNotice(result, id, _context.Text));
             Refresh();
         }
 

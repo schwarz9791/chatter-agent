@@ -93,6 +93,7 @@ Assets/ChatterMascot/
                 MutedSpeechPlayer.cs 「声だけ消す」デコレータ。ack は通常経路のまま出す
     Ui/         HotKeySpec.cs       "opt+m" ⇄ Carbon の (keyCode, modifiers)
                 MenuModel.cs        メニューの並びの唯一の持ち主
+                UiText.cs           画面の文言の表（言語ごとのサブクラス。→「画面の言語」）
                 MenuJson.cs         ネイティブとやり取りする JSON
     Settings/   SettingsStore.cs    ~/.config/chatter-agent/mascot/settings.json
                 SettingsJson.cs / MascotSettings.cs
@@ -259,6 +260,15 @@ WebSocket クライアントには `ClientWebSocket` を選んだ。`Origin` を
 `allowedOrigins`（既定 `[]` = Origin 付きは全拒否）の設定が要らず（Origin が付くのは WebView から
 張ったとき。→ [`protocol.md`](./protocol.md) の表）、追加依存も無いまま
 macOS と Android を同じコードで通せる。引き換えは ping watchdog が同等品を作れないこと。
+
+### 画面の言語
+
+設定パネル・メニュー・「について」の文言は端末の言語に従う。日本語なら日本語、それ以外は英語。
+言語を手で選ぶ設定は無い。文言は `Runtime/Ui/UiText.cs` の言語ごとのサブクラス（`UiText.Ja.cs` /
+`UiText.En.cs`）が持ち、言語を足すときはサブクラスを1つ足して `UiText.For` に分岐を足す。
+端末の言語（`Application.systemLanguage`）を読むのは `StatusItemBridge`（macOS）と
+`XrSettingsBridge`（XR）だけで、`ChatterMascot.Runtime` は言語を引数で受け取る——英語の並びも
+EditMode テストで固定するため。ログと XR の同期結果の通知は言語で切り替えない。
 
 ### 感情モーションと小ネタの素材
 

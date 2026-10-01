@@ -1,4 +1,5 @@
 using ChatterMascot.Net;
+using ChatterMascot.Ui;
 using NUnit.Framework;
 
 namespace ChatterMascot.Tests
@@ -22,7 +23,7 @@ namespace ChatterMascot.Tests
         public void NamesTheReasonWhenSynthesisFails()
         {
             Assert.That(
-                CoreConfigClient.DescribeError("{\"error\":\"synthesis_unavailable\",\"detail\":\"down\"}"),
+                CoreConfigClient.DescribeError("{\"error\":\"synthesis_unavailable\",\"detail\":\"down\"}", UiText.Ja),
                 Is.EqualTo("音声を合成できませんでした"));
         }
 
@@ -31,7 +32,7 @@ namespace ChatterMascot.Tests
         public void SaysWhoTurnedTheAudioOff()
         {
             Assert.That(
-                CoreConfigClient.DescribeError("{\"error\":\"tts_disabled\"}"),
+                CoreConfigClient.DescribeError("{\"error\":\"tts_disabled\"}", UiText.Ja),
                 Is.EqualTo("サーバー側で音声が無効になっています（ttsEnabled）"));
         }
 
@@ -48,7 +49,7 @@ namespace ChatterMascot.Tests
         [Test]
         public void NamesTheMissingApiInsteadOfEchoingNotFound()
         {
-            var reason = CoreConfigClient.DescribeFailure(404, "not found\n");
+            var reason = CoreConfigClient.DescribeFailure(404, "not found\n", UiText.Ja);
 
             Assert.That(reason, Does.Contain("API not found"));
             Assert.That(reason, Does.Contain("chatter-agent-server"));
@@ -60,7 +61,7 @@ namespace ChatterMascot.Tests
         public void StillTranslatesTheBodyForOtherStatuses()
         {
             Assert.That(
-                CoreConfigClient.DescribeFailure(403, "{\"error\":\"readonly_key\",\"key\":\"ttsBaseUrl\"}"),
+                CoreConfigClient.DescribeFailure(403, "{\"error\":\"readonly_key\",\"key\":\"ttsBaseUrl\"}", UiText.Ja),
                 Is.EqualTo("この設定は変更できません（ttsBaseUrl）"));
         }
 
@@ -68,14 +69,14 @@ namespace ChatterMascot.Tests
         [Test]
         public void FallsBackToTheStatusWhenThereIsNoBody()
         {
-            Assert.That(CoreConfigClient.DescribeFailure(500, ""), Does.Contain("500"));
+            Assert.That(CoreConfigClient.DescribeFailure(500, "", UiText.Ja), Does.Contain("500"));
         }
 
         /// <summary>★ 知らないキーは生のまま。空にすると「押したのに何も起きない」に見える</summary>
         [Test]
         public void FallsBackToTheRawKey()
         {
-            Assert.That(CoreConfigClient.DescribeError("{\"error\":\"future_error\"}"), Is.EqualTo("future_error"));
+            Assert.That(CoreConfigClient.DescribeError("{\"error\":\"future_error\"}", UiText.Ja), Is.EqualTo("future_error"));
         }
     }
 }

@@ -23,24 +23,24 @@ namespace ChatterMascot.Settings
         /// 「ボタンの文字くらいネイティブに書いてよい」で例外を1つ作ると、必ず増える
         /// （項目のラベルとの線引きが説明できなくなる）。
         /// </summary>
-        private static JObject Strings()
+        private static JObject Strings(Ui.UiText text)
         {
             return new JObject
             {
-                ["record"] = "記録",
-                ["cancel"] = "中止",
+                ["record"] = text.PanelRecord,
+                ["cancel"] = text.PanelCancel,
                 // ★ 記録中に出る文字。修飾キーを押すとその記号に置き換わる
-                ["recording"] = "キーを押す",
+                ["recording"] = text.PanelRecording,
                 // ★ 選択肢が空のときに出す。**項目ごと消さない**ための表示
-                ["empty"] = "（取得できません）",
+                ["empty"] = text.PanelEmpty,
             };
         }
 
-        public static string Write(string title, IReadOnlyList<SettingSpec> items)
+        public static string Write(string title, IReadOnlyList<SettingSpec> items, Ui.UiText text)
         {
             var root = new JObject();
             if (!string.IsNullOrEmpty(title)) root["title"] = title;
-            root["strings"] = Strings();
+            root["strings"] = Strings(text);
 
             var array = new JArray();
             if (items != null)

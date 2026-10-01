@@ -15,7 +15,7 @@ namespace ChatterMascot.Tests
             return new MenuState(
                 muted, hidden, Spec(muteHotKey), Spec(hideHotKey),
                 "Chatter Mascot", "1.2.3", 4242,
-                "/tmp/trayTemplate.png", "/tmp/trayTemplate@2x.png");
+                "/tmp/trayTemplate.png", "/tmp/trayTemplate@2x.png", UiText.Ja);
         }
 
         private static HotKeySpec Spec(string text)
@@ -108,7 +108,7 @@ namespace ChatterMascot.Tests
         {
             var state = new MenuState(
                 false, false, default(HotKeySpec), default(HotKeySpec),
-                "Chatter Mascot", "1.0", 1, null, null);
+                "Chatter Mascot", "1.0", 1, null, null, UiText.Ja);
             var entries = MascotMenu.Build(state).Entries;
 
             Assert.That(entries.First(e => e.Key == MenuKeys.Mute).Label, Is.EqualTo("ミュート"));
@@ -141,7 +141,7 @@ namespace ChatterMascot.Tests
         public void OmitsTheIconWhenThereIsNoPath()
         {
             var model = MascotMenu.Build(new MenuState(
-                false, false, default(HotKeySpec), default(HotKeySpec), "x", "1", 1, null, null));
+                false, false, default(HotKeySpec), default(HotKeySpec), "x", "1", 1, null, null, UiText.Ja));
 
             Assert.That(JObject.Parse(MenuJson.Write(model))["icon"], Is.Null);
         }

@@ -720,6 +720,9 @@ osascript -e 'tell application "System Events" to tell process "Chatter Mascot" 
   to click menu item "Chatter Mascot について" of menu 1 of menu bar item 1 of menu bar 2'
 ```
 
+★ **項目名は端末の言語に従う。** 英語の端末では `About Chatter Mascot` などになるので、この例は
+日本語の端末か、`-AppleLanguages '(ja)'` で起動したときのもの。
+
 ★ **ターミナルにアクセシビリティ権限が要る。** 権限が無いと項目そのものが見えないので、
 #75 の「見えない」はおそらくそれ。**権限の有無で結論が変わる測定**だと分かるように書くこと。
 

@@ -142,6 +142,55 @@ namespace ChatterMascot.Tests
                 Assert.That(en[i].Select(s => s.Key), Is.EqualTo(ja[i].Select(s => s.Key)), "keys #" + i);
                 Assert.That(en[i].Select(s => s.Kind), Is.EqualTo(ja[i].Select(s => s.Kind)), "kinds #" + i);
                 Assert.That(en[i].Select(s => s.Enabled), Is.EqualTo(ja[i].Select(s => s.Enabled)), "enabled #" + i);
+                // XR のパネルは注記の有無で行を作り直すので、有無も言語で変わらないこと
+                Assert.That(
+                    en[i].Select(s => string.IsNullOrEmpty(s.Note)),
+                    Is.EqualTo(ja[i].Select(s => string.IsNullOrEmpty(s.Note))), "note #" + i);
+            }
+        }
+
+        /// <summary>
+        /// Bridge からしか出ない文言も含め、<see cref="UiText"/> の string を返す全メンバーを検査する。
+        /// メンバーを足せば自動で対象に入る。
+        /// </summary>
+        [Test]
+        public void EveryMemberIsTranslated()
+        {
+            var flags = System.Reflection.BindingFlags.Public
+                | System.Reflection.BindingFlags.Instance
+                | System.Reflection.BindingFlags.DeclaredOnly;
+            var members = new List<(string Name, System.Func<UiText, string> Get)>();
+
+            foreach (var p in typeof(UiText).GetProperties(flags))
+            {
+                if (p.PropertyType != typeof(string) || p.GetMethod == null) continue;
+                var prop = p;
+                members.Add((prop.Name, t => (string)prop.GetValue(t)));
+            }
+
+            foreach (var m in typeof(UiText).GetMethods(flags))
+            {
+                if (m.IsSpecialName || m.ReturnType != typeof(string)) continue;
+                var method = m;
+                var args = method.GetParameters().Select(p =>
+                {
+                    if (p.ParameterType == typeof(string)) return (object)"x";
+                    if (p.ParameterType == typeof(int)) return 2;
+                    if (p.ParameterType == typeof(long)) return 500L;
+                    Assert.Fail($"{method.Name}: 未対応の引数の型 {p.ParameterType}");
+                    return null;
+                }).ToArray();
+                members.Add((method.Name, t => (string)method.Invoke(t, args)));
+            }
+
+            Assert.That(members, Is.Not.Empty, "リフレクションで UiText のメンバーを取れていない");
+
+            foreach (var member in members)
+            {
+                var en = member.Get(UiText.En);
+                Assert.That(en, Is.Not.Null.And.Not.Empty, "En." + member.Name);
+                AssertNoJapanese(new[] { en });
+                Assert.That(member.Get(UiText.Ja), Is.Not.Null.And.Not.Empty, "Ja." + member.Name);
             }
         }
 

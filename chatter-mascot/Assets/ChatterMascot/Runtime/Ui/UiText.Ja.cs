@@ -3,11 +3,10 @@ namespace ChatterMascot.Ui
     internal sealed class JaUiText : UiText
     {
         // ── メニュー ──────────────────────────────────
-        public override string MenuMute => "ミュート";
+        public override string Mute => "ミュート";
         public override string MenuHide => "キャラクターを隠す";
         public override string MenuShow => "キャラクターを表示する";
         public override string MenuSettings => "設定を開く…";
-        public override string MenuQuit => "終了";
         public override string About(string product) => $"{product} について";
         public override string MenuWithShortcut(string label, string symbols) => $"{label}（{symbols}）";
 
@@ -86,7 +85,7 @@ namespace ChatterMascot.Ui
         public override string SpeakerIdUnreadable => "話者 ID を読めませんでした";
         public override string PlaybackNotReady => "再生の準備ができていません";
         public override string MutedNoSound => "ミュート中なので鳴りません";
-        public override string AppliesFromNextLaunch => "次に起動したときから反映されます";
+        public override string AppliesFromNextLaunch => "次回の起動から反映されます";
 
         // ── 設定パネル: 「について」 ──────────────────────────────────
         public override string Version => "バージョン";
@@ -122,11 +121,9 @@ namespace ChatterMascot.Ui
         public override string MotionPlayDisposed => "キャラクターが無効です";
 
         // ── XR ──────────────────────────────────
-        public override string XrMute => "ミュート";
         public override string XrLoadingModel => "モデルを読み込んでいます";
         public override string XrActualSize(string cm) => $"実寸（{cm} cm）";
         public override string XrSyncAssets => "モデルとモーションを同期";
-        public override string XrSyncAssetsNote => "次回の起動から反映されます";
         public override string XrSyncNow => "今すぐ同期";
         public override string XrSyncing => "同期しています…";
         public override string XrSyncOffNote => "同期が OFF の間は使えません";

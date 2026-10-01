@@ -323,7 +323,7 @@ namespace ChatterMascot.Settings
             var text = c.Text;
             var items = new List<SettingSpec>();
 
-            items.Add(SettingSpec.Bool(SettingKeys.Mute, text.XrMute, settings.Muted));
+            items.Add(SettingSpec.Bool(SettingKeys.Mute, text.Mute, settings.Muted));
 
             // ── キャラクター ─────────────────────────────────
             items.Add(SettingSpec.Section(text.SectionCharacter));
@@ -332,7 +332,7 @@ namespace ChatterMascot.Settings
             items.Add(SettingSpec.Bool(
                 SettingKeys.AssetSync, text.XrSyncAssets,
                 syncOn,
-                note: text.XrSyncAssetsNote));
+                note: text.AppliesFromNextLaunch));
             // ★ note はどの状態でも出す。有無が変わると XrSettingsPanel.Signature が変わってパネルが
             //   行を作り直し、縮尺と中心がずれて、押そうとした行がずれる。
             items.Add(SettingSpec.Button(

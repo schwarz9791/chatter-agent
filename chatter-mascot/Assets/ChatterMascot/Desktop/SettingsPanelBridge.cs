@@ -724,7 +724,7 @@ namespace ChatterMascot.Desktop
                 _context.CoreReachable = config.Ok;
                 if (!config.Ok)
                 {
-                    _context.CoreNote = config.Reason ?? _context.Text.CoreUnreachable;
+                    _context.CoreNote = config.Reason;
                     _context.Speakers = new SettingChoice[0];
                     // ★ ログにも残すこと。パネルの note は**開いている間しか見えない**うえ、
                     //   3項目がまとめて無効になる原因（版の食い違い / 落ちている）は
@@ -770,7 +770,7 @@ namespace ChatterMascot.Desktop
                 _context.AiSummaryBackend ?? string.Empty,
                 _context.EmotionClassifier ?? string.Empty,
                 _context.CoreReachable ? "1" : "0",
-                _context.CoreNote ?? string.Empty,
+                _context.CoreNote,
                 _context.CoreEnvOverridden == null ? "" : string.Join(",", _context.CoreEnvOverridden),
             });
         }

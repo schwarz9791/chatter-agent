@@ -224,7 +224,7 @@ namespace ChatterMascot.Tests
             var message = AssetSyncClient.DescribeResult(0, 2, 0);
 
             Assert.That(message, Is.Not.Null);
-            Assert.That(message, Does.Not.Contain("updated"));
+            Assert.That(message, Does.Not.Contain("updated").IgnoreCase);
         }
     }
 }

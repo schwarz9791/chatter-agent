@@ -106,13 +106,13 @@ namespace ChatterMascot.Ui
         public static MenuModel Build(MenuState state)
         {
             var product = string.IsNullOrEmpty(state.ProductName) ? "Chatter Mascot" : state.ProductName;
-            var text = state.Text;
+            var text = state.Text ?? UiText.Ja;
 
             var entries = new List<MenuEntry>
             {
                 MenuEntry.Of(
                     MenuKeys.Mute,
-                    WithShortcut(text, text.MenuMute, state.MuteHotKey),
+                    WithShortcut(text, text.Mute, state.MuteHotKey),
                     isChecked: state.Muted),
                 MenuEntry.Of(
                     MenuKeys.Hide,
@@ -128,7 +128,7 @@ namespace ChatterMascot.Ui
                 //   「Dock に居ないので、どれが動いているかの手掛かりがここしか無い」ためなので、
                 //   pid と同じ場所（ツールチップ）に残せば目的は保てる
                 MenuEntry.Of(MenuKeys.About, text.About(product)),
-                MenuEntry.Of(MenuKeys.Quit, text.MenuQuit),
+                MenuEntry.Of(MenuKeys.Quit, text.Quit),
             };
 
             return new MenuModel

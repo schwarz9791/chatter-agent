@@ -78,7 +78,7 @@ namespace ChatterMascot.Xr
             _origin = origin;
             _grab = grab;
             _walk = walk;
-            // ★ 端末の言語を読むのはここ1か所（→ UiText.For）
+            // ★ XR で端末の言語を読むのはここだけ（→ UiText.For）
             _context.Text = UiText.For(Application.systemLanguage);
 
             var panelGo = new GameObject("XR Settings Panel");

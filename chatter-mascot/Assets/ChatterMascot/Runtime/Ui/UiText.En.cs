@@ -3,11 +3,10 @@ namespace ChatterMascot.Ui
     internal sealed class EnUiText : UiText
     {
         // ── メニュー ──────────────────────────────────
-        public override string MenuMute => "Mute";
+        public override string Mute => "Mute";
         public override string MenuHide => "Hide Character";
         public override string MenuShow => "Show Character";
         public override string MenuSettings => "Settings…";
-        public override string MenuQuit => "Quit";
         public override string About(string product) => $"About {product}";
         public override string MenuWithShortcut(string label, string symbols) => $"{label} ({symbols})";
 
@@ -100,9 +99,9 @@ namespace ChatterMascot.Ui
         public override string ResetDone(int removedModels) =>
             removedModels > 0 ? $"Restored defaults and deleted {removedModels} model file(s)." : "Restored defaults.";
         public override string ResetModelsFailed(string reason) => $"Couldn't delete the model: {reason}";
-        public override string ResetCoreFailed(string reason) => $"Couldn't reset voice style, speaking speed, summary, etc. ({reason})";
-        public override string ResetCoreDefaultsUnavailable => "couldn't get the defaults";
-        public override string ResetKeyFailed(string key, string reason) => $"Couldn't reset {key} ({reason})";
+        public override string ResetCoreFailed(string reason) => $"Couldn't reset voice style, speaking speed, summary, etc.: {reason}";
+        public override string ResetCoreDefaultsUnavailable => "Couldn't get the defaults.";
+        public override string ResetKeyFailed(string key, string reason) => $"Couldn't reset {key}: {reason}";
 
         // ── VRM の選択 ──────────────────────────────────
         public override string ChooseVrmTitle => "Choose VRM Model";
@@ -122,11 +121,9 @@ namespace ChatterMascot.Ui
         public override string MotionPlayDisposed => "The character is unavailable.";
 
         // ── XR ──────────────────────────────────
-        public override string XrMute => "Mute";
         public override string XrLoadingModel => "Loading model…";
         public override string XrActualSize(string cm) => $"Life-size ({cm} cm)";
         public override string XrSyncAssets => "Sync model & motions";
-        public override string XrSyncAssetsNote => "Takes effect on next launch.";
         public override string XrSyncNow => "Sync Now";
         public override string XrSyncing => "Syncing…";
         public override string XrSyncOffNote => "Unavailable while sync is off.";

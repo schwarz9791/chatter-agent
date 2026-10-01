@@ -22,11 +22,11 @@ namespace ChatterMascot.Ui
         }
 
         // ── メニュー ──────────────────────────────────
-        public abstract string MenuMute { get; }
+        /// <summary>メニューと XR のパネルで共有する</summary>
+        public abstract string Mute { get; }
         public abstract string MenuHide { get; }
         public abstract string MenuShow { get; }
         public abstract string MenuSettings { get; }
-        public abstract string MenuQuit { get; }
         /// <summary>メニューの項目と「について」の題名で共有する</summary>
         public abstract string About(string product);
         /// <summary>★ 括弧は言語ごとに違う（全角 / 半角）ので書式ごと持つ</summary>
@@ -104,6 +104,7 @@ namespace ChatterMascot.Ui
         public abstract string ResetPosition { get; }
         public abstract string ResetAll { get; }
         public abstract string ResetAllNote { get; }
+        /// <summary>メニューと設定パネルで共有する</summary>
         public abstract string Quit { get; }
         public abstract string PositionReset { get; }
 
@@ -111,6 +112,7 @@ namespace ChatterMascot.Ui
         public abstract string SpeakerIdUnreadable { get; }
         public abstract string PlaybackNotReady { get; }
         public abstract string MutedNoSound { get; }
+        /// <summary>VRM を選んだ後の注記と XR の同期の注記で共有する</summary>
         public abstract string AppliesFromNextLaunch { get; }
 
         // ── 設定パネル: 「について」 ──────────────────────────────────
@@ -147,11 +149,9 @@ namespace ChatterMascot.Ui
         public abstract string MotionPlayDisposed { get; }
 
         // ── XR ──────────────────────────────────
-        public abstract string XrMute { get; }
         public abstract string XrLoadingModel { get; }
         public abstract string XrActualSize(string cm);
         public abstract string XrSyncAssets { get; }
-        public abstract string XrSyncAssetsNote { get; }
         public abstract string XrSyncNow { get; }
         public abstract string XrSyncing { get; }
         public abstract string XrSyncOffNote { get; }
@@ -178,7 +178,7 @@ namespace ChatterMascot.Ui
         public abstract string ErrorConfigUnreadable { get; }
         public abstract string ErrorConfigUnwritable { get; }
         public abstract string ErrorTooManyRequests { get; }
-        /// <summary>サーバーが返した知らない error をそのまま出す（訳せないものを潰さない）。key が空なら error だけ</summary>
+        /// <summary>サーバーが返した知らない error をそのまま出す（訳せないものを潰さない）。key が空なら呼ばずに error だけ出すこと</summary>
         public abstract string ErrorUnknown(string error, string key);
     }
 }

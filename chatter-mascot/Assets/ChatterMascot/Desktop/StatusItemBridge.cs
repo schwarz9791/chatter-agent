@@ -190,7 +190,7 @@ namespace ChatterMascot.Desktop
             private bool _activationPolicyApplied;
             private bool _shown;
 
-            /// <summary>画面の言語。端末の言語を読むのはここ1か所（→ <see cref="UiText.For"/>）。</summary>
+            /// <summary>画面の言語。macOS で端末の言語を読むのはここだけ（→ <see cref="UiText.For"/>）。</summary>
             private UiText _text;
 
             private void Start()

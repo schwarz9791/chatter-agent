@@ -305,6 +305,10 @@ impl Manager {
         }))
     }
 
+    pub fn set_core_dir(&self, dir: PathBuf) {
+        *lock(&self.0.core_dir) = Some(dir);
+    }
+
     pub fn status(&self) -> Status {
         lock(&self.0.status).clone()
     }

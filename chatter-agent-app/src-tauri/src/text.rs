@@ -23,6 +23,10 @@ pub struct Text {
     spawn_failed: fn(&str) -> String,
     pub restart: &'static str,
     pub start: &'static str,
+    pub open_log: &'static str,
+    pub pick_core: &'static str,
+    pub pick_core_title: &'static str,
+    pub autostart: &'static str,
     pub quit: &'static str,
 }
 
@@ -47,6 +51,10 @@ pub const JA: Text = Text {
     spawn_failed: |e| format!("起動に失敗（{e}）"),
     restart: "サーバーを再起動",
     start: "サーバーを起動",
+    open_log: "ログを開く",
+    pick_core: "core の場所を選ぶ…",
+    pick_core_title: "chatter-agent の core フォルダを選ぶ",
+    autostart: "ログイン時に起動",
     quit: "終了",
 };
 
@@ -71,6 +79,10 @@ pub const EN: Text = Text {
     spawn_failed: |e| format!("failed to spawn ({e})"),
     restart: "Restart Server",
     start: "Start Server",
+    open_log: "Open Log",
+    pick_core: "Choose Core Folder…",
+    pick_core_title: "Choose the chatter-agent core folder",
+    autostart: "Launch at Login",
     quit: "Quit",
 };
 

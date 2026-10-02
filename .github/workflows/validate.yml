@@ -215,6 +215,40 @@ jobs:
       - name: Verify assets (マニフェスト → GET /v1/assets/ → Range で再開)
         run: npm run verify:assets
 
+  agent-app:
+    name: ChatterAgent (Rust)
+    runs-on: macos-latest
+
+    # ChatterAgent は macOS 常駐アプリ（Tauri）。tray と LaunchAgent を使うので macOS で回す。
+    # ここで見るのは Rust のコードだけで、.app のビルドと実機の挙動は見ない
+    defaults:
+      run:
+        working-directory: chatter-agent-app/src-tauri
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.98.1
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: chatter-agent-app/src-tauri
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Run tests
+        run: cargo test
+
   unity-audio-settings:
     name: Unity のオーディオ設定が出荷値
     runs-on: ubuntu-latest

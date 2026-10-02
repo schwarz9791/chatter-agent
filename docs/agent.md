@@ -108,6 +108,7 @@ Dock にも ⌘Tab にも出ない。操作はメニューバーのアイコン�
 
 - ★ **ChatterAgent がメニューの「終了」やログアウト（quit の Apple Event）以外で終わると server が残る。**
   `kill` の SIGTERM や強制終了がこれに当たる。次に起動した ChatterAgent からは「外で動いている」に見える
+  （→ [`knowledge/agent.md`](./knowledge/agent.md)）
 - **Windows は未対応。** 停止が穏当でなく（server の後始末が走らない）、環境の解決もしない
 - **制御 API（`/v1/*`）はまだ叩いていない。** 叩くときは Rust 側から行うこと。WebView から `fetch`
   すると `Origin` が付いて 403 になる（→ [`protocol.md`](./protocol.md)）

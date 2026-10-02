@@ -67,7 +67,7 @@ pub const EN: Text = Text {
     crashed_code: |c| format!("Crashed (exit code {c})"),
     crashed_signal: |s| format!("Crashed (signal {s})"),
     crashed_unknown: "Crashed",
-    external: |pid| format!("Running outside (pid {pid})"),
+    external: |pid| format!("Running outside Chatter Agent (pid {pid})"),
     cannot_prefix: "Cannot start: ",
     no_core_dir: "choose the core folder",
     no_dist: "dist is missing (run npm run build in core)",
@@ -95,8 +95,9 @@ pub fn current() -> &'static Text {
 }
 
 impl Text {
-    fn fail(&self, f: &Fail) -> String {
-        match f {
+    /// 起動できない理由（「起動できません: …」）。
+    pub fn cannot(&self, f: &Fail) -> String {
+        let reason = match f {
             Fail::NoCoreDir => self.no_core_dir.into(),
             Fail::NoDist => self.no_dist.into(),
             Fail::NoNodeModules => self.no_node_modules.into(),
@@ -105,7 +106,8 @@ impl Text {
             Fail::NodeUnknown => self.node_unknown.into(),
             Fail::NodeOld(v) => (self.node_old)(v),
             Fail::SpawnFailed(e) => (self.spawn_failed)(e),
-        }
+        };
+        format!("{}{reason}", self.cannot_prefix)
     }
 
     /// 状態欄の文言（「サーバー: …」）。
@@ -119,7 +121,7 @@ impl Text {
             Status::Crashed(ExitInfo::Signal(sig)) => (self.crashed_signal)(*sig),
             Status::Crashed(ExitInfo::Unknown) => self.crashed_unknown.into(),
             Status::External(pid) => (self.external)(*pid),
-            Status::Cannot(f) => format!("{}{}", self.cannot_prefix, self.fail(f)),
+            Status::Cannot(f) => self.cannot(f),
         };
         format!("{}{body}", self.status_prefix)
     }

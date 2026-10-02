@@ -12,7 +12,7 @@ use tauri::menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, Predefined
 use tauri::tray::TrayIconBuilder;
 use tauri::{Manager as _, RunEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
-use tauri_plugin_dialog::DialogExt as _;
+use tauri_plugin_dialog::{DialogExt as _, MessageDialogKind};
 use tauri_plugin_opener::OpenerExt as _;
 
 /// ChatterAgent 自身の設定。
@@ -127,7 +127,7 @@ fn main() {
                             .open_path(target.to_string_lossy(), None::<&str>);
                     }
                     "pick_core" => {
-                        let (m, path) = (m.clone(), settings_path.clone());
+                        let (m, path, handle) = (m.clone(), settings_path.clone(), app.clone());
                         app.dialog()
                             .file()
                             .set_title(t.pick_core_title)
@@ -135,21 +135,21 @@ fn main() {
                                 let Some(dir) = picked.and_then(|p| p.into_path().ok()) else {
                                     return;
                                 };
-                                if let Err(f) = server::check_core(&dir) {
-                                    // 動いている子がいる間は、状態欄を実態と食い違わせない。
-                                    if !m.is_running() {
-                                        m.set_status(Status::Cannot(f));
-                                    }
-                                    return;
-                                }
-                                if Settings::save(
-                                    &Settings {
-                                        core_dir: Some(dir.clone()),
-                                    },
-                                    &path,
-                                )
-                                .is_err()
-                                {
+                                // 選び直しの失敗は状態欄に出さない。動いている server の状態と食い違うため。
+                                let saved = server::check_core(&dir)
+                                    .map_err(|f| t.cannot(&f))
+                                    .and_then(|()| {
+                                        let settings = Settings {
+                                            core_dir: Some(dir.clone()),
+                                        };
+                                        settings.save(&path).map_err(|e| e.to_string())
+                                    });
+                                if let Err(reason) = saved {
+                                    handle
+                                        .dialog()
+                                        .message(reason)
+                                        .kind(MessageDialogKind::Warning)
+                                        .show(|_| {});
                                     return;
                                 }
                                 m.set_core_dir(dir);

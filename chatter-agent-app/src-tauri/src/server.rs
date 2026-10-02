@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -166,15 +166,19 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// パイプを読み切って送る。rc が起こしたプロセスがパイプを握ったままだと読み終わらないので、
+/// 受け取る側は期限つきで待つ。
 #[cfg(unix)]
-fn drain<R: Read + Send + 'static>(r: Option<R>) -> thread::JoinHandle<Vec<u8>> {
+fn drain<R: Read + Send + 'static>(r: Option<R>) -> mpsc::Receiver<Vec<u8>> {
+    let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         let mut buf = Vec::new();
         if let Some(mut r) = r {
             let _ = r.read_to_end(&mut buf);
         }
-        buf
-    })
+        let _ = tx.send(buf);
+    });
+    rx
 }
 
 /// 端末から起動したときと同じ環境を、ログインシェルから得る。失敗の詳細（シェルの stderr の末尾など）を返す。
@@ -206,9 +210,12 @@ pub fn resolve_login_env(core: &Path) -> Result<Env, String> {
             }
         }
     }
-    let stdout = out.join().unwrap_or_default();
+    let left = || deadline.saturating_duration_since(Instant::now());
+    let stdout = out
+        .recv_timeout(left())
+        .map_err(|_| "ログインシェルの出力が時間内に閉じなかった".to_string())?;
     parse_env_output(&stdout).ok_or_else(|| {
-        let stderr = err.join().unwrap_or_default();
+        let stderr = err.recv_timeout(left()).unwrap_or_default();
         let tail = &stderr[stderr.len().saturating_sub(STDERR_TAIL_BYTES)..];
         format!(
             "環境を取り出せなかった。stderr: {}",

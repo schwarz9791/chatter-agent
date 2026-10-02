@@ -109,11 +109,7 @@ fn main() {
                 .show_menu_on_left_click(true)
                 .on_menu_event(move |app, event| match event.id().as_ref() {
                     "restart" => {
-                        if m.is_running() {
-                            m.restart();
-                        } else {
-                            m.start();
-                        }
+                        m.start_or_restart();
                     }
                     "open_log" => {
                         // ファイルがまだ無ければディレクトリを開く。
@@ -153,11 +149,7 @@ fn main() {
                                     return;
                                 }
                                 m.set_core_dir(dir);
-                                if m.is_running() {
-                                    m.restart();
-                                } else {
-                                    m.start();
-                                }
+                                m.start_or_restart();
                             });
                     }
                     "autostart" => {
@@ -182,7 +174,7 @@ fn main() {
                 .build(app)?;
 
             manager.spawn_monitor();
-            manager.start();
+            manager.start_or_restart();
             Ok(())
         })
         .build(tauri::generate_context!())

@@ -15,7 +15,7 @@ use crate::text;
 pub type Env = HashMap<String, String>;
 
 /// server が要求する node の下限（`core/package.json` の engines と揃える）。
-const NODE_MIN: (u32, u32, u32) = (24, 11, 0);
+pub const NODE_MIN: (u32, u32, u32) = (24, 11, 0);
 const LOG_MAX_BYTES: u64 = 10 * 1024 * 1024;
 const ENV_MARKER: &[u8] = b"\0__CHATTER_AGENT_ENV__\0";
 
@@ -76,6 +76,11 @@ pub fn parse_node_version(output: &str) -> Option<(u32, u32, u32)> {
         parts.next()?.parse().ok()?,
     );
     parts.next().is_none().then_some(v)
+}
+
+/// `24.11.0` の形に整える。
+pub fn version_label(v: (u32, u32, u32)) -> String {
+    format!("{}.{}.{}", v.0, v.1, v.2)
 }
 
 pub fn node_is_new_enough(v: (u32, u32, u32)) -> bool {
@@ -157,28 +162,57 @@ pub fn rotate_log(path: &Path, max_bytes: u64) -> std::io::Result<()> {
 #[cfg(unix)]
 const ENV_SCRIPT: &str = "printf '\\0__CHATTER_AGENT_ENV__\\0'; exec /usr/bin/env -0";
 const ENV_TIMEOUT: Duration = Duration::from_secs(10);
-/// server の watchdog（6秒）より長く待つ。
+/// server の終了処理の上限（`SHUTDOWN_TIMEOUT_MS`）より長く待つ。
 const STOP_TIMEOUT: Duration = Duration::from_secs(10);
 const MONITOR_INTERVAL: Duration = Duration::from_secs(2);
 const STDERR_TAIL_BYTES: usize = 500;
+/// 子が終わったあと、パイプの EOF を待つ猶予。子孫がパイプを握っていると EOF は来ない。
+const PIPE_GRACE: Duration = Duration::from_millis(300);
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// パイプを読み切って送る。rc が起こしたプロセスがパイプを握ったままだと読み終わらないので、
-/// 受け取る側は期限つきで待つ。
+/// パイプを読むたびに共有バッファへ足す。rc が起こしたプロセスがパイプを握ったままだと EOF が
+/// 来ないので、読めた分をいつでも取り出せるようにしてある。
 #[cfg(unix)]
-fn drain<R: Read + Send + 'static>(r: Option<R>) -> mpsc::Receiver<Vec<u8>> {
-    let (tx, rx) = mpsc::channel();
-    thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(mut r) = r {
-            let _ = r.read_to_end(&mut buf);
-        }
-        let _ = tx.send(buf);
-    });
-    rx
+struct Drain {
+    buf: Arc<Mutex<Vec<u8>>>,
+    eof: mpsc::Receiver<()>,
+}
+
+#[cfg(unix)]
+impl Drain {
+    fn new<R: Read + Send + 'static>(r: Option<R>) -> Self {
+        let buf = Arc::new(Mutex::new(Vec::new()));
+        let (tx, eof) = mpsc::channel();
+        let shared = Arc::clone(&buf);
+        thread::spawn(move || {
+            if let Some(mut r) = r {
+                let mut chunk = [0u8; 4096];
+                while let Ok(n) = r.read(&mut chunk) {
+                    if n == 0 {
+                        break;
+                    }
+                    lock(&shared).extend_from_slice(&chunk[..n]);
+                }
+            }
+            let _ = tx.send(());
+        });
+        Drain { buf, eof }
+    }
+
+    /// EOF を最大 `wait` 待ってから、読めた分を返す。
+    fn take(&self, wait: Duration) -> Vec<u8> {
+        let _ = self.eof.recv_timeout(wait);
+        lock(&self.buf).clone()
+    }
+
+    fn stderr_tail(&self) -> String {
+        let bytes = self.take(PIPE_GRACE);
+        let tail = &bytes[bytes.len().saturating_sub(STDERR_TAIL_BYTES)..];
+        String::from_utf8_lossy(tail).trim().to_string()
+    }
 }
 
 /// 端末から起動したときと同じ環境を、ログインシェルから得る。失敗の詳細（シェルの stderr の末尾など）を返す。
@@ -196,8 +230,8 @@ pub fn resolve_login_env(core: &Path) -> Result<Env, String> {
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("{shell} を起動できない: {e}"))?;
-    let out = drain(child.stdout.take());
-    let err = drain(child.stderr.take());
+    let out = Drain::new(child.stdout.take());
+    let err = Drain::new(child.stderr.take());
     let deadline = Instant::now() + ENV_TIMEOUT;
     loop {
         match child.try_wait() {
@@ -206,22 +240,15 @@ pub fn resolve_login_env(core: &Path) -> Result<Env, String> {
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err("ログインシェルが時間内に終わらなかった".into());
+                return Err(format!(
+                    "ログインシェルが時間内に終わらなかった。stderr: {}",
+                    err.stderr_tail()
+                ));
             }
         }
     }
-    let left = || deadline.saturating_duration_since(Instant::now());
-    let stdout = out
-        .recv_timeout(left())
-        .map_err(|_| "ログインシェルの出力が時間内に閉じなかった".to_string())?;
-    parse_env_output(&stdout).ok_or_else(|| {
-        let stderr = err.recv_timeout(left()).unwrap_or_default();
-        let tail = &stderr[stderr.len().saturating_sub(STDERR_TAIL_BYTES)..];
-        format!(
-            "環境を取り出せなかった。stderr: {}",
-            String::from_utf8_lossy(tail).trim()
-        )
-    })
+    parse_env_output(&out.take(PIPE_GRACE))
+        .ok_or_else(|| format!("環境を取り出せなかった。stderr: {}", err.stderr_tail()))
 }
 
 #[cfg(not(unix))]
@@ -268,6 +295,16 @@ fn exit_info(status: &ExitStatus) -> ExitInfo {
     ExitInfo::Unknown
 }
 
+/// 自分が起こした server が終わったときの状態。
+/// 0 は外から止められた正常終了。起動の直前に別の server がロックを取っていると、子は 1 で終わる。
+pub fn status_after_exit(info: ExitInfo, owner: Option<u32>) -> Status {
+    match (info, owner) {
+        (ExitInfo::Code(0), _) => Status::Stopped,
+        (ExitInfo::Code(1), Some(owner)) => Status::External(owner),
+        _ => Status::Crashed(info),
+    }
+}
+
 struct Prepared {
     core: PathBuf,
     env: Env,
@@ -280,10 +317,37 @@ enum Poll {
     NoChild,
 }
 
+/// 処理を背景で1本ずつ流す。処理中に来た要求は捨てず、今の処理が終わったあとに1回だけ流し直す。
+#[derive(Default)]
+struct Serial {
+    busy: AtomicBool,
+    pending: AtomicBool,
+}
+
+impl Serial {
+    fn request(self: &Arc<Self>, job: impl Fn() + Send + 'static) {
+        self.pending.store(true, Ordering::SeqCst);
+        if self.busy.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let s = Arc::clone(self);
+        thread::spawn(move || loop {
+            while s.pending.swap(false, Ordering::SeqCst) {
+                job();
+            }
+            s.busy.store(false, Ordering::SeqCst);
+            // busy を下ろす直前に来た要求を拾う。
+            if !s.pending.load(Ordering::SeqCst) || s.busy.swap(true, Ordering::SeqCst) {
+                break;
+            }
+        });
+    }
+}
+
 struct Inner {
     child: Mutex<Option<Child>>,
     status: Mutex<Status>,
-    busy: AtomicBool,
+    serial: Arc<Serial>,
     core_dir: Mutex<Option<PathBuf>>,
     /// 直近に解決した環境。外部 server の検知でランタイムルートを求めるのに使う。
     env: Mutex<Option<Env>>,
@@ -304,7 +368,7 @@ impl Manager {
         Manager(Arc::new(Inner {
             child: Mutex::new(None),
             status: Mutex::new(Status::Stopped),
-            busy: AtomicBool::new(false),
+            serial: Arc::default(),
             core_dir: Mutex::new(core_dir),
             env: Mutex::new(None),
             log_path,
@@ -331,44 +395,32 @@ impl Manager {
         (self.0.on_change)(&status);
     }
 
-    /// 自分の子が動いているか。
-    pub fn is_running(&self) -> bool {
-        matches!(self.status(), Status::Running(_))
-    }
-
     /// `server.log` に ChatterAgent 自身の出来事を1行足す。
     fn log(&self, msg: &str) {
         let line = format!(
             "[Agent] {} {msg}\n",
             chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
         );
-        if let Ok(mut f) = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.0.log_path)
-        {
+        if let Ok(mut f) = self.open_log() {
             let _ = f.write_all(line.as_bytes());
         }
     }
 
-    /// 処理中でなければ背景スレッドで走らせる。起動・停止の二重実行を防ぐ。
-    fn run_bg(&self, f: impl FnOnce(&Manager) + Send + 'static) {
-        if self.0.busy.swap(true, Ordering::SeqCst) {
-            return;
+    /// ログを追記で開く。ディレクトリが無ければ作る。
+    fn open_log(&self) -> std::io::Result<fs::File> {
+        if let Some(dir) = self.0.log_path.parent() {
+            fs::create_dir_all(dir)?;
         }
+        OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.0.log_path)
+    }
+
+    /// 子が居れば止めてから起こす。処理中なら、今の処理が終わってから1回だけ流し直す。
+    pub fn start_or_restart(&self) {
         let m = self.clone();
-        thread::spawn(move || {
-            f(&m);
-            m.0.busy.store(false, Ordering::SeqCst);
-        });
-    }
-
-    pub fn start(&self) {
-        self.run_bg(|m| m.do_start());
-    }
-
-    pub fn restart(&self) {
-        self.run_bg(|m| {
+        self.0.serial.request(move || {
             m.do_stop();
             m.do_start();
         });
@@ -378,12 +430,12 @@ impl Manager {
     pub fn quit(&self, then: impl FnOnce() + Send + 'static) {
         let m = self.clone();
         thread::spawn(move || {
-            while m.0.busy.swap(true, Ordering::SeqCst) {
+            while m.0.serial.busy.swap(true, Ordering::SeqCst) {
                 thread::sleep(Duration::from_millis(100));
             }
             m.set_status(Status::Stopping);
             m.do_stop();
-            m.0.busy.store(false, Ordering::SeqCst);
+            m.0.serial.busy.store(false, Ordering::SeqCst);
             then();
         });
     }
@@ -405,7 +457,7 @@ impl Manager {
         *lock(&self.0.env) = Some(env.clone());
         let node = node_version(&core, &env).map_err(Status::Cannot)?;
         if !node_is_new_enough(node) {
-            let v = format!("v{}.{}.{}", node.0, node.1, node.2);
+            let v = format!("v{}", version_label(node));
             return Err(Status::Cannot(Fail::NodeOld(v)));
         }
         if let Some(pid) = runtime_root(&env).and_then(|r| external_server_pid(&r)) {
@@ -428,15 +480,8 @@ impl Manager {
 
     fn spawn(&self, p: Prepared) -> Result<u32, Status> {
         let fail = |e: std::io::Error| Status::Cannot(Fail::SpawnFailed(e.to_string()));
-        if let Some(dir) = self.0.log_path.parent() {
-            fs::create_dir_all(dir).map_err(fail)?;
-        }
         let _ = rotate_log(&self.0.log_path, LOG_MAX_BYTES);
-        let log = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.0.log_path)
-            .map_err(fail)?;
+        let log = self.open_log().map_err(fail)?;
         let log_err = log.try_clone().map_err(fail)?;
         // ★ stdout / stderr はログの fd を直接渡す。パイプで中継すると、ChatterAgent が先に死んだとき
         //   server が EPIPE で壊れる。
@@ -458,10 +503,8 @@ impl Manager {
             })?;
         let pid = child.id();
         self.log(&format!(
-            "起動した: pid={pid} node=v{}.{}.{} core={}",
-            p.node.0,
-            p.node.1,
-            p.node.2,
+            "起動した: pid={pid} node=v{} core={}",
+            version_label(p.node),
             p.core.display()
         ));
         *lock(&self.0.child) = Some(child);
@@ -524,19 +567,21 @@ impl Manager {
             Poll::Alive => {}
             Poll::Exited(pid, st) => {
                 let info = exit_info(&st);
-                self.log(&format!(
-                    "予期しない終了: pid={pid} {}",
-                    text::JA.status(&Status::Crashed(info))
-                ));
-                // 起動の直前に別の server がロックを取っていると、子は exit 1 で終わる。
                 let owner = self.current_root().and_then(|r| external_server_pid(&r));
-                self.set_status(match owner {
-                    Some(owner) if info == ExitInfo::Code(1) => Status::External(owner),
-                    _ => Status::Crashed(info),
-                });
+                let status = status_after_exit(info, owner);
+                let how = match info {
+                    ExitInfo::Code(c) => format!("終了コード {c}"),
+                    ExitInfo::Signal(s) => format!("シグナル {s}"),
+                    ExitInfo::Unknown => "終了状態不明".into(),
+                };
+                self.log(&format!(
+                    "server が終わった: pid={pid} {how} → {}",
+                    text::JA.status(&status)
+                ));
+                self.set_status(status);
             }
             Poll::NoChild => {
-                if self.0.busy.load(Ordering::SeqCst) {
+                if self.0.serial.busy.load(Ordering::SeqCst) {
                     return;
                 }
                 let owner = self.current_root().and_then(|r| external_server_pid(&r));
@@ -657,6 +702,68 @@ mod tests {
         fs::remove_file(lock.join("owner.json")).unwrap();
         assert_eq!(external_server_pid(&root), None);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn exit_status_mapping() {
+        let owner = Some(42);
+        assert_eq!(status_after_exit(ExitInfo::Code(0), owner), Status::Stopped);
+        assert_eq!(
+            status_after_exit(ExitInfo::Code(1), owner),
+            Status::External(42)
+        );
+        assert_eq!(
+            status_after_exit(ExitInfo::Code(1), None),
+            Status::Crashed(ExitInfo::Code(1))
+        );
+        assert_eq!(
+            status_after_exit(ExitInfo::Signal(9), owner),
+            Status::Crashed(ExitInfo::Signal(9))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn drain_returns_output_even_if_descendant_holds_pipe() {
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "printf abc; sleep 5 &"])
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let drain = Drain::new(child.stdout.take());
+        child.wait().unwrap();
+        let started = Instant::now();
+        assert_eq!(drain.take(Duration::from_millis(300)), b"abc");
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn log_creates_missing_directory() {
+        let dir = tmp("log");
+        let path = dir.join("sub").join("server.log");
+        let m = Manager::new(path.clone(), None, |_| {});
+        m.log("hello");
+        assert!(fs::read_to_string(&path).unwrap().contains("hello"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn serial_reruns_once_for_requests_during_job() {
+        let runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let serial = Arc::new(Serial::default());
+        let r = Arc::clone(&runs);
+        let job = move || {
+            thread::sleep(Duration::from_millis(200));
+            r.fetch_add(1, Ordering::SeqCst);
+        };
+        serial.request(job.clone());
+        thread::sleep(Duration::from_millis(50));
+        serial.request(job.clone());
+        serial.request(job);
+        while serial.busy.load(Ordering::SeqCst) {
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(runs.load(Ordering::SeqCst), 2);
     }
 
     #[test]

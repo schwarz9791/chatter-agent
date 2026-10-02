@@ -1,6 +1,6 @@
 //! 日英の文言。言語ごとに全項目を持つ構造体にして、訳し漏れをコンパイルで検出する。
 
-use crate::server::{ExitInfo, Fail, Status};
+use crate::server::{version_label, ExitInfo, Fail, Status, NODE_MIN};
 
 pub struct Text {
     status_prefix: &'static str,
@@ -18,7 +18,7 @@ pub struct Text {
     no_node_modules: &'static str,
     env: &'static str,
     node_missing: &'static str,
-    node_old: fn(&str) -> String,
+    node_old: fn(&str, &str) -> String,
     node_unknown: &'static str,
     spawn_failed: fn(&str) -> String,
     pub restart: &'static str,
@@ -46,7 +46,7 @@ pub const JA: Text = Text {
     no_node_modules: "node_modules が無い（core で npm install）",
     env: "ログインシェルから環境を取得できません",
     node_missing: "node が見つかりません",
-    node_old: |v| format!("node {v} は古い（24.11 以上が必要）"),
+    node_old: |v, min| format!("node {v} は古い（{min} 以上が必要）"),
     node_unknown: "node の版を取得できません",
     spawn_failed: |e| format!("起動に失敗（{e}）"),
     restart: "サーバーを再起動",
@@ -74,7 +74,7 @@ pub const EN: Text = Text {
     no_node_modules: "node_modules is missing (run npm install in core)",
     env: "could not get the environment from the login shell",
     node_missing: "node not found",
-    node_old: |v| format!("node {v} is too old (24.11 or newer required)"),
+    node_old: |v, min| format!("node {v} is too old ({min} or newer required)"),
     node_unknown: "could not determine the node version",
     spawn_failed: |e| format!("failed to spawn ({e})"),
     restart: "Restart Server",
@@ -104,7 +104,7 @@ impl Text {
             Fail::Env => self.env.into(),
             Fail::NodeMissing => self.node_missing.into(),
             Fail::NodeUnknown => self.node_unknown.into(),
-            Fail::NodeOld(v) => (self.node_old)(v),
+            Fail::NodeOld(v) => (self.node_old)(v, &version_label(NODE_MIN)),
             Fail::SpawnFailed(e) => (self.spawn_failed)(e),
         };
         format!("{}{reason}", self.cannot_prefix)

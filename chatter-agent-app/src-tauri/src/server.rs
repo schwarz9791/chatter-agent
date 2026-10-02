@@ -412,7 +412,7 @@ impl Manager {
         let status = match self.prepare().and_then(|p| self.spawn(p)) {
             Ok(pid) => Status::Running(pid),
             Err(status) => {
-                self.log(&format!("起動しない: {}", text::JA.status(&status)));
+                self.log(&format!("起動しない。{}", text::JA.status(&status)));
                 status
             }
         };
@@ -517,7 +517,10 @@ impl Manager {
             Poll::Alive => {}
             Poll::Exited(pid, st) => {
                 let info = exit_info(&st);
-                self.log(&format!("予期しない終了: pid={pid} {info:?}"));
+                self.log(&format!(
+                    "予期しない終了: pid={pid} {}",
+                    text::JA.status(&Status::Crashed(info))
+                ));
                 // 起動の直前に別の server がロックを取っていると、子は exit 1 で終わる。
                 let owner = self.current_root().and_then(|r| external_server_pid(&r));
                 self.set_status(match owner {

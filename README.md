@@ -50,6 +50,7 @@ The speech contract is in [`docs/protocol.md`](./docs/protocol.md). If you're wr
 | `plugin/` | The Claude Code plugin. A bash hook just drops the payload |
 | `core/` | The server and CLIs (TypeScript / Node). `src/server/` `src/cli/` `src/player/` |
 | `chatter-mascot/` | The display-side app (Unity + UniVRM). macOS and Android XR from a single project |
+| `chatter-agent-app/` | ChatterAgent (Tauri). A menu bar app that starts and stops the server |
 | `docs/` | The basic design, file layout, and commands. What was learned along the way is in `docs/knowledge/` |
 
 ## Current state
@@ -157,6 +158,20 @@ To silence it, start Claude Code with `CHATTER_AGENT_DISABLE=1` set.
 cd core && npm run start:server
 ```
 
+On macOS you can let **ChatterAgent** (a menu bar app) start, stop, and restart the server instead.
+Build `core/` first, then:
+
+```bash
+cd chatter-agent-app
+npm install
+npm run build      # → src-tauri/target/release/bundle/macos/ChatterAgent.app
+```
+
+Open the app and choose the `core/` folder once from the menu ("Choose Core Folder…"). It then starts
+the server with the same environment a login shell gives you. Starting it by hand as above keeps
+working; ChatterAgent shows it as running outside and leaves it alone. Details are in
+[`docs/agent.md`](./docs/agent.md).
+
 ### Client
 
 How the server and client pair up depends on the case. See
@@ -259,6 +274,7 @@ cd chatter-mascot
 | [`docs/core.md`](./docs/core.md) | when touching `core/` |
 | [`docs/plugin.md`](./docs/plugin.md) | when touching `plugin/` |
 | [`docs/mascot.md`](./docs/mascot.md) | when touching the display-side app |
+| [`docs/agent.md`](./docs/agent.md) | when touching ChatterAgent (the menu bar app that runs the server) |
 | [`docs/origin.md`](./docs/origin.md) | when touching code that comes from cc-mascot |
 | [`docs/kokoro.md`](./docs/kokoro.md) | when using Kokoro-FastAPI (TTS for non-Japanese languages) |
 | [`docs/knowledge/`](./docs/knowledge) | what was learned along the way, why, and measured values |

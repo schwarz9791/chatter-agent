@@ -2,7 +2,7 @@
 
 **Claude Code の発言を、VRM キャラクターがリアルタイムで読み上げるシステム。** Claude Code の
 `MessageDisplay` hook から発言を受け取り、サーバーが整形・合成し、表示側アプリ（macOS 常駐 /
-Android XR）が鳴らして VRM に反映する。
+Android XR）が鳴らして VRM に反映する。macOS では ChatterAgent が server の面倒を見る。
 
 **対象は Claude Code のみ。** hook を持たない Codex / Gemini CLI / Antigravity は対象外なので、
 **`AGENTS.md` は置かない。**
@@ -21,6 +21,7 @@ Android XR）が鳴らして VRM に反映する。
 | `core/src/core/` | 契約と基盤（型・パス・設定・ロック・キュー） |
 | `core/src/text/` `emotion/` `prompt/` `summarizer/` `tts/` | 整形・感情判定・応答待ち通知・AI要約（既定ON）・合成クライアント |
 | `chatter-mascot/` | 表示側アプリ（Unity + UniVRM）。macOS と Android XR を1プロジェクトから |
+| `chatter-agent-app/` | ChatterAgent（Tauri）。メニューバー常駐で `chatter-agent-server` を起動・停止する |
 | `docs/` | 基本設計・ファイル構成・コマンド |
 | `docs/knowledge/` | 実装で踏んだこと・なぜそうしたか・実測値 |
 
@@ -50,6 +51,8 @@ chatter-agent-server         キューを読んで WebSocket 配信（テキス�
   ├──▶ chatter-agent-player  発話 CLI
   ▼
 chatter-mascot               表示側アプリ（Unity）。再生 → VRM描画 / 表情 / モーション / リップシンク
+
+ChatterAgent（macOS 常駐）──▶ chatter-agent-server を起動・停止する（配信の経路には入らない）
 ```
 
 設計の芯は3つ。
@@ -196,12 +199,19 @@ cd chatter-mascot
 ./scripts/test.sh        # EditMode テスト
 ```
 
+```bash
+cd chatter-agent-app/src-tauri
+cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+cd .. && npm run build   # → ChatterAgent.app
+```
+
 ### タスク完了時のチェックリスト
 
 - [ ] **テスト追加の検討** —— 変更した箇所に関連するテストが必要か考える
 - [ ] **ライセンスヘッダの確認** —— cc-mascot 由来のファイルを改変したら `Modified for chatter-agent.`
 - [ ] **ドキュメント更新の検討** —— `docs/` / `docs/knowledge/` / `README.md` に追記するものがないか検討し、あればユーザーに提案する
 - [ ] `npm run typecheck` / `npm run lint` / `npm run format` / `npm run test:run` が通ること
+- [ ] `chatter-agent-app/` を触ったら `cargo fmt --check` / `cargo clippy --all-targets -- -D warnings` / `cargo test` が通ること
 - [ ] `src/cli/` を触ったら `npm run build` してバンドルもコミットする
 - [ ] `plugin/` の中身（バンドルを含む）が変わったら、`plugin.json` と `marketplace.json` の `version` を上げる
 
@@ -213,6 +223,7 @@ cd chatter-mascot
 | [`docs/core.md`](./docs/core.md) | `core/` を触るとき。区画の分け方、tsconfig の制約、バンドル方針、ランタイムのファイル配置 |
 | [`docs/plugin.md`](./docs/plugin.md) | `plugin/` を触るとき。bash hook の制約、spool 命名、`hooks.json` の3種 |
 | [`docs/mascot.md`](./docs/mascot.md) | `chatter-mascot/` を触るとき。セットアップ、構成、探索順、ビルドと実行 |
+| [`docs/agent.md`](./docs/agent.md) | `chatter-agent-app/` を触るとき。server に渡す環境、停止の仕組み、ログ、制約 |
 | [`docs/origin.md`](./docs/origin.md) | cc-mascot 由来のコードを触るとき。移植の対応表、フォーク点、ライセンス義務 |
 | [`docs/kokoro.md`](./docs/kokoro.md) | Kokoro-FastAPI（`ttsEngine: "openai"`。日本語以外向けの TTS）を使うとき |
 | [`docs/knowledge/`](./docs/knowledge) | **踏んだこと・なぜそうしたか・実測値。** 同じ罠に2度目で刺されないため |

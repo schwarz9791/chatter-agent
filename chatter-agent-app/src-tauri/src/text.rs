@@ -26,6 +26,8 @@ pub struct Text {
     pub open_log: &'static str,
     pub pick_core: &'static str,
     pub pick_core_title: &'static str,
+    pub settings: &'static str,
+    pub settings_title: &'static str,
     pub autostart: &'static str,
     pub quit: &'static str,
 }
@@ -54,6 +56,8 @@ pub const JA: Text = Text {
     open_log: "ログを開く",
     pick_core: "core の場所を選ぶ…",
     pick_core_title: "chatter-agent の core フォルダを選ぶ",
+    settings: "設定…",
+    settings_title: "Chatter Agent 設定",
     autostart: "ログイン時に起動",
     quit: "終了",
 };
@@ -82,15 +86,32 @@ pub const EN: Text = Text {
     open_log: "Open Log",
     pick_core: "Choose Core Folder…",
     pick_core_title: "Choose the chatter-agent core folder",
+    settings: "Settings…",
+    settings_title: "Chatter Agent Settings",
     autostart: "Launch at Login",
     quit: "Quit",
 };
 
-/// OS のロケールが `ja` で始まれば日本語、それ以外は英語。
+/// OS のロケールが `ja` で始まるか。
+pub fn is_ja() -> bool {
+    sys_locale::get_locale().is_some_and(|l| l.starts_with("ja"))
+}
+
 pub fn current() -> &'static Text {
-    match sys_locale::get_locale() {
-        Some(l) if l.starts_with("ja") => &JA,
-        _ => &EN,
+    if is_ja() {
+        &JA
+    } else {
+        &EN
+    }
+}
+
+/// 画面の言語。WKWebView の `navigator.language` はアプリのローカライズに引かれて OS と食い違いうる。
+#[tauri::command]
+pub fn lang() -> &'static str {
+    if is_ja() {
+        "ja"
+    } else {
+        "en"
     }
 }
 

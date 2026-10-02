@@ -2,12 +2,22 @@
   "name": "chatter-agent-app",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.11"
+  },
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",
-    "build": "tauri build"
+    "build": "tauri build",
+    "dev:web": "vite",
+    "build:web": "tsc --noEmit && vite build",
+    "test": "node --test \"src/**/*.test.ts\""
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.12.1"
+    "@tauri-apps/cli": "^2.12.1",
+    "@types/node": "^26.2.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.0.0"
   }
 }

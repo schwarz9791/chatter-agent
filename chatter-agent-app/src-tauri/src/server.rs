@@ -554,11 +554,15 @@ impl Manager {
         }
     }
 
+    /// server に渡している環境。まだ解決していなければ ChatterAgent 自身の環境。
+    pub fn env(&self) -> Env {
+        lock(&self.0.env)
+            .clone()
+            .unwrap_or_else(|| std::env::vars().collect())
+    }
+
     fn current_root(&self) -> Option<PathBuf> {
-        match lock(&self.0.env).as_ref() {
-            Some(env) => runtime_root(env),
-            None => runtime_root(&std::env::vars().collect()),
-        }
+        runtime_root(&self.env())
     }
 
     /// 監視の1回分。予期しない終了と、外で動いている server の出入りを状態へ反映する。

@@ -169,7 +169,7 @@ npm run build      # → src-tauri/target/release/bundle/macos/ChatterAgent.app
 
 アプリを開き、メニューの「core の場所を選ぶ…」で `core/` を一度選ぶと、ログインシェルと同じ環境で
 サーバーを起こします。上の手動起動もこれまでどおり使えます（ChatterAgent は「外で動いている」と表示するだけで、
-手を出しません）。詳細は [`docs/agent.md`](./docs/agent.md)。
+手を出しません）。メニューの「設定…」から、サーバーの設定とマスコットの設定を変えられます。詳細は [`docs/agent.md`](./docs/agent.md)。
 
 ### クライアント
 

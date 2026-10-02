@@ -281,6 +281,22 @@ cc-mascot の「キャラクターサイズ」はコンテナ（ウィンドウ�
 矛盾しない——**キャラそのものを大きく／小さくするのは窓、腕の可動域に余白を残すのは
 `headroom`** と役割が分かれている。
 
+## ★★ `settings.json` には ChatterAgent も書く —— 書き手は2つで、後勝ち
+
+ChatterAgent の設定パネル（→ [`../agent.md`](../agent.md)「設定パネル」）も `settings.json` を書く。
+Unity は保存のたびに**メモリ上の全キー**を書き直すので、Unity のパネルと ChatterAgent を同時に触ると、
+Unity が持っている古い値が ChatterAgent の変更を巻き戻しうる。Unity は1秒ごとに読み直すので、続けて
+触らなければ ChatterAgent の変更は取り込まれる。Unity のパネルが無くなれば解消する。
+
+ChatterAgent 側は、書き手が複数でも壊さないために次の形にしている。
+
+- **管理キーだけを差し替える。** Unity は知らないキーを捨てるので、知らないキーと `xr.*` / `connection.*`
+  は読んだものをそのまま残して書く。壊れたファイルは書き戻さない
+- **tmp を別名にする**（`settings.json.chatter-agent.tmp`）。Unity の `settings.json.tmp` と同じ名前だと、
+  お互いの書きかけを踏む
+- 選んだ VRM は Unity と同じ固定名（`models/mascot.vrm`）へ置き換える。`.vrm` で終わらない tmp を経由する
+  （`assetCatalog` が `*.vrm` を走査するため）
+
 ## ★ `preferredMaxLayoutWidth` を固定値にしない
 
 折り返す複数行ラベルには `preferredMaxLayoutWidth` が要る（無いと Auto Layout は

@@ -50,6 +50,7 @@ Claude Code
 | `plugin/` | Claude Code プラグイン。bash の hook が payload を置くだけ |
 | `core/` | サーバーと CLI（TypeScript / Node）。`src/server/` `src/cli/` `src/player/` |
 | `chatter-mascot/` | 表示側アプリ（Unity + UniVRM）。macOS と Android XR を1プロジェクトから |
+| `chatter-agent-app/` | ChatterAgent（Tauri）。メニューバー常駐でサーバーを起動・停止する |
 | `docs/` | 基本設計・ファイル構成・コマンド。実装で踏んだことは `docs/knowledge/` |
 
 ## 現在の状態
@@ -157,6 +158,19 @@ tail -f "${XDG_CONFIG_HOME:-$HOME/.config}/chatter-agent/speech.jsonl"
 cd core && npm run start:server
 ```
 
+macOS では、メニューバー常駐アプリ **ChatterAgent** にサーバーの起動・停止・再起動を任せることもできます。
+先に `core/` をビルドしてから:
+
+```bash
+cd chatter-agent-app
+npm install
+npm run build      # → src-tauri/target/release/bundle/macos/ChatterAgent.app
+```
+
+アプリを開き、メニューの「core の場所を選ぶ…」で `core/` を一度選ぶと、ログインシェルと同じ環境で
+サーバーを起こします。上の手動起動もこれまでどおり使えます（ChatterAgent は「外で動いている」と表示するだけで、
+手を出しません）。詳細は [`docs/agent.md`](./docs/agent.md)。
+
 ### クライアント
 
 サーバーとクライアントの組み合わせ方はケースで変わります。詳しくは
@@ -258,6 +272,7 @@ cd chatter-mascot
 | [`docs/core.md`](./docs/core.md) | `core/` を触るとき |
 | [`docs/plugin.md`](./docs/plugin.md) | `plugin/` を触るとき |
 | [`docs/mascot.md`](./docs/mascot.md) | 表示側アプリを触るとき |
+| [`docs/agent.md`](./docs/agent.md) | ChatterAgent（サーバーを起動するメニューバーアプリ）を触るとき |
 | [`docs/origin.md`](./docs/origin.md) | cc-mascot 由来のコードを触るとき |
 | [`docs/kokoro.md`](./docs/kokoro.md) | Kokoro-FastAPI（日本語以外向けの TTS）を使うとき |
 | [`docs/knowledge/`](./docs/knowledge) | 実装で踏んだこと・なぜそうしたか・実測値 |

@@ -35,3 +35,8 @@ quit の Apple Event が届くのは、tao の `applicationWillTerminate:` が `
 - 2026-10-02（macOS。AivisSpeech と Ollaya を server が spawn する構成）: `open` での起動、メニューからの
   再起動（6回）と「終了」、quit の Apple Event、外で動いている server、ログイン時に起動の ON/OFF。
   全部通った
+- 2026-10-02（Android XR エミュレータ）: `host: 0.0.0.0` で起こした server に、LAN のアドレス
+  （`ws://<Mac の IP>:8570`）で繋がり、口パクと感情モーションまで動いた。★ **エミュレータの接続は
+  `netsimd` が Mac 自身の IP から張るので Mac の外に出ず、「ローカルネットワーク」の許可は求められない
+  （システム設定の一覧にも載らない）。** 許可が ChatterAgent に付くかは、実機のヘッドセットでないと
+  確かめられない

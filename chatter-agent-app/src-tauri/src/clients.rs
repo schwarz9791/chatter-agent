@@ -25,7 +25,8 @@ use crate::mascot_app::{candidates, find_app, launch, request_quit, running_pids
 use crate::server::{exit_info, exit_label, lock, runtime_root, stop_child, Env, Manager, Serial};
 use crate::text;
 
-/// 起動時点で既にこれより古い発話は、音を出さずに飛ばさせる（マスコットにも player にも渡す）。
+/// 誰も繋いでいなかった間の後に繋ぐクライアントへ、起動時点でこれより古い発話を音なしで飛ばさせる
+/// （マスコットにも player にも渡す）。繋ぎ替えでは渡さず、未再生の文を引き継いで鳴らす。
 pub const BACKLOG_MAX_AGE_MS: u64 = 60_000;
 const MASCOT_QUIT_TIMEOUT: Duration = Duration::from_secs(10);
 const MASCOT_START_TIMEOUT: Duration = Duration::from_secs(15);
@@ -47,6 +48,18 @@ pub fn want(visible: bool, mute: bool) -> Want {
         (false, false) => Want::Player,
         (false, true) => Want::Nothing,
     }
+}
+
+/// 古い発話を飛ばすのは、起動直後か、誰も繋いでいなかった後だけ。
+fn skips_backlog(prev: Option<Want>) -> bool {
+    matches!(prev, None | Some(Want::Nothing))
+}
+
+/// player の子と、起こしたときの音量・core。
+struct PlayerProc {
+    child: Child,
+    volume: String,
+    core: PathBuf,
 }
 
 /// `mascot/settings.json` のうち、ここが使う値。
@@ -188,8 +201,7 @@ struct Inner {
     app: AppHandle,
     settings_path: PathBuf,
     manager: OnceLock<Manager>,
-    /// player の子と、起こしたときの音量。
-    player: Mutex<Option<(Child, String)>>,
+    player: Mutex<Option<PlayerProc>>,
     st: Mutex<St>,
     shutting_down: AtomicBool,
     serial: Arc<Serial>,
@@ -274,12 +286,16 @@ impl Clients {
         self.set_mute(on);
     }
 
-    fn set_visible(&self, visible: bool) {
+    /// `persist` は利用者の操作のときだけ true。外で起きた変化は保存しない
+    /// （ログアウトではマスコットが先に終わるため、保存すると次のログインで出なくなる）。
+    fn set_visible(&self, visible: bool, persist: bool) {
         lock(&self.0.st).visible = visible;
-        if let Err(e) =
-            crate::update_settings(&self.0.settings_path, |s| s.mascot_visible = visible)
-        {
-            self.log(&format!("表示状態を保存できなかった: {e}"));
+        if persist {
+            if let Err(e) =
+                crate::update_settings(&self.0.settings_path, |s| s.mascot_visible = visible)
+            {
+                self.log(&format!("表示状態を保存できなかった: {e}"));
+            }
         }
         self.notify();
         self.request();
@@ -287,7 +303,7 @@ impl Clients {
 
     pub fn toggle_visible(&self) {
         let visible = !lock(&self.0.st).visible;
-        self.set_visible(visible);
+        self.set_visible(visible, true);
     }
 
     /// `mascot/settings.json` を読み直す。読めない・壊れているときは前回の値を使い続ける。
@@ -325,12 +341,13 @@ impl Clients {
             (st.visible, st.cfg.clone())
         };
         let w = want(visible, cfg.mute);
+        let backlog = skips_backlog(lock(&self.0.st).applied);
         let volume = format!("{}", cfg.volume);
 
         // 先に止める。
         let stale = lock(&self.0.player)
             .as_ref()
-            .is_some_and(|(_, v)| w != Want::Player || *v != volume);
+            .is_some_and(|p| w != Want::Player || p.volume != volume || p.core != core);
         if stale {
             self.stop_player();
         }
@@ -345,7 +362,7 @@ impl Clients {
         match w {
             Want::Mascot => {
                 if running_pids().is_empty() {
-                    if let Err(msg) = self.start_mascot(&env, &core) {
+                    if let Err(msg) = self.start_mascot(&env, &core, backlog) {
                         self.log(&format!("マスコットを起動できない: {msg}"));
                         let t = text::current();
                         self.0
@@ -355,8 +372,15 @@ impl Clients {
                             .title(t.mascot_unavailable_title)
                             .kind(MessageDialogKind::Warning)
                             .show(|_| {});
-                        // 隠した状態として保存し直し、player への切り替えへ進める。
-                        self.set_visible(false);
+                        // 隠した状態に寄せ、player への切り替えへ進める。
+                        self.set_visible(false, false);
+                        return;
+                    }
+                    // ★ 終了処理（`stop_sync`）は `serial.busy` を取らないので、起こした直後に見直して残さない。
+                    if self.0.shutting_down.load(Ordering::SeqCst) {
+                        for pid in running_pids() {
+                            request_quit(pid);
+                        }
                         return;
                     }
                 }
@@ -364,8 +388,13 @@ impl Clients {
             Want::Player => {
                 if lock(&self.0.player).is_none() {
                     // 失敗しても起こし直しはしない（終わった player と同じ扱い）。
-                    if let Err(e) = self.spawn_player(m, &env, &core, cfg.volume, volume) {
+                    if let Err(e) = self.spawn_player(m, &env, &core, cfg.volume, volume, backlog) {
                         self.log(&format!("player を起動できない: {e}"));
+                    }
+                    // ★ 終了処理（`stop_sync`）は `serial.busy` を取らないので、起こした直後に見直して残さない。
+                    if self.0.shutting_down.load(Ordering::SeqCst) {
+                        self.stop_player();
+                        return;
                     }
                 }
             }
@@ -388,7 +417,7 @@ impl Clients {
     }
 
     /// 失敗は利用者へ見せる文言で返す。
-    fn start_mascot(&self, env: &Env, core: &Path) -> Result<(), String> {
+    fn start_mascot(&self, env: &Env, core: &Path, backlog: bool) -> Result<(), String> {
         let t = text::current();
         let home = env
             .get("HOME")
@@ -402,7 +431,7 @@ impl Clients {
                 .collect();
             return Err(t.mascot_not_found(&places.join("\n")));
         };
-        launch(&app, env).map_err(|e| t.mascot_launch_failed(&e.to_string()))?;
+        launch(&app, env, backlog).map_err(|e| t.mascot_launch_failed(&e.to_string()))?;
         if !wait_until(MASCOT_START_TIMEOUT, || !running_pids().is_empty()) {
             return Err(t.mascot_launch_failed("timeout"));
         }
@@ -417,17 +446,20 @@ impl Clients {
         core: &Path,
         volume: f64,
         volume_label: String,
+        backlog: bool,
     ) -> std::io::Result<()> {
         let log = m.open_log()?;
         let log_err = log.try_clone()?;
         let mut cmd = Command::new("node");
         cmd.arg("dist/chatter-agent-player.mjs")
             .current_dir(core)
-            .envs(env)
-            .env(
+            .envs(env);
+        if backlog {
+            cmd.env(
                 "CHATTER_AGENT_SPEECH_BACKLOG_MAX_AGE_MS",
                 BACKLOG_MAX_AGE_MS.to_string(),
             );
+        }
         // 1.0 のときは足さず、利用者が `config.json` に書いた `playerArgs` を生かす。
         if volume != 1.0 {
             cmd.env(
@@ -445,13 +477,17 @@ impl Clients {
             "player を起動した: pid={} volume={volume_label}",
             child.id()
         ));
-        *lock(&self.0.player) = Some((child, volume_label));
+        *lock(&self.0.player) = Some(PlayerProc {
+            child,
+            volume: volume_label,
+            core: core.to_path_buf(),
+        });
         Ok(())
     }
 
     fn stop_player(&self) {
         // ★ 子を take してから止める。SIGTERM の2回目は player が後始末を飛ばすので、二重に送らない。
-        let Some((mut child, _)) = lock(&self.0.player).take() else {
+        let Some(PlayerProc { mut child, .. }) = lock(&self.0.player).take() else {
             return;
         };
         let pid = child.id();
@@ -472,7 +508,7 @@ impl Clients {
             return;
         }
         self.log(why);
-        self.set_visible(visible);
+        self.set_visible(visible, false);
     }
 
     /// ショートカットを登録し直す。macOS ではメインスレッドへ回して待つので、メインスレッドから呼ばない。
@@ -514,9 +550,9 @@ impl Clients {
         }
         {
             let mut guard = lock(&self.0.player);
-            if let Some((child, _)) = guard.as_mut() {
-                if let Ok(Some(st)) = child.try_wait() {
-                    let (pid, info) = (child.id(), exit_label(exit_info(&st)));
+            if let Some(p) = guard.as_mut() {
+                if let Ok(Some(st)) = p.child.try_wait() {
+                    let (pid, info) = (p.child.id(), exit_label(exit_info(&st)));
                     *guard = None;
                     drop(guard);
                     // ponytail: 自動では起こし直さない。主因は外で動いている player の `player.lock` で、
@@ -597,6 +633,14 @@ mod tests {
         assert_eq!(want(true, true), Want::Mascot);
         assert_eq!(want(false, false), Want::Player);
         assert_eq!(want(false, true), Want::Nothing);
+    }
+
+    #[test]
+    fn backlog_is_skipped_only_after_nothing_was_connected() {
+        assert!(skips_backlog(None));
+        assert!(skips_backlog(Some(Want::Nothing)));
+        assert!(!skips_backlog(Some(Want::Mascot)));
+        assert!(!skips_backlog(Some(Want::Player)));
     }
 
     #[test]

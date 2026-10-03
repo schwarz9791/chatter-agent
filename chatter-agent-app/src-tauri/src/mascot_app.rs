@@ -39,36 +39,46 @@ fn first_dir(paths: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
 /// （どれが繋がっても二重に鳴る）。
 #[cfg(target_os = "macos")]
 pub fn running_pids() -> Vec<u32> {
+    use objc2::rc::autoreleasepool;
     use objc2_app_kit::NSRunningApplication;
     use objc2_foundation::NSString;
-    NSRunningApplication::runningApplicationsWithBundleIdentifier(&NSString::from_str(BUNDLE_ID))
+    // 終わらないスレッド（監視）からも呼ぶので、AppKit の autorelease をここで掃除する。
+    autoreleasepool(|_| {
+        NSRunningApplication::runningApplicationsWithBundleIdentifier(&NSString::from_str(
+            BUNDLE_ID,
+        ))
         .iter()
         .filter(|a| !a.isTerminated())
         .filter_map(|a| u32::try_from(a.processIdentifier()).ok())
         .collect()
+    })
 }
 
 /// 通常の quit を要求する。★ 強制終了はしない（Unity は未送信の ack を投げ切ってから自分で終わる）。
 /// 戻り値は当てにならないので、終わったかは pid が消えたことで見る。
 #[cfg(target_os = "macos")]
 pub fn request_quit(pid: u32) {
+    use objc2::rc::autoreleasepool;
     use objc2_app_kit::NSRunningApplication;
-    if let Some(app) = NSRunningApplication::runningApplicationWithProcessIdentifier(pid as i32) {
-        app.terminate();
-    }
+    autoreleasepool(|_| {
+        if let Some(app) = NSRunningApplication::runningApplicationWithProcessIdentifier(pid as i32)
+        {
+            app.terminate();
+        }
+    });
 }
 
 /// `open` は呼び出し元の環境をアプリへ引き継ぐので、マスコットも server と同じ設定の場所を見る。
+/// `backlog` が true のときだけ、古い発話を飛ばす引数を付ける。
 #[cfg(target_os = "macos")]
-pub fn launch(app: &Path, env: &Env) -> io::Result<()> {
-    let status = Command::new("open")
-        .arg("-a")
-        .arg(app)
-        .args(["--args", "-speechBacklogMaxAgeMs"])
-        .arg(BACKLOG_MAX_AGE_MS.to_string())
-        .envs(env)
-        .stdin(Stdio::null())
-        .status()?;
+pub fn launch(app: &Path, env: &Env, backlog: bool) -> io::Result<()> {
+    let mut cmd = Command::new("open");
+    cmd.arg("-a").arg(app);
+    if backlog {
+        cmd.args(["--args", "-speechBacklogMaxAgeMs"])
+            .arg(BACKLOG_MAX_AGE_MS.to_string());
+    }
+    let status = cmd.envs(env).stdin(Stdio::null()).status()?;
     if status.success() {
         Ok(())
     } else {
@@ -86,7 +96,7 @@ pub fn running_pids() -> Vec<u32> {
 pub fn request_quit(_pid: u32) {}
 
 #[cfg(not(target_os = "macos"))]
-pub fn launch(_app: &Path, _env: &crate::server::Env) -> io::Result<()> {
+pub fn launch(_app: &Path, _env: &crate::server::Env, _backlog: bool) -> io::Result<()> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
         "macOS 以外ではマスコットを起動できない",

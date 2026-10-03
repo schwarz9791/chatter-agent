@@ -95,6 +95,19 @@ JS の `confirm()` は wry で効かない。確認は `tauri-plugin-dialog` の
 pid で引くので、別のワークツリーのビルドを名前で取り違えない。bundle id で列挙する
 （`runningApplicationsWithBundleIdentifier`）ので、どのワークツリーのビルドも「動いているマスコット」に入る。
 
+## 終わらないスレッドから AppKit を呼ぶなら autoreleasepool で包む
+
+AppKit の内部で autorelease されたオブジェクトは、呼んだスレッドの暗黙のプールに積まれる。
+監視スレッドは終わらないので、そのプールが掃除されず、常駐中にメモリが増え続ける。`Serial` のスレッドは
+ジョブのたびに終わるので掃除される。`mascot_app.rs` の `running_pids` / `request_quit` は
+`objc2::rc::autoreleasepool` で包んでいる。
+
+実測（新しいスレッドで `running_pids()` を 20 万回呼び、マスコットが動いている状態で 2 万回ごとに RSS を見た）:
+
+- 包まない: 1 回あたり約 310 バイトずつ一定の傾きで増え、9.5MB → 72MB になった
+- `objc_autoreleasePoolPush` / `Pop` で包む: 最初に約 1.4MB 増えたあとは横ばい
+- 2 秒ごとの監視なら、包まないと 1 日で約 13MB 増える計算になる
+
 ## 画面のロック中は GUI の操作を自動化できない
 
 - Orca の computer-use はメニューバーとメニューを扱えない（`capabilities` の `surfaces.menubar` /

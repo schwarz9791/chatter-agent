@@ -23,7 +23,7 @@
 
 ## ビルドと起動
 
-前提は `core/` がビルド済みであること（server の成果物 `core/dist/chatter-agent-server.mjs` を使う）。
+前提は `core/` がビルド済みであること（server と player の成果物 `core/dist/chatter-agent-server.mjs` / `core/dist/chatter-agent-player.mjs` を使う）。
 Rust は `chatter-agent-app/mise.toml` で固定している。
 
 ```bash
@@ -46,8 +46,8 @@ Dock にも ⌘Tab にも出ない。操作はメニューバーのアイコン�
 
 メニューの「core の場所を選ぶ…」で `core/` を選ぶ。選んだ場所は
 `~/Library/Application Support/tech.sukima.chatter-agent/settings.json` の `coreDir` に保存され、
-次回からはアプリを起動すると自動で server を起こす。`dist/chatter-agent-server.mjs` か
-`node_modules` が無いフォルダは、警告ダイアログを出して保存しない（動いている server の状態は変わらない）。
+次回からはアプリを起動すると自動で server を起こす。`dist/chatter-agent-server.mjs`・`dist/chatter-agent-player.mjs`・
+`node_modules` のどれかが無いフォルダは、警告ダイアログを出して保存しない（動いている server の状態は変わらない）。
 
 ## メニューと状態
 
@@ -92,23 +92,33 @@ player は SIGTERM を1回だけ送って待つ（停止の仕組みと同じ）
 
 - **`.app` の探す順**: `/Applications/ChatterMascot.app` → `~/Applications/ChatterMascot.app` →
   `<core>/../chatter-mascot/Build/ChatterMascot.app`。見つからない・`open` が失敗する・pid が現れない
-  ときは、探した場所を警告ダイアログとログに出し、**非表示として保存して player に切り替える**
+  ときは、探した場所を警告ダイアログとログに出し、**非表示に寄せて player に切り替える**（保存はしない。下記）
 - マスコットは `open -a` で、server に渡している環境を引き継いで起こす（同じ設定の場所を見る）。
   別のワークツリーのビルドも同じ bundle id なので、動いているものは全部「動いているマスコット」として扱う
-- **起動時点で古い発話は飛ばす。** マスコットには起動引数 `-speechBacklogMaxAgeMs 60000`、player には
-  環境変数 `CHATTER_AGENT_SPEECH_BACKLOG_MAX_AGE_MS=60000` を渡す
+- **古い発話を飛ばすのは、ChatterAgent の起動直後と、何も繋がない状態（非表示＋ミュート）から繋ぐときだけ。**
+  マスコットには起動引数 `-speechBacklogMaxAgeMs 60000`、player には環境変数
+  `CHATTER_AGENT_SPEECH_BACKLOG_MAX_AGE_MS=60000` を渡す。音量や core による player の起こし直しと、
+  マスコット ⇄ player の切り替えでは渡さず、未再生の文を引き継いで鳴らす
 - **player の音量**は `audio.volume`。1.0 でないときだけ `CHATTER_AGENT_PLAYER_ARGS=-v,<音量>,{file}`
   （`afplay` の引数列）を足す。1.0 のときは足さないので、`config.json` の `playerArgs` が生きる。
-  音量が変わると player を起こし直す。player の出力は `server.log` に追記する
+  音量が変わると player を起こし直す。core を選び直したときも起こし直す（server と同じ core を使わせる）。
+  player の出力は `server.log` に追記する
+- ★ **`playerCommand` を `afplay` 以外にしているときは、音量を 1.0 にする。** `-v` は `afplay` の
+  引数なので、ほかのコマンドは受け付けず、無音のまま ack されて消えうる
+- **XR だけで使うときは「隠す＋ミュート」にする。** 既定は表示で、`.app` が無ければ player が繋ぐので、
+  XR と ack を取り合う（→ [`protocol.md`](./protocol.md)「同じルートに対して繋ぐクライアントは1台」）
 - ★ **player は自動で起こし直さない。** 終わったら `[Agent]` ログに終了状態を残して捨てるだけ。
   主因は外で動いている player の `player.lock` で、起こし直すと再起動を繰り返すだけになる。
   次の切り替え（表示・ミュートの操作）で、必要なら起こし直す
 - 環境（server に渡す環境）が解決するまでは何も起こさない。解決したあとに決め直す
 
 **表示状態は `settings.json`（ChatterAgent 自身のもの）の `mascotVisible`**（既定は表示）に保存する。
-Unity のメニューの「終了」やクラッシュで外から終わった、Finder などで外から起動された、という変化は
-監視（2秒ごと）が**最後に実現できた状態と実態を比べて**拾い、表示状態を実態に寄せる
-（外で起動されたら player を止める）。`mascot/settings.json` の変化（`mtime:size`）も同じ監視で拾い、
+**保存するのはメニューとショートカットの操作だけ。** Unity のメニューの「終了」やクラッシュで外から
+終わった、Finder などで外から起動された、`.app` が見つからない・起動できない、という変化は、
+監視（2秒ごと）が**最後に実現できた状態と実態を比べて**拾い、メモリ上の表示状態を実態に寄せるが、
+保存しない（外での終了を保存すると、ログアウトで macOS がマスコットと ChatterAgent の両方へ quit を送ったとき、
+マスコットが先に終わって非表示が保存され、次のログインでマスコットが出なくなる）。
+外で起動されたら player を止める。`mascot/settings.json` の変化（`mtime:size`）も同じ監視で拾い、
 Unity 側でのミュートの変更をメニューのチェックに反映する。
 
 **終了のときは `mascotVisible` を書き換えない**（次の起動で元の状態に戻すため）。

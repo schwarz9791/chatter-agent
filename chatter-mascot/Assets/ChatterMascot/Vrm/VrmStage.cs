@@ -306,8 +306,7 @@ namespace ChatterMascot.Vrm
         ///
         /// ★ <b>この <c>ct</c> によるキャンセルだけ通すこと。</b> 握ると、終了時に
         ///   残りの候補を舐め直したうえで「1つも読めませんでした」と
-        ///   <b>誤った <c>LogError</c> を出す</b>。逆に関係ない <c>OperationCanceledException</c> まで
-        ///   通すと、Cube を隠したまま次の候補へも進まずに<b>黙って止まる</b>。
+        ///   <b>誤った <c>LogError</c> を出す</b>。
         ///
         /// ★ <b>失敗は <c>LogWarning</c> 止まり。</b> 探索順の途中で外れるのは正常な分岐
         ///   （<c>VrmAssetLoader</c> が「無い」を <c>Log</c> にしているのと同じ）。

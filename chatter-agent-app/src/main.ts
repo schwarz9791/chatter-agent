@@ -405,12 +405,16 @@ function build(): void {
   s = section(() => t.sectionAbout);
   const version = el("span", "val");
   row(s, "aboutVersion", () => t.aboutVersion, [version]);
+  // 全文は長いので、ふだんは畳んでおく
+  const license = el("details", "row");
+  const summary = el("summary");
+  updaters.push(() => (summary.textContent = t.aboutLicense));
   const notice = el("pre", "notice");
-  row(s, "aboutLicense", () => t.aboutLicense, []);
-  s.lastElementChild!.append(notice);
+  license.append(summary, notice);
+  s.append(license);
   about()
     .then((a) => {
-      version.textContent = `Chatter Agent ${a.version}`;
+      version.textContent = a.version;
       notice.textContent = a.notice;
     })
     .catch(() => {});

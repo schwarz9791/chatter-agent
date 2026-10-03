@@ -259,9 +259,9 @@ macOS 限定。Windows は single-instance プラグインで同じ口にでき�
 | 位置と大きさをリセット（「キャラクター」節） | `character.scale` を消してから依頼 `resetWindow` を置く。マスコットは依頼の直前に設定を読み直し、既定の大きさ・既定の位置（`window.json` を消す）に戻す |
 | モーションを確認（「モーション」節） | select と「再生」。依頼 `playMotion`（→「マスコットとのやり取り」） |
 
-「について」節（末尾）は server にもマスコットにも依存せず、常に出る。版（Tauri の `package_info()`）と、
-リポジトリ直下の `NOTICE` の全文（`include_str!` でビルド時に埋め込む。コピーを持たないので食い違わない。
-Rust の `about()`）を出す。
+「Chatter Agent について」節（末尾）は server にもマスコットにも依存せず、常に出る。バージョン（Tauri の
+`package_info()`）と、リポジトリ直下の `NOTICE` の全文（`include_str!` でビルド時に埋め込む。コピーを持たないので
+食い違わない。Rust の `about()`）を出す。全文は長いので「ライセンス」の下に畳んでおく。
 
 - 窓は縦だけリサイズできる（幅は 520 で固定）
 - 環境変数で固定されたキー（`origins` が `env`）は押せず、`CHATTER_AGENT_*` で固定されている旨を注記する

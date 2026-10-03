@@ -163,8 +163,8 @@ export const JA: Text = {
   resetCoreDefaultsUnavailable: "既定値を取れません",
   resetKeyFailed: (key, reason) => `${key} を戻せませんでした（${reason}）`,
 
-  sectionAbout: "について",
-  aboutVersion: "版",
+  sectionAbout: "Chatter Agent について",
+  aboutVersion: "バージョン",
   aboutLicense: "ライセンス",
 
   settingsUnreadable: (reason) => `settings.json を読めません（${reason}）`,
@@ -254,7 +254,7 @@ export const EN: Text = {
   resetCoreDefaultsUnavailable: "Couldn't get the defaults.",
   resetKeyFailed: (key, reason) => `Couldn't reset ${key}: ${reason}`,
 
-  sectionAbout: "About",
+  sectionAbout: "About Chatter Agent",
   aboutVersion: "Version",
   aboutLicense: "License",
 

@@ -337,8 +337,7 @@ namespace ChatterMascot.Tests
         }
 
         /// <summary>
-        /// 旧 5:8 の保存を渡しても、大きさを引数で差し替えてから解決するので
-        /// 旧既定の比の移行は走らず、幅は引数のまま。
+        /// 保存された幅高（旧 5:8 でも）は使わず、引数の大きさのまま解決される。
         /// </summary>
         [Test]
         public void ResolveAfterAtSizeKeepsTheRequestedSize()

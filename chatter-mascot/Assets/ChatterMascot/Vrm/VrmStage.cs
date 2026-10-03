@@ -26,15 +26,17 @@ namespace ChatterMascot.Vrm
         [SerializeField] private Transform modelAnchor;
 
         /// <summary>
-        /// 読み込めなかったときに出しっぱなしにする Cube。
+        /// モデルを採れなかったとき（全候補が読めなかったか、読み込みで例外が出たとき）だけ出す Cube。
         ///
         /// ★ <b>名前で <c>GameObject.Find</c> しないこと。</b> このプロジェクトは
         ///   「対象を名前で決め打ちにしない」で通してある（→ <c>SceneFixups</c>）。
         ///
         /// ★ <b>無地の Cube が出ていること自体が可視のシグナル。</b> 同梱モデルまで
         ///   読めないのは異常事態なので、静かに何も出さないより良い。
+        ///
+        /// ★ <b>読み込み中は出さない。</b> 成功する通常の起動で Cube が一瞬映らないように。
         /// </summary>
-        [Tooltip("読み込めなかったときに残すプレースホルダ")]
+        [Tooltip("モデルを採れなかったとき（全候補が読めなかったか、読み込みで例外が出たとき）だけ出すプレースホルダ")]
         [SerializeField] private GameObject placeholder;
 
         [Header("画角")]
@@ -218,6 +220,8 @@ namespace ChatterMascot.Vrm
             //   「読めたのに真っ黒」と区別がつかない
             VrmMaterialCheck.WarnIfShadersStripped();
 
+            if (placeholder != null) placeholder.SetActive(false);
+
             _cancellation = new CancellationTokenSource();
             // MascotRunner の `_ = ShutdownThenQuitAsync()` と同じ形。
             // 例外は LoadAsync が内側で全部握る
@@ -276,16 +280,18 @@ namespace ChatterMascot.Vrm
                 // ★ **候補を全部並べること。** 探索順のどこで外れたかはこれが無いと分からない
                 Debug.LogError("[Mascot] 読めて VRM として解釈できた候補が1つもありませんでした。探した順:" +
                                VrmAssetLoader.DescribeCandidates(candidates));
+                if (placeholder != null) placeholder.SetActive(true);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 // 終了経路。ログを出さない
             }
             catch (Exception e)
             {
                 // ★ 握ること。ここから漏らすと `_ = LoadAsync()` の未観測 Task として
-                //   捨てられ、Cube が出たまま理由がどこにも残らない
+                //   捨てられ、Cube すら出ないまま理由がどこにも残らない
                 Debug.LogError("[Mascot] VRM の読み込みで例外が出ました: " + e);
+                if (placeholder != null) placeholder.SetActive(true);
             }
             finally
             {
@@ -298,7 +304,7 @@ namespace ChatterMascot.Vrm
         /// バイト列を VRM 1.0 として解釈する。<b>失敗しても投げず <c>null</c> を返す</b> ——
         /// 「次の候補へ進む」を呼び出し側で普通の <c>continue</c> として書けるように。
         ///
-        /// ★ <b><c>OperationCanceledException</c> だけは通すこと。</b> 握ると、終了時に
+        /// ★ <b>この <c>ct</c> によるキャンセルだけ通すこと。</b> 握ると、終了時に
         ///   残りの候補を舐め直したうえで「1つも読めませんでした」と
         ///   <b>誤った <c>LogError</c> を出す</b>。
         ///
@@ -332,7 +338,7 @@ namespace ChatterMascot.Vrm
                 Debug.LogWarning($"[Mascot] {loaded.Candidate.Path} は VRM として解釈できませんでした（null）。次の候補へ進みます");
                 return null;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 throw;
             }
@@ -393,8 +399,6 @@ namespace ChatterMascot.Vrm
             RealHeightCm = scale > 0f
                 ? VrmBounds.RealHeightCm(_bounds.size.y, scale, boneBoundsMarginMeters)
                 : (float?)null;
-
-            if (placeholder != null) placeholder.SetActive(false);
 
             Model = instance.gameObject;
 

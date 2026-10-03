@@ -211,7 +211,8 @@ namespace ChatterMascot.EditorTools
         /// <c>ModelAnchor</c> と <see cref="VrmStage"/> がシーンに居ることを保証する。
         ///
         /// <c>ModelPlaceholder</c>（Cube）は<b>消さずに <c>ModelAnchor</c> の子へ移す</b>。
-        /// 読み込みに成功したら <see cref="VrmStage"/> が <c>SetActive(false)</c> する。
+        /// <see cref="VrmStage"/> は起動時に隠し、モデルを採れなかったとき
+        /// （全候補が読めなかったか、読み込みで例外が出たとき）だけ出す。
         /// ★ <b>無地の Cube が出ていること自体が可視のシグナル</b>なので、
         ///   同梱モデルまで読めない異常事態を静かにしない。
         /// </summary>

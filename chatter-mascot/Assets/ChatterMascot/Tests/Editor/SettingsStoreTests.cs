@@ -41,7 +41,6 @@ namespace ChatterMascot.Tests
             var settings = Store().Current;
 
             Assert.That(settings.Muted, Is.False);
-            Assert.That(settings.MuteHotKey, Is.EqualTo(HotKeySpec.Default));
             Assert.That(_warnings, Is.Empty);
         }
 
@@ -49,11 +48,11 @@ namespace ChatterMascot.Tests
         public void RoundTripsThroughSaveAndReload()
         {
             var store = Store();
-            Assert.That(store.Save(MascotSettings.Defaults.WithMuted(true).WithMuteHotKey("cmd+shift+m")), Is.True);
+            Assert.That(store.Save(MascotSettings.Defaults.WithMuted(true).WithVolume(0.3f)), Is.True);
             Assert.That(_written, Is.Not.Null);
 
             Assert.That(store.Current.Muted, Is.True);
-            Assert.That(store.Current.MuteHotKey, Is.EqualTo("cmd+shift+m"));
+            Assert.That(store.Current.Volume, Is.EqualTo(0.3f));
         }
 
         /// <summary>
@@ -135,7 +134,7 @@ namespace ChatterMascot.Tests
                 text => { },
                 _warnings.Add);
 
-            Assert.That(store.Current.MuteHotKey, Is.EqualTo(HotKeySpec.Default));
+            Assert.That(store.Current.Muted, Is.EqualTo(MascotSettings.Defaults.Muted));
             Assert.That(_warnings, Has.Count.EqualTo(1));
         }
 

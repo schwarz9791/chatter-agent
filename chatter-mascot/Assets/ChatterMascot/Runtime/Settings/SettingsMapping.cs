@@ -38,19 +38,11 @@ namespace ChatterMascot.Settings
         public const float VolumeStep = 0.1f;
 
         /// <summary>
-        /// 話速の範囲と刻み。★ <b>表示上のもので、値域の権威は core の <c>SPECS</c>。</b>
-        /// ズレても <c>PATCH /v1/config</c> が 400 を返すだけで、黙って効かない値にはならない。
-        /// </summary>
-        public const float SpeedMin = 0.5f;
-        public const float SpeedMax = 2.0f;
-        public const float SpeedStep = 0.1f;
-
-        /// <summary>
         /// Android XR の空間固定パラメータの範囲と既定値（→ <see cref="MascotSettings.XrDistance"/> ほかの doc）。
         ///
         /// ★★ <b><see cref="ScaleMin"/> / <see cref="ScaleMax"/>（デスクトップのウィンドウ倍率）とは
         ///   別物。</b> 混同しないよう、こちらは必ず <c>Xr</c> を頭に付けて区別する。
-        /// ★ 刻み（<c>Step</c>）は持たない。デスクトップの設定パネルにスライダーを出さないので、
+        /// ★ 刻み（<c>Step</c>）は持たない。XR の設定パネルにスライダーを出さないので、
         ///   刻みへ丸める理由が無い（→ <see cref="SettingsJson"/> の <c>xr</c> 読み取り）。
         /// ★ 既定は「机の上のミニチュアを、正面の画面を避けた右側に」置く。グラスの表示視野は
         ///   ヘッドセットより狭いので、方位と足元の深さは<b>起動時の正面を向いたまま全身が視野に

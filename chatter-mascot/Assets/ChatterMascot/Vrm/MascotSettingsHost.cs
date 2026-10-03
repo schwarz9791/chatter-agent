@@ -7,9 +7,9 @@ namespace ChatterMascot.Vrm
 {
     /// <summary>
     /// 「<c>settings.json</c> → シーン」の反映。デスクトップでも Android でも同じものが動く。
-    /// <b>ここが settings.json の唯一の書き手</b>（デスクトップの設定パネルもここを経由する。
-    /// → <see cref="Apply"/>）。メニューバーやホットキーのようなデスクトップ固有の見た目は
-    /// <c>StatusItemBridge</c> が <see cref="ChangedExternally"/> を購読して担う。
+    /// デスクトップでは ChatterAgent が書いた値を読んで反映するだけで、書き戻さない。
+    /// 書き込みを伴う <see cref="Apply"/> を使うのは XR の設定パネルだけ。
+    /// プラットフォーム固有の見た目の更新は <see cref="ChangedExternally"/> を購読して担う。
     ///
     /// ★ <b>置き場所が Vrm asmdef なのは、<see cref="MascotRunner"/> と <see cref="VrmCharacter"/>
     ///   の両方に触るため。</b>（<c>Vrm</c> → <c>Runtime</c> の一方向参照はあるが逆は無いので、
@@ -21,15 +21,14 @@ namespace ChatterMascot.Vrm
         private const float PollSeconds = 1f;
 
         /// <summary>
-        /// ★ <c>FindFirstObjectByType</c> で毎回探さないこと。<c>StatusItemBridge</c> は
-        ///   <c>Start</c> で1回だけ取りに来る。
+        /// ★ <c>FindFirstObjectByType</c> で毎回探さないこと。
         /// </summary>
         public static MascotSettingsHost Instance { get; private set; }
 
         /// <summary>
         /// ファイルの外部変更（手編集 / 別プロセス）を検出したときに発火する（旧い値, 新しい値）。
-        /// 反映そのものはこの型が既に済ませている ——購読者はホットキーの再登録や
-        /// メニューの更新など、<b>デスクトップ固有の見た目</b>だけを行う。
+        /// 反映そのものはこの型が既に済ませている ——購読者は
+        /// <b>プラットフォーム固有の見た目</b>の更新だけを行う。
         /// </summary>
         public event Action<MascotSettings, MascotSettings> ChangedExternally;
 
@@ -45,7 +44,7 @@ namespace ChatterMascot.Vrm
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Install()
         {
-            // ★ StatusItemBridge.Install と同じ理由。Editor では動かさない
+            // ★ Editor では動かさない
             if (Application.isEditor) return;
 
             var go = new GameObject(nameof(MascotSettingsHost)) { hideFlags = HideFlags.HideAndDontSave };
@@ -98,10 +97,10 @@ namespace ChatterMascot.Vrm
         }
 
         /// <summary>
-        /// 反映（シーンへ適用）+ 保存。<b>settings.json への唯一の書き込み口</b>。
+        /// 反映（シーンへ適用）+ 保存。<b>このプロセスからの settings.json への唯一の書き込み口</b>。
         ///
-        /// ★ ストアを2つ作らないための境界でもある——設定パネル（デスクトップ）はここを
-        ///   経由するだけで、自分では read-modify-write しない。
+        /// ★ ストアを2つ作らないための境界でもある——呼び手（XR の設定パネル）は
+        ///   ここを経由するだけで、自分では read-modify-write しない。
         /// </summary>
         public void Apply(MascotSettings next)
         {
@@ -114,7 +113,7 @@ namespace ChatterMascot.Vrm
         /// <c>settings.json</c> の値をシーンへ反映する。
         ///
         /// ★★ <b>ここが「設定 → 見た目・音」の唯一の経路。</b> 起動時にも、
-        ///   パネルからの変更でも、ファイルを直接編集したときにも同じものが通る。
+        ///   XR パネルからの変更でも、ファイルを直接編集したときにも同じものが通る。
         ///   経路を分けると「パネルからは効くのに、ファイルを直したときだけ効かない」
         ///   （またはその逆）が生まれる。
         ///

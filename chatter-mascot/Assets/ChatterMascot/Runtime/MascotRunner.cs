@@ -42,7 +42,7 @@ namespace ChatterMascot
         ///   リフレッシュレートに合わせる必要がある（→ #99）。VRM のリップシンクと
         ///   spring bone が入ったら見直す（→ #17）。
         ///
-        /// ★ <b>デスクトップでは設定パネルの <c>display.frameRate</c>（#88）がこの値を上書きする</b>
+        /// ★ <b>デスクトップでは設定ファイルの <c>display.frameRate</c>（#88）がこの値を上書きする</b>
         ///   —— <see cref="SetTargetFrameRate"/> 経由で、<c>Awake</c> の後（設定を読み終えたところ）
         ///   から効く。<b>Android では反映しない</b>（→
         ///   <c>Settings.SettingsMapping.AppliesFrameRate</c>）—— <c>settings.json</c> に値が
@@ -51,7 +51,7 @@ namespace ChatterMascot
         /// </summary>
         [Header("表示")]
         [Tooltip("フレームレートの上限。常駐アプリなので電力に直接効く。0 以下なら制限しない。" +
-                 "デスクトップでは設定パネルの display.frameRate（SetTargetFrameRate）がこれを上書きする")]
+                 "デスクトップでは設定ファイルの display.frameRate（SetTargetFrameRate）がこれを上書きする")]
         [SerializeField] private int targetFrameRate = 30;
 
         [Header("再生")]
@@ -178,7 +178,7 @@ namespace ChatterMascot
         }
 
         /// <summary>
-        /// 再生音量（<b>0.0〜1.0</b>。既定 1.0）。設定パネル（#76）が書き、次の発話から効く。
+        /// 再生音量（<b>0.0〜1.0</b>。既定 1.0）。ChatterAgent が設定ファイルへ書き、次の発話から効く。
         /// 画面には 0〜100% で出る（→ <c>Settings.SettingDisplay.Percent</c>）。
         ///
         /// ★★ <b>ミュートの代わりにしないこと。</b> <c>0</c> にしても
@@ -208,14 +208,14 @@ namespace ChatterMascot
         }
 
         /// <summary>
-        /// 接続先（<c>ws://host:port</c>）。設定パネル（#76）が制御 API の口を導くのに使う。
+        /// 接続先（<c>ws://host:port</c>）。
         ///
         /// ★ 起動引数（<c>-serverUrl</c>）で上書きされた後の<b>実際の値</b>を返すこと。
         ///   <c>[SerializeField]</c> をそのまま読むと、引数で別のサーバーを指したときに
-        ///   設定パネルだけ元のサーバーを見に行く。
+        ///   読み手だけ元のサーバーを見に行く。
         /// ★★ <b>その約束は <c>Awake</c> で上書きすることで守られている</b>
-        ///   （→ <see cref="ResolveServerUrl"/>）。読み手（<c>StatusItemBridge</c>）は
-        ///   <c>Start</c> に居るので、上書きを <c>Start</c> でやると<b>順序が未規定になる</b>。
+        ///   （→ <see cref="ResolveServerUrl"/>）。他コンポーネントの <c>Start</c> が読みうるので、
+        ///   上書きを <c>Start</c> でやると<b>順序が未規定になる</b>。
         /// </summary>
         public string ServerUrl
         {
@@ -251,32 +251,7 @@ namespace ChatterMascot
         private const int AssetSyncTimeoutMs = 120000;
 
         /// <summary>
-        /// 設定パネルのテスト音声を鳴らす（#76）。失敗したら理由、成功なら <c>null</c>。
-        ///
-        /// ★ <b>通常の再生経路をそのまま通す。</b> 別経路で鳴らすと、
-        ///   「テストは鳴るのに本番が鳴らない」（またはその逆）を作ってしまう。
-        ///   ★ その帰結として、<b>ミュート中は鳴らない</b>（<c>MutedSpeechPlayer</c> が
-        ///   声だけ消す）。呼び出し側がミュート中である旨を出すこと。
-        ///
-        /// ★ <b>キューには載せない。</b> 配信された発話ではないので <c>seq</c> も ack も無い。
-        ///   口も表情も動かない（<c>BeginSpeaking</c> を通さない）——
-        ///   確かめたいのは「声と速さ」なので、それで足りる。
-        /// </summary>
-        public async Task<string> PlayPreviewAsync(byte[] wav)
-        {
-            if (_player == null) return "再生の準備ができていません";
-            if (wav == null || wav.Length == 0) return "音声が空です";
-
-            string error;
-            var handle = _player.Prepare(wav, "preview-" + DateTime.UtcNow.Ticks, out error);
-            if (handle == null) return string.IsNullOrEmpty(error) ? "音声を用意できませんでした" : error;
-
-            return await _player.PlayAsync(handle);
-        }
-
-        /// <summary>
-        /// 一時ミュートの状態。<b>読み書きの両方に使う</b>（ステータスバーのメニューと
-        /// グローバルショートカットから切り替わる）。
+        /// 一時ミュートの状態。<b>読み書きの両方に使う</b>。
         /// </summary>
         public MuteState Mute
         {
@@ -310,11 +285,10 @@ namespace ChatterMascot
         private readonly SpeakingSet _speaking = new SpeakingSet();
 
         /// <summary>
-        /// 一時ミュート（#75）。<b>ここが所有者</b>で、ステータスバー（<c>Desktop</c>）は
-        /// <see cref="Mute"/> 越しに触る。
+        /// 一時ミュート。<b>ここが所有者</b>で、他は <see cref="Mute"/> 越しに触る。
         ///
         /// ★ <b>フィールド初期化子で作ること。</b> <c>Start</c> の前に
-        ///   <c>StatusItemBridge</c> が読みに来る（実行順は保証されない）。
+        ///   他コンポーネントが読みに来うる（実行順は保証されない）。
         /// </summary>
         private readonly MuteState _mute = new MuteState();
         private float _volume = 1f;
@@ -488,7 +462,7 @@ namespace ChatterMascot
         }
 
         /// <summary>
-        /// 表示のフレームレート上限を変える（設定パネル、#88）。<see cref="targetFrameRate"/> の doc。
+        /// 表示のフレームレート上限を変える（設定ファイル、#88）。<see cref="targetFrameRate"/> の doc。
         ///
         /// ★ <b><c>Application.targetFrameRate</c> を直接書かないこと</b>（→ <c>FrameRateBudget</c>）。
         ///   ここは「戻す先」を宣言し直すだけで、VRM 読み込み中などの一時的な引き上げ
@@ -508,16 +482,11 @@ namespace ChatterMascot
         /// ★★ <b>起動引数で上書きしたときは <see cref="ServerToken"/> の doc を見ること</b>
         ///   —— ファイルのトークンは使わない。
         ///
-        /// ★★ <b><c>Start</c> ではなく <c>Awake</c> で行うこと。</b> 設定パネル（#76）は
-        ///   <c>StatusItemBridge.Bridge.Start()</c> から <see cref="ServerUrl"/> を読んで
-        ///   <c>CoreConfigClient</c> の接続先を<b>1回きり</b>捕まえる。あちらも <c>Start</c> なので
-        ///   <b>2つの <c>Start</c> の相対順序は保証されない</b>（どちらにも
-        ///   <c>[DefaultExecutionOrder]</c> は付いていない）。先に走られると
-        ///   <c>[SerializeField]</c> の既定値が焼かれ、<b>再生は正しいサーバーなのに設定パネルだけ
-        ///   別のサーバーを読み書きする</b>状態がセッション中ずっと続く。
-        ///   <c>Bridge</c> は <c>RuntimeInitializeOnLoadMethod(AfterSceneLoad)</c> で生えるので、
-        ///   <b>シーンの <c>Awake</c> はすべて終わった後</b>に <c>Start</c> が来る ——
-        ///   ここへ移せば順序が決まる。
+        /// ★★ <b><c>Start</c> ではなく <c>Awake</c> で行うこと。</b> <see cref="ServerUrl"/> を
+        ///   <c>Start</c> で読む側とは<b>2つの <c>Start</c> の相対順序が保証されない</b>。
+        ///   先に読まれると <c>[SerializeField]</c> の既定値が焼かれ、再生と読み手が
+        ///   別のサーバーを見る状態がセッション中ずっと続く。
+        ///   <c>Awake</c> に置けば、後から来る <c>Start</c> より必ず先に済む。
         ///
         /// ★ <b>検証（<c>ServerUrl.IsValid</c>）は <c>Start</c> のまま。</b> あちらは
         ///   「<c>_client</c> を作れるか」の話で、読み手の順序とは別の関心事。
@@ -733,7 +702,7 @@ namespace ChatterMascot
             //   open Build/ChatterMascot.app --args -serverUrl ws://127.0.0.1:9
             //
             // ★★ **上書きそのものは Awake で済ませてある**（→ ResolveServerUrl）。ここに残すと、
-            //   同じ Start パスに居る StatusItemBridge が**先に ServerUrl を読みうる**。
+            //   Start で ServerUrl を読む側が**先に読みうる**。
             // ★ 完全修飾で呼ぶこと。 このクラスは同名の public string ServerUrl プロパティを持つので、
             //   using しただけの型名は解決できない
             if (!ChatterMascot.Net.ServerUrl.IsValid(serverUrl))

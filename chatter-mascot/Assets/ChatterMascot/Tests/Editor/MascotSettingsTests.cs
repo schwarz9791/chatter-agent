@@ -16,8 +16,6 @@ namespace ChatterMascot.Tests
             var defaults = MascotSettings.Defaults;
 
             Assert.That(defaults.Muted, Is.False);
-            Assert.That(defaults.MuteHotKey, Is.EqualTo(HotKeySpec.Default));
-            Assert.That(defaults.HideHotKey, Is.EqualTo(HotKeySpec.DefaultHide));
             Assert.That(defaults.Volume, Is.EqualTo(1f));
             Assert.That(defaults.IdleMotion, Is.True);
             Assert.That(defaults.CursorGaze, Is.True);
@@ -38,7 +36,6 @@ namespace ChatterMascot.Tests
 
             Assert.That(settings.Muted, Is.True);
             Assert.That(settings.Volume, Is.EqualTo(0.3f));
-            Assert.That(settings.MuteHotKey, Is.EqualTo(HotKeySpec.Default));
         }
 
         /// <summary>
@@ -80,7 +77,7 @@ namespace ChatterMascot.Tests
         ///   テストも足し忘れる」で同じ穴が開く。リフレクションで回せば、
         ///   <b>新しいプロパティは書いた瞬間からこのテストの対象になる</b>。
         ///
-        /// ★ 実際に一度落とした —— <c>HideHotKey</c> を <c>Equals</c> に入れ忘れたせいで
+        /// ★ 実際に一度落とした —— プロパティを <c>Equals</c> に入れ忘れたせいで
         ///   <c>SettingsStore.Refresh</c> が「変わっていない」と返し、次の保存で
         ///   <b>ユーザーの編集がディスクから消えた</b>。#76 で項目が3→9に増えた保険。
         ///

@@ -37,12 +37,10 @@ namespace ChatterMascot.Tests
         [Test]
         public void RoundTrips()
         {
-            var written = SettingsJson.Write(MascotSettings.Defaults.WithMuted(true).WithMuteHotKey("cmd+shift+m").WithHideHotKey("cmd+shift+h"));
+            var written = SettingsJson.Write(MascotSettings.Defaults.WithMuted(true));
             var parsed = Parse(written);
 
             Assert.That(parsed.Muted, Is.True);
-            Assert.That(parsed.MuteHotKey, Is.EqualTo("cmd+shift+m"));
-            Assert.That(parsed.HideHotKey, Is.EqualTo("cmd+shift+h"));
             Assert.That(_warnings, Is.Empty);
         }
 
@@ -51,8 +49,6 @@ namespace ChatterMascot.Tests
         {
             var parsed = Parse("{}");
             Assert.That(parsed.Muted, Is.EqualTo(MascotSettings.Defaults.Muted));
-            Assert.That(parsed.MuteHotKey, Is.EqualTo(HotKeySpec.Default));
-            Assert.That(parsed.HideHotKey, Is.EqualTo(HotKeySpec.DefaultHide));
         }
 
         /// <summary>★ ファイル全体が読めないケース。呼び出し側は直前値を維持する。</summary>
@@ -85,43 +81,26 @@ namespace ChatterMascot.Tests
         [Test]
         public void FallsBackPerKeyOnBadValues()
         {
-            var parsed = Parse("{\"audio\":{\"mute\":\"yes\",\"muteHotKey\":\"cmd+shift+m\"}}");
+            var parsed = Parse("{\"audio\":{\"mute\":\"yes\",\"volume\":0.3}}");
 
             Assert.That(parsed.Muted, Is.False, "mute だけ既定へ");
-            Assert.That(parsed.MuteHotKey, Is.EqualTo("cmd+shift+m"), "他のキーは生きる");
+            Assert.That(parsed.Volume, Is.EqualTo(0.3f), "他のキーは生きる");
             Assert.That(_warnings, Has.Count.EqualTo(1));
         }
 
         /// <summary>
-        /// ★★ <b>登録できないショートカットを保存させないこと。</b> 修飾キー無しを通すと、
-        /// 次の起動でそのキーが全アプリから奪われる（→ <c>HotKeySpec</c>）。
+        /// ★ ショートカットは ChatterAgent が持つキー。マスコットは使わないので、
+        ///   警告せずに読み飛ばす（不正な値でも同じ）。
         /// </summary>
         [Test]
-        public void RejectsAnUnregisterableHotKey()
+        public void SkipsTheHotKeysWithoutWarning()
         {
-            var parsed = Parse("{\"audio\":{\"muteHotKey\":\"m\"}}");
+            var parsed = Parse(
+                "{\"audio\":{\"mute\":true,\"muteHotKey\":\"ctrl+opt+m\"}," +
+                "\"ui\":{\"hideHotKey\":\"h\"}}");
 
-            Assert.That(parsed.MuteHotKey, Is.EqualTo(HotKeySpec.Default));
-            Assert.That(_warnings, Has.Count.EqualTo(1));
-        }
-
-        /// <summary>ui は audio と同じ作法（キー単位で既定に倒す / 未知キーは無視）。</summary>
-        [Test]
-        public void ReadsTheHideHotKey()
-        {
-            var parsed = Parse("{\"ui\":{\"hideHotKey\":\"cmd+shift+h\"}}");
-
-            Assert.That(parsed.HideHotKey, Is.EqualTo("cmd+shift+h"));
+            Assert.That(parsed.Muted, Is.True);
             Assert.That(_warnings, Is.Empty);
-        }
-
-        [Test]
-        public void RejectsAnUnregisterableHideHotKey()
-        {
-            var parsed = Parse("{\"ui\":{\"hideHotKey\":\"h\"}}");
-
-            Assert.That(parsed.HideHotKey, Is.EqualTo(HotKeySpec.DefaultHide));
-            Assert.That(_warnings, Has.Count.EqualTo(1));
         }
 
         [Test]

@@ -2,11 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
-using ChatterMascot.Net;
 using ChatterMascot.Settings;
 using ChatterMascot.Ui;
 using ChatterMascot.Vrm;
-using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -23,19 +21,6 @@ namespace ChatterMascot.Tests
         private static readonly Regex Japanese =
             new Regex(@"[\p{IsHiragana}\p{IsKatakana}\p{IsCJKUnifiedIdeographs}　-〿＀-￯]");
 
-        private static readonly string[] CoreKeys =
-        {
-            CoreConfigKeys.SpeakerId, CoreConfigKeys.KokoroVoiceId, CoreConfigKeys.SpeedScale,
-            CoreConfigKeys.SummaryEnabled, CoreConfigKeys.AiSummaryBackend, CoreConfigKeys.EmotionClassifier,
-        };
-
-        private static readonly string[] ErrorCodes =
-        {
-            "env_override", "readonly_key", "invalid_value", "unknown_key", "engine_unreachable",
-            "synthesis_unavailable", "tts_disabled", "config_unreadable", "config_unwritable",
-            "too_many_requests", "future_error",
-        };
-
         [TestCase(SystemLanguage.Japanese, true)]
         [TestCase(SystemLanguage.English, false)]
         [TestCase(SystemLanguage.French, false)]
@@ -47,31 +32,14 @@ namespace ChatterMascot.Tests
 
         private static IEnumerable<IReadOnlyList<SettingSpec>> Layouts(UiText text)
         {
-            var speakers = new[] { new SettingChoice("1", "Anneli (Normal)") };
             var clip = new[] { new SettingChoice("idle/a.vrma", "idle/a.vrma") };
             var steps = SettingsMapping.XrHeightSteps(160f);
-
-            SettingsContext Desktop(Action<SettingsContext> tweak = null)
-            {
-                var c = new SettingsContext
-                {
-                    Text = text,
-                    CoreReachable = true,
-                    Speakers = speakers,
-                    SpeakerId = "1",
-                    Version = "1.0",
-                    LicenseText = "MIT",
-                };
-                tweak?.Invoke(c);
-                return c;
-            }
 
             SettingsContext Xr(Action<SettingsContext> tweak = null)
             {
                 var c = new SettingsContext
                 {
                     Text = text,
-                    Platform = SettingsPlatform.Xr,
                     XrHeightChoices = SettingsMapping.XrHeightChoices(steps, text),
                     MotionClips = clip,
                 };
@@ -81,16 +49,6 @@ namespace ChatterMascot.Tests
 
             var contexts = new List<SettingsContext>
             {
-                Desktop(),
-                Desktop(c => { c.CoreReachable = false; c.Speakers = new SettingChoice[0]; }),
-                Desktop(c => c.Speakers = new SettingChoice[0]),
-                Desktop(c => c.CoreEnvOverridden = CoreKeys),
-                Desktop(c => c.Settings = c.Settings.WithIdleMotion(false)),
-                Desktop(c => c.Settings = c.Settings.WithVrmFileName("a.vrm")),
-                Desktop(c => c.Settings = c.Settings.WithMuteHotKey(c.Settings.HideHotKey)),
-                Desktop(c => c.MotionClips = null),
-                Desktop(c => c.MotionClips = new SettingChoice[0]),
-                Desktop(c => c.MotionClips = clip),
                 Xr(),
                 Xr(c => c.XrHeightChoices = null),
                 Xr(c => c.AssetSyncRunning = true),
@@ -100,8 +58,7 @@ namespace ChatterMascot.Tests
                 Xr(c => c.Settings = c.Settings.WithIdleMotion(false)),
             };
 
-            foreach (var c in contexts) yield return SettingsSchema.Build(c);
-            yield return SettingsSchema.BuildAbout(contexts[0]);
+            foreach (var c in contexts) yield return SettingsSchema.BuildXr(c);
         }
 
         private static IEnumerable<string> Texts(IEnumerable<SettingSpec> items)
@@ -150,7 +107,7 @@ namespace ChatterMascot.Tests
         }
 
         /// <summary>
-        /// Bridge からしか出ない文言も含め、<see cref="UiText"/> の string を返す全メンバーを検査する。
+        /// パネルのレイアウトに現れない文言も含め、<see cref="UiText"/> の string を返す全メンバーを検査する。
         /// メンバーを足せば自動で対象に入る。
         /// </summary>
         [Test]
@@ -195,28 +152,6 @@ namespace ChatterMascot.Tests
         }
 
         [Test]
-        public void EnglishMenuHasNoJapanese()
-        {
-            foreach (var hidden in new[] { false, true })
-            {
-                var model = MascotMenu.Build(new MenuState(
-                    false, hidden, Spec("ctrl+opt+m"), Spec("ctrl+opt+h"),
-                    "Chatter Mascot", "1.0", 1, null, null, UiText.En));
-
-                AssertNoJapanese(model.Entries.Where(e => !e.IsSeparator).Select(e => e.Label));
-                AssertNoJapanese(new[] { model.Tooltip });
-            }
-        }
-
-        [Test]
-        public void EnglishPanelJsonHasNoJapanese()
-        {
-            var json = JObject.Parse(SettingsPanelJson.Write("x", new List<SettingSpec>(), UiText.En));
-
-            AssertNoJapanese(json["strings"].Children<JProperty>().Select(p => (string)p.Value));
-        }
-
-        [Test]
         public void EnglishXrHeightChoicesHaveNoJapanese()
         {
             var choices = SettingsMapping.XrHeightChoices(SettingsMapping.XrHeightSteps(160f), UiText.En);
@@ -234,64 +169,6 @@ namespace ChatterMascot.Tests
                 AssertNoJapanese(new[] { notice });
                 Assert.That(notice, Is.Not.Empty, result.ToString());
             }
-        }
-
-        [Test]
-        public void EnglishServerErrorsHaveNoJapanese()
-        {
-            foreach (var code in ErrorCodes)
-            {
-                var body = "{\"error\":\"" + code + "\",\"key\":\"ttsSpeakerId\"}";
-                var ja = CoreConfigClient.DescribeError(body, UiText.Ja);
-                var en = CoreConfigClient.DescribeError(body, UiText.En);
-
-                Assert.That(en, Is.Not.Empty, code);
-                AssertNoJapanese(new[] { en });
-                if (code != "future_error") Assert.That(en, Is.Not.EqualTo(ja), code);
-            }
-            AssertNoJapanese(new[] { CoreConfigClient.DescribeFailure(500, "", UiText.En) });
-        }
-
-        [Test]
-        public void EnglishHotKeyErrorsHaveNoJapanese()
-        {
-            HotKeySpec spec;
-            string error;
-
-            Assert.That(HotKeySpec.TryFromCode(0x2E, 0, UiText.En, out spec, out error), Is.False);
-            AssertNoJapanese(new[] { error });
-
-            Assert.That(HotKeySpec.TryFromCode(0x21, 0x1000, UiText.En, out spec, out error), Is.False);
-            AssertNoJapanese(new[] { error });
-        }
-
-        [Test]
-        public void EnglishMenuShortcutUsesHalfWidthParentheses()
-        {
-            var model = MascotMenu.Build(new MenuState(
-                false, false, Spec("ctrl+opt+m"), default(HotKeySpec),
-                "Chatter Mascot", "1.0", 1, null, null, UiText.En));
-
-            Assert.That(model.Entries.First(e => e.Key == MenuKeys.Mute).Label, Is.EqualTo("Mute (⌃⌥M)"));
-            Assert.That(model.Entries.First(e => e.Key == MenuKeys.About).Label, Is.EqualTo("About Chatter Mascot"));
-        }
-
-        [Test]
-        public void EnglishShortcutClashNameTheOtherRow()
-        {
-            var settings = MascotSettings.Defaults.WithMuteHotKey(MascotSettings.Defaults.HideHotKey);
-            var items = SettingsSchema.Build(new SettingsContext { Text = UiText.En, Settings = settings });
-
-            var note = items.First(s => s.Key == SettingKeys.HideHotKey).Note;
-            Assert.That(note, Is.EqualTo("Same as \"Toggle mute\", so it can't be registered."));
-        }
-
-        private static HotKeySpec Spec(string text)
-        {
-            HotKeySpec spec;
-            string error;
-            HotKeySpec.TryParse(text, out spec, out error);
-            return spec;
         }
     }
 }

@@ -8,7 +8,7 @@ namespace ChatterMascot.Settings
     /// ビューを組む</b>ので、ここに無い見た目は作れない。
     ///
     /// ★ <b>ネイティブ側に設定のキーを書かないこと。</b> 項目の追加・並び替え・ラベルの変更が
-    ///   C# だけの変更で済むのが、この作りを選んだ理由そのもの（#75 の <c>MenuModel</c> と同じ）。
+    ///   C# だけの変更で済むのが、この作りを選んだ理由そのもの。
     /// </summary>
     public enum SettingKind
     {
@@ -20,29 +20,9 @@ namespace ChatterMascot.Settings
         Button,
 
         /// <summary>
-        /// ショートカット。<b>実際にキーを押して記録する</b>（現在の値 + 「記録」ボタン）。
-        ///
-        /// ★★ <b>ネイティブが返すのは数値だけ。</b> <c>"&lt;keyCode&gt;,&lt;修飾マスク&gt;"</c> の形で
-        ///   返り、<c>ctrl+opt+m</c> という語彙への変換は
-        ///   <see cref="Ui.HotKeySpec.TryFromCode"/> が行う。
-        ///   「ネイティブに設定の語彙を書かない」をショートカットにも通すため。
-        ///
-        /// ★ <b>キーの捕捉はローカルモニタ（<c>addLocalMonitorForEvents</c>）。</b>
-        ///   グローバルモニタと違い<b>アクセシビリティ権限が要らない</b>
-        ///   （グローバルショートカットの登録に Carbon を選んだのと同じ理由）。
-        ///
-        /// ★ <b>記録中はパネルがキーウィンドウである必要がある。</b> <c>LSUIElement</c> の
-        ///   アプリは既定でアクティブになれないので、パネルを出すときの
-        ///   <c>[NSApp activateIgnoringOtherApps:YES]</c> が効いていないと
-        ///   <b>「記録」を押しても何も起きない</b>という形で出る。
-        /// </summary>
-        HotKey,
-
-        /// <summary>
         /// <b>読み取り専用</b>の複数行テキスト（バージョン・ライセンス本文）。
         ///
-        /// ★ 入力欄ではない。編集できる文字列は <see cref="HotKey"/> だけにしてある ——
-        ///   自由入力の設定を増やすほど、検証と「不正値のときどう見せるか」が増える。
+        /// ★ 入力欄ではない。自由入力の設定を増やすほど、検証と「不正値のときどう見せるか」が増える。
         /// </summary>
         Text,
     }
@@ -224,15 +204,6 @@ namespace ChatterMascot.Settings
         public static SettingSpec Button(string key, string label, bool enabled = true, string note = "")
         {
             var spec = new SettingSpec(SettingKind.Button, key, label);
-            spec.Enabled = enabled;
-            spec.Note = note ?? "";
-            return spec;
-        }
-
-        public static SettingSpec HotKey(string key, string label, string value, bool enabled = true, string note = "")
-        {
-            var spec = new SettingSpec(SettingKind.HotKey, key, label);
-            spec.Value = value ?? "";
             spec.Enabled = enabled;
             spec.Note = note ?? "";
             return spec;

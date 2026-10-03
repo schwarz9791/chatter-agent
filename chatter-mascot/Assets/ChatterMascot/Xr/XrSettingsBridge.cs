@@ -9,8 +9,8 @@ using UnityEngine.UI;
 namespace ChatterMascot.Xr
 {
     /// <summary>
-    /// XR の設定パネルで、<b>キーの意味を知る唯一の場所</b>（デスクトップの
-    /// <c>SettingsPanelBridge</c> と同じ役回り）。<see cref="SettingsSchema.Build"/> で並びを組み、
+    /// XR の設定パネルで、<b>キーの意味を知る唯一の場所</b>。
+    /// <see cref="SettingsSchema.BuildXr"/> で並びを組み、
     /// <see cref="XrSettingsPanel"/> へ渡す。パネルからのイベントは <c>key</c> の
     /// <c>switch</c> で振り分ける。
     ///
@@ -62,8 +62,7 @@ namespace ChatterMascot.Xr
 
         /// <summary>
         /// 直近に <see cref="RebuildContext"/> で見たモーション本数。<c>null</c> なら読み込み中
-        /// （<see cref="Update"/> が開いている間だけ監視する。<c>Desktop/SettingsPanelBridge.WatchMotionClips</c>
-        /// と同じ形）。
+        /// （<see cref="Update"/> が開いている間だけ監視する）。
         /// </summary>
         private int? _lastMotionClipCount;
 
@@ -132,8 +131,7 @@ namespace ChatterMascot.Xr
         }
 
         /// <summary>
-        /// モーションの読み込みが、パネルを開いている間に終わったら選択肢を埋め直す
-        /// （<c>Desktop/SettingsPanelBridge.WatchMotionClips</c> と同じ形）。
+        /// モーションの読み込みが、パネルを開いている間に終わったら選択肢を埋め直す。
         /// </summary>
         private void WatchMotionClips()
         {
@@ -276,7 +274,6 @@ namespace ChatterMascot.Xr
         private void RebuildContext()
         {
             var host = MascotSettingsHost.Instance;
-            _context.Platform = SettingsPlatform.Xr;
             _context.Settings = host != null ? host.Current : MascotSettings.Defaults;
 
             var realCm = _stage.RealHeightCm;
@@ -295,7 +292,7 @@ namespace ChatterMascot.Xr
 
         private IReadOnlyList<SettingSpec> BuildItems()
         {
-            var items = SettingsSchema.Build(_context);
+            var items = SettingsSchema.BuildXr(_context);
             items = ApplyResetAllConfirmState(items);
             items = ApplyNotices(items);
             return items;
@@ -455,8 +452,7 @@ namespace ChatterMascot.Xr
         }
 
         /// <summary>
-        /// 「モーションを確認」の「再生」。デスクトップの
-        /// <c>SettingsPanelBridge.PlayMotionPreview</c> と同じ経路（<c>VrmCharacter.PreviewMotion</c>）。
+        /// 「モーションを確認」の「再生」（<c>VrmCharacter.PreviewMotion</c>）。
         /// </summary>
         private void PlayMotionPreview()
         {

@@ -11,23 +11,6 @@ namespace ChatterMascot.Tests
     [TestFixture]
     public sealed class SettingsSchemaTests
     {
-        private static SettingsContext Context(bool reachable = true)
-        {
-            return new SettingsContext
-            {
-                CoreReachable = reachable,
-                Speakers = new[]
-                {
-                    new SettingChoice("888753760", "Anneli（ノーマル）"),
-                    new SettingChoice("1", "テスト（ノーマル）"),
-                },
-                SpeakerId = "888753760",
-                SpeedScale = 1f,
-                Version = "1.2.3",
-                LicenseText = "MIT",
-            };
-        }
-
         private static SettingSpec Find(IReadOnlyList<SettingSpec> items, string key)
         {
             return items.FirstOrDefault(s => s.Key == key);
@@ -37,7 +20,7 @@ namespace ChatterMascot.Tests
         [Test]
         public void KeysAreUnique()
         {
-            var keys = SettingsSchema.Build(Context())
+            var keys = SettingsSchema.BuildXr(XrContext())
                 .Where(s => s.Kind != SettingKind.Section)
                 .Select(s => s.Key)
                 .ToList();
@@ -50,141 +33,24 @@ namespace ChatterMascot.Tests
         [Test]
         public void SectionsHaveNoKeyAndEverythingElseDoes()
         {
-            foreach (var spec in SettingsSchema.Build(Context()))
+            foreach (var spec in SettingsSchema.BuildXr(XrContext()))
             {
                 if (spec.Kind == SettingKind.Section) Assert.That(spec.Key, Is.Null, spec.Label);
                 else Assert.That(spec.Key, Is.Not.Null.And.Not.Empty, spec.Label);
-                Assert.That(spec.Label, Is.Not.Null.And.Not.Empty);
+                // ★ 「モーションを確認」は見出しの直下に置くのでラベルを持たない
+                if (spec.Key != SettingKeys.MotionPreview) Assert.That(spec.Label, Is.Not.Null.And.Not.Empty);
             }
         }
 
-        /// <summary>★ 刻みが範囲を割り切らないと、最大値にハンドルが止まらない</summary>
-        [Test]
-        public void SliderStepsDivideTheirRange()
-        {
-            foreach (var spec in SettingsSchema.Build(Context()).Where(s => s.Kind == SettingKind.Slider))
-            {
-                Assert.That(spec.Step, Is.GreaterThan(0f), spec.Key);
-                var steps = (spec.Max - spec.Min) / spec.Step;
-                Assert.That(
-                    steps, Is.EqualTo(System.Math.Round(steps)).Within(0.0001f),
-                    $"{spec.Key}: 刻み {spec.Step} が範囲 {spec.Min}〜{spec.Max} を割り切らない");
-            }
-        }
-
-        [Test]
-        public void SliderValuesStartInsideTheirRange()
-        {
-            foreach (var spec in SettingsSchema.Build(Context()).Where(s => s.Kind == SettingKind.Slider))
-            {
-                var value = SettingsMapping.Parse(spec.Value, float.NaN);
-                Assert.That(value, Is.InRange(spec.Min, spec.Max), spec.Key);
-            }
-        }
-
-        /// <summary>★ 選択肢に無い値を選択済みにすると、開いた瞬間に別の話者へ切り替わって見える</summary>
+        /// <summary>★ 選択肢に無い値を選択済みにすると、開いた瞬間に別の選択肢へ切り替わって見える</summary>
         [Test]
         public void ChoiceValuesExistInTheirChoices()
         {
-            foreach (var spec in SettingsSchema.Build(Context()).Where(s => s.Kind == SettingKind.Choice))
+            foreach (var spec in SettingsSchema.BuildXr(XrContext()).Where(s => s.Kind == SettingKind.Choice))
             {
                 if (spec.Choices.Count == 0) continue;
                 Assert.That(spec.Choices.Select(c => c.Value), Contains.Item(spec.Value), spec.Key);
             }
-        }
-
-        /// <summary>
-        /// ★★ サーバーに繋がらなくても<b>項目を消さない</b>。消すと「設定が無い」に見える。
-        /// </summary>
-        [Test]
-        public void KeepsCoreItemsWhenTheServerIsUnreachable()
-        {
-            var items = SettingsSchema.Build(Context(reachable: false));
-
-            foreach (var key in new[]
-                     {
-                         SettingKeys.Speaker, SettingKeys.Speed, SettingKeys.SummaryEnabled,
-                         SettingKeys.AiSummaryBackend, SettingKeys.EmotionClassifier,
-                     })
-            {
-                var spec = Find(items, key);
-                Assert.That(spec, Is.Not.Null, $"{key} が消えている");
-                Assert.That(spec.Enabled, Is.False, key);
-                Assert.That(spec.Note, Is.Not.Empty, $"{key}: 無効な理由が出ていない");
-            }
-        }
-
-        /// <summary>★ 選択肢が空でも項目は出す（note で理由を出す）</summary>
-        [Test]
-        public void KeepsTheSpeakerItemWithNoChoices()
-        {
-            var context = Context();
-            context.Speakers = new SettingChoice[0];
-
-            var spec = Find(SettingsSchema.Build(context), SettingKeys.Speaker);
-
-            Assert.That(spec, Is.Not.Null);
-            Assert.That(spec.Choices, Is.Empty);
-            Assert.That(spec.Enabled, Is.False);
-            Assert.That(spec.Note, Is.Not.Empty);
-        }
-
-        /// <summary>
-        /// ★ 環境変数が勝っているキーは触らせない。触れると <c>PATCH</c> が 409 を返すだけで、
-        ///   ユーザーには「変えたのに戻る」としか見えない。
-        /// </summary>
-        [Test]
-        public void DisablesKeysThatTheEnvironmentOverrides()
-        {
-            var context = Context();
-            context.CoreEnvOverridden = new[] { CoreConfigKeys.SpeakerId };
-
-            var spec = Find(SettingsSchema.Build(context), SettingKeys.Speaker);
-
-            Assert.That(spec.Enabled, Is.False);
-            Assert.That(spec.Note, Does.Contain("CHATTER_AGENT_TTS_SPEAKER_ID"));
-        }
-
-        [Test]
-        public void SpeakerKeyFollowsTheEngine()
-        {
-            Assert.That(CoreConfigKeys.SpeakerKeyFor("openai"), Is.EqualTo(CoreConfigKeys.KokoroVoiceId));
-            Assert.That(CoreConfigKeys.SpeakerKeyFor("voicevox"), Is.EqualTo(CoreConfigKeys.SpeakerId));
-            Assert.That(CoreConfigKeys.SpeakerKeyFor(null), Is.EqualTo(CoreConfigKeys.SpeakerId));
-        }
-
-        /// <summary>★ Kokoro のときは声のキーが <c>kokoroVoiceId</c> になり、env の見る先もそちらへ移る</summary>
-        [Test]
-        public void ChecksTheKokoroVoiceKeyForTheEnvironmentOverrideWhenTheEngineIsKokoro()
-        {
-            var context = Context();
-            context.TtsEngine = "openai";
-
-            context.CoreEnvOverridden = new[] { CoreConfigKeys.SpeakerId };
-            Assert.That(Find(SettingsSchema.Build(context), SettingKeys.Speaker).Enabled, Is.True);
-
-            context.CoreEnvOverridden = new[] { CoreConfigKeys.KokoroVoiceId };
-            var spec = Find(SettingsSchema.Build(context), SettingKeys.Speaker);
-            Assert.That(spec.Enabled, Is.False);
-            Assert.That(spec.Note, Does.Contain("CHATTER_AGENT_KOKORO_VOICE_ID"));
-        }
-
-        /// <summary>★ 要約エンジン・感情判定も同じ扱い（環境変数名まで note に出す）</summary>
-        [Test]
-        public void DisablesTheSummaryBackendAndEmotionClassifierWhenTheEnvironmentOverridesThem()
-        {
-            var context = Context();
-            context.CoreEnvOverridden = new[] { CoreConfigKeys.AiSummaryBackend, CoreConfigKeys.EmotionClassifier };
-
-            var items = SettingsSchema.Build(context);
-
-            var backend = Find(items, SettingKeys.AiSummaryBackend);
-            Assert.That(backend.Enabled, Is.False);
-            Assert.That(backend.Note, Does.Contain("CHATTER_AGENT_AI_SUMMARY_BACKEND"));
-
-            var emotion = Find(items, SettingKeys.EmotionClassifier);
-            Assert.That(emotion.Enabled, Is.False);
-            Assert.That(emotion.Note, Does.Contain("CHATTER_AGENT_EMOTION_CLASSIFIER"));
         }
 
         /// <summary>
@@ -211,7 +77,7 @@ namespace ChatterMascot.Tests
         [Test]
         public void DoesNotOfferFeaturesThatDoNotExistYet()
         {
-            var keys = SettingsSchema.Build(Context()).Select(s => s.Key).ToList();
+            var keys = SettingsSchema.BuildXr(XrContext()).Select(s => s.Key).ToList();
 
             // #83（音声出力デバイス）と #70（発話・感情モーション）
             Assert.That(keys, Has.None.EqualTo("outputDevice"));
@@ -220,252 +86,11 @@ namespace ChatterMascot.Tests
             Assert.That(keys, Has.None.EqualTo("cuteMotion"));
         }
 
-        /// <summary>★ 画面に出るのは記号（⌃⌥M）。保存される文字列（ctrl+opt+m）ではない</summary>
-        [Test]
-        public void ShowsHotKeysAsSymbols()
-        {
-            var context = Context();
-            context.Settings = MascotSettings.Defaults.WithMuteHotKey("ctrl+opt+m");
-
-            var spec = Find(SettingsSchema.Build(context), SettingKeys.MuteHotKey);
-
-            Assert.That(spec.Value, Is.EqualTo("⌃⌥M"));
-        }
-
-        /// <summary>★ 壊れた値でも空にしない（画面から気づけるように）</summary>
-        [Test]
-        public void ShowsUnreadableHotKeysAsIs()
-        {
-            var context = Context();
-            context.Settings = MascotSettings.Defaults.WithMuteHotKey("これは壊れている");
-
-            Assert.That(Find(SettingsSchema.Build(context), SettingKeys.MuteHotKey).Value,
-                Is.EqualTo("これは壊れている"));
-        }
-
-        /// <summary>
-        /// ★★ 版とライセンスは<b>設定パネルに出さない</b>（ライセンス本文が長く、
-        ///   設定の項目が埋もれる）。メニューバーの「について」から別ダイアログで開く。
-        /// </summary>
-        [Test]
-        public void KeepsTheAboutOutOfTheSettingsPanel()
-        {
-            var items = SettingsSchema.Build(Context());
-
-            Assert.That(Find(items, SettingKeys.Version), Is.Null);
-            Assert.That(Find(items, SettingKeys.License), Is.Null);
-        }
-
-        [Test]
-        public void ShowsTheVersionAndLicenseInTheAboutDialog()
-        {
-            var items = SettingsSchema.BuildAbout(Context());
-
-            Assert.That(Find(items, SettingKeys.Version).Value, Does.Contain("1.2.3"));
-            Assert.That(Find(items, SettingKeys.License).Value, Is.EqualTo("MIT"));
-        }
-
-        /// <summary>
-        /// ★★ <b>手で編集された <c>settings.json</c> の重複は画面に出す（第2層）。</b>
-        ///   パネルからの記録は保存の手前で弾かれる（<c>SettingsPanelBridge.ApplyHotKey</c>）ので、
-        ///   ここに来るのは手編集だけ。放っておくと2行とも同じ表記が出て、
-        ///   <c>RegisterHotKeys</c> が黙って2つ目を登録せずに戻る。
-        /// </summary>
-        [Test]
-        public void SaysWhenTheTwoShortcutsCollide()
-        {
-            var settings = MascotSettings.Defaults
-                .WithMuteHotKey("ctrl+opt+m")
-                // ★ 表記ゆれでも見つけること（文字列の比較にしない）
-                .WithHideHotKey("opt+ctrl+m");
-
-            var items = SettingsSchema.Build(new SettingsContext { Settings = settings });
-
-            Assert.That(Find(items, SettingKeys.HideHotKey).Note, Does.Contain("同じ組み合わせ"));
-            // ★ 出すのは後の行だけ。登録されないのは2つ目なので
-            Assert.That(Find(items, SettingKeys.MuteHotKey).Note, Is.Empty);
-        }
-
-        /// <summary>★ 重なっていなければ何も出さない</summary>
-        [Test]
-        public void SaysNothingWhenTheShortcutsDiffer()
-        {
-            var items = SettingsSchema.Build(new SettingsContext());
-
-            Assert.That(Find(items, SettingKeys.HideHotKey).Note, Is.Empty);
-        }
-
-        /// <summary>
-        /// ★★ <b>画面の行は一覧から作ること。</b> ここで直に並べると、ショートカットを
-        ///   1本足すたびに「画面の行」と「重複の判定」の両方に書き足すことになり、
-        ///   片方を忘れた瞬間に<b>「重複を見ていないショートカット」</b>ができる ——
-        ///   症状は「登録したのに効かない」で、どこにも理由が出ない。
-        /// </summary>
-        [Test]
-        public void BuildsTheShortcutRowsFromTheOneList()
-        {
-            var settings = MascotSettings.Defaults;
-            var slots = SettingsSchema.HotKeySlots(settings, UiText.Ja);
-            var items = SettingsSchema.Build(new SettingsContext { Settings = settings });
-
-            Assert.That(slots.Count, Is.GreaterThanOrEqualTo(2));
-            foreach (var slot in slots)
-            {
-                var spec = Find(items, slot.Key);
-                Assert.That(spec, Is.Not.Null, slot.Key);
-                Assert.That(spec.Label, Is.EqualTo(slot.Label));
-            }
-
-            // ★ 一覧に無いショートカットの行が紛れていないこと（逆向きも見る）
-            var keys = new HashSet<string>();
-            foreach (var slot in slots) keys.Add(slot.Key);
-            foreach (var spec in items)
-            {
-                if (spec.Kind != SettingKind.HotKey) continue;
-                Assert.That(keys.Contains(spec.Key), Is.True, spec.Key);
-            }
-        }
-
-        /// <summary>
-        /// ★★ ショートカットの記録の仕方は<b>見出しに付ける</b>。ミュートの行に付けると、
-        ///   同じことが言える「キャラクターの表示切り替え」にはかかっていないように読める。
-        /// </summary>
-        [Test]
-        public void PutsTheRecordingHintOnTheShortcutSection()
-        {
-            var items = SettingsSchema.Build(new SettingsContext());
-
-            var section = items.First(s => s.Kind == SettingKind.Section && s.Label == "ショートカット");
-            Assert.That(section.Note, Does.Contain("記録"));
-
-            foreach (var key in new[] { SettingKeys.MuteHotKey, SettingKeys.HideHotKey })
-            {
-                Assert.That(Find(items, key).Note, Is.Empty, key);
-            }
-        }
-
-        /// <summary>
-        /// ★★ ミュートとテスト要約は出さない（判断の記録）。
-        ///   ミュートはショートカットで切り替えたときにパネルが追従できず、
-        ///   テスト要約は結果を出す場所が note しか無かった。
-        /// </summary>
-        [Test]
-        public void DoesNotOfferMuteOrTheSummaryTest()
-        {
-            var keys = SettingsSchema.Build(Context()).Select(s => s.Key).ToList();
-
-            Assert.That(keys, Has.None.EqualTo(SettingKeys.Mute));
-            Assert.That(keys, Has.None.EqualTo("summaryPreview"));
-        }
-
-        /// <summary>★ 大きさは settings.json ではなく「いまの窓」から出す</summary>
-        [Test]
-        public void TakesTheSizeFromTheWindow()
-        {
-            var context = Context();
-            context.WindowScale = 1.5f;
-
-            Assert.That(Find(SettingsSchema.Build(context), SettingKeys.Scale).Value, Is.EqualTo("1.5"));
-        }
-
-        [Test]
-        public void ReflectsTheCurrentSettings()
-        {
-            var context = Context();
-            context.Settings = MascotSettings.Defaults
-                .WithVolume(0.3f)
-                .WithBlink(false)
-                .WithVrmFileName("foo.vrm");
-
-            var items = SettingsSchema.Build(context);
-
-            Assert.That(Find(items, SettingKeys.Volume).Value, Is.EqualTo("0.3"));
-            Assert.That(Find(items, SettingKeys.Blink).Value, Is.EqualTo("false"));
-            Assert.That(Find(items, SettingKeys.Vrm).Note, Does.Contain("foo.vrm"));
-        }
-
-        [Test]
-        public void SaysWhichModelIsUsedWhenNoneIsChosen()
-        {
-            Assert.That(Find(SettingsSchema.Build(Context()), SettingKeys.Vrm).Note, Is.Not.Empty);
-        }
-
         /// <summary>★ null を渡されても落ちないこと（起動直後に呼ばれうる）</summary>
         [Test]
         public void SurvivesANullContext()
         {
-            Assert.That(SettingsSchema.Build(null), Is.Not.Empty);
-        }
-
-        // ── #88 フレームレート ─────────────────────────────────
-
-        [Test]
-        public void OffersTheFrameRateChoice()
-        {
-            var spec = Find(SettingsSchema.Build(Context()), SettingKeys.FrameRate);
-
-            Assert.That(spec, Is.Not.Null);
-            Assert.That(spec.Kind, Is.EqualTo(SettingKind.Choice));
-            Assert.That(spec.Value, Is.EqualTo("30"));
-            Assert.That(spec.Choices.Count, Is.EqualTo(2));
-        }
-
-        [Test]
-        public void ReflectsTheFrameRateSetting()
-        {
-            var context = Context();
-            context.Settings = MascotSettings.Defaults.WithFrameRate(60);
-
-            var spec = Find(SettingsSchema.Build(context), SettingKeys.FrameRate);
-
-            Assert.That(spec.Value, Is.EqualTo("60"));
-        }
-
-        // ── #107 要約エンジン・感情判定 ─────────────────────────────
-
-        [Test]
-        public void OffersTheAiSummaryBackendChoice()
-        {
-            var spec = Find(SettingsSchema.Build(Context()), SettingKeys.AiSummaryBackend);
-
-            Assert.That(spec, Is.Not.Null);
-            Assert.That(spec.Kind, Is.EqualTo(SettingKind.Choice));
-            Assert.That(spec.Value, Is.EqualTo("fm"));
-            Assert.That(spec.Choices.Select(c => c.Value), Is.EqualTo(new[] { "fm", "claude" }));
-        }
-
-        [Test]
-        public void OffersTheEmotionClassifierChoice()
-        {
-            var spec = Find(SettingsSchema.Build(Context()), SettingKeys.EmotionClassifier);
-
-            Assert.That(spec, Is.Not.Null);
-            Assert.That(spec.Kind, Is.EqualTo(SettingKind.Choice));
-            Assert.That(spec.Value, Is.EqualTo("ollaya"));
-            Assert.That(spec.Choices.Select(c => c.Value), Is.EqualTo(new[] { "ollaya", "fm", "dictionary" }));
-        }
-
-        [Test]
-        public void ReflectsTheChosenSummaryBackendAndEmotionClassifier()
-        {
-            var context = Context();
-            context.AiSummaryBackend = "claude";
-            context.EmotionClassifier = "dictionary";
-
-            var items = SettingsSchema.Build(context);
-
-            Assert.That(Find(items, SettingKeys.AiSummaryBackend).Value, Is.EqualTo("claude"));
-            Assert.That(Find(items, SettingKeys.EmotionClassifier).Value, Is.EqualTo("dictionary"));
-        }
-
-        /// <summary>★ XR には出さない（AI要約そのものを出していないので対象外）</summary>
-        [Test]
-        public void XrDoesNotOfferTheSummaryBackendOrEmotionClassifier()
-        {
-            var keys = SettingsSchema.Build(XrContext()).Select(s => s.Key).ToList();
-
-            Assert.That(keys, Has.None.EqualTo(SettingKeys.AiSummaryBackend));
-            Assert.That(keys, Has.None.EqualTo(SettingKeys.EmotionClassifier));
+            Assert.That(SettingsSchema.BuildXr(null), Is.Not.Empty);
         }
 
         // ── #70 派生: モーションを確認 ─────────────────────────────
@@ -478,23 +103,6 @@ namespace ChatterMascot.Tests
 
         private static readonly MotionClip Wave =
             new MotionClip(MotionCategory.Happy, "/x/happy/Wave.vrma", "Wave.vrma", MotionStyle.Natural);
-
-        /// <summary>★ 置き場所は「待機モーション」の項目のすぐ後ろ</summary>
-        [Test]
-        public void PutsMotionPreviewRightAfterIdleMotion()
-        {
-            var context = Context();
-            context.MotionClips = SettingsSchema.MotionPreviewChoices(new[] { Idle01 });
-
-            var items = SettingsSchema.Build(context).ToList();
-            var idleIndex = items.FindIndex(s => s.Key == SettingKeys.IdleMotion);
-
-            Assert.That(items[idleIndex + 1].Key, Is.EqualTo(SettingKeys.MotionPreview));
-            Assert.That(items[idleIndex + 1].Kind, Is.EqualTo(SettingKind.Choice));
-            Assert.That(items[idleIndex + 2].Key, Is.EqualTo(SettingKeys.MotionPreviewPlay));
-            Assert.That(items[idleIndex + 2].Kind, Is.EqualTo(SettingKind.Button));
-            Assert.That(items[idleIndex + 2].Label, Is.EqualTo("再生"));
-        }
 
         /// <summary>
         /// ★ id もラベルも <c>"&lt;カテゴリ&gt;/&lt;ファイル名&gt;"</c>。ファイル名と実際の
@@ -529,11 +137,11 @@ namespace ChatterMascot.Tests
         [Test]
         public void DisablesMotionPreviewWhileTheManifestIsLoading()
         {
-            var context = Context();
+            var context = XrContext();
             context.MotionClips = null; // 読み込み中
 
-            var choice = Find(SettingsSchema.Build(context), SettingKeys.MotionPreview);
-            var button = Find(SettingsSchema.Build(context), SettingKeys.MotionPreviewPlay);
+            var choice = Find(SettingsSchema.BuildXr(context), SettingKeys.MotionPreview);
+            var button = Find(SettingsSchema.BuildXr(context), SettingKeys.MotionPreviewPlay);
 
             Assert.That(choice.Enabled, Is.False);
             Assert.That(choice.Note, Does.Contain("読み込み中"));
@@ -543,11 +151,11 @@ namespace ChatterMascot.Tests
         [Test]
         public void DisablesMotionPreviewWhenThereAreNoClips()
         {
-            var context = Context();
+            var context = XrContext();
             context.MotionClips = Array.Empty<SettingChoice>();
 
-            var choice = Find(SettingsSchema.Build(context), SettingKeys.MotionPreview);
-            var button = Find(SettingsSchema.Build(context), SettingKeys.MotionPreviewPlay);
+            var choice = Find(SettingsSchema.BuildXr(context), SettingKeys.MotionPreview);
+            var button = Find(SettingsSchema.BuildXr(context), SettingKeys.MotionPreviewPlay);
 
             Assert.That(choice.Enabled, Is.False);
             Assert.That(choice.Note, Does.Contain("animations"));
@@ -558,12 +166,12 @@ namespace ChatterMascot.Tests
         [Test]
         public void DisablesMotionPreviewWhenIdleMotionIsOff()
         {
-            var context = Context();
+            var context = XrContext();
             context.MotionClips = SettingsSchema.MotionPreviewChoices(new[] { Idle01 });
             context.Settings = MascotSettings.Defaults.WithIdleMotion(false);
 
-            var choice = Find(SettingsSchema.Build(context), SettingKeys.MotionPreview);
-            var button = Find(SettingsSchema.Build(context), SettingKeys.MotionPreviewPlay);
+            var choice = Find(SettingsSchema.BuildXr(context), SettingKeys.MotionPreview);
+            var button = Find(SettingsSchema.BuildXr(context), SettingKeys.MotionPreviewPlay);
 
             Assert.That(choice.Enabled, Is.False);
             Assert.That(choice.Note, Does.Contain("待機モーション"));
@@ -574,10 +182,10 @@ namespace ChatterMascot.Tests
         [Test]
         public void DefaultsMotionPreviewToTheFirstClip()
         {
-            var context = Context();
+            var context = XrContext();
             context.MotionClips = SettingsSchema.MotionPreviewChoices(new[] { Idle01, Idle02 });
 
-            var choice = Find(SettingsSchema.Build(context), SettingKeys.MotionPreview);
+            var choice = Find(SettingsSchema.BuildXr(context), SettingKeys.MotionPreview);
 
             Assert.That(choice.Value, Is.EqualTo("idle/Hub_Idle01.vrma"));
         }
@@ -585,11 +193,11 @@ namespace ChatterMascot.Tests
         [Test]
         public void KeepsTheChosenMotionPreview()
         {
-            var context = Context();
+            var context = XrContext();
             context.MotionClips = SettingsSchema.MotionPreviewChoices(new[] { Idle01, Idle02 });
             context.MotionPreview = "idle/Hub_Idle02.vrma";
 
-            var choice = Find(SettingsSchema.Build(context), SettingKeys.MotionPreview);
+            var choice = Find(SettingsSchema.BuildXr(context), SettingKeys.MotionPreview);
 
             Assert.That(choice.Value, Is.EqualTo("idle/Hub_Idle02.vrma"));
         }
@@ -600,43 +208,14 @@ namespace ChatterMascot.Tests
         {
             return new SettingsContext
             {
-                Platform = SettingsPlatform.Xr,
                 XrHeightChoices = SettingsMapping.XrHeightChoices(SettingsMapping.XrHeightSteps(160f), UiText.Ja),
             };
-        }
-
-        /// <summary>★★ Desktop の出力は XR の出し分けに影響されないこと（並び・キー・ラベル）</summary>
-        [Test]
-        public void DoesNotChangeTheDesktopOutput()
-        {
-            var keys = SettingsSchema.Build(Context()).Select(s => s.Key).ToList();
-
-            Assert.That(keys, Is.EqualTo(new[]
-            {
-                null, SettingKeys.Vrm, SettingKeys.Scale,
-                null, SettingKeys.Speaker, SettingKeys.Volume, SettingKeys.Speed, SettingKeys.TtsPreview,
-                null, SettingKeys.IdleMotion, SettingKeys.MotionPreview, SettingKeys.MotionPreviewPlay,
-                SettingKeys.CursorGaze, SettingKeys.Blink, SettingKeys.FrameRate,
-                null, SettingKeys.SummaryEnabled, SettingKeys.AiSummaryBackend,
-                null, SettingKeys.EmotionClassifier,
-                null, SettingKeys.MuteHotKey, SettingKeys.HideHotKey,
-                null, SettingKeys.ResetPosition, SettingKeys.ResetAll,
-                SettingKeys.Quit,
-            }));
-        }
-
-        /// <summary>★ 既定は Desktop。Platform を指定しなければ Desktop の並びが出る</summary>
-        [Test]
-        public void DefaultsToTheDesktopPlatform()
-        {
-            var context = Context();
-            Assert.That(context.Platform, Is.EqualTo(SettingsPlatform.Desktop));
         }
 
         [Test]
         public void XrOffersOnlyTheListedKeysInOrder()
         {
-            var keys = SettingsSchema.Build(XrContext()).Select(s => s.Key).ToList();
+            var keys = SettingsSchema.BuildXr(XrContext()).Select(s => s.Key).ToList();
 
             Assert.That(keys, Is.EqualTo(new[]
             {
@@ -648,39 +227,13 @@ namespace ChatterMascot.Tests
             }));
         }
 
-        /// <summary>★ Desktop 専用の項目は1つも出ない</summary>
-        [Test]
-        public void XrDoesNotOfferDesktopOnlyKeys()
-        {
-            var keys = SettingsSchema.Build(XrContext()).Select(s => s.Key).ToList();
-
-            foreach (var key in new[]
-            {
-                SettingKeys.Vrm, SettingKeys.Scale, SettingKeys.Speaker, SettingKeys.Volume,
-                SettingKeys.Speed, SettingKeys.TtsPreview, SettingKeys.IdleMotion, SettingKeys.FrameRate,
-                SettingKeys.SummaryEnabled, SettingKeys.AiSummaryBackend, SettingKeys.EmotionClassifier,
-                SettingKeys.MuteHotKey, SettingKeys.HideHotKey, SettingKeys.Quit,
-            })
-            {
-                Assert.That(keys, Has.None.EqualTo(key), key);
-            }
-        }
-
-        /// <summary>★ 歩行は XR だけの項目（デスクトップは歩かない）</summary>
-        [Test]
-        public void DesktopDoesNotOfferWalk()
-        {
-            var keys = SettingsSchema.Build(Context()).Select(s => s.Key).ToList();
-            Assert.That(keys, Has.None.EqualTo(SettingKeys.Walk));
-        }
-
         [Test]
         public void XrReflectsTheWalkSetting()
         {
             var context = XrContext();
             context.Settings = MascotSettings.Defaults.WithWalk(false);
 
-            var spec = Find(SettingsSchema.Build(context), SettingKeys.Walk);
+            var spec = Find(SettingsSchema.BuildXr(context), SettingKeys.Walk);
 
             Assert.That(spec.Kind, Is.EqualTo(SettingKind.Bool));
             Assert.That(spec.Value, Is.EqualTo("false"));
@@ -693,7 +246,7 @@ namespace ChatterMascot.Tests
             var context = XrContext();
             context.XrHeightChoices = null;
 
-            var spec = Find(SettingsSchema.Build(context), SettingKeys.XrHeight);
+            var spec = Find(SettingsSchema.BuildXr(context), SettingKeys.XrHeight);
 
             Assert.That(spec.Enabled, Is.False);
             Assert.That(spec.Note, Does.Contain("読み込んでいます"));
@@ -707,7 +260,7 @@ namespace ChatterMascot.Tests
             var context = XrContext();
             context.Settings = MascotSettings.Defaults.WithXrHeight(33f); // 15/25/40/60/100/160 の 40 に寄る
 
-            var spec = Find(SettingsSchema.Build(context), SettingKeys.XrHeight);
+            var spec = Find(SettingsSchema.BuildXr(context), SettingKeys.XrHeight);
 
             Assert.That(spec.Enabled, Is.True);
             Assert.That(spec.Value, Is.EqualTo("40"));
@@ -719,17 +272,17 @@ namespace ChatterMascot.Tests
         {
             var on = XrContext();
             on.Settings = MascotSettings.Defaults.WithAssetSync(SettingsMapping.AssetSyncAuto);
-            Assert.That(Find(SettingsSchema.Build(on), SettingKeys.AssetSync).Value, Is.EqualTo("true"));
+            Assert.That(Find(SettingsSchema.BuildXr(on), SettingKeys.AssetSync).Value, Is.EqualTo("true"));
 
             var off = XrContext();
             off.Settings = MascotSettings.Defaults.WithAssetSync(SettingsMapping.AssetSyncOff);
-            Assert.That(Find(SettingsSchema.Build(off), SettingKeys.AssetSync).Value, Is.EqualTo("false"));
+            Assert.That(Find(SettingsSchema.BuildXr(off), SettingKeys.AssetSync).Value, Is.EqualTo("false"));
         }
 
         [Test]
         public void XrAssetSyncNoteSaysItAppliesOnTheNextLaunch()
         {
-            var spec = Find(SettingsSchema.Build(XrContext()), SettingKeys.AssetSync);
+            var spec = Find(SettingsSchema.BuildXr(XrContext()), SettingKeys.AssetSync);
             Assert.That(spec.Note, Does.Contain("次回の起動"));
         }
 
@@ -739,7 +292,7 @@ namespace ChatterMascot.Tests
             var c = XrContext();
             c.Settings = MascotSettings.Defaults.WithAssetSync(SettingsMapping.AssetSyncOff);
 
-            var spec = Find(SettingsSchema.Build(c), SettingKeys.AssetSyncNow);
+            var spec = Find(SettingsSchema.BuildXr(c), SettingKeys.AssetSyncNow);
             Assert.That(spec.Enabled, Is.False);
             Assert.That(spec.Note, Is.Not.Empty);
         }
@@ -751,7 +304,7 @@ namespace ChatterMascot.Tests
             c.Settings = MascotSettings.Defaults.WithAssetSync(SettingsMapping.AssetSyncAuto);
             c.AssetSyncRunning = true;
 
-            var spec = Find(SettingsSchema.Build(c), SettingKeys.AssetSyncNow);
+            var spec = Find(SettingsSchema.BuildXr(c), SettingKeys.AssetSyncNow);
             Assert.That(spec.Enabled, Is.False);
             Assert.That(spec.Note, Does.Contain("同期しています"));
         }
@@ -762,7 +315,7 @@ namespace ChatterMascot.Tests
             var c = XrContext();
             c.Settings = MascotSettings.Defaults.WithAssetSync(SettingsMapping.AssetSyncAuto);
 
-            var spec = Find(SettingsSchema.Build(c), SettingKeys.AssetSyncNow);
+            var spec = Find(SettingsSchema.BuildXr(c), SettingKeys.AssetSyncNow);
             Assert.That(spec.Enabled, Is.True);
             Assert.That(spec.Note, Is.Not.Empty);
         }
@@ -774,7 +327,7 @@ namespace ChatterMascot.Tests
             c.Settings = MascotSettings.Defaults.WithAssetSync(SettingsMapping.AssetSyncOff);
             c.AssetSyncRunning = true;
 
-            var spec = Find(SettingsSchema.Build(c), SettingKeys.AssetSyncNow);
+            var spec = Find(SettingsSchema.BuildXr(c), SettingKeys.AssetSyncNow);
             Assert.That(spec.Enabled, Is.False);
             Assert.That(spec.Note, Does.Contain("同期しています"));
         }
@@ -794,29 +347,23 @@ namespace ChatterMascot.Tests
                 c.Settings = MascotSettings.Defaults.WithAssetSync(mode);
                 c.AssetSyncRunning = running;
 
-                var spec = Find(SettingsSchema.Build(c), SettingKeys.AssetSyncNow);
+                var spec = Find(SettingsSchema.BuildXr(c), SettingKeys.AssetSyncNow);
                 Assert.That(spec.Note, Is.Not.Empty, $"mode={mode} running={running}");
             }
         }
 
-        [Test]
-        public void DesktopDoesNotOfferAssetSyncNow()
-        {
-            Assert.That(SettingsSchema.Build(Context()).Select(s => s.Key), Does.Not.Contain(SettingKeys.AssetSyncNow));
-        }
-
-        /// <summary>★ ラベルは aim レイ向けの言い回しに変わるが、キーは Desktop と同じ</summary>
+        /// <summary>★ ラベルは aim レイ向けの言い回しに変わるが、キーは共通</summary>
         [Test]
         public void XrCursorGazeUsesTheAimRayWording()
         {
-            var spec = Find(SettingsSchema.Build(XrContext()), SettingKeys.CursorGaze);
+            var spec = Find(SettingsSchema.BuildXr(XrContext()), SettingKeys.CursorGaze);
             Assert.That(spec.Label, Is.EqualTo("指している先を目で追う"));
         }
 
         [Test]
         public void XrResetPositionDoesNotMentionTheSize()
         {
-            var spec = Find(SettingsSchema.Build(XrContext()), SettingKeys.ResetPosition);
+            var spec = Find(SettingsSchema.BuildXr(XrContext()), SettingKeys.ResetPosition);
             Assert.That(spec.Label, Is.EqualTo("キャラクターの位置をリセット"));
         }
 
@@ -824,38 +371,30 @@ namespace ChatterMascot.Tests
         [Test]
         public void XrResetAllKeepsTheConnectionNote()
         {
-            var spec = Find(SettingsSchema.Build(XrContext()), SettingKeys.ResetAll);
+            var spec = Find(SettingsSchema.BuildXr(XrContext()), SettingKeys.ResetAll);
             Assert.That(spec.Note, Does.Contain("接続先"));
         }
 
-        /// <summary>★ 「モーションを確認」は Desktop と同じ enabled 判定を共有する</summary>
+        /// <summary>★ 「モーションを確認」の enabled は一覧の読み込み状態に従う</summary>
         [Test]
-        public void XrSharesTheMotionPreviewEnabledRuleWithDesktop()
+        public void DisablesMotionPreviewWhileTheManifestIsLoadingOnXr()
         {
             var context = XrContext();
             context.MotionClips = null; // 読み込み中
 
-            var choice = Find(SettingsSchema.Build(context), SettingKeys.MotionPreview);
-            var button = Find(SettingsSchema.Build(context), SettingKeys.MotionPreviewPlay);
+            var choice = Find(SettingsSchema.BuildXr(context), SettingKeys.MotionPreview);
+            var button = Find(SettingsSchema.BuildXr(context), SettingKeys.MotionPreviewPlay);
 
             Assert.That(choice.Enabled, Is.False);
             Assert.That(choice.Note, Does.Contain("読み込み中"));
             Assert.That(button.Enabled, Is.False);
         }
 
-        /// <summary>★ Desktop の見た目は変えない（項目単体のラベルも）</summary>
-        [Test]
-        public void KeepsTheMotionPreviewLabelOnDesktop()
-        {
-            var spec = Find(SettingsSchema.Build(Context()), SettingKeys.MotionPreview);
-            Assert.That(spec.Label, Is.EqualTo("モーションを確認"));
-        }
-
         /// <summary>★ 見出し「モーション」の直下に置くので、ラベルが無くても何の行か分かる</summary>
         [Test]
         public void XrMotionPreviewHasNoLabel()
         {
-            var spec = Find(SettingsSchema.Build(XrContext()), SettingKeys.MotionPreview);
+            var spec = Find(SettingsSchema.BuildXr(XrContext()), SettingKeys.MotionPreview);
             Assert.That(spec.Label, Is.Empty);
         }
 
@@ -865,7 +404,7 @@ namespace ChatterMascot.Tests
             var context = XrContext();
             context.Settings = MascotSettings.Defaults.WithXrHeight(999f); // 実寸へクランプされる側
 
-            foreach (var spec in SettingsSchema.Build(context).Where(s => s.Kind == SettingKind.Choice))
+            foreach (var spec in SettingsSchema.BuildXr(context).Where(s => s.Kind == SettingKind.Choice))
             {
                 if (spec.Choices.Count == 0) continue;
                 Assert.That(spec.Choices.Select(c => c.Value), Contains.Item(spec.Value), spec.Key);

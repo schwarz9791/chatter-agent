@@ -142,7 +142,7 @@ namespace ChatterMascot.Net
         /// ★ <b>1件でも契約の3形から外れたら全体を読めなかったことにする。</b> このマニフェストは
         ///   ローカルの書き込み先（<c>synced/&lt;path&gt;</c>）とサーバーへの GET パスの両方の材料になる
         ///   ——部分的に信用すると <c>../</c> のような経路挿入の入り口になりうる。件数を絞って
-        ///   出せるものだけ出す（<c>CoreConfigClient.ReadSpeakers</c>）作法はここでは採らない。
+        ///   出せるものだけ出す作法はここでは採らない。
         /// </summary>
         private static bool TryParseManifest(string raw, out List<AssetManifestEntry> entries)
         {

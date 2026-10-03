@@ -1,12 +1,17 @@
 #if UNITY_STANDALONE_OSX || UNITY_EDITOR_OSX
+using System;
+using System.Diagnostics;
+using System.Threading.Tasks;
 using Kirurobo;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using Debug = UnityEngine.Debug;
+using Object = UnityEngine.Object;
 
 namespace ChatterMascot.Desktop
 {
     /// <summary>
-    /// キャラクターの<b>右クリック</b>で設定パネルを開閉する（#76）。
+    /// キャラクターの<b>右クリック</b>で ChatterAgent の設定パネルを開く（#76）。
     ///
     /// ★★ <b><c>IPointerClickHandler</c> では成立しない。</b> 実測で潰した前提なので戻さないこと:
     ///   常駐マスコットは<b>基本フォーカスを持たない</b>が、macOS が <c>mouseMoved</c> を配送するのは
@@ -22,8 +27,8 @@ namespace ChatterMascot.Desktop
     /// ★★ <b><c>⌃ + 左クリック</c>も受け付けない。</b> macOS の慣習ではあるが、
     ///   <b>非アクティブなアプリへの最初の左クリックはアクティブ化に食われる</b>ので、
     ///   常駐マスコットでは必ず2回クリックが要る。右クリックはアクティブ化しないのでそのまま届く。
-    ///   <b>押しても何も起きない操作を残さない</b>（→ <c>SettingsSchema</c> と同じ方針）。
-    ///   副ボタンを出せない環境の逃げ道は<b>メニューバーの「設定を開く…」</b>で足りている。
+    ///   <b>押しても何も起きない操作を残さない</b>。副ボタンを出せない環境の逃げ道は
+    ///   ChatterAgent のメニューバーが持つ。
     ///
     /// ★★ <b>押下はイベント、位置はクリック透過の状態、と分けること。</b> どちらか片方では足りない:
     ///   <list type="bullet">
@@ -41,12 +46,6 @@ namespace ChatterMascot.Desktop
     ///   これは<b>グローバルなカーソル座標</b>から毎フレーム計算されていて（→ 上記）、
     ///   フォーカスに依存しない。<b>掴める領域と右クリックできる領域が定義上ずれない</b>のも
     ///   同じ判定を使うからで、コライダーを自分で数える必要が無い。
-    ///
-    /// ★ <b>既知の穴。</b> 設定パネルがキャラクターに重なっているとき、
-    ///   <b>パネルの上での右クリックでも閉じる</b>（マスコット側から見ると
-    ///   「不透明な画素の上で右ボタンが押された」と区別がつかない）。
-    ///   パネルには右クリックで何かが出る部品が無いので実害は「閉じる」だけ。
-    ///   潰すにはネイティブ側にパネルの矩形を問い合わせる口が要るので、割に合わないと判断した。
     /// </summary>
     [DisallowMultipleComponent]
     internal sealed class MascotContextClick : MonoBehaviour
@@ -58,6 +57,7 @@ namespace ChatterMascot.Desktop
         {
             _controller = Object.FindFirstObjectByType<UniWindowController>();
             if (_controller == null) { enabled = false; return; }
+            AllowInputWithoutFocus();
             Debug.Log("[Mascot] 右クリックを見張ります");
         }
 
@@ -80,7 +80,82 @@ namespace ChatterMascot.Desktop
             // ★ 不透明な画素の上＝キャラクターの上。窓の外なら true のままなのでここで弾かれる
             if (_controller.isClickThrough) return;
 
-            StatusItemBridge.ToggleSettings();
+            ChatterAgentLauncher.OpenSettings();
+        }
+
+        /// <summary>
+        /// フォーカスが無くてもポインタ入力を受け取れるようにする。
+        ///
+        /// ★★ <b>これが無いと、キャラの右クリックが効かない。</b> Input System の既定は
+        ///   <c>BackgroundBehavior.ResetAndDisableNonBackgroundDevices</c> で、
+        ///   アプリがフォーカスを失うと <c>Mouse</c>（<c>canRunInBackground == false</c>）が
+        ///   <b>無効化される</b>。<c>runInBackground</c> はイベントストリームの手前の関門を
+        ///   通すだけで、こちらは塞げない。<c>Mouse.current.rightButton.wasPressedThisFrame</c> は
+        ///   これで生きる。
+        ///
+        /// ★★ <b>これ「だけ」では足りない。</b> デバイスが生きても、macOS が
+        ///   <c>mouseMoved</c> を配送するのは前面のアプリだけなので座標は古いまま
+        ///   （→ 型の doc）。だから座標はクリック透過の状態から取る。
+        ///
+        /// ★ <b>Editor では触らない。</b> プロジェクトの <c>InputSettings</c> アセットを書き換えてしまう。
+        /// </summary>
+        private static void AllowInputWithoutFocus()
+        {
+            if (Application.isEditor) return;
+
+            try
+            {
+                var settings = InputSystem.settings;
+                if (settings == null) return;
+                if (settings.backgroundBehavior == InputSettings.BackgroundBehavior.IgnoreFocus) return;
+
+                settings.backgroundBehavior = InputSettings.BackgroundBehavior.IgnoreFocus;
+                Debug.Log("[Mascot] フォーカスが無くても入力を受け取る設定にしました");
+            }
+            catch (Exception e)
+            {
+                // ★ ここで落とさないこと。効かなくても「右クリックで開かない」だけ
+                Debug.LogWarning("[Mascot] 入力の設定を変えられませんでした: " + e.Message);
+            }
+        }
+    }
+
+    /// <summary>
+    /// ChatterAgent を前面に出して設定パネルを開かせる。
+    ///
+    /// ★ 起動済みならアプリの再オープンとして、未起動なら起動として届く。
+    ///   起動直後はパネルを出さないので、未起動のときは起動するだけになる。
+    /// </summary>
+    internal static class ChatterAgentLauncher
+    {
+        // ★ ChatterAgent の tauri.conf.json の identifier と同じ値にすること
+        private const string BundleId = "tech.sukima.chatter-agent";
+
+        // ponytail: macOS 限定。Windows は ChatterAgent 側を tauri-plugin-single-instance にすれば同じ口にできる
+        public static void OpenSettings()
+        {
+            try
+            {
+                var process = Process.Start(new ProcessStartInfo
+                {
+                    FileName = "/usr/bin/open",
+                    Arguments = "-b " + BundleId,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                });
+                if (process == null) return;
+
+                // ★ 終了を回収しないとゾンビが残る。メインスレッドは止めない
+                Task.Run(() =>
+                {
+                    try { process.WaitForExit(); }
+                    finally { process.Dispose(); }
+                });
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[Mascot] ChatterAgent を開けませんでした: " + e.Message);
+            }
         }
     }
 

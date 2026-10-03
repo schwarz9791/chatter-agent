@@ -32,13 +32,16 @@ cd core && npm install && npm run build
 
 cd ../chatter-agent-app
 npm install
-npm run build      # → src-tauri/target/release/bundle/macos/ChatterAgent.app
+npm run build      # → build/ChatterAgent.app
 npm run dev        # 開発時
 npm test           # 設定窓の純粋な判定（node --test）
 ```
 
 - `npm run dev` は Vite（`dev:web`、ポート 1420）も起こす。`npm run build` は先に `build:web`
   （`tsc --noEmit && vite build`）を走らせ、`dist/` を `.app` に取り込む
+- Tauri は `.app` を `src-tauri/target/release/bundle/macos/` に作る。`npm run build` はそれを `build/` へ
+  写す（マスコットの `chatter-mascot/Build/` と同じく、成果物の場所を1段で分かるようにするため）。
+  `.app` は macOS でしかできないので、Windows に持っていくときは写す元と写し方を書き直す
 - `devUrl` を持つので、`cargo clippy` / `cargo test` は `dist/` が無くても通る
 
 Dock にも ⌘Tab にも出ない。操作はメニューバーのアイコンから行う。

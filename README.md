@@ -164,7 +164,7 @@ Build `core/` first, then:
 ```bash
 cd chatter-agent-app
 npm install
-npm run build      # → src-tauri/target/release/bundle/macos/ChatterAgent.app
+npm run build      # → build/ChatterAgent.app
 ```
 
 Open the app and choose the `core/` folder once from the menu ("Choose Core Folder…"). It then starts

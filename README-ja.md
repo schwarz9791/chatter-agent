@@ -164,7 +164,7 @@ macOS では、メニューバー常駐アプリ **ChatterAgent** にサーバ�
 ```bash
 cd chatter-agent-app
 npm install
-npm run build      # → src-tauri/target/release/bundle/macos/ChatterAgent.app
+npm run build      # → build/ChatterAgent.app
 ```
 
 アプリを開き、メニューの「core の場所を選ぶ…」で `core/` を一度選ぶと、ログインシェルと同じ環境で

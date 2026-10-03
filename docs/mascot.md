@@ -376,6 +376,12 @@ XR の設定パネルの「歩く」からその場で切り替えられる（�
 設定ファイルは1秒ポーリング（`mtime` + `size` のスタンプ比較）で外部からの変更も拾うので、
 アプリを再起動しなくても直る。
 
+**書き手は Unity のパネルと ChatterAgent の設定パネル（→ [`agent.md`](./agent.md)「設定パネル」）。**
+ChatterAgent は許可リストの管理キーだけを差し替え、知らないキーと `xr.*` / `connection.*` は残し、
+別名の tmp（`settings.json.chatter-agent.tmp`）経由で書く。★ **Unity も保存のたびにメモリ上の全キーを
+書き直すので、両方のパネルを同時に触ると後勝ちになる。** 続けて触らなければ、Unity が1秒ごとの
+読み直しで ChatterAgent の変更を取り込む。
+
 ```bash
 $EDITOR ~/.config/chatter-agent/mascot/settings.json   # 直すか、消して既定に戻す
 ```

@@ -1,16 +1,23 @@
 # ChatterAgent（Tauri）
 
 **メニューバーに常駐して `chatter-agent-server` を起動・停止・再起動するアプリ。** 端末で
-`npm run start:server` を叩く代わりに、server の面倒を見る親になる。設定パネルとマスコットの
-表示はまだ持たない（後続の段階で入る）。発話の契約は [`protocol.md`](./protocol.md) が正。
+`npm run start:server` を叩く代わりに、server の面倒を見る親になる。**設定パネル**（サーバーの設定と
+マスコットの設定）を持つ。マスコットの表示はまだ持たない。発話の契約は [`protocol.md`](./protocol.md) が正。
 
 実体は `chatter-agent-app/`（Tauri v2。Rust は `src-tauri/src/`）。
 
 | ファイル | 内容 |
 |---|---|
-| `src-tauri/src/main.rs` | トレイ・メニュー・設定（`settings.json`）の読み書き・終了時の後始末 |
+| `src-tauri/src/main.rs` | トレイ・メニュー・設定窓・設定（`settings.json`）の読み書き・終了時の後始末 |
 | `src-tauri/src/server.rs` | 環境の解決・事前チェック・起動・停止・監視・ロックの確認・ログの退避 |
-| `src-tauri/src/text.rs` | 日英の文言（OS のロケールが `ja` で始まれば日本語、それ以外は英語） |
+| `src-tauri/src/control.rs` | server の制御 API を Rust から叩く。接続先の解決・HTTP/1.0・許可リスト |
+| `src-tauri/src/mascot.rs` | `mascot/settings.json` と VRM |
+| `src-tauri/src/text.rs` | 日英の文言（OS のロケールが `ja` で始まれば日本語、それ以外は英語）と、画面へ渡す言語 |
+| `index.html` | 設定窓（CSS も中に持つ） |
+| `src/main.ts` | 設定窓の DOM の組み立てとイベント |
+| `src/model.ts` | DOM に触らない純粋な判定（声のキーの選択・環境変数の注記・ショートカットの組み立てと分解・エラー文言の選択） |
+| `src/text.ts` | 設定窓の日英の文言 |
+| `src/tauri.ts` | Rust のコマンドの型付きラッパ |
 
 ## ビルドと起動
 
@@ -24,7 +31,12 @@ cd ../chatter-agent-app
 npm install
 npm run build      # → src-tauri/target/release/bundle/macos/ChatterAgent.app
 npm run dev        # 開発時
+npm test           # 設定窓の純粋な判定（node --test）
 ```
+
+- `npm run dev` は Vite（`dev:web`、ポート 1420）も起こす。`npm run build` は先に `build:web`
+  （`tsc --noEmit && vite build`）を走らせ、`dist/` を `.app` に取り込む
+- `devUrl` を持つので、`cargo clippy` / `cargo test` は `dist/` が無くても通る
 
 Dock にも ⌘Tab にも出ない。操作はメニューバーのアイコンから行う。
 
@@ -50,6 +62,7 @@ Dock にも ⌘Tab にも出ない。操作はメニューバーのアイコン�
 
 | 項目 | 動き |
 |---|---|
+| 設定… | 設定窓を前面に出す。無ければ作る（次節） |
 | サーバーを再起動 / サーバーを起動 | 自分の server が動いていれば再起動、そうでなければ起動。外で動いている間と処理中は無効 |
 | ログを開く | `server.log` を開く。無ければディレクトリを開く |
 | core の場所を選ぶ… | 上記。保存したら起動（動いていれば再起動）。処理中に選び直したときは、今の処理が終わってから、選び直した core で起こし直す |
@@ -86,6 +99,105 @@ Dock にも ⌘Tab にも出ない。操作はメニューバーのアイコン�
   警告が出る）。残ったエンジンは次の起動の疎通確認で見つかって再利用される
   （→ [`knowledge/core.md`](./knowledge/core.md)「エンジンを起こす」）
 
+## 設定パネル
+
+メニューの「設定…」で開く窓。**閉じても ChatterAgent は終わらない**（終了要求を止めている。
+メニューの「終了」だけが終わらせる）。窓がフォーカスを得るたびに、server の設定と `settings.json` を読み直す。
+画面の言語は Rust の `lang()` が決める（OS のロケールが `ja` で始まれば日本語）。
+
+### 項目と保存先
+
+サーバーの設定（`GET/PATCH /v1/config`。1キーずつ PATCH する）:
+
+| 項目 | キー | 備考 |
+|---|---|---|
+| 合成エンジン | `ttsEngine` | AivisSpeech は `voicevox`、Kokoro は `openai`。変えると話者一覧を取り直す |
+| 音声スタイル | `ttsSpeakerId` / `kokoroVoiceId` | エンジンに応じて書き先が変わる。候補は `GET /v1/speakers` |
+| 話す速さ | `ttsSpeedScale` | 0.5–2.0。つまみを離したときに送る |
+| テスト音声 | （`POST /v1/tts/preview`） | 下記 |
+| AI要約 | `aiSummaryEnabled` | |
+| 要約エンジン | `aiSummaryBackend` | |
+| 感情判定 | `emotionClassifier` | |
+
+マスコットの設定（`mascot/settings.json`。Unity が1秒ごとに読み直して反映する）:
+
+| 項目 | キー |
+|---|---|
+| VRM | `character.vrm`（元の名前。実体は `models/mascot.vrm`） |
+| 音量 | `audio.volume` |
+| 待機モーション | `character.idleMotion` |
+| カーソルを目で追う | `character.cursorGaze` |
+| まばたき | `character.blink` |
+| フレームレート | `display.frameRate`（30 / 60） |
+| ショートカット（ミュート） | `audio.muteHotKey` |
+| ショートカット（表示切替） | `ui.hideHotKey` |
+
+- 環境変数で固定されたキー（`origins` が `env`）は押せず、`CHATTER_AGENT_*` で固定されている旨を注記する
+- server に繋がらないと、サーバーの項目は押せず注記が出る。**3秒ごとに取り直す**
+- 話者一覧が 503 の間は「取得できません」を出し、**3秒ごとに取り直す**（エンジンを切り替えた直後は、
+  エンジンの起動待ちで 503 になる）
+- 設定の書き込みに失敗したら、項目の下に理由を出して値を読み直す
+- **テスト音声は ChatterAgent が自分で鳴らす。** 音量は `audio.volume`、ミュート中（`audio.mute`）は鳴らさない
+
+### server とのやり取り（`control.rs`）
+
+★ **server とは Rust から HTTP で話す。** WebView の `fetch` には `Origin` が付き、server は 403 にする。
+この絞りは緩めない（→ [`protocol.md`](./protocol.md)「制御 API」）。
+
+- **許可しているのは `GET/PATCH /v1/config`、`GET /v1/speakers`、`POST /v1/tts/preview` だけ。**
+  要約のプレビューは課金されるので入れない
+- 接続できないときの status は 0。応答待ちは設定の読み書きが10秒、話者一覧とテスト音声が70秒
+
+接続先は毎回解決し直す。
+
+| | 順 |
+|---|---|
+| port | `CHATTER_AGENT_PORT` > `config.json` の `port` > 8570 |
+| host | `CHATTER_AGENT_HOST` > `config.json` の `host` > `127.0.0.1` |
+
+- `config.json` は `CHATTER_AGENT_CONFIG` があればそれ、無ければランタイムルート直下
+- 環境は、server に渡しているもの（ログインシェルから解決したもの。→「server に渡す環境」）と同じ
+- `0.0.0.0` / `::` は `127.0.0.1` として扱い、ループバック（`localhost` / `127.x` / `::1`）はそのまま使う
+- ★ **LAN の特定 IP は非対応で、繋がない。** server は相手がループバックでないと、書き込みを 404、GET を 401 にする
+
+### `settings.json` の書き方（`mascot.rs`）
+
+- **書けるキーは許可リスト（`MANAGED`）だけ。** 書き込みの受け付けとリセットの両方がこれを使う
+- 管理キーだけを差し替える。**知らないキーと XR のキー（`xr.*`、`connection.*`）は残す**。`version` が無ければ 1 を入れる
+- **壊れた JSON や、最上位が object でないファイルは書き戻さない**（エラーにする）
+- 読み→差し替え→書きは直列にし、tmp へ書いてから rename する。**tmp は `settings.json.chatter-agent.tmp`**
+  で、Unity の `settings.json.tmp` と別名（お互いの書きかけを踏まない）
+- ★ **フレームレートは JSON の整数で書く。** Unity は `30.0` を既定へ倒す
+
+★ **Chatter Mascot の設定パネルも `settings.json` を書くので、後勝ちになる。** Unity は保存のたびに
+メモリ上の全キーを書き直すため、両方を同時に触ると ChatterAgent の変更が巻き戻りうる。Unity は
+1秒ごとに読み直すので、続けて触らなければ取り込まれる。Unity のパネルが無くなれば解消する。
+
+### VRM
+
+選んだファイルを `models/mascot.vrm` へコピーし、元の名前を `character.vrm` に書く（反映はマスコットの
+**次の起動から**）。コピーは `.vrm` で終わらない tmp を経由する（core の `assetCatalog` が `*.vrm` を走査するため）。
+
+ファイル選択にフィルタは付けない。`.vrm` は動的 UTI で、絞るとグレーアウトしうる
+（→ [`knowledge/mascot-settings.md`](./knowledge/mascot-settings.md)「`.vrm` はシステムに UTI が無いので、`allowedContentTypes` では絞れない」）。
+拡張子は選んだあとに Rust で確かめる。
+
+### ショートカット
+
+修飾キー4つ（ctrl / opt / shift / cmd）のチェックとキーの選択で組み立てる。**キー入力の記録にはしない。**
+登録済みのグローバルホットキーや既定メニューのキー割り当てに横取りされるため。規則は Unity の
+`HotKeySpec` と同じ（修飾キー1つ以上、ミュートと表示切替の重複は不可）。
+
+### すべての設定をリセット
+
+ネイティブの確認ダイアログのあと、マスコット側（`settings.json` の管理キー → `models/*.vrm`）→ server の順に戻す。**途中で失敗しても残りの段は進める**（失敗は最後にまとめて表示する）。
+
+| 戻す | 戻さない |
+|---|---|
+| server の6キー（`ttsSpeakerId` / `kokoroVoiceId` / `ttsSpeedScale` / `aiSummaryEnabled` / `aiSummaryBackend` / `emotionClassifier`）。環境変数で固定されたキーは飛ばす | `ttsEngine` |
+| `settings.json` の管理キー | キャラクターの位置・大きさ（`window.json`） |
+| `models/` の `*.vrm`（同梱モデルに戻る） | ミュート（`audio.mute`）、接続先（`connection.*`）、XR のキー |
+
 ## ログ
 
 `~/Library/Logs/tech.sukima.chatter-agent/server.log`。server の stdout / stderr（ファイルへ直接
@@ -110,5 +222,3 @@ Dock にも ⌘Tab にも出ない。操作はメニューバーのアイコン�
   `kill` の SIGTERM や強制終了がこれに当たる。次に起動した ChatterAgent からは「外で動いている」に見える
   （→ [`knowledge/agent.md`](./knowledge/agent.md)）
 - **Windows は未対応。** 停止が穏当でなく（server の後始末が走らない）、環境の解決もしない
-- **制御 API（`/v1/*`）はまだ叩いていない。** 叩くときは Rust 側から行うこと。WebView から `fetch`
-  すると `Origin` が付いて 403 になる（→ [`protocol.md`](./protocol.md)）

@@ -21,7 +21,7 @@ Android XR）が鳴らして VRM に反映する。macOS では ChatterAgent が
 | `core/src/core/` | 契約と基盤（型・パス・設定・ロック・キュー） |
 | `core/src/text/` `emotion/` `prompt/` `summarizer/` `tts/` | 整形・感情判定・応答待ち通知・AI要約（既定ON）・合成クライアント |
 | `chatter-mascot/` | 表示側アプリ（Unity + UniVRM）。macOS と Android XR を1プロジェクトから |
-| `chatter-agent-app/` | ChatterAgent（Tauri）。メニューバー常駐で `chatter-agent-server` を起動・停止する |
+| `chatter-agent-app/` | ChatterAgent（Tauri）。メニューバー常駐で `chatter-agent-server` を起動・停止する。設定パネル（サーバーの設定とマスコットの設定）を持つ |
 | `docs/` | 基本設計・ファイル構成・コマンド |
 | `docs/knowledge/` | 実装で踏んだこと・なぜそうしたか・実測値 |
 
@@ -53,6 +53,7 @@ chatter-agent-server         キューを読んで WebSocket 配信（テキス�
 chatter-mascot               表示側アプリ（Unity）。再生 → VRM描画 / 表情 / モーション / リップシンク
 
 ChatterAgent（macOS 常駐）──▶ chatter-agent-server を起動・停止する（配信の経路には入らない）
+                          └─▶ 設定パネル: /v1/*（Rust から）と mascot/settings.json を書く
 ```
 
 設計の芯は3つ。
@@ -202,7 +203,8 @@ cd chatter-mascot
 ```bash
 cd chatter-agent-app/src-tauri
 cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
-cd .. && npm run build   # → ChatterAgent.app
+cd .. && npm run build:web && npm test   # 設定窓（tsc + vite build、node --test）
+npm run build            # → ChatterAgent.app
 ```
 
 ### タスク完了時のチェックリスト
@@ -211,7 +213,7 @@ cd .. && npm run build   # → ChatterAgent.app
 - [ ] **ライセンスヘッダの確認** —— cc-mascot 由来のファイルを改変したら `Modified for chatter-agent.`
 - [ ] **ドキュメント更新の検討** —— `docs/` / `docs/knowledge/` / `README.md` に追記するものがないか検討し、あればユーザーに提案する
 - [ ] `npm run typecheck` / `npm run lint` / `npm run format` / `npm run test:run` が通ること
-- [ ] `chatter-agent-app/` を触ったら `cargo fmt --check` / `cargo clippy --all-targets -- -D warnings` / `cargo test` が通ること
+- [ ] `chatter-agent-app/` を触ったら `cargo fmt --check` / `cargo clippy --all-targets -- -D warnings` / `cargo test` と、`npm run build:web` / `npm test` が通ること
 - [ ] `src/cli/` を触ったら `npm run build` してバンドルもコミットする
 - [ ] `plugin/` の中身（バンドルを含む）が変わったら、`plugin.json` と `marketplace.json` の `version` を上げる
 

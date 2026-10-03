@@ -683,6 +683,9 @@ const SPECS = {
   emotionTimeoutMs: { env: "CHATTER_AGENT_EMOTION_TIMEOUT_MS", parse: parseTimeoutMs },
 } as const satisfies { [K in ConfigKey]: { env: string; parse: Parser<ChatterAgentConfig[K]> } };
 
+/** 各キーに対応する環境変数名。制御 API の利用側（ChatterAgent）が表を持つときの突き合わせ用 */
+export type ConfigEnvNames = { [K in ConfigKey]: (typeof SPECS)[K]["env"] };
+
 const CONFIG_KEYS = Object.keys(SPECS) as ConfigKey[];
 
 /** 設定キーの一覧。**並び順は `SPECS` の宣言順**（`ChatterAgentConfig` と同じ） */

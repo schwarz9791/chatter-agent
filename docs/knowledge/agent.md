@@ -30,6 +30,62 @@ quit の Apple Event が届くのは、tao の `applicationWillTerminate:` が `
 （メニューの「終了」とログアウト）はどちらも server を止めてから終わる。SIGTERM も拾うなら、
 シグナルハンドラから `app.exit` に繋ぐ。
 
+## 設定窓を閉じても終わらないようにする
+
+窓を全部閉じると、Tauri は終了要求（`RunEvent::ExitRequested { code: None }`）を出す。止めないと
+ChatterAgent ごと終わり、server も止まる。→ `api.prevent_exit()` で止める（`main.rs`）。
+
+メニューの「終了」は `app.exit(0)` で、code が `Some` なので止まらない。終了要求を止めても、終わらせる
+経路は塞がない。
+
+## 設定窓から server への HTTP は Rust の std で書く
+
+- **WebView の `fetch` は使えない。** `Origin` が付き、server が 403 にする。この絞りは緩めず、
+  Origin を持たない Rust から送る
+- **HTTP クライアントの crate は足さない。** reqwest は macOS では未コンパイルで、足すと hyper 一式が
+  乗る。std の `TcpStream` で HTTP/1.0 の要求を送り、`read_to_end` で読み切る
+- server の応答は `content-length` 付きで、HTTP/1.0 の要求には chunked で返さない。だから本文の切り出しは
+  ヘッダの終わりまでで済む。keep-alive / chunked / TLS が要るなら `ureq` を使う
+
+## 同期の `#[tauri::command]` は使わない
+
+同期のコマンドはメインスレッドで走る。HTTP やファイル操作で待つと、トレイも窓も固まる。
+→ HTTP・ファイル操作・ダイアログは `async` にして `spawn_blocking` へ逃がす。
+
+★ **`blocking_*` のダイアログをメインスレッドで呼ぶとデッドロックする。** ファイル選択も確認も
+`spawn_blocking` の中で呼ぶ。
+
+## 確認はネイティブダイアログで出す
+
+JS の `confirm()` は wry で効かない。確認は `tauri-plugin-dialog` のネイティブダイアログ（`confirm`
+コマンド）で出す。
+
+## 画面の言語は Rust から取る
+
+`navigator.language` は使わず、Rust の `lang()`（メニューと同じ `sys_locale`）から取る。WKWebView の
+`navigator.language` はアプリのローカライズに引かれて、OS の言語と食い違いうる。
+
+## `@tauri-apps/api` を入れない
+
+`tauri.conf.json` の `app.withGlobalTauri` を立て、`window.__TAURI__.core.invoke` を使う。アプリ定義の
+コマンドだけなら capabilities のファイルは要らない（event 系を使うと要る）。
+
+## core の型は `import type` で引く
+
+設定窓は core の `config.ts` の型（`ChatterAgentConfig` / `ConfigKey` / `ConfigOrigin` /
+`ConfigEnvNames`）を `import type` で引く。
+
+★ **`import { type X }` で書かないこと。** `verbatimModuleSyntax` の下では、型だけの import でも
+モジュールの import が残る。Vite が `config.ts` とその先の `fs` をバンドルしに行く。
+
+環境変数名の表（`model.ts` の `ENV_NAMES`）は、`ConfigEnvNames`（core の `SPECS` から導く型）と
+`satisfies` で突き合わせる。core の名前が変わるとコンパイルが落ちる。
+
+## `devUrl` があれば `cargo` は `dist/` を要求しない
+
+`tauri.conf.json` の `build.devUrl` があると、`cargo clippy` / `cargo test` は `frontendDist`
+（`dist/`）の存在を要求しない。CI の Rust のジョブが、フロントの事前ビルド無しで通る理由。
+
 ## 実機確認
 
 - 2026-10-02（macOS。AivisSpeech と Ollaya を server が spawn する構成）: `open` での起動、メニューからの

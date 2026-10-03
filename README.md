@@ -169,7 +169,8 @@ npm run build      # → src-tauri/target/release/bundle/macos/ChatterAgent.app
 
 Open the app and choose the `core/` folder once from the menu ("Choose Core Folder…"). It then starts
 the server with the same environment a login shell gives you. Starting it by hand as above keeps
-working; ChatterAgent shows it as running outside and leaves it alone. Details are in
+working; ChatterAgent shows it as running outside and leaves it alone. Its settings panel (menu → "Settings…")
+edits the server settings and the mascot settings. Details are in
 [`docs/agent.md`](./docs/agent.md).
 
 ### Client

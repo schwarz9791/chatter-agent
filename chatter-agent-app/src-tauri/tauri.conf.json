@@ -4,7 +4,14 @@
   "mainBinaryName": "ChatterAgent",
   "version": "0.1.0",
   "identifier": "tech.sukima.chatter-agent",
+  "build": {
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist",
+    "beforeDevCommand": "npm run dev:web",
+    "beforeBuildCommand": "npm run build:web"
+  },
   "app": {
+    "withGlobalTauri": true,
     "windows": [],
     "security": {
       "csp": null

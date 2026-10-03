@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod control;
+mod mascot;
 mod server;
 mod text;
 
@@ -41,6 +43,29 @@ impl Settings {
     }
 }
 
+/// 設定窓を前面に出す。無ければ作る。
+fn open_settings(app: &tauri::AppHandle, title: &str) {
+    if let Some(w) = app.get_webview_window("settings") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let built = tauri::WebviewWindowBuilder::new(
+        app,
+        "settings",
+        tauri::WebviewUrl::App("index.html".into()),
+    )
+    .title(title)
+    .inner_size(520.0, 720.0)
+    .resizable(true)
+    .build();
+    // Accessory アプリは自分から前面に出ない。
+    if let Ok(w) = built {
+        let _ = w.set_focus();
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -49,6 +74,15 @@ fn main() {
             MacosLauncher::LaunchAgent,
             None,
         ))
+        .invoke_handler(tauri::generate_handler![
+            control::server_request,
+            mascot::mascot_settings_get,
+            mascot::mascot_settings_set,
+            mascot::pick_vrm,
+            mascot::confirm,
+            mascot::mascot_reset,
+            text::lang,
+        ])
         .setup(|app| {
             // tao は起動時に Regular へ戻すため、LSUIElement だけでは Dock に出る。
             #[cfg(target_os = "macos")]
@@ -58,6 +92,7 @@ fn main() {
             let status_item = MenuItemBuilder::with_id("status", t.status(&Status::Stopped))
                 .enabled(false)
                 .build(app)?;
+            let settings_item = MenuItemBuilder::with_id("settings", t.settings).build(app)?;
             let restart_item = MenuItemBuilder::with_id("restart", t.start)
                 .enabled(false)
                 .build(app)?;
@@ -70,6 +105,7 @@ fn main() {
             let menu = MenuBuilder::new(app)
                 .item(&status_item)
                 .item(&PredefinedMenuItem::separator(app)?)
+                .item(&settings_item)
                 .item(&restart_item)
                 .item(&open_log_item)
                 .item(&pick_core_item)
@@ -111,6 +147,7 @@ fn main() {
                     "restart" => {
                         m.start_or_restart();
                     }
+                    "settings" => open_settings(app, t.settings_title),
                     "open_log" => {
                         // ファイルがまだ無ければディレクトリを開く。
                         let target = if log_path.exists() {
@@ -180,10 +217,18 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("ChatterAgent の起動に失敗しました")
         .run(|app, event| {
-            if let RunEvent::Exit = event {
-                if let Some(m) = app.try_state::<Manager>() {
-                    m.stop_sync();
+            match event {
+                // 常駐アプリなので、設定窓を全部閉じても終了しない。メニューの「終了」は
+                // `app.exit(0)`（code が Some）なので止まらない。
+                RunEvent::ExitRequested {
+                    code: None, api, ..
+                } => api.prevent_exit(),
+                RunEvent::Exit => {
+                    if let Some(m) = app.try_state::<Manager>() {
+                        m.stop_sync();
+                    }
                 }
+                _ => {}
             }
         });
 }

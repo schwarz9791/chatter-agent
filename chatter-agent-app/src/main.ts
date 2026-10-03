@@ -17,6 +17,7 @@ import {
 } from "./model.ts";
 import {
   asServerError,
+  about,
   confirmDialog,
   lang,
   mascotRequest,
@@ -399,6 +400,20 @@ function build(): void {
   updaters.push(() => (reset.textContent = t.resetAll));
   reset.addEventListener("click", () => void resetAll());
   row(s, "reset", () => "", [reset], { staticNote: () => t.resetAllNote });
+
+  // について。server にもマスコットにも依存しないので、常に出る。
+  s = section(() => t.sectionAbout);
+  const version = el("span", "val");
+  row(s, "aboutVersion", () => t.aboutVersion, [version]);
+  const notice = el("pre", "notice");
+  row(s, "aboutLicense", () => t.aboutLicense, []);
+  s.lastElementChild!.append(notice);
+  about()
+    .then((a) => {
+      version.textContent = `Chatter Agent ${a.version}`;
+      notice.textContent = a.notice;
+    })
+    .catch(() => {});
 }
 
 function hotKeyRow(

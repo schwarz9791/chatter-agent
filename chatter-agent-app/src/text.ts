@@ -71,6 +71,10 @@ export type Text = {
   resetCoreDefaultsUnavailable: string;
   resetKeyFailed(key: string, reason: string): string;
 
+  sectionAbout: string;
+  aboutVersion: string;
+  aboutLicense: string;
+
   settingsUnreadable(reason: string): string;
 
   errorResponseUnreadable(reason: string): string;
@@ -159,6 +163,10 @@ export const JA: Text = {
   resetCoreDefaultsUnavailable: "既定値を取れません",
   resetKeyFailed: (key, reason) => `${key} を戻せませんでした（${reason}）`,
 
+  sectionAbout: "について",
+  aboutVersion: "版",
+  aboutLicense: "ライセンス",
+
   settingsUnreadable: (reason) => `settings.json を読めません（${reason}）`,
 
   errorResponseUnreadable: (reason) => `応答を読めませんでした: ${reason}`,
@@ -245,6 +253,10 @@ export const EN: Text = {
   resetMascotFailed: (reason) => `Couldn't reset the mascot settings: ${reason}`,
   resetCoreDefaultsUnavailable: "Couldn't get the defaults.",
   resetKeyFailed: (key, reason) => `Couldn't reset ${key}: ${reason}`,
+
+  sectionAbout: "About",
+  aboutVersion: "Version",
+  aboutLicense: "License",
 
   settingsUnreadable: (reason) => `Couldn't read settings.json (${reason}).`,
 

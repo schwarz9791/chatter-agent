@@ -125,11 +125,21 @@ namespace ChatterMascot.Desktop
     ///
     /// ★ 起動済みならアプリの再オープンとして、未起動なら起動として届く。
     ///   起動直後はパネルを出さないので、未起動のときは起動するだけになる。
+    ///
+    /// ★ 同じ bundle id のコピーが複数あると <c>open -b</c> は動いていない別のコピーを起動しうる。
+    ///   だから ChatterAgent が起動したマスコットは、起動元のパスを引数で受け取ってそれを開く。
+    ///   引数が無い（単体起動）ときだけ <c>-b</c> に頼る。
     /// </summary>
     internal static class ChatterAgentLauncher
     {
         // ★ ChatterAgent の tauri.conf.json の identifier と同じ値にすること
         private const string BundleId = "tech.sukima.chatter-agent";
+
+        // ChatterAgent が渡す、自分の .app のパス
+        private const string AppPathArgument = "-chatterAgentApp";
+
+        private static string OpenArguments(string appPath) =>
+            string.IsNullOrEmpty(appPath) ? "-b " + BundleId : "\"" + appPath.Replace("\"", "\\\"") + "\"";
 
         // ponytail: macOS 限定。Windows は ChatterAgent 側を tauri-plugin-single-instance にすれば同じ口にできる
         public static void OpenSettings()
@@ -139,7 +149,7 @@ namespace ChatterMascot.Desktop
                 var process = Process.Start(new ProcessStartInfo
                 {
                     FileName = "/usr/bin/open",
-                    Arguments = "-b " + BundleId,
+                    Arguments = OpenArguments(CommandLine.Argument(AppPathArgument)),
                     UseShellExecute = false,
                     CreateNoWindow = true,
                 });

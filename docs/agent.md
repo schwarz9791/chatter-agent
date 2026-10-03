@@ -103,6 +103,8 @@ player は SIGTERM を1回だけ送って待つ（停止の仕組みと同じ）
   マスコットには起動引数 `-speechBacklogMaxAgeMs 60000`、player には環境変数
   `CHATTER_AGENT_SPEECH_BACKLOG_MAX_AGE_MS=60000` を渡す。音量や core による player の起こし直しと、
   マスコット ⇄ player の切り替えでは渡さず、未再生の文を引き継いで鳴らす
+- マスコットには、起動のたびに自分の `.app` のパスを `-chatterAgentApp <path>` で渡す（右クリックで開き直す相手に使う。
+  `.app` の中で動いていない `tauri dev` のときは付けない）
 - **player の音量**は `audio.volume`。1.0 でないときだけ `CHATTER_AGENT_PLAYER_ARGS=-v,<音量>,{file}`
   （`afplay` の引数列）を足す。1.0 のときは足さないので、`config.json` の `playerArgs` が生きる。
   音量が変わると player を起こし直す。core を選び直したときも起こし直す（server と同じ core を使わせる）。
@@ -145,13 +147,15 @@ player は SIGTERM を1回だけ送って待つ（停止の仕組みと同じ）
 | ChatterAgent → マスコット | `mascot/settings.json` | 設定。マスコットは1秒ごとに `mtime:size` を見て反映する。**マスコットは書かない** |
 | ChatterAgent → マスコット | `mascot/requests/*.json`（依頼箱） | 一度きりの操作 |
 | マスコット → ChatterAgent | `mascot/motions.json` | 再生できるモーションの一覧 |
-| マスコット → ChatterAgent | `open -b tech.sukima.chatter-agent` | 右クリックでの設定窓の呼び出し |
+| マスコット → ChatterAgent | `open "<起動元の .app>"`（単体起動なら `open -b tech.sukima.chatter-agent`） | 右クリックでの設定窓の呼び出し |
 
 **書き手は ChatterAgent だけ。** マスコットは `settings.json` を読むだけなので、保存の競合（後勝ち）は起きない。
 
 ### 右クリック → 設定窓
 
-マスコットのキャラクターを右クリックすると、マスコットが `/usr/bin/open -b tech.sukima.chatter-agent` を呼ぶ。
+マスコットのキャラクターを右クリックすると、マスコットが `/usr/bin/open` で ChatterAgent を開く。
+ChatterAgent が起動したマスコットは、起動引数 `-chatterAgentApp` で渡された起動元の `.app` を**パスで**開く。
+単体起動のマスコット（引数なし）だけが `open -b tech.sukima.chatter-agent` に頼る。
 ChatterAgent は macOS の再オープン（Tauri の `RunEvent::Reopen`）で設定窓を前面に出す。Finder などから
 ChatterAgent を開き直しても同じ。**ChatterAgent が起動していなければ起動するだけで、設定窓は出ない。**
 macOS 限定。Windows は single-instance プラグインで同じ口にできる見込み。

@@ -301,8 +301,8 @@ cd chatter-mascot
 「について」は持たない。Dock にも出ない（`LSUIElement`）ので、単体で起動したマスコットには終了の UI が無い
 ——終わらせるのは ChatterAgent の「マスコットを隠す」と「終了」（→ [`agent.md`](./agent.md)）。
 
-**キャラクターを右クリック**すると、マスコットが `/usr/bin/open -b tech.sukima.chatter-agent` を呼び、
-ChatterAgent の設定窓が前面に出る（ChatterAgent が起動していなければ起動するだけ。macOS 限定）。
+**キャラクターを右クリック**すると、マスコットが `/usr/bin/open` で ChatterAgent を開き、
+設定窓が前面に出る（ChatterAgent が起動したマスコットは起動引数 `-chatterAgentApp` のパス、単体起動は `open -b tech.sukima.chatter-agent`）（ChatterAgent が起動していなければ起動するだけ。macOS 限定）。
 設定・ショートカット（ミュートと表示切替）・大きさ・位置のリセット・モーションの確認はすべて
 ChatterAgent の設定パネルで行う。やり取りの仕組み（依頼箱・`motions.json`）は [`agent.md`](./agent.md)
 「マスコットとのやり取り」。

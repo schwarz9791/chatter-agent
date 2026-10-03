@@ -163,7 +163,7 @@ frame を測ると **x が負**（画面の左外）で `screen` も取れない
 
 設定（`settings.json`）、依頼箱（`mascot/requests/`）、モーション一覧（`mascot/motions.json`）は、
 **server を経由せず、OS 固有の IPC（ソケット・XPC）も使わない**。ファイルなら Windows にも持っていける。
-例外は右クリックでの設定窓の呼び出し（`open -b tech.sukima.chatter-agent` → `RunEvent::Reopen`）で、
+例外は右クリックでの設定窓の呼び出し（`open` → `RunEvent::Reopen`）で、
 これだけは macOS の再オープンに頼る。仕様は [`../agent.md`](../agent.md)「マスコットとのやり取り」。
 
 - ★ **依頼は `.json.tmp` に書いてから rename する。** マスコットは 0.5 秒ごとに `*.json` を読むので、
@@ -175,3 +175,12 @@ frame を測ると **x が負**（画面の左外）で `screen` も取れない
 - ★ **`motions.json` は起動時に消す。** 前回の一覧が残っていると、読み込み前のマスコットに対して
   古い一覧から再生を頼めてしまう（ファイルが無い = 読み込み中、`[]` = 空と区別するため）
 
+## `open -b` は動いている方に届くとは限らない
+
+同じ bundle id のビルドが複数登録されている（ワークツリーごとのビルドなど）と、`open -b tech.sukima.chatter-agent`
+で LaunchServices が選ぶのは動いている ChatterAgent とは限らない。別のコピーが2つ目として起動した
+（実機では動いていない旧ビルドが起動した）。`.app` を**パスで** `open` すれば、その実体（動いていればそれ）に
+再オープンが届いて設定窓が出る。
+
+- ★ **だから起動元がパスを渡す。** ChatterAgent はマスコットを起こすとき自分の `.app` を `-chatterAgentApp` で渡し、
+  マスコットはそれを `open` する。引数が無い単体起動のときだけ `-b` に頼る

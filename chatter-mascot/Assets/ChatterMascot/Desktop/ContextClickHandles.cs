@@ -128,7 +128,7 @@ namespace ChatterMascot.Desktop
     ///
     /// ★ 同じ bundle id のコピーが複数あると <c>open -b</c> は動いていない別のコピーを起動しうる。
     ///   だから ChatterAgent が起動したマスコットは、起動元のパスを引数で受け取ってそれを開く。
-    ///   引数が無い（単体起動）ときだけ <c>-b</c> に頼る。
+    ///   引数が無いか、そのパスがもう無いときだけ <c>-b</c> に頼る。
     /// </summary>
     internal static class ChatterAgentLauncher
     {
@@ -139,7 +139,7 @@ namespace ChatterMascot.Desktop
         private const string AppPathArgument = "-chatterAgentApp";
 
         private static string OpenArguments(string appPath) =>
-            string.IsNullOrEmpty(appPath) ? "-b " + BundleId : "\"" + appPath.Replace("\"", "\\\"") + "\"";
+            string.IsNullOrEmpty(appPath) || !System.IO.Directory.Exists(appPath) ? "-b " + BundleId : "\"" + appPath.Replace("\"", "\\\"") + "\"";
 
         // ponytail: macOS 限定。Windows は ChatterAgent 側を tauri-plugin-single-instance にすれば同じ口にできる
         public static void OpenSettings()

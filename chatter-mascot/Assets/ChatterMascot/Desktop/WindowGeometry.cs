@@ -10,7 +10,7 @@ using UnityEngine;
 namespace ChatterMascot.Desktop
 {
     /// <summary>
-    /// <b>ウィンドウの位置と大きさを、ポイントで、自分で覚える。</b>
+    /// <b>ウィンドウの位置を、ポイントで、自分で覚える。</b> 大きさは <c>character.scale</c> で決まる。
     ///
     /// ★ <b>Unity の永続化には乗れない。</b> <c>Screenmanager Resolution/Window Position</c> は
     ///   <b>バッキング px</b> なので、Retina で終了して 1x のディスプレイで開くと窓が倍になる
@@ -22,7 +22,7 @@ namespace ChatterMascot.Desktop
     ///   「起動直後に見えていた大きさ」を守る作りで、
     ///   <a href="https://github.com/schwarz9791/chatter-agent/issues/66">#66</a> の2点
     ///   （捕まえる順序が保証されない / 補正が最初の1回で打ち切り）を抱えていた。
-    ///   <b>意図した大きさの権威を自前の永続化へ移すと、どちらも構造的に消える。</b>
+    ///   <b>位置を自前の永続化へ移し、大きさは <c>character.scale</c> に一本化すると、どちらも構造的に消える。</b>
     ///
     /// ★ <b>2人が <c>windowSize</c> を書く状態を作らないこと。</b> だから
     ///   <c>WindowSizeKeeper</c> は削除してある。
@@ -46,9 +46,7 @@ namespace ChatterMascot.Desktop
         ///   垂直 FOV が支配する（<see cref="ChatterMascot.Vrm.VrmFraming"/>）ので、
         ///   1:1 にしても同じカメラ距離のまま<b>横方向の余裕だけ増える</b>。
         ///   縦は <c>VrmStage.headroom</c> の既定を上げて、腕を上げる・跳ぶモーションを
-        ///   余裕を持って収める。<b>既に大きさを変えていた窓は移行で高さが保たれる</b>
-        ///   （<c>WindowPlacement</c>）ので、そこでは <c>headroom</c> のぶんキャラが少し
-        ///   小さく収まる。これは意図どおり——「以前と同じ大きさ」より「見切れない」を取った。
+        ///   余裕を持って収める。
         /// </summary>
         public const float DefaultWidthPoints = 540f;
         public const float DefaultHeightPoints = 540f;
@@ -107,9 +105,8 @@ namespace ChatterMascot.Desktop
         ///   <c>FindObjectsInactive.Include</c> は「非アクティブを含めるか」だけの指定で、
         ///   こちらには効かない。
         ///
-        /// ★ **実際に踏んだ**（#76）—— 位置のリセットが常に
-        ///   「管理が動いていません」の枝へ落ち、ファイルを消すだけで終わっていた
-        ///   （症状は「アプリを再起動しないとリセットされない」）。
+        /// ★ 探すと見つからないので、位置のリセットが「管理が動いていません」の枝へ落ち、
+        ///   ファイルを消すだけで終わる（再起動まで効かない）。
         /// </summary>
         private static Keeper _keeper;
 
@@ -377,7 +374,8 @@ namespace ChatterMascot.Desktop
                 _scale = current.Scale;
                 if (_phase == Phase.Attaching) return;
 
-                var from = _lastSeen.IsValid ? _lastSeen : Current();
+                // 適用中に倍率が変わっても、復元・リセットの目標を捨てないため、進行中の目標を起点にする
+                var from = _phase == Phase.Applying ? _wanted : _lastSeen.IsValid ? _lastSeen : Current();
                 if (!from.IsValid)
                 {
                     Debug.LogWarning("[Mascot] いまのウィンドウを読めないので、大きさを変えられません");

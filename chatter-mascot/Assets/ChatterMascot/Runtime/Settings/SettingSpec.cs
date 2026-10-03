@@ -18,13 +18,6 @@ namespace ChatterMascot.Settings
         Slider,
         Choice,
         Button,
-
-        /// <summary>
-        /// <b>読み取り専用</b>の複数行テキスト（バージョン・ライセンス本文）。
-        ///
-        /// ★ 入力欄ではない。自由入力の設定を増やすほど、検証と「不正値のときどう見せるか」が増える。
-        /// </summary>
-        Text,
     }
 
     /// <summary>
@@ -229,14 +222,6 @@ namespace ChatterMascot.Settings
             spec.Choices = source.Choices;
             spec.Enabled = source.Enabled;
             spec.Note = note ?? "";
-            return spec;
-        }
-
-        public static SettingSpec Text(string key, string label, string value)
-        {
-            var spec = new SettingSpec(SettingKind.Text, key, label);
-            spec.Value = value ?? "";
-            spec.Enabled = false; // 読み取り専用
             return spec;
         }
     }

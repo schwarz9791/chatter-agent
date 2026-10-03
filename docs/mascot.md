@@ -38,6 +38,10 @@ Build Support の枠がそのまま生える。要らないものを入れてお
 "com.unity.nuget.newtonsoft-json": "3.2.1"
 ```
 
+★ **旧版（ネイティブプラグインがあった版）から上げたら `rm -rf chatter-mascot/Assets/Plugins/macOS` で
+残った実体を消す。** 残すと Unity が `.meta` を既定（全プラットフォーム）で作り直し、Android ビルドに
+macOS のバンドルが混ざって落ちる。
+
 ## 構成
 
 ```

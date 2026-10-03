@@ -18,7 +18,7 @@ namespace ChatterMascot.Settings
     /// ★★ <b>デスクトップのキャラクターの大きさの権威はここ（<see cref="Scale"/>）。</b>
     ///   <c>window.json</c> は位置だけを持つ。窓の大きさを2か所に持たないための分担
     ///   （→ <see cref="SettingsMapping.WindowSizeFor"/>）。
-
+    ///
     /// ★ <b>「キャラクターを隠す」を入れないこと。</b> 隠した状態を永続化すると、
     ///   次の起動で「マスコットが出ない」に化ける。ミュートはアイコンが薄くなるので
     ///   気づけるが、隠れているものは気づきようが無い。
@@ -26,8 +26,8 @@ namespace ChatterMascot.Settings
     /// ★★ <b>プロパティを足したら <see cref="Copy"/> と <see cref="Equals"/> の両方に足すこと。</b>
     ///   <c>MascotSettingsTests</c> がリフレクションで全プロパティを回し、
     ///   <c>With&lt;プロパティ名&gt;</c> が無いか、<c>Equals</c> に効いていないかを落として教える。
-    ///   実際に一度落とした —— 比べ忘れたプロパティがあったせいで <c>SettingsStore.Refresh</c> が
-    ///   「変わっていない」と返し、次の保存で<b>ユーザーの編集をディスクから消した</b>。
+    ///   比べ忘れると <c>SettingsStore.Refresh</c> が「変わっていない」と返し、
+    ///   次の保存で<b>ユーザーの編集をディスクから消す</b>。
     /// </summary>
     public readonly struct MascotSettings : IEquatable<MascotSettings>
     {

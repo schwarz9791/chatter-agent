@@ -74,3 +74,6 @@ mono_crash.*.blob
 # ★ .meta も一緒に無視する。上の !*.meta より後に書くので、こちらが勝つ。
 /[Aa]ssets/XR/[Tt]emp/
 /[Aa]ssets/XR/[Tt]emp.meta
+
+# 旧版のネイティブプラグインの実体（git 外）が残ったチェックアウトで、誤ってコミットしないため
+*.bundle

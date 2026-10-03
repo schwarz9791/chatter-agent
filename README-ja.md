@@ -39,7 +39,7 @@ Claude Code
 | | 担当 |
 |---|---|
 | **server** | 発言の受け取り、テキストの整形（Markdown 除去・文分割・感情判定・AI要約）、発話キューの管理と配信、音声合成（合成エンジンの起動まで面倒を見る）、設定の保持 |
-| **client** | 発話の受信、音声の取得と再生、再生し終わった通知（ack）、VRM の描画・表情・モーション・リップシンク、設定 UI（デスクトップはネイティブのパネル、Android XR は空間に浮かぶパネル）、（デスクトップ版のみ）ウィンドウ・常駐 |
+| **client** | 発話の受信、音声の取得と再生、再生し終わった通知（ack）、VRM の描画・表情・モーション・リップシンク、（Android XR のみ）空間に浮かぶ設定パネル、（デスクトップ版のみ）ウィンドウ・常駐。デスクトップの設定 UI は ChatterAgent が持ちます |
 
 発話の契約は [`docs/protocol.md`](./docs/protocol.md) にあります。クライアントを書くならこれだけで足ります。
 
@@ -50,7 +50,7 @@ Claude Code
 | `plugin/` | Claude Code プラグイン。bash の hook が payload を置くだけ |
 | `core/` | サーバーと CLI（TypeScript / Node）。`src/server/` `src/cli/` `src/player/` |
 | `chatter-mascot/` | 表示側アプリ（Unity + UniVRM）。macOS と Android XR を1プロジェクトから |
-| `chatter-agent-app/` | ChatterAgent（Tauri）。メニューバー常駐でサーバーを起動・停止し、マスコットの表示とミュートを操作する |
+| `chatter-agent-app/` | ChatterAgent（Tauri）。メニューバー常駐でサーバーを起動・停止し、設定パネルを持ち、マスコットの表示・ミュート・大きさ・モーションの確認を操作する |
 | `docs/` | 基本設計・ファイル構成・コマンド。実装で踏んだことは `docs/knowledge/` |
 
 ## 現在の状態
@@ -73,7 +73,6 @@ Claude Code
 - **Node 24.11 以上**（`mise.toml` で 24.19.0 に固定しています）
 - **Unity 6000.3.14f1** —— macOS / Android のビルドサポートモジュールが必要です
 - **Unity CLI**（`unity` コマンド） —— `chatter-mascot/scripts/*.sh` がこれ経由で Editor を動かします
-- **Xcode コマンドラインツール** —— macOS 常駐用のネイティブプラグインをビルドするのに使います（`xcode-select --install`）
 - **Android SDK の platform-tools**（`adb`）—— Android 版を端末へ入れるとき
 
 Unity プロジェクトのセットアップ手順は [`docs/mascot.md`](./docs/mascot.md) にあります。
@@ -95,8 +94,9 @@ cd chatter-mascot
 ./scripts/build.sh           # → Build/ChatterMascot.app
 ```
 
-常駐用のネイティブプラグイン（Objective-C）は `build.sh` が先にビルドします。**クローンした直後は
-Unity を開く前に [`docs/mascot.md`](./docs/mascot.md) のセットアップを済ませてください。**
+**クローンした直後は Unity を開く前に [`docs/mascot.md`](./docs/mascot.md) のセットアップを済ませてください。**
+マスコットは描画と再生だけで、設定パネル・メニューバー・ショートカットは持ちません（Dock にも出ません）。
+キャラクターを右クリックすると ChatterAgent の設定パネルが開きます（ChatterAgent が動いていなければ起動します）。
 
 ### Android XR クライアント
 
@@ -164,18 +164,18 @@ macOS では、メニューバー常駐アプリ **ChatterAgent** にサーバ�
 ```bash
 cd chatter-agent-app
 npm install
-npm run build      # → src-tauri/target/release/bundle/macos/ChatterAgent.app
+npm run build      # → build/ChatterAgent.app
 ```
 
 アプリを開き、メニューの「core の場所を選ぶ…」で `core/` を一度選ぶと、ログインシェルと同じ環境で
 サーバーを起こします。上の手動起動もこれまでどおり使えます（ChatterAgent は「外で動いている」と表示するだけで、
-手を出しません）。メニューの「設定…」から、サーバーの設定とマスコットの設定を変えられます。
+手を出しません）。メニューの「設定…」から、サーバーの設定とマスコットの設定（モデル・大きさ・音量・モーションなど）を変えられます。マスコットを右クリックするか、Finder などから ChatterAgent を開き直しても、設定窓が前面に出ます。
 
 メニューの「マスコットを表示 / 隠す」と「ミュート」で、繋ぐクライアントも切り替わります。表示中は macOS アプリ、
 隠している間は CLI プレーヤーで声だけを鳴らし、隠してミュートしているときは何も繋ぎません（2つを同時に繋ぐと
 二重に鳴るので、ChatterAgent がどちらか一方だけを動かします）。macOS アプリは `/Applications` →
 `~/Applications` → `chatter-mascot/Build` の順に `ChatterMascot.app` を探します。ショートカット
-（既定は ⌃⌥M がミュート、⌃⌥H が表示切替）でも操作できます。詳細は [`docs/agent.md`](./docs/agent.md)。
+（既定は ⌃⌥M がミュート、⌃⌥H が表示切替。登録するのは ChatterAgent だけです）でも操作できます。詳細は [`docs/agent.md`](./docs/agent.md)。
 
 ### クライアント
 
@@ -214,7 +214,7 @@ cd chatter-mascot
 
 ## モデルとモーション
 
-**主な設定は macOS クライアントから変えられます。** キャラクターを右クリック、またはメニューバーのアイコンから設定パネルが開きます —— モデル・大きさ・音量・話す速さ・音声スタイル・モーション・要約・ショートカット。
+**主な設定は ChatterAgent の設定パネルから変えられます。** キャラクターを右クリック、または ChatterAgent のメニューバーのアイコンから開きます —— モデル・大きさ・音量・話す速さ・音声スタイル・モーションの確認・要約・ショートカット。マスコット自身は設定を書かず、読むだけです。
 
 設定と素材は `~/.config/chatter-agent/` に入ります（`XDG_CONFIG_HOME` を設定していればそちら）。
 
@@ -222,9 +222,9 @@ cd chatter-mascot
 ~/.config/chatter-agent/
 ├── config.json               サーバーの設定
 ├── emotion-keywords.json     感情判定のキーワード（消せば既定に戻ります）
-├── mascot/settings.json      クライアントの設定
-├── mascot/window.json        ウィンドウの位置と大きさ
-├── models/mascot.vrm         設定パネルで選んだモデル
+├── mascot/settings.json      クライアントの設定（大きさは `character.scale`。書くのは ChatterAgent だけ）
+├── mascot/window.json        ウィンドウの位置
+├── models/mascot.vrm         ChatterAgent の設定パネルで選んだモデル
 └── animations/               モーション（手で置きます）
 ```
 
@@ -237,7 +237,7 @@ cd chatter-mascot
 | `animations/happy/` `angry/` `sad/` `relaxed/` `surprised/` | その感情の発言でワンショット再生 → 待機へ戻る |
 | `animations/walk/` | XR で歩き回るときの歩行モーション（ループ再生。macOS では使わない） |
 
-モデルの差し替えは設定パネルからできますが、**モーションに UI はありません。** ディレクトリを掘って `.vrma` を置くと、次の起動で拾います。`neutral` に対応するディレクトリはありません（感情モーションを出さない、が既定の振る舞いです）。
+モデルの差し替えは ChatterAgent の設定パネルからでき、モーションは「モーション」節で再生して確認できますが、**モーションを置く UI はありません。** ディレクトリを掘って `.vrma` を置くと、次の起動で拾います。`neutral` に対応するディレクトリはありません（感情モーションを出さない、が既定の振る舞いです）。
 
 **Android XR もディレクトリは同じです**（端末の `Android/data/tech.sukima.chattermascot/files/` の下）が、
 **`adb push` は要りません。** 接続先とトークンを設定すれば（`configure-android.sh`）、起動のたびに

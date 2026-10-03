@@ -53,3 +53,7 @@ export const confirmDialog = (title: string, message: string, ok: string, cancel
   invoke<boolean>("confirm", { title, message, ok, cancel });
 export const mascotReset = () => invoke<{ removed: number; error: string | null }>("mascot_reset");
 export const lang = () => invoke<"ja" | "en">("lang");
+export const mascotState = () => invoke<{ running: boolean; motions: string[] | null }>("mascot_state");
+export const mascotRequest = (kind: "resetWindow" | "playMotion", id?: string) =>
+  invoke<void>("mascot_request", { kind, id });
+export const about = () => invoke<{ version: string; notice: string }>("about");

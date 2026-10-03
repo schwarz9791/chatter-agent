@@ -226,7 +226,7 @@ namespace ChatterMascot.EditorTools
         ///   このパッケージは <c>git</c> 参照（<c>Packages/manifest.json</c>）で解決されており
         ///   Unity 側で読み取り専用扱いになる。<c>SetCompatibleWithAnyPlatform</c> +
         ///   <c>SaveAndReimport</c> は成功したように見えて、実際にはメタファイルへ書き込まれない
-        ///   （<c>NativePluginSettings</c> が自前の <c>.bundle</c> に使っている手当ては効かない）。
+        ///   （インポーターの設定を書き換える手当ては効かない）。
         ///
         /// ★ <b>だから <see cref="PluginImporter.SetIncludeInBuildDelegate"/> で外す。</b>
         ///   メタファイルを書き換えず、このビルド呼び出しの間だけ「ビルドに含めるか」を

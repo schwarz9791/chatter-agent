@@ -46,10 +46,6 @@ export const SERVER_RESET_KEYS = [
   "emotionClassifier",
 ] as const satisfies readonly PanelKey[];
 
-export function voiceKey(engine: string): "ttsSpeakerId" | "kokoroVoiceId" {
-  return engine === "openai" ? "kokoroVoiceId" : "ttsSpeakerId";
-}
-
 /** 環境変数で固定されているときの注記。固定でなければ null */
 export function envNote(
   key: PanelKey,
@@ -59,7 +55,7 @@ export function envNote(
   return origins?.[key] === "env" ? t.envOverridden(ENV_NAMES[key]) : null;
 }
 
-// ── ショートカット（Unity の HotKeySpec と同じ規則） ──
+// ── ショートカット（マスコット設定に書く表記の規則） ──
 
 export const HOTKEY_KEYS = [
   ..."abcdefghijklmnopqrstuvwxyz0123456789",
@@ -143,6 +139,8 @@ export const MASCOT_DEFAULTS = {
   "character.cursorGaze": true,
   "character.blink": true,
   "character.vrm": "",
+  // 範囲 0.5〜2.0・刻み 0.1 はマスコット（SettingsMapping）の写し
+  "character.scale": 1.0,
   "display.frameRate": 30,
 } as const;
 
@@ -158,6 +156,22 @@ export function mascotGet<K extends MascotKey>(settings: unknown, key: K): Widen
     cur = (cur as Record<string, unknown>)[part];
   }
   return (typeof cur === typeof fallback ? cur : fallback) as never;
+}
+
+// ── モーションの確認 ──
+
+export type MotionPreviewState = "notRunning" | "idleOff" | "loading" | "empty" | "ready";
+
+/** 再生できない理由。`motions` は null が読み込み中、空配列が空 */
+export function motionPreviewState(s: {
+  running: boolean;
+  idleMotion: boolean;
+  motions: string[] | null;
+}): MotionPreviewState {
+  if (!s.running) return "notRunning";
+  if (!s.idleMotion) return "idleOff";
+  if (s.motions === null) return "loading";
+  return s.motions.length === 0 ? "empty" : "ready";
 }
 
 // ── エラー文言 ──

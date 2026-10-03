@@ -37,12 +37,10 @@ namespace ChatterMascot.Tests
         [Test]
         public void RoundTrips()
         {
-            var written = SettingsJson.Write(MascotSettings.Defaults.WithMuted(true).WithMuteHotKey("cmd+shift+m").WithHideHotKey("cmd+shift+h"));
+            var written = SettingsJson.Write(MascotSettings.Defaults.WithMuted(true));
             var parsed = Parse(written);
 
             Assert.That(parsed.Muted, Is.True);
-            Assert.That(parsed.MuteHotKey, Is.EqualTo("cmd+shift+m"));
-            Assert.That(parsed.HideHotKey, Is.EqualTo("cmd+shift+h"));
             Assert.That(_warnings, Is.Empty);
         }
 
@@ -51,8 +49,6 @@ namespace ChatterMascot.Tests
         {
             var parsed = Parse("{}");
             Assert.That(parsed.Muted, Is.EqualTo(MascotSettings.Defaults.Muted));
-            Assert.That(parsed.MuteHotKey, Is.EqualTo(HotKeySpec.Default));
-            Assert.That(parsed.HideHotKey, Is.EqualTo(HotKeySpec.DefaultHide));
         }
 
         /// <summary>★ ファイル全体が読めないケース。呼び出し側は直前値を維持する。</summary>
@@ -85,43 +81,26 @@ namespace ChatterMascot.Tests
         [Test]
         public void FallsBackPerKeyOnBadValues()
         {
-            var parsed = Parse("{\"audio\":{\"mute\":\"yes\",\"muteHotKey\":\"cmd+shift+m\"}}");
+            var parsed = Parse("{\"audio\":{\"mute\":\"yes\",\"volume\":0.3}}");
 
             Assert.That(parsed.Muted, Is.False, "mute だけ既定へ");
-            Assert.That(parsed.MuteHotKey, Is.EqualTo("cmd+shift+m"), "他のキーは生きる");
+            Assert.That(parsed.Volume, Is.EqualTo(0.3f), "他のキーは生きる");
             Assert.That(_warnings, Has.Count.EqualTo(1));
         }
 
         /// <summary>
-        /// ★★ <b>登録できないショートカットを保存させないこと。</b> 修飾キー無しを通すと、
-        /// 次の起動でそのキーが全アプリから奪われる（→ <c>HotKeySpec</c>）。
+        /// ★ ショートカットは ChatterAgent が持つキー。マスコットは使わないので、
+        ///   警告せずに読み飛ばす（不正な値でも同じ）。
         /// </summary>
         [Test]
-        public void RejectsAnUnregisterableHotKey()
+        public void SkipsTheHotKeysWithoutWarning()
         {
-            var parsed = Parse("{\"audio\":{\"muteHotKey\":\"m\"}}");
+            var parsed = Parse(
+                "{\"audio\":{\"mute\":true,\"muteHotKey\":\"ctrl+opt+m\"}," +
+                "\"ui\":{\"hideHotKey\":\"h\"}}");
 
-            Assert.That(parsed.MuteHotKey, Is.EqualTo(HotKeySpec.Default));
-            Assert.That(_warnings, Has.Count.EqualTo(1));
-        }
-
-        /// <summary>ui は audio と同じ作法（キー単位で既定に倒す / 未知キーは無視）。</summary>
-        [Test]
-        public void ReadsTheHideHotKey()
-        {
-            var parsed = Parse("{\"ui\":{\"hideHotKey\":\"cmd+shift+h\"}}");
-
-            Assert.That(parsed.HideHotKey, Is.EqualTo("cmd+shift+h"));
+            Assert.That(parsed.Muted, Is.True);
             Assert.That(_warnings, Is.Empty);
-        }
-
-        [Test]
-        public void RejectsAnUnregisterableHideHotKey()
-        {
-            var parsed = Parse("{\"ui\":{\"hideHotKey\":\"h\"}}");
-
-            Assert.That(parsed.HideHotKey, Is.EqualTo(HotKeySpec.DefaultHide));
-            Assert.That(_warnings, Has.Count.EqualTo(1));
         }
 
         [Test]
@@ -224,31 +203,26 @@ namespace ChatterMascot.Tests
             Assert.That(parsed.Volume, Is.EqualTo(SettingsMapping.VolumeMax));
         }
 
-        /// <summary>
-        /// ★★ キャラクターの大きさは <c>window.json</c> が持つ。
-        ///   ここに書くと権威が2つになるので、<c>character</c> には**書かないし読まない**
-        ///   （前の版が書いた <c>character.scale</c> は未知キーとして警告して無視する）。
-        ///
-        /// ★ <b><c>character</c> セクションに絞って見ること。</b> <c>xr.height</c>
-        ///   （→ <see cref="MascotSettings.XrHeight"/>）は別概念で、こちらは正当に書く。
-        /// </summary>
         [Test]
-        public void DoesNotStoreTheCharacterSize()
+        public void RoundTripsTheCharacterScale()
         {
-            var character = (JObject)JObject.Parse(SettingsJson.Write(MascotSettings.Defaults))["character"];
-            Assert.That(character.ContainsKey("scale"), Is.False);
+            var parsed = Parse(SettingsJson.Write(MascotSettings.Defaults.WithScale(1.4f)));
 
-            MascotSettings parsed;
-            string error;
-            var warnings = new List<string>();
-            Assert.That(
-                SettingsJson.TryParse(
-                    "{\"version\":1,\"character\":{\"scale\":1.4,\"blink\":false}}",
-                    out parsed, out error, warnings.Add),
-                Is.True, error);
+            Assert.That(parsed.Scale, Is.EqualTo(1.4f).Within(0.0001f));
+            Assert.That(_warnings, Is.Empty);
+        }
 
-            Assert.That(parsed.Blink, Is.False, "他のキーは読めること");
-            Assert.That(warnings, Has.Some.Contains("scale"));
+        [Test]
+        public void DefaultsTheCharacterScaleWhenMissing()
+        {
+            Assert.That(Parse("{\"character\":{\"blink\":false}}").Scale, Is.EqualTo(SettingsMapping.DefaultScale));
+        }
+
+        [Test]
+        public void ClampsTheCharacterScaleIntoTheSliderRange()
+        {
+            Assert.That(Parse("{\"character\":{\"scale\":9}}").Scale, Is.EqualTo(SettingsMapping.ScaleMax));
+            Assert.That(Parse("{\"character\":{\"scale\":0.1}}").Scale, Is.EqualTo(SettingsMapping.ScaleMin));
         }
 
         /// <summary>★ 数値ですらないときは既定に倒す（クランプする先が無い）</summary>
@@ -550,7 +524,7 @@ namespace ChatterMascot.Tests
             Assert.That(written, Does.Contain("\"feetBelowEye\""));
             // ★ 未換算の倍率が無い（既定）間は scale を書かない——
             //   両方書き続けると、手で height を直しても scale が優先されるように見えかねない
-            Assert.That(written, Does.Not.Contain("\"scale\""));
+            Assert.That(((JObject)JObject.Parse(written)["xr"]).ContainsKey("scale"), Is.False);
         }
 
         [Test]
@@ -667,11 +641,11 @@ namespace ChatterMascot.Tests
         public void WritesBackTheLegacyScaleUntilItIsResolved()
         {
             var pending = SettingsJson.Write(MascotSettings.Defaults.WithXrLegacyScale(0.3f));
-            Assert.That(pending, Does.Contain("\"scale\": 0.3"), "情報を失わないよう書き戻す");
+            Assert.That(JObject.Parse(pending)["xr"]["scale"].Value<float>(), Is.EqualTo(0.3f).Within(0.0001f), "情報を失わないよう書き戻す");
 
             var resolved = SettingsJson.Write(
                 MascotSettings.Defaults.WithXrHeight(60f).WithXrLegacyScale(0f));
-            Assert.That(resolved, Does.Not.Contain("\"scale\""), "確定したら書かない");
+            Assert.That(((JObject)JObject.Parse(resolved)["xr"]).ContainsKey("scale"), Is.False, "確定したら書かない");
         }
 
         [Test]

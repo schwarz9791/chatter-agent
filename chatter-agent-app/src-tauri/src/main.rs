@@ -77,6 +77,21 @@ impl Settings {
     }
 }
 
+#[derive(serde::Serialize)]
+struct About {
+    version: String,
+    notice: &'static str,
+}
+
+/// 通知はビルド時にリポジトリの NOTICE を埋め込む。コピーを持たないので食い違わない。
+#[tauri::command]
+fn about(app: tauri::AppHandle) -> About {
+    About {
+        version: app.package_info().version.to_string(),
+        notice: include_str!("../../../NOTICE"),
+    }
+}
+
 /// 設定窓を前面に出す。無ければ作る。
 fn open_settings(app: &tauri::AppHandle, title: &str) {
     if let Some(w) = app.get_webview_window("settings") {
@@ -92,6 +107,9 @@ fn open_settings(app: &tauri::AppHandle, title: &str) {
     )
     .title(title)
     .inner_size(520.0, 720.0)
+    // 幅は固定で、高さだけ変えられる。
+    .min_inner_size(520.0, 400.0)
+    .max_inner_size(520.0, 4000.0)
     .resizable(true)
     .build();
     // Accessory アプリは自分から前面に出ない。
@@ -116,7 +134,10 @@ fn main() {
             mascot::pick_vrm,
             mascot::confirm,
             mascot::mascot_reset,
+            mascot::mascot_state,
+            mascot::mascot_request,
             text::lang,
+            about,
         ])
         .setup(|app| {
             // tao は起動時に Regular へ戻すため、LSUIElement だけでは Dock に出る。
@@ -302,6 +323,11 @@ fn main() {
                 RunEvent::ExitRequested {
                     code: None, api, ..
                 } => api.prevent_exit(),
+                // マスコットの右クリックと Finder 等からの開き直しで設定窓を出す。
+                #[cfg(target_os = "macos")]
+                RunEvent::Reopen { .. } => {
+                    open_settings(app, text::current().settings_title);
+                }
                 RunEvent::Exit => {
                     if let Some(c) = app.try_state::<Clients>() {
                         c.stop_sync();

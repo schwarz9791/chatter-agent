@@ -49,7 +49,7 @@ the built `.app` / `.apk`.**
   - UniWindowController (https://github.com/kirurobo/UniWindowController)
       Copyright (c) 2020 Kirurobo, licensed under the MIT License.
       Handles window transparency, always-on-top and click-through on
-      macOS / Windows, and the native file selection dialog (FilePanel).
+      macOS / Windows.
       ★ **Distributing it carries the obligation to include the MIT
         copyright notice and license text.**
         This used to say that the LICENSE.md inside the package was that
@@ -167,12 +167,10 @@ the `.app` / `.apk` as well.
       **Unmodified.** The idle motion (→ issue #59).
 
   - NOTICE.txt — **a copy of this very file** (→ issue #76).
-      "About this app" in the settings panel reads it from there.
-      ★ **Do not embed it in a C# string literal.** It would be updated
-        separately from the repository's NOTICE and drift out of sync in
-        silence. **An EditMode test (NoticeTests) pins the two together.**
-      ★ After a build, it is the `StreamingAssets` copy inside the `.app`
-        that is read.
+      It exists so that the notice ships inside the `.app` / `.apk`.
+      ★ **An EditMode test (NoticeTests) pins the two together.**
+      ChatterAgent's settings window shows the repository's NOTICE, embedded
+      at build time.
 
 ---
 

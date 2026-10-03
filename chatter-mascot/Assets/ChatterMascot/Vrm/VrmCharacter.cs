@@ -186,7 +186,7 @@ namespace ChatterMascot.Vrm
         ///   作った <c>List</c> を無条件に使い回していたので、<see cref="OnDisable"/> で
         ///   <see cref="_motion"/> を捨てても古い一覧を返し続けた。<c>Loaded</c> が別のインスタンスに
         ///   なった（読み込み直した）か <c>null</c> に戻ったら作り直す。キャッシュ自体を無くさないのは、
-        ///   設定パネルを開いている間 <c>SettingsPanelBridge.Tick</c> が毎フレームここを見に来るため
+        ///   設定パネルを開いている間 <c>XrSettingsBridge</c> が毎フレームここを見に来るため
         ///   （常駐アプリで毎フレーム <c>List</c> を確保しない）。
         /// </summary>
         public IReadOnlyList<MotionClip> MotionClips
@@ -219,7 +219,7 @@ namespace ChatterMascot.Vrm
         /// ★ 感情モーション再生中（<c>_motion.IsPlayingEmotion</c>）は <see cref="VrmMotionPlayer.Play"/>
         ///   自身が拒否する（感情モーション同士は割り込まない、ユーザーと決めたこと）。
         /// ★★ 戻り値は <see cref="MotionPlayResult"/>（#70 レビュー #5）。呼び出し側
-        ///   （<c>SettingsPanelBridge</c>）はこれを <c>SettingsSchema.MotionPlayNotice</c> に渡すだけで
+        ///   （<c>XrSettingsBridge</c>）はこれを <c>SettingsSchema.MotionPlayNotice</c> に渡すだけで
         ///   拒否理由ごとの文言を出す——以前は全部 <c>bool</c> の <c>false</c> にまとめていたため、
         ///   「読み込み中で押せない」も「もう鳴っている」も同じ「再生中です」になっていた。
         /// ★ <c>_motion == null</c>（読み込みの前段——<see cref="OnLoaded"/> がまだ走っていない、

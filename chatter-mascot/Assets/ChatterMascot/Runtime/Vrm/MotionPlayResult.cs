@@ -1,8 +1,7 @@
 namespace ChatterMascot.Vrm
 {
     /// <summary>
-    /// <c>VrmMotionPlayer.Play</c>（および <c>VrmCharacter.PreviewMotion</c> /
-    /// <c>ISettingsHost.PlayMotion</c>）が返す、再生を開始できたか・できなかったならその理由。
+    /// <c>VrmMotionPlayer.Play</c>（および <c>VrmCharacter.PreviewMotion</c>）が返す、再生を開始できたか・できなかったならその理由。
     ///
     /// ★ <c>VrmMotionPlayer.Play</c> の拒否条件と 1 対 1 で対応する（#70 レビュー #5）。
     ///   以前は全部 <c>bool</c> の <c>false</c> にまとめていたため、設定パネルの「再生」ボタンは

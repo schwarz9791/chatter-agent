@@ -18,6 +18,7 @@ namespace ChatterMascot.Settings
         public const float ScaleMin = 0.5f;
         public const float ScaleMax = 2.0f;
         public const float ScaleStep = 0.1f;
+        public const float DefaultScale = 1f;
 
         /// <summary>
         /// 音量の範囲と刻み。<b>0.0〜1.0</b>（画面には <b>0〜100%</b> で出る。
@@ -38,19 +39,11 @@ namespace ChatterMascot.Settings
         public const float VolumeStep = 0.1f;
 
         /// <summary>
-        /// 話速の範囲と刻み。★ <b>表示上のもので、値域の権威は core の <c>SPECS</c>。</b>
-        /// ズレても <c>PATCH /v1/config</c> が 400 を返すだけで、黙って効かない値にはならない。
-        /// </summary>
-        public const float SpeedMin = 0.5f;
-        public const float SpeedMax = 2.0f;
-        public const float SpeedStep = 0.1f;
-
-        /// <summary>
         /// Android XR の空間固定パラメータの範囲と既定値（→ <see cref="MascotSettings.XrDistance"/> ほかの doc）。
         ///
         /// ★★ <b><see cref="ScaleMin"/> / <see cref="ScaleMax"/>（デスクトップのウィンドウ倍率）とは
         ///   別物。</b> 混同しないよう、こちらは必ず <c>Xr</c> を頭に付けて区別する。
-        /// ★ 刻み（<c>Step</c>）は持たない。デスクトップの設定パネルにスライダーを出さないので、
+        /// ★ 刻み（<c>Step</c>）は持たない。XR の設定パネルにスライダーを出さないので、
         ///   刻みへ丸める理由が無い（→ <see cref="SettingsJson"/> の <c>xr</c> 読み取り）。
         /// ★ 既定は「机の上のミニチュアを、正面の画面を避けた右側に」置く。グラスの表示視野は
         ///   ヘッドセットより狭いので、方位と足元の深さは<b>起動時の正面を向いたまま全身が視野に
@@ -231,21 +224,6 @@ namespace ChatterMascot.Settings
             var clamped = Clamp(RoundToStep(scale, ScaleStep), ScaleMin, ScaleMax);
             width = baseWidth * clamped;
             height = baseHeight * clamped;
-        }
-
-        /// <summary>
-        /// <see cref="WindowSizeFor"/> の逆。**いまのウィンドウの大きさ**を倍率に読み替える。
-        ///
-        /// ★★ <b>倍率を <c>settings.json</c> に持たないための関数。</b> ウィンドウの大きさは
-        ///   既に <c>window.json</c> が持っているので、両方に持つと権威が2つになる
-        ///   （ユーザーが窓を直接リサイズしたとき、どちらが勝つのか説明できない）。
-        ///
-        /// ★ 高さで見る。窓の縦横比が変わっても（#88）権威は高さのままで、幅は同じ倍率で付いてくる。
-        /// </summary>
-        public static float ScaleForWindow(float height, float baseHeight)
-        {
-            if (!(baseHeight > 0f) || !(height > 0f)) return 1f;
-            return Clamp(RoundToStep(height / baseHeight, ScaleStep), ScaleMin, ScaleMax);
         }
 
         /// <summary>

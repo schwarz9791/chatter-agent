@@ -12,8 +12,7 @@ namespace ChatterMascot.EditorTools
     ///   Unity のバージョンと <c>NamedBuildTarget</c> で変わる。Inspector の Icon タブへ
     ///   1枚ずつドラッグする手順書は、バージョンが上がった瞬間に欄の数が合わなくなって
     ///   陳腐化する。<see cref="PlayerSettings.GetIconSizes"/> に聞いて配列を作れば、
-    ///   何が要求されているかを機械的に追従できる（<c>NativePluginSettings</c> /
-    ///   <c>SceneFixups</c> と同じ立ち位置）。
+    ///   何が要求されているかを機械的に追従できる（<c>SceneFixups</c> と同じ立ち位置）。
     ///
     ///   ./scripts/run.sh ChatterMascot.EditorTools.IconSettings.FixAll
     ///

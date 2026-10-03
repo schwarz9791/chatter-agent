@@ -61,22 +61,6 @@ namespace ChatterMascot.Tests
             Assert.That(height / width, Is.EqualTo(BaseHeight / BaseWidth).Within(0.0001f));
         }
 
-        /// <summary>★★ 倍率は settings.json に持たない。いまの窓から読み替える</summary>
-        [Test]
-        public void SizeAndScaleRoundTrip()
-        {
-            foreach (var scale in new[] { 0.5f, 0.8f, 1f, 1.4f, 2f })
-            {
-                float width, height;
-                SettingsMapping.WindowSizeFor(scale, BaseWidth, BaseHeight, out width, out height);
-
-                Assert.That(
-                    SettingsMapping.ScaleForWindow(height, BaseHeight),
-                    Is.EqualTo(scale).Within(0.0001f),
-                    $"scale={scale} が往復しない");
-            }
-        }
-
         [Test]
         public void ClampsTheScaleToTheSliderRange()
         {
@@ -86,14 +70,6 @@ namespace ChatterMascot.Tests
 
             SettingsMapping.WindowSizeFor(-5f, BaseWidth, BaseHeight, out width, out height);
             Assert.That(height, Is.EqualTo(BaseHeight * SettingsMapping.ScaleMin).Within(0.001f));
-        }
-
-        /// <summary>★ 0 で割らないこと（窓の大きさが読めないときは等倍に倒す）</summary>
-        [Test]
-        public void FallsBackToUnityScaleForUnreadableSizes()
-        {
-            Assert.That(SettingsMapping.ScaleForWindow(0f, BaseHeight), Is.EqualTo(1f));
-            Assert.That(SettingsMapping.ScaleForWindow(BaseHeight, 0f), Is.EqualTo(1f));
         }
 
         /// <summary>★★ スライダーから来る float は 0.7000000119 になりうる</summary>

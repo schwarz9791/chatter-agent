@@ -4,76 +4,34 @@ using ChatterMascot.Ui;
 namespace ChatterMascot.Settings
 {
     /// <summary>
-    /// 設定パネルを描画する側のプラットフォーム。<see cref="SettingsSchema.Build"/> が
-    /// 出し分けの唯一の入力に使う（→ <see cref="SettingsContext.Platform"/>）。
-    /// </summary>
-    public enum SettingsPlatform
-    {
-        Desktop,
-        Xr,
-    }
-
-    /// <summary>
-    /// 設定パネルの項目に流し込む「その時々の状態」。<c>MenuState</c>（#75）と同じ役回りで、
-    /// <see cref="SettingsSchema.Build"/> の唯一の入力。
+    /// 設定パネルの項目に流し込む「その時々の状態」。
+    /// <see cref="SettingsSchema.BuildXr"/> の唯一の入力。
     ///
     /// ★ <b>ここに <c>MonoBehaviour</c> や <c>UnityWebRequest</c> を持ち込まないこと。</b>
     ///   スキーマを純粋関数のままにしておくと、EditMode テストから
     ///   「サーバーが落ちているときの見え方」まで固定できる。
-    ///
-    /// ★ <b>値の行き先は3つある</b>（→ <see cref="MascotSettings"/>）:
-    ///   Unity の <c>settings.json</c> / core の <c>config.json</c> / 読むだけ。
-    ///   ここは3つを1つの器にまとめているだけで、書き戻し先は
-    ///   <c>SettingsPanelBridge</c> が振り分ける。
     /// </summary>
     public sealed class SettingsContext
     {
-        private static readonly SettingChoice[] NoChoices = new SettingChoice[0];
-
-        /// <summary>
-        /// 設定パネルを描画している側。既定は <see cref="SettingsPlatform.Desktop"/>。
-        ///
-        /// ★★ <b><see cref="SettingsSchema.Build"/> の出し分けの唯一の入力。</b> ここ以外に
-        ///   プラットフォームを見る分岐を増やさないこと——増やすと、Desktop の出力が
-        ///   変わらないことを保証する場所が2つになる。
-        /// </summary>
-        public SettingsPlatform Platform { get; set; } = SettingsPlatform.Desktop;
-
         /// <summary>画面に出す文言の表。既定は日本語（→ <see cref="UiText.For"/>）</summary>
         public UiText Text { get; set; } = UiText.Ja;
 
         // ── Unity 側が権威を持つ値 ─────────────────────────────
         public MascotSettings Settings { get; set; } = MascotSettings.Defaults;
 
-        /// <summary>選択中の VRM のファイル名。空なら同梱モデル</summary>
-        public string VrmFileName
-        {
-            get { return Settings.VrmFileName; }
-        }
-
         /// <summary>
-        /// キャラクターの大きさ（＝<b>ウィンドウの倍率</b>）。1.0 が出荷値。
-        ///
-        /// ★★ <b><see cref="MascotSettings"/> に持たない。</b> ウィンドウの大きさは
-        ///   <c>window.json</c> が持っているので、**いまの窓から読み替えて**ここに入れる
-        ///   （→ <see cref="SettingsMapping.ScaleForWindow"/>）。両方に持つと権威が2つになる。
-        /// </summary>
-        public float WindowScale { get; set; } = 1f;
-
-        /// <summary>
-        /// 「モーションを確認」（#70 派生）の選択肢。<c>SettingsSchema.MotionPreviewChoices</c> が
-        /// <c>ISettingsHost.MotionClips</c> から変換したものをそのまま持つ（<see cref="Speakers"/> と
-        /// 同じ、他所が権威を持つ値の写し方）。
+        /// 「モーションを確認」の選択肢。<c>SettingsSchema.MotionPreviewChoices</c> が
+        /// <c>VrmCharacter.MotionClips</c> から変換したものをそのまま持つ。
         ///
         /// ★★ <b>既定は <c>null</c>。空配列にしないこと。</b> <c>null</c> は「マニフェストが
         ///   まだ読み込まれていない」、空配列は「読み込んだが1本も無い」——別の状態で、
-        ///   出す note も無効化の理由も違う（→ <c>SettingsSchema</c> の doc）。
+        ///   出す note も無効化の理由も違う（→ <see cref="SettingsSchema.BuildXr"/>）。
         /// </summary>
         public IReadOnlyList<SettingChoice> MotionClips { get; set; }
 
         /// <summary>
         /// XR の「大きさ」の選択肢（→ <see cref="SettingsMapping.XrHeightSteps"/> ＋
-        /// <see cref="SettingsMapping.XrHeightChoices"/>）。デスクトップでは使わない。
+        /// <see cref="SettingsMapping.XrHeightChoices"/>）。
         ///
         /// ★★ <b>既定は <c>null</c>。空配列にしないこと。</b> <see cref="MotionClips"/> と同じ
         ///   規約——段は読み込んだモデルの実寸から作るので、モデルが読めるまで <c>null</c>
@@ -87,81 +45,10 @@ namespace ChatterMascot.Settings
         /// <summary>
         /// 「モーションを確認」で選択中の id（<c>"idle/Hub_Idle01.vrma"</c> の形）。
         ///
-        /// ★★ <b>保存しない。</b> <c>settings.json</c> にも core の <c>config.json</c> にも
-        ///   書かない——ここは確認用の一時的な選択で、本番の再生（文の <c>emotion</c> から
-        ///   自動で選ぶ）とは別物。パネルを閉じたら忘れてよい（<c>SettingsPanelBridge</c> は
-        ///   <c>Close</c> / <c>NotifyClosed</c> で <c>_notices</c> は消すが、この値は
-        ///   <c>_context</c> ごと次に開くときまで残る——それでよい。値の行き先が3つある
-        ///   （→ このクラスの doc）のに、これは<b>そのどれでもない4つ目</b>）。
+        /// ★★ <b>保存しない。</b> <c>settings.json</c> にも書かない——ここは確認用の
+        ///   一時的な選択で、本番の再生（文の <c>emotion</c> から自動で選ぶ）とは別物。
+        ///   パネルを閉じたら忘れてよい。
         /// </summary>
         public string MotionPreview { get; set; } = "";
-
-        // ── core 側が権威を持つ値 ─────────────────────────────
-
-        /// <summary>
-        /// 制御 API に繋がったか。
-        ///
-        /// ★★ <b>繋がらないときに項目を消さないこと。</b> <c>Enabled = false</c> +
-        ///   <see cref="CoreNote"/> で出す。消すと「設定が無い」に見える。
-        /// </summary>
-        public bool CoreReachable { get; set; }
-
-        /// <summary>繋がらない理由。項目の <c>note</c> に出す</summary>
-        public string CoreNote
-        {
-            get { return _coreNote ?? Text.CoreUnreachable; }
-            set { _coreNote = value; }
-        }
-
-        private string _coreNote;
-
-        /// <summary>話者の候補。空なら取得できていない</summary>
-        public IReadOnlyList<SettingChoice> Speakers { get; set; } = NoChoices;
-
-        /// <summary>合成エンジン（<c>ttsEngine</c>）。声を書き込むキーがこれで変わる</summary>
-        public string TtsEngine { get; set; } = "voicevox";
-
-        /// <summary>選択中の話者 ID（文字列）</summary>
-        public string SpeakerId { get; set; } = "";
-
-        public float SpeedScale { get; set; } = 1f;
-
-        public bool SummaryEnabled { get; set; }
-
-        /// <summary>要約に使うエンジン（"fm" | "claude"）。既定は core と揃えて "fm"</summary>
-        public string AiSummaryBackend { get; set; } = "fm";
-
-        /// <summary>感情判定に使うエンジン（"ollaya" | "fm" | "dictionary"）。既定は core と揃えて "ollaya"</summary>
-        public string EmotionClassifier { get; set; } = "ollaya";
-
-        /// <summary>
-        /// 環境変数が勝っている core の設定キー（<c>ttsSpeakerId</c> など）。
-        ///
-        /// ★ 触れるように出すと <c>PATCH</c> が 409 を返すだけで、ユーザーには
-        ///   「変えたのに戻る」としか見えない。**先に無効化して理由を出す**。
-        /// </summary>
-        public IReadOnlyCollection<string> CoreEnvOverridden { get; set; } = new string[0];
-
-        // ── 読むだけ ─────────────────────────────────────────
-        public string ProductName { get; set; } = "Chatter Mascot";
-        public string Version { get; set; } = "";
-
-        /// <summary>
-        /// <c>NOTICE</c> の本文（<c>StreamingAssets/NOTICE.txt</c>）。
-        ///
-        /// ★ <b>C# の文字列リテラルに埋め込まないこと。</b> リポジトリの <c>NOTICE</c> と
-        ///   別々に更新されて静かにズレる。読めなかったときは空のまま出す（項目は消さない）。
-        /// </summary>
-        public string LicenseText { get; set; } = "";
-
-        public bool IsCoreEnvOverridden(string coreKey)
-        {
-            if (CoreEnvOverridden == null) return false;
-            foreach (var key in CoreEnvOverridden)
-            {
-                if (key == coreKey) return true;
-            }
-            return false;
-        }
     }
 }

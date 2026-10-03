@@ -38,19 +38,13 @@ namespace ChatterMascot.Settings
                 ["audio"] = new JObject
                 {
                     ["mute"] = settings.Muted,
-                    ["muteHotKey"] = settings.MuteHotKey ?? HotKeySpec.Default,
                     // ★ 刻みに丸めてから書くこと。スライダー由来の 0.7000000119 を
                     //   そのまま残すと、次に開いたときハンドルが刻みに乗らない位置から始まる
                     ["volume"] = Round(settings.Volume, SettingsMapping.VolumeStep),
                 },
-                ["ui"] = new JObject
-                {
-                    ["hideHotKey"] = settings.HideHotKey ?? HotKeySpec.DefaultHide,
-                },
-                // ★ ここに「大きさ」は入らない。ウィンドウの大きさは window.json が持つ
-                //   （→ MascotSettings の型 doc）
                 ["character"] = new JObject
                 {
+                    ["scale"] = Round(settings.Scale, SettingsMapping.ScaleStep),
                     ["idleMotion"] = settings.IdleMotion,
                     ["cursorGaze"] = settings.CursorGaze,
                     ["blink"] = settings.Blink,
@@ -211,9 +205,8 @@ namespace ChatterMascot.Settings
                             ReadBool(property.Value, "audio.mute", settings.Muted, warn));
                         break;
 
+                    // ★ ショートカットは ChatterAgent が持つ。マスコットは使わないので警告せずに読み飛ばす
                     case "muteHotKey":
-                        settings = settings.WithMuteHotKey(
-                            ReadHotKey(property.Value, "audio.muteHotKey", settings.MuteHotKey, warn));
                         break;
 
                     case "volume":
@@ -243,9 +236,8 @@ namespace ChatterMascot.Settings
             {
                 switch (property.Key)
                 {
+                    // ★ ショートカットは ChatterAgent が持つ。マスコットは使わないので警告せずに読み飛ばす
                     case "hideHotKey":
-                        settings = settings.WithHideHotKey(
-                            ReadHotKey(property.Value, "ui.hideHotKey", settings.HideHotKey, warn));
                         break;
 
                     default:
@@ -287,6 +279,12 @@ namespace ChatterMascot.Settings
                     case "vrm":
                         settings = settings.WithVrmFileName(
                             ReadFileName(property.Value, "character.vrm", settings.VrmFileName, warn));
+                        break;
+
+                    case "scale":
+                        settings = settings.WithScale(ReadNumber(
+                            property.Value, "character.scale", settings.Scale,
+                            SettingsMapping.ScaleMin, SettingsMapping.ScaleMax, SettingsMapping.ScaleStep, warn));
                         break;
 
                     case "walk":
@@ -454,7 +452,7 @@ namespace ChatterMascot.Settings
         /// ★★ <b>ここが入口。</b> この値はそのまま WebSocket / HTTP のヘッダに載るので、
         ///   改行など制御文字を含む値を通すと、送信側の実装によっては例外や
         ///   ヘッダインジェクションになりうる。通す場所を1つに絞れば、送る側
-        ///   （<c>SpeechClient</c> / <c>AudioFetcher</c> / <c>CoreConfigClient</c>）は
+        ///   （<c>SpeechClient</c> / <c>AudioFetcher</c>）は
         ///   検査を持たなくてよい。
         ///
         /// ★ <c>\A</c> / <c>\z</c> と <c>RegexOptions.None</c> の理由は <c>SpeechEpoch.Pattern</c> と同じ。
@@ -597,26 +595,6 @@ namespace ChatterMascot.Settings
                 Warn(warn, $"{key} は 30 か 60 です（{raw}）。既定の {SettingsMapping.DefaultFrameRate} を使います");
             }
             return normalized;
-        }
-
-        /// <summary>
-        /// ★ <b>ここで妥当性まで見ること。</b> 「修飾キー無し」を保存できてしまうと、
-        /// 次の起動でそのキーが<b>全アプリから奪われる</b>（→ <see cref="HotKeySpec"/>）。
-        /// </summary>
-        private static string ReadHotKey(JToken value, string key, string fallback, Action<string> warn)
-        {
-            if (value.Type != JTokenType.String)
-            {
-                Warn(warn, $"{key} が文字列ではありません（{value}）。既定を使います");
-                return fallback;
-            }
-
-            var text = value.Value<string>();
-            HotKeySpec spec;
-            string reason;
-            if (HotKeySpec.TryParse(text, out spec, out reason)) return text;
-            Warn(warn, $"{key} を使えません（{reason}）。既定を使います");
-            return fallback;
         }
 
         /// <summary>

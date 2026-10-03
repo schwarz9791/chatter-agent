@@ -39,7 +39,7 @@ Claude Code
 | | Responsibilities |
 |---|---|
 | **server** | receiving the messages, formatting text (Markdown removal, sentence splitting, emotion classification, AI summarization), managing and delivering the speech queue, speech synthesis (including waking the synthesis engine up), holding settings |
-| **client** | receiving speech, fetching and playing audio, notifying that playback finished (ack), VRM rendering / facial expressions / motion / lip sync, settings UI (desktop: native panel; Android XR: in-space panel), (desktop version only) window / staying resident |
+| **client** | receiving speech, fetching and playing audio, notifying that playback finished (ack), VRM rendering / facial expressions / motion / lip sync, (Android XR only) the in-space settings panel, (desktop version only) window / staying resident. The desktop settings UI lives in ChatterAgent |
 
 The speech contract is in [`docs/protocol.md`](./docs/protocol.md). If you're writing a client, that's all you need.
 
@@ -50,7 +50,7 @@ The speech contract is in [`docs/protocol.md`](./docs/protocol.md). If you're wr
 | `plugin/` | The Claude Code plugin. A bash hook just drops the payload |
 | `core/` | The server and CLIs (TypeScript / Node). `src/server/` `src/cli/` `src/player/` |
 | `chatter-mascot/` | The display-side app (Unity + UniVRM). macOS and Android XR from a single project |
-| `chatter-agent-app/` | ChatterAgent (Tauri). A menu bar app that starts and stops the server and shows, hides, and mutes the mascot |
+| `chatter-agent-app/` | ChatterAgent (Tauri). A menu bar app that starts and stops the server, hosts the settings panel, and shows, hides, mutes, resizes the mascot and previews its motions |
 | `docs/` | The basic design, file layout, and commands. What was learned along the way is in `docs/knowledge/` |
 
 ## Current state
@@ -73,7 +73,6 @@ There are four deliverables.
 - **Node 24.11 or later** (pinned to 24.19.0 in `mise.toml`)
 - **Unity 6000.3.14f1** — requires the macOS / Android build support modules
 - **Unity CLI** (`unity` command) — `chatter-mascot/scripts/*.sh` run the Editor through it
-- **Xcode command line tools** — used to build the native plugin for the macOS resident app (`xcode-select --install`)
 - **Android SDK platform-tools** (`adb`) — when installing the Android version onto a device
 
 Unity project setup steps are in [`docs/mascot.md`](./docs/mascot.md).
@@ -95,8 +94,9 @@ cd chatter-mascot
 ./scripts/build.sh           # → Build/ChatterMascot.app
 ```
 
-`build.sh` builds the native plugin (Objective-C) for the resident app first. **Right after cloning,
-finish the setup in [`docs/mascot.md`](./docs/mascot.md) before opening Unity.**
+**Right after cloning, finish the setup in [`docs/mascot.md`](./docs/mascot.md) before opening Unity.**
+The mascot only renders and plays: it has no settings panel, menu bar item, or shortcuts (and no Dock icon).
+Right-clicking the character opens ChatterAgent's settings panel (if ChatterAgent isn't running, it is just launched).
 
 ### Android XR client
 
@@ -164,20 +164,20 @@ Build `core/` first, then:
 ```bash
 cd chatter-agent-app
 npm install
-npm run build      # → src-tauri/target/release/bundle/macos/ChatterAgent.app
+npm run build      # → build/ChatterAgent.app
 ```
 
 Open the app and choose the `core/` folder once from the menu ("Choose Core Folder…"). It then starts
 the server with the same environment a login shell gives you. Starting it by hand as above keeps
 working; ChatterAgent shows it as running outside and leaves it alone. Its settings panel (menu → "Settings…")
-edits the server settings and the mascot settings.
+edits the server settings and the mascot settings (model, size, volume, motion, and so on). Right-clicking the mascot, or reopening ChatterAgent from Finder, brings the settings window to the front too.
 
 "Show Mascot / Hide Mascot" and "Mute" in the menu also switch which client is connected. While the
 mascot is shown, the macOS app plays the speech; while it is hidden, the CLI player plays the voice
 only; when it is hidden and muted, nothing is connected (connecting both would play everything twice,
 so ChatterAgent runs only one of them). The macOS app is looked up as `ChatterMascot.app` in
 `/Applications`, then `~/Applications`, then `chatter-mascot/Build`. Shortcuts work too (by default
-⌃⌥M toggles mute and ⌃⌥H shows or hides the mascot). Details are in
+⌃⌥M toggles mute and ⌃⌥H shows or hides the mascot; only ChatterAgent registers them). Details are in
 [`docs/agent.md`](./docs/agent.md).
 
 ### Client
@@ -217,7 +217,7 @@ cd chatter-mascot
 
 ## Models and motion
 
-**The main settings can be changed from the macOS client.** Right-click the character, or use the menu bar icon, to open the settings panel — model, size, volume, speaking speed, voice style, motion, summarization, shortcuts.
+**The main settings can be changed from ChatterAgent's settings panel.** Right-click the character, or use ChatterAgent's menu bar icon, to open it — model, size, volume, speaking speed, voice style, motion preview, summarization, shortcuts. The mascot itself only reads the settings; it never writes them.
 
 Settings and assets live under `~/.config/chatter-agent/` (or under `XDG_CONFIG_HOME` if you've set it).
 
@@ -225,9 +225,9 @@ Settings and assets live under `~/.config/chatter-agent/` (or under `XDG_CONFIG_
 ~/.config/chatter-agent/
 ├── config.json               server settings
 ├── emotion-keywords.json     emotion-classification keywords (delete to restore defaults)
-├── mascot/settings.json      client settings
-├── mascot/window.json        window position and size
-├── models/mascot.vrm         the model chosen in the settings panel
+├── mascot/settings.json      client settings (size is `character.scale`; only ChatterAgent writes it)
+├── mascot/window.json        window position
+├── models/mascot.vrm         the model chosen in ChatterAgent's settings panel
 └── animations/               motion (placed by hand)
 ```
 
@@ -240,7 +240,7 @@ Settings and assets live under `~/.config/chatter-agent/` (or under `XDG_CONFIG_
 | `animations/happy/` `angry/` `sad/` `relaxed/` `surprised/` | plays once for speech with that emotion → returns to idle |
 | `animations/walk/` | the walking motion for wandering in XR (looped; unused on macOS) |
 
-The model can be swapped from the settings panel, but **there's no UI for motion.** Create the directory, drop a `.vrma` file in, and it's picked up on the next launch. There's no directory for `neutral` (the default behavior is not to play an emotion motion).
+The model can be swapped from ChatterAgent's settings panel, and motions can be previewed in its "Motion" section, but **there's no UI for placing motions.** Create the directory, drop a `.vrma` file in, and it's picked up on the next launch. There's no directory for `neutral` (the default behavior is not to play an emotion motion).
 
 **Android XR uses the same directories** (under `Android/data/tech.sukima.chattermascot/files/` on the
 device), but **you don't need `adb push`.** Once the connection target and token are configured

@@ -357,7 +357,7 @@ Ordinal 昇順に並ぶ。
 
 ## 制御 API — `/v1/*`
 
-**設定パネル（[#76](https://github.com/schwarz9791/chatter-agent/issues/76)）が設定を読み書きする口。**
+**設定パネル（ChatterAgent。→ [`agent.md`](./agent.md)。[#76](https://github.com/schwarz9791/chatter-agent/issues/76)）が設定を読み書きする口。**
 発話の契約とは独立していて、**繋がなくても発話は成立する**。
 
 ★★ **書き込み（`PATCH` / `POST`）は同じマシンからだけ。** それ以外は **404**。
@@ -390,9 +390,8 @@ GET   /v1/assets           200 {"files":[{"path":"models/mascot.vrm","size":1234
 
 ★★ **`GET /v1/speakers` の `id` は文字列。** Kokoro のような英字の声 ID（`af_heart` 等）を
 VOICEVOX 系の数値スタイル ID と同じ形で返すための変更（[#106](https://github.com/schwarz9791/chatter-agent/issues/106)）。
-**旧版の表示側アプリ（`chatter-mascot`）はこれを `Integer` として読むため、文字列の `id` は
-表示側の JSON デコードで丸ごと捨てられ、話者一覧が空になる。** サーバーと表示側アプリは
-両方まとめて更新すること——片方だけ上げると設定パネルの話者一覧だけが壊れる。
+制御 API のクライアントは ChatterAgent だけで（マスコットは叩かない）、`id` は文字列として読む。
+`id` を数値として読むクライアントを書くと、文字列の `id` を捨てて話者一覧が空になる。
 
 ### 書き込み口の絞りは3重
 

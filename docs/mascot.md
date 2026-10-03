@@ -17,7 +17,6 @@
 | JSON | `com.unity.nuget.newtonsoft-json` |
 | XR（Android のみ） | `com.unity.xr.androidxr-openxr`（Android XR Extensions for Unity は入れない → [#119](https://github.com/schwarz9791/chatter-agent/issues/119)） |
 | グラフィックス API | Metal（macOS）/ Android は **Vulkan 単独**（URP で Android XR を使うときの必須設定） |
-| 常駐（macOS のみ） | 自作の Objective-C プラグイン `Assets/Plugins/macOS~/ChatterMascotNative/` |
 
 ### 必要な Unity モジュール
 
@@ -27,29 +26,6 @@
 ★ **これ以外のプラットフォームを入れないこと。** OpenXR の設定アセットには、Editor に入っている
 Build Support の枠がそのまま生える。要らないものを入れておくと、**Unity を回すだけで追跡ファイルが
 汚れる**（→ [`docs/knowledge/mascot-android-xr.md`](./knowledge/mascot-android-xr.md)）。
-
-### Xcode コマンドラインツール（macOS のみ）
-
-メニューバー常駐のネイティブプラグインを `clang` でビルドするのに要る。
-
-```bash
-xcode-select --install   # 既に Xcode があれば不要
-./scripts/build-native.sh
-```
-
-`scripts/` 経由で Unity を回すとき（`build.sh` / `test.sh` / `run.sh` / `build-android.sh`）は
-自動で呼ばれるので、普段は意識しなくてよい。
-
-★ **Unity Hub から手で開くなど `scripts/` を通さないときは、開く前にここまで済ませること。**
-`.bundle` は git に無いので新規クローン直後は `.meta` しか無く、先に Unity を開くと
-**`.bundle.meta` の GUID ごとプラットフォームの絞りが飛ぶ**。**ビルドもテストも通ってしまうので、
-気づけるのは `git diff` だけ**（→ [`knowledge/mascot-unity.md`](./knowledge/mascot-unity.md)）。
-飛ばしてしまったら、バンドルがある状態で:
-
-```bash
-git checkout -- Assets/Plugins/macOS/ChatterMascotNative.bundle.meta
-./scripts/run.sh ChatterMascot.EditorTools.NativePluginSettings.FixAll
-```
 
 ### パッケージの導入
 
@@ -62,22 +38,16 @@ git checkout -- Assets/Plugins/macOS/ChatterMascotNative.bundle.meta
 "com.unity.nuget.newtonsoft-json": "3.2.1"
 ```
 
+★ **旧版（ネイティブプラグインがあった版）から上げたら `rm -rf chatter-mascot/Assets/Plugins/macOS` で
+残った実体を消す。** 残すと Unity が `.meta` を既定（全プラットフォーム）で作り直し、Android ビルドに
+macOS のバンドルが混ざって落ちる。
+
 ## 構成
 
 ```
 Assets/StreamingAssets/
   vita.vrm                          同梱モデル（CC0。→ ../NOTICE）
   idle_loop.vrma                    同梱アイドル
-  trayTemplate.png / @2x            メニューバーのアイコン（自作）
-
-Assets/Plugins/
-  macOS~/ChatterMascotNative/       `~` 付き。Unity は完全に無視する（ObjC のソース）
-    CMNative.h                      ABI。公開するものに CM_EXPORT を付ける
-    CMEvent.m                       C# へ返す唯一の口（main thread の保証もここ）
-    CMApp.m                         NSApplicationActivationPolicy / 版
-    CMStatusItem.m                  NSStatusItem + NSMenu（キーもラベルも書かない）
-    CMHotKey.m                      Carbon RegisterEventHotKey
-  macOS/ChatterMascotNative.bundle  成果物（.gitignore。.meta だけコミットする）
 
 Assets/ChatterMascot/
   Runtime/                          ChatterMascot.Runtime — 描画に依存しない層
@@ -91,12 +61,10 @@ Assets/ChatterMascot/
                 AudioClipPlayer.cs  AudioSource で1件ずつ鳴らす
                 MuteState.cs        一時ミュートの状態
                 MutedSpeechPlayer.cs 「声だけ消す」デコレータ。ack は通常経路のまま出す
-    Ui/         HotKeySpec.cs       "opt+m" ⇄ Carbon の (keyCode, modifiers)
-                MenuModel.cs        メニューの並びの唯一の持ち主
-                UiText.cs           画面の文言の表（言語ごとのサブクラス。→「画面の言語」）
-                MenuJson.cs         ネイティブとやり取りする JSON
-    Settings/   SettingsStore.cs    ~/.config/chatter-agent/mascot/settings.json
+    Ui/         UiText.cs           画面の文言の表（言語ごとのサブクラス。→「画面の言語」）
+    Settings/   SettingsStore.cs    ~/.config/chatter-agent/mascot/settings.json（読むだけ。書くのは XR だけ）
                 SettingsJson.cs / MascotSettings.cs
+                MascotRequest.cs    依頼箱の1通（resetWindow / playMotion）のパースと検証
     Vrm/        AssetPath.cs        .vrm / .vrma の探索順（純粋。下の表）
                 VrmFraming.cs       画面に収まるカメラ距離（純粋）
     Xr/         XrPlacement.cs      起動時の頭の姿勢 → XR Origin の配置（純粋）
@@ -124,12 +92,11 @@ Assets/ChatterMascot/
     WindowGeometry.cs               位置と大きさをポイントで復元・永続化
     DragStateGuard.cs               ドラッグ終了の取りこぼしでクリック透過が死ぬのを救う
     WindowProbe.cs                  座標系の実測（`-windowProbe` のときだけ動く）
-    StatusItemBridge.cs             メニューバー常駐の配線（判断は Runtime 側）
-    Native/ChatterMascotNative.cs   DllImport。可用性の判定は初回1回だけ
+    MascotInbox.cs                  依頼箱（mascot/requests/）を0.5秒ごとに読んで実行する
+    ContextClickHandles.cs          キャラクターの右クリック → ChatterAgent を開く（`MascotContextClick` と `ChatterAgentLauncher`）
   Editor/
     SceneFixups.cs                  シーンとプロジェクトの修繕・検査
-    MacPostBuild.cs                 Info.plist に LSUIElement を書く（Dock に出さない）
-    NativePluginSettings.cs         PluginImporter を出荷値にする
+    MacPostBuild.cs                 Info.plist に LSUIElement を書く（Dock に出さない唯一の手段）
     IconSettings.cs                 AppIcon.png を Player Settings の Icon に登録する
     BuildScript.cs / VrmProbe.cs
   Tests/Editor/                     EditMode テスト（状態機械が主）
@@ -150,7 +117,7 @@ Assets/ChatterMascot/
 |---|---|---|---|---|
 | 1 | 起動引数 | `-vrm <path>` | `-vrma <path>` | 全 |
 | 2 | 環境変数 | `CHATTER_MASCOT_VRM` | `CHATTER_MASCOT_VRMA` | 全 |
-| 3 | 設定パネルで選んだモデル | `models/mascot.vrm`（固定名） | —— | デスクトップのみ |
+| 3 | ChatterAgent の設定パネルで選んだモデル | `models/mascot.vrm`（固定名） | —— | デスクトップのみ |
 | 4 | `Application.persistentDataPath/`（手置き） | `models/mascot.vrm` | `animations/idle.vrma` | 全 |
 | 5 | `Application.persistentDataPath/synced/`（サーバーから自動取得。[#117](https://github.com/schwarz9791/chatter-agent/issues/117)） | `models/mascot.vrm` | `animations/idle.vrma` | 全 |
 | 6 | `${XDG_CONFIG_HOME:-~/.config}/chatter-agent/` | `models/*.vrm` | `animations/*.vrma`（直下のみ） | デスクトップのみ |
@@ -196,11 +163,12 @@ open Build/ChatterMascot.app --args -serverUrl ws://127.0.0.1:9
 grep RecreateSurface "$HOME/Library/Logs/schwarz9791/Chatter Mascot/Player.log"
 ```
 
-位置と大きさは `~/.config/chatter-agent/mascot/window.json` にポイントで永続化される。
-設定パネルの「大きさ」（倍率 0.5〜2.0）もこのウィンドウそのものを動かす——`VrmStage` が
-`Screen.width/height` の変化を見てフレーミングし直すので、ウィンドウさえ変えればモデルは
-勝手に収まる。理由と実測は [`mascot-desktop.md`](./knowledge/mascot-desktop.md) /
-[`mascot-settings.md`](./knowledge/mascot-settings.md)。
+窓の位置は `~/.config/chatter-agent/mascot/window.json` にポイントで永続化される（**位置だけの権威**。
+幅と高さは大きさとして読まない）。大きさは `mascot/settings.json` の `character.scale`（0.5〜2.0、
+キーが無ければ 1.0）が権威で、窓の大きさは「既定 540×540pt × scale」。マスコットは値の変化をその場で
+窓へ反映し（位置は保つ）、`VrmStage` が `Screen.width/height` の変化を見てフレーミングし直すので、
+ウィンドウさえ変えればモデルは勝手に収まる。透過窓は枠なしで、端を掴んでリサイズはできない。
+理由と実測は [`mascot-desktop.md`](./knowledge/mascot-desktop.md) / [`mascot-settings.md`](./knowledge/mascot-settings.md)。
 
 ### 音の出し方（プラットフォームで違う）
 
@@ -268,11 +236,10 @@ macOS と Android を同じコードで通せる。引き換えは ping watchdog
 
 ### 画面の言語
 
-設定パネル・メニュー・「について」の文言は端末の言語に従う。日本語なら日本語、それ以外は英語。
+XR の設定パネルの文言は端末の言語に従う。日本語なら日本語、それ以外は英語。
 言語を手で選ぶ設定は無い。文言は `Runtime/Ui/UiText.cs` の言語ごとのサブクラス（`UiText.Ja.cs` /
 `UiText.En.cs`）が持ち、言語を足すときはサブクラスを1つ足して `UiText.For` に分岐を足す。
-端末の言語（`Application.systemLanguage`）を読むのは `StatusItemBridge`（macOS）と
-`XrSettingsBridge`（XR）だけで、`ChatterMascot.Runtime` は言語を引数で受け取る——英語の並びも
+端末の言語（`Application.systemLanguage`）を読むのは `XrSettingsBridge` だけで、`ChatterMascot.Runtime` は言語を引数で受け取る——英語の並びも
 EditMode テストで固定するため。ログと XR の同期結果の通知は言語で切り替えない。
 
 ### 感情モーションと小ネタの素材
@@ -332,21 +299,36 @@ cd chatter-mascot
 - `seq` の飛びは欠落。埋める手段は無いのでそのまま進む
 - `epoch` が変わったら覚えていることを全部捨てる（重複排除の記憶、取得中の item、溜めている ack）
 
-### macOS: 設定パネルとメニューバー
+### macOS: 描画と再生だけ
 
-**キャラクターを右クリック**すると設定パネルが開閉する。メニューバーの「設定を開く…」からも
-同じパネルが開く。「Chatter Mascot について」は別のダイアログで、版とライセンス全文はそちらに
-出る。ショートカットは「記録」ボタンで実際にキーを押して決める（修飾キーを1つ以上含めること。
-中止は修飾キー無しの esc）。
+**マスコット（Chatter Mascot）は描画と再生だけ。** 設定パネル・メニューバー・グローバルショートカット・
+「について」は持たない。Dock にも出ない（`LSUIElement`）ので、単体で起動したマスコットには終了の UI が無い
+——終わらせるのは ChatterAgent の「マスコットを隠す」と「終了」（→ [`agent.md`](./agent.md)）。
 
-常駐の設定は `~/.config/chatter-agent/mascot/settings.json`（`window.json` と同じディレクトリ）。
+**キャラクターを右クリック**すると、マスコットが `/usr/bin/open` で ChatterAgent を開き、
+設定窓が前面に出る（ChatterAgent が起動したマスコットは起動引数 `-chatterAgentApp` のパス、単体起動は `open -b tech.sukima.chatter-agent`）（ChatterAgent が起動していなければ起動するだけ。macOS 限定）。
+設定・ショートカット（ミュートと表示切替）・大きさ・位置のリセット・モーションの確認はすべて
+ChatterAgent の設定パネルで行う。やり取りの仕組み（依頼箱・`motions.json`）は [`agent.md`](./agent.md)
+「マスコットとのやり取り」。
+
+マスコットの側は次の2つだけを受け持つ。
+
+- **`mascot/settings.json` を読む**（1秒ごとに `mtime` + `size` を見て反映する。**書かない**。書き手は ChatterAgent だけ）。
+  ショートカットのキー（`audio.muteHotKey` / `ui.hideHotKey`）は ChatterAgent が書くが、マスコットは使わず、
+  警告も出さずに読み飛ばす
+- **依頼箱 `mascot/requests/` を読んで実行する**（デスクトップのみ。0.5秒ごとに名前順に「読む → 消す → 実行」。
+  起動時に残っていた依頼は実行せずに捨てる）。`resetWindow` は依頼の直前に設定を読み直してから既定の大きさ・
+  位置（`window.json` を消す）へ戻し、`playMotion` は指定のモーションを1本再生する。
+  起動時に `mascot/motions.json`（再生できるモーションの一覧）を消し、読み込みが終わったら書く
+
+設定は `~/.config/chatter-agent/mascot/settings.json`（`window.json` と同じディレクトリ）。
 
 ```json
 {
   "version": 1,
   "audio": { "mute": false, "muteHotKey": "ctrl+opt+m", "volume": 1.0 },
   "ui": { "hideHotKey": "ctrl+opt+h" },
-  "character": { "idleMotion": true, "cursorGaze": true, "blink": true, "vrm": "", "walk": true },
+  "character": { "idleMotion": true, "cursorGaze": true, "blink": true, "vrm": "", "walk": true, "scale": 1.0 },
   "display": { "frameRate": 30 },
   "connection": { "serverUrl": "", "token": "", "assetSync": "auto" },
   "xr": { "height": 25, "distance": 0.6, "azimuth": 20, "feetBelowEye": 0.2 }
@@ -360,32 +342,19 @@ cd chatter-mascot
 `character.walk`（既定 `true`）も**デスクトップでは何もしない**——歩くのは Android XR だけ。
 XR の設定パネルの「歩く」からその場で切り替えられる（→ 下の「設定パネル」）。
 
+`character.scale` はデスクトップの大きさ（0.5〜2.0、刻み 0.1、既定 1.0）。Android は読まない。
+
 `xr.height` は Android XR でのキャラクターの大きさ（cm。既定 `25`）。15cm〜読み込んだモデルの
 実寸を**等比で6段**に刻み、途中の段は5cm単位に丸める（実寸を超える値は実寸へ寄る）。
 `xr.scale`（倍率）しか持たない古いファイルは、モデルを読み込んで実寸が分かった時点で cm へ
 換算し、一番近い段を `height` として書き直す（`scale` は消える）。
 
-`display.frameRate` は `30` か `60` のみ（既定 `30`。それ以外は既定へフォールバック）。設定
-パネルの「モーション」→「フレームレート」から変えられ、反映はデスクトップ限定——Android は
-このキーを読むだけで反映しない（XR ではランタイムがフレームペーシングを握る）。`connection`
-（`serverUrl` / `token`）と `xr`（`height` / `distance` / `azimuth` / `feetBelowEye`）はデスクトップの
-パネルには出さないが、往復や「すべての設定をリセット」でも落とさない（`MascotSettings.ResetKeepingConnection`）。「大きさ」はここに無く
-`window.json` が権威を持つ（スライダーは現在の高さ ÷ 540 の写し）。音声スタイル・話す速さ・
-要約の ON/OFF は core の `~/.config/chatter-agent/config.json` が持ち、設定パネルは
-`PATCH /v1/config` 経由で書く（音声スタイルは現在のエンジンの声のキー —— AivisSpeech なら
-`ttsSpeakerId`、Kokoro なら `kokoroVoiceId` —— へ書く）（→ [`protocol.md`](./protocol.md)「制御 API」）。音量が Unity 側で
-速さが core 側なのは紛らわしいが理由がある —— 音量は**再生側のつまみ**で合成し直さなくても効き、
-速さは**合成のパラメータ**で `audio_query` を変えない限り WAV が変わらない。`volume` は
-0.0〜1.0（パネルには 0〜100% で出る）。
-
-設定ファイルは1秒ポーリング（`mtime` + `size` のスタンプ比較）で外部からの変更も拾うので、
-アプリを再起動しなくても直る。
-
-**書き手は Unity のパネルと ChatterAgent の設定パネル（→ [`agent.md`](./agent.md)「設定パネル」）。**
-ChatterAgent は許可リストの管理キーだけを差し替え、知らないキーと `xr.*` / `connection.*` は残し、
-別名の tmp（`settings.json.chatter-agent.tmp`）経由で書く。★ **Unity も保存のたびにメモリ上の全キーを
-書き直すので、両方のパネルを同時に触ると後勝ちになる。** 続けて触らなければ、Unity が1秒ごとの
-読み直しで ChatterAgent の変更を取り込む。
+`display.frameRate` は `30` か `60` のみ（既定 `30`。それ以外は既定へフォールバック）。反映は
+デスクトップ限定——Android はこのキーを読むだけで反映しない（XR ではランタイムがフレームペーシングを握る）。
+音量（`audio.volume`、0.0〜1.0）は**再生側のつまみ**で合成し直さなくても効き、話す速さは core の
+`config.json` が持つ**合成のパラメータ**（`audio_query` を変えない限り WAV が変わらない）。
+このため速さ・音声スタイル・AI要約の書き込みは ChatterAgent が `PATCH /v1/config` 経由で行う
+（→ [`protocol.md`](./protocol.md)「制御 API」）。
 
 ```bash
 $EDITOR ~/.config/chatter-agent/mascot/settings.json   # 直すか、消して既定に戻す
@@ -436,7 +405,7 @@ adb shell pm grant|revoke tech.sukima.chattermascot android.permission.HAND_TRAC
 
 **`adb push` は要らない。** `connection.serverUrl` / `connection.token`（→ 下の「接続」の C）が
 入っていれば、起動のたびに `chatter-agent-server` の `GET /v1/assets` からモデル・モーションを
-自動で取りに行く（`connection.assetSync`。既定 `"auto"`、`"off"` で止められる。→ 上の「macOS: 設定パネルとメニューバー」）。
+自動で取りに行く（`connection.assetSync`。既定 `"auto"`、`"off"` で止められる。→ 上の「macOS: 描画と再生だけ」）。
 Mac 側にファイルを置く場所はデスクトップと同じ `~/.config/chatter-agent/models/` /
 `~/.config/chatter-agent/animations/`（→ [`README-ja.md`](../README-ja.md)「モデルとモーション」）。
 
@@ -512,7 +481,7 @@ $ADB shell chmod -R 777 $D/animations
 使わない）。Bool は ON/OFF を切り替え、Choice は ‹ › で隣の値へ送り、Button はその場で実行する。
 一番上の「閉じる」で閉じる。視線から外れると正面へ戻ってくる。
 
-出す項目は、常駐トレイと同じ数を持たせる理由が無いので、デスクトップの設定パネルより絞ってある。
+出す項目は ChatterAgent の設定パネルより絞ってある（Mac とは同期しない）。
 
 | 項目 | 備考 |
 |---|---|
@@ -520,7 +489,7 @@ $ADB shell chmod -R 777 $D/animations
 | 大きさ | 下の「置き場所と大きさ」。**その場で反映**される |
 | モデルとモーションを同期 | ON/OFF。**次回の起動から反映**（→ 上「モデルとモーションを入れる」） |
 | 今すぐ同期 | 起動時と同じ同期をその場で走らせる。反映は次回の起動から。同期が OFF の間と、同期が走っている間は押せない |
-| モーションを確認 / 再生 | デスクトップと同じ、保存しない一時的な選択 |
+| モーションを確認 / 再生 | 保存しない一時的な選択 |
 | 歩く | ON/OFF。**その場で反映**される。OFF の間は歩行範囲の円を出さず、歩いている最中なら止める。ON に戻すとその場から歩く。キャラクターの置き直し自体はできる |
 | 指している先を目で追う | ON = aim レイの指す先 / OFF = ユーザーの頭（今までの挙動） |
 | まばたき | |
@@ -689,8 +658,8 @@ B・C どちらの経路でもこのポートへ向ける。C（`configure-andro
 | 症状・調べたいこと | ファイル |
 |---|---|
 | ビルドが落ちる / 通ったのに反映されない / テストが嘘をつく / シェーダーが真っ黒・ピンク / asmdef が解決しない / Unity の版を変えたい / CPU が張り付く | [`mascot-unity.md`](./knowledge/mascot-unity.md) |
-| 透過しない / 窓の位置と大きさがおかしい / クリックが透けない・透けたまま / ドラッグで壊れる / Dock やメニューバーに出ない・出てしまう / ショートカットが効かない / ミュートが効かない | [`mascot-desktop.md`](./knowledge/mascot-desktop.md) |
-| 設定パネルが出ない・作り直される / 右クリックが取れない / 値が保存されない・戻る / スライダーやポップアップの挙動 / ファイル選択 / サーバーに繋がらないときの表示 | [`mascot-settings.md`](./knowledge/mascot-settings.md) |
+| 透過しない / 窓の位置と大きさがおかしい / クリックが透けない・透けたまま / ドラッグで壊れる / Dock に出てしまう / ミュートが効かない | [`mascot-desktop.md`](./knowledge/mascot-desktop.md) |
+| 右クリックが取れない / 大きさが反映されない・戻る / 設定ファイルの読み直し / XR の設定パネルの挙動 / 設定窓（ChatterAgent）のスライダーやファイル選択 | [`mascot-settings.md`](./knowledge/mascot-settings.md) |
 | モデルが映らない・背中が映る・小さい / 表情が変わらない / まばたき / 視線が合わない / モーションが T ポーズになる・固まる / 髪が流れる | [`mascot-vrm.md`](./knowledge/mascot-vrm.md) |
 | 音が出ない・途切れる / 口が合わない / オーディオデバイスを掴んだまま / 接続が切れる / ack が届かない / 終了時に取りこぼす / JSON のパースがおかしい | [`mascot-speech.md`](./knowledge/mascot-speech.md) |
 | Android でビルドが通らない / 白飛びする / LAN で繋がらない / XR で何も映らない・位置がおかしい / 背景が黒い / つまめない / 歩かない・歩行範囲の円が出ない / 設定パネルが開かない・行が見えない・呼び出し口が出ない・消えない / 手のひらメニューが向きを拾わない / 髪が固まる（大きさの変更） | [`mascot-android-xr.md`](./knowledge/mascot-android-xr.md) |

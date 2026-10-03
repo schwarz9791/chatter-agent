@@ -1,4 +1,4 @@
-// 設定パネルの文言。文言は Unity のパネル（UiText.Ja.cs / UiText.En.cs）に揃える。
+// 設定パネルの文言。
 // `Text` に足したら JA / EN の両方を直さないとコンパイルが通らない。
 
 export type Text = {
@@ -11,6 +11,9 @@ export type Text = {
   chooseVrm: string;
   bundledModelNote: string;
   appliesFromNextLaunch: string;
+  characterSize: string;
+  resetWindow: string;
+  mascotNotRunning: string;
   notVrm: string;
   copyFailed(reason: string): string;
 
@@ -31,6 +34,12 @@ export type Text = {
   blink: string;
   frameRate: string;
   frameRateNote: string;
+  previewMotion: string;
+  playMotion: string;
+  previewIdleOff: string;
+  previewLoading: string;
+  previewEmpty: string;
+  previewNote: string;
 
   sectionAiSummary: string;
   summarizeLongMessages: string;
@@ -62,6 +71,10 @@ export type Text = {
   resetCoreDefaultsUnavailable: string;
   resetKeyFailed(key: string, reason: string): string;
 
+  sectionAbout: string;
+  aboutVersion: string;
+  aboutLicense: string;
+
   settingsUnreadable(reason: string): string;
 
   errorResponseUnreadable(reason: string): string;
@@ -88,6 +101,9 @@ export const JA: Text = {
   chooseVrm: "VRM モデルを選ぶ…",
   bundledModelNote: "同梱のモデルを使っています",
   appliesFromNextLaunch: "次回の起動から反映されます",
+  characterSize: "大きさ",
+  resetWindow: "位置と大きさをリセット",
+  mascotNotRunning: "Chatter Mascot が起動していません",
   notVrm: "VRM ファイル（.vrm）を選んでください",
   copyFailed: (reason) => `コピーできませんでした: ${reason}`,
 
@@ -108,6 +124,13 @@ export const JA: Text = {
   blink: "まばたき",
   frameRate: "フレームレート",
   frameRateNote: "60 fps は CPU 使用率が上がります",
+  previewMotion: "モーションを確認",
+  playMotion: "再生",
+  previewIdleOff: "待機モーションが OFF の間は再生できません",
+  previewLoading: "モーションを読み込み中です",
+  previewEmpty:
+    "モーションがありません。~/.config/chatter-agent/animations/<カテゴリ>/ に .vrma を置いてください",
+  previewNote: "感情のモーションを再生中は始まらないことがあります",
 
   sectionAiSummary: "AI要約",
   summarizeLongMessages: "長いメッセージを要約してから読み上げる",
@@ -129,7 +152,7 @@ export const JA: Text = {
 
   sectionReset: "リセット",
   resetAll: "すべての設定をリセット…",
-  resetAllNote: "選んだモデルのファイルも消します。合成エンジンと、キャラクターの位置・大きさはそのままです",
+  resetAllNote: "選んだモデルファイルも削除します。合成エンジンとキャラクターの位置・大きさはそのままです",
   confirmResetTitle: "すべての設定をリセットしますか？",
   confirmResetMessage:
     "音量・モーション・ショートカット・音声スタイル・話す速さ・要約・要約エンジン・感情判定の設定が既定に戻り、選んだ VRM モデルのファイルも削除されます。この操作は取り消せません。",
@@ -139,6 +162,10 @@ export const JA: Text = {
   resetMascotFailed: (reason) => `マスコットの設定を戻せませんでした: ${reason}`,
   resetCoreDefaultsUnavailable: "既定値を取れません",
   resetKeyFailed: (key, reason) => `${key} を戻せませんでした（${reason}）`,
+
+  sectionAbout: "Chatter Agent について",
+  aboutVersion: "バージョン",
+  aboutLicense: "ライセンス",
 
   settingsUnreadable: (reason) => `settings.json を読めません（${reason}）`,
 
@@ -166,6 +193,9 @@ export const EN: Text = {
   chooseVrm: "Choose VRM Model…",
   bundledModelNote: "Using the bundled model.",
   appliesFromNextLaunch: "Takes effect on next launch.",
+  characterSize: "Size",
+  resetWindow: "Reset position and size",
+  mascotNotRunning: "Chatter Mascot is not running.",
   notVrm: "Choose a VRM file (.vrm).",
   copyFailed: (reason) => `Couldn't copy the file: ${reason}`,
 
@@ -186,6 +216,12 @@ export const EN: Text = {
   blink: "Blink",
   frameRate: "Frame rate",
   frameRateNote: "60 fps uses more CPU.",
+  previewMotion: "Preview motion",
+  playMotion: "Play",
+  previewIdleOff: "Can't play while Idle motion is off.",
+  previewLoading: "Loading motions…",
+  previewEmpty: "No motions found. Put .vrma files in ~/.config/chatter-agent/animations/<category>/.",
+  previewNote: "May not start while an emotion motion is playing.",
 
   sectionAiSummary: "AI Summary",
   summarizeLongMessages: "Summarize long messages before reading aloud",
@@ -217,6 +253,10 @@ export const EN: Text = {
   resetMascotFailed: (reason) => `Couldn't reset the mascot settings: ${reason}`,
   resetCoreDefaultsUnavailable: "Couldn't get the defaults.",
   resetKeyFailed: (key, reason) => `Couldn't reset ${key}: ${reason}`,
+
+  sectionAbout: "About Chatter Agent",
+  aboutVersion: "Version",
+  aboutLicense: "License",
 
   settingsUnreadable: (reason) => `Couldn't read settings.json (${reason}).`,
 

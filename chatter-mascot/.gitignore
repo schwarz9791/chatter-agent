@@ -51,17 +51,6 @@ mono_crash.*.blob
 *.unitypackage
 *.app
 
-# ネイティブプラグイン（#75）の成果物。
-# ★ .bundle をコミットしないこと。 バイナリはレビューできず、plugin/bin/*.mjs のように
-#   CI で「ソースと一致するか」を検証する手段が無い（clang の出力に再現性が無い）。
-#   ソースは Assets/Plugins/macOS~/ にあり、./scripts/build-native.sh で作れる。
-# ★ .meta は追跡する（GUID が動くと、参照している側が壊れる）。
-#   *.bundle はスラッシュを含まない glob なので basename 全体に一致する必要があり、
-#   `*.bundle.meta` は末尾が `.meta` で `.bundle` ではないため、そもそも対象外
-#   （下の打ち消しは今は何も打ち消していない。より広いパターンを足したときの保険として残す）。
-*.bundle
-!/[Aa]ssets/**/*.bundle.meta
-
 # Addressables
 /[Aa]ssets/[Aa]ddressable[Aa]ssets[Dd]ata/*/*.bin*
 /[Aa]ssets/[Ss]treamingAssets/aa.meta
@@ -85,3 +74,6 @@ mono_crash.*.blob
 # ★ .meta も一緒に無視する。上の !*.meta より後に書くので、こちらが勝つ。
 /[Aa]ssets/XR/[Tt]emp/
 /[Aa]ssets/XR/[Tt]emp.meta
+
+# 旧版のネイティブプラグインの実体（git 外）が残ったチェックアウトで、誤ってコミットしないため
+*.bundle

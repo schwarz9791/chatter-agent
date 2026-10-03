@@ -70,13 +70,21 @@ pub fn request_quit(pid: u32) {
 
 /// `open` は呼び出し元の環境をアプリへ引き継ぐので、マスコットも server と同じ設定の場所を見る。
 /// `backlog` が true のときだけ、古い発話を飛ばす引数を付ける。
+/// マスコットが右クリックで開き直す相手を取り違えないよう、自分の `.app` の場所を渡す。
 #[cfg(target_os = "macos")]
 pub fn launch(app: &Path, env: &Env, backlog: bool) -> io::Result<()> {
     let mut cmd = Command::new("open");
-    cmd.arg("-a").arg(app);
+    cmd.arg("-a").arg(app).arg("--args");
     if backlog {
-        cmd.args(["--args", "-speechBacklogMaxAgeMs"])
+        cmd.arg("-speechBacklogMaxAgeMs")
             .arg(BACKLOG_MAX_AGE_MS.to_string());
+    }
+    if let Some(me) = std::env::current_exe()
+        .ok()
+        .as_deref()
+        .and_then(app_bundle_of)
+    {
+        cmd.arg("-chatterAgentApp").arg(me);
     }
     let status = cmd.envs(env).stdin(Stdio::null()).status()?;
     if status.success() {
@@ -84,6 +92,14 @@ pub fn launch(app: &Path, env: &Env, backlog: bool) -> io::Result<()> {
     } else {
         Err(io::Error::other(format!("open が失敗した: {status}")))
     }
+}
+
+/// 実行ファイル（`X.app/Contents/MacOS/<bin>`）を含む `.app`。`.app` の外で動いていれば `None`。
+#[cfg(any(target_os = "macos", test))]
+fn app_bundle_of(exe: &Path) -> Option<PathBuf> {
+    exe.ancestors()
+        .find(|p| p.extension().is_some_and(|e| e == "app"))
+        .map(Path::to_path_buf)
 }
 
 // ponytail: macOS 以外ではマスコットを扱わない。Windows 対応時に実装する。
@@ -106,6 +122,20 @@ pub fn launch(_app: &Path, _env: &crate::server::Env, _backlog: bool) -> io::Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn app_bundle_is_found_only_inside_an_app() {
+        assert_eq!(
+            app_bundle_of(Path::new(
+                "/Applications/Chatter Agent.app/Contents/MacOS/chatter-agent-app"
+            )),
+            Some(PathBuf::from("/Applications/Chatter Agent.app"))
+        );
+        assert_eq!(
+            app_bundle_of(Path::new("/w/target/debug/chatter-agent-app")),
+            None
+        );
+    }
 
     #[test]
     fn candidates_in_priority_order() {

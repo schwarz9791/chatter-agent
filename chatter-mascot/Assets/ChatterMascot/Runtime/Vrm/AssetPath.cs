@@ -174,7 +174,7 @@ namespace ChatterMascot.Vrm
         /// 素材を置くディレクトリ名。<b>ここが唯一の出どころ。</b>
         ///
         /// ★★ <b>リテラルで持たないこと。</b> 探索（<see cref="Enumerate"/>）・カテゴリ別モーションの
-        ///   走査（<see cref="AnimationRoots"/>）・設定パネルの書き込みと削除（<c>SettingsPanelBridge</c>）が
+        ///   走査（<see cref="AnimationRoots"/>）・ChatterAgent の書き込みと削除が
         ///   同じ名前を使う。散らばっていると改名が片方にしか届かず、
         ///   <b>待機ループは動いたまま感情モーションだけが黙って見つからなくなる</b> ——
         ///   いちばん気付きにくい壊れ方をする。

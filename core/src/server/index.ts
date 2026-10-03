@@ -29,6 +29,7 @@ import {
   getSummarizerSessionsPath,
 } from "../core/paths";
 import { registerSummarizerSession } from "../core/summarizerSessions";
+import { engineKeys } from "../core/engineKeys";
 import { createSpeechQueue } from "../core/speechQueue";
 import { createVoicevoxEngine } from "../tts/voicevoxClient";
 import { createOpenAiEngine } from "../tts/openaiClient";
@@ -245,15 +246,15 @@ async function main(): Promise<void> {
   //   直したらすぐ効く方がよい（クライアント側の警告もそこを名指しする）。
   //   クライアントの生成は object literal と closure だけなので、GET のたびに作って問題ない
   //
-  // ★ **エンジンに応じた接続先・声のキーの選択はここ1か所だけ。** spawn 計画や起動ログも
-  //   `ttsBaseUrl` を直接読まず、これを通す
+  // ★ **エンジンに応じた接続先・声の読み出しはここ1か所だけ**（キーの対応表は `engineKeys`）。
+  //   spawn 計画や起動ログも `ttsBaseUrl` を直接読まず、これを通す
   const currentVoice = (): Voice => {
     const kind = config.get("ttsEngine");
-    const kokoro = kind === "openai";
+    const keys = engineKeys(kind);
     return {
       engine: kind,
-      baseUrl: config.get(kokoro ? "kokoroBaseUrl" : "ttsBaseUrl"),
-      speakerId: config.get(kokoro ? "kokoroVoiceId" : "ttsSpeakerId"),
+      baseUrl: config.get(keys.baseUrl),
+      speakerId: config.get(keys.voice),
       speedScale: config.get("ttsSpeedScale"),
     };
   };

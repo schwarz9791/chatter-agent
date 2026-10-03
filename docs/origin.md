@@ -132,11 +132,7 @@ hook 方式への転換で、`textFilter.ts` が**上流と要件で食い違う
 ヘッダコメントを埋め込む場所が無い**。Apache-2.0 §4(b)（改変の告知）は改変していないので
 発生せず、§4(a)/(d)（ライセンス本文と帰属の維持）は `NOTICE` とこの表で担保する。
 
-★ **`trayTemplate.png` / `trayTemplate@2x.png`（メニューバーのアイコン。2026-08-31 に
-[#75](https://github.com/schwarz9791/chatter-agent/issues/75) でコピー）は
-[#93](https://github.com/schwarz9791/chatter-agent/issues/93) で自前の素材に差し替えた。**
-**ファイル名は据え置きで中身だけを入れ替えている**ので、パスを grep しても由来が変わったことは
-見えない。cc-mascot 由来のバイナリはこれで `idle_loop.vrma` の1本だけになった。
+★ **cc-mascot 由来のバイナリは `idle_loop.vrma` の1本だけ。** メニューバーのアイコンはもう持たない。
 
 ★ **VRoid 公式の VRMA サンプル7種は BOOTH 規約で二次配布禁止**なので同梱できない。
 cc-mascot 側も再配布不可のモーションは**プライベート submodule に隔離**したうえで、
@@ -155,8 +151,7 @@ cc-mascot 側も再配布不可のモーションは**プライベート submodu
 | `prompt/promptEventFormatter.ts` + `.test.ts` | 自分が cc-mascot の作業ブランチ上で書いたものを持ち込んだ |
 | `summarizer/` 配下すべて | 自分が cc-mascot の作業ブランチ上で書いたものを持ち込んだ（`9b23434` で新規作成） |
 | `core/` `cli/` `server/` 配下すべて | chatter-agent 独自 |
-| `chatter-mascot/Assets/Plugins/macOS~/ChatterMascotNative/` | chatter-agent で新規に書いた（#75 のネイティブプラグイン。**cc-mascot に相当する実装は無い** —— あちらは Electron の `Tray` / `app.dock.hide()` で済んでおり、ObjC のコードは1行も存在しない） |
-| `chatter-mascot/Assets/ChatterMascot/Runtime/Ui/` `Runtime/Settings/` | chatter-agent で新規に書いた（#75。メニューの組み立て・ショートカットの解釈・設定の永続化） |
+| `chatter-mascot/Assets/ChatterMascot/Runtime/Ui/` `Runtime/Settings/` | chatter-agent で新規に書いた（画面の文言の表・設定の永続化と依頼箱の解釈）。**cc-mascot に相当する実装は無い** |
 
 `prompt/promptEventFormatter.ts` は移送時に `SpeakMessage` の import 元を `../adapters/harnessAdapter`（kazakago の `adapters/` は移植しない）から `../core/types` に張り替えてある。
 

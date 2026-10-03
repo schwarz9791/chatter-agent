@@ -310,7 +310,7 @@ namespace ChatterMascot.Tests
         /// <summary>
         /// ★ 等倍でないときだけ <c>-v</c> が付く。
         ///   ★★ <b>スライダーが % で出ていても、渡すのは生の数</b>（<c>-v 70</c> にしない。
-        ///   表示の文字列と送る値を分けてある。→ <c>CMSettingsPanel.m</c> の <c>CMSliderText</c>）。
+        ///   表示の文字列と送る値は別）。
         /// </summary>
         [Test]
         public void PassesTheVolumeWhenItIsNotUnity()

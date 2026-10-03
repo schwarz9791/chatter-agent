@@ -2,9 +2,11 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tauri::State;
 use tauri_plugin_dialog::{DialogExt as _, MessageDialogButtons, MessageDialogKind};
@@ -24,6 +26,9 @@ const MANAGED: &[&[&str]] = &[
     &["display", "frameRate"],
 ];
 
+/// 書いてよいが、リセットでは消さないキー。大きさは位置と同じ扱いで、設定のリセットでは戻さない。
+const KEPT_ON_RESET: &[&[&str]] = &[&["character", "scale"]];
+
 /// 読み→差し替え→書きを直列にする。async コマンドが並行に走ると片方の変更が消えるため。
 static SETTINGS_LOCK: Mutex<()> = Mutex::new(());
 
@@ -42,6 +47,7 @@ fn models_dir(root: &Path) -> PathBuf {
 fn is_managed(path: &[String]) -> bool {
     MANAGED
         .iter()
+        .chain(KEPT_ON_RESET)
         .any(|m| m.len() == path.len() && m.iter().zip(path).all(|(a, b)| a == b))
 }
 
@@ -205,6 +211,60 @@ fn install_vrm(root: &Path, src: &Path) -> Result<String, String> {
     Ok(name)
 }
 
+/// マスコットへの依頼。置き場所は `mascot/requests/`。
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+enum Request {
+    ResetWindow,
+    PlayMotion { id: String },
+}
+
+/// 名前の後半。同じミリ秒に2件置いても文字列順 = 送信順になる。
+static REQUEST_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+/// 依頼を1件置く。マスコットは拡張子が `.json` のものだけ拾うので、tmp は別の拡張子で書く。
+/// 名前が一意なので `SETTINGS_LOCK` は要らない。
+fn send_request(root: &Path, req: &Request) -> Result<(), String> {
+    let io = |e: std::io::Error| format!("依頼を置けない: {e}");
+    let dir = root.join("mascot").join("requests");
+    fs::create_dir_all(&dir).map_err(io)?;
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    let n = REQUEST_COUNTER.fetch_add(1, Ordering::Relaxed) % 10_000;
+    let path = dir.join(format!("{millis:013}-{n:04}.json"));
+    let mut body = serde_json::to_value(req).map_err(|e| e.to_string())?;
+    body["version"] = Value::from(1);
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, serde_json::to_vec(&body).map_err(|e| e.to_string())?).map_err(io)?;
+    fs::rename(&tmp, &path).map_err(io)
+}
+
+#[derive(Deserialize)]
+struct MotionList {
+    version: u32,
+    motions: Vec<String>,
+}
+
+/// マスコットが書く一覧。無い（読み込み中）・壊れている・版違いは `None`。
+fn read_motions(root: &Path) -> Option<Vec<String>> {
+    let text = fs::read_to_string(root.join("mascot").join("motions.json")).ok()?;
+    let list: MotionList = serde_json::from_str(&text).ok()?;
+    (list.version == 1).then_some(list.motions)
+}
+
+/// 大きさを既定へ戻す。マスコットは依頼の直前に設定を読み直すので、既定の大きさで戻る。
+fn clear_scale(root: &Path) -> Result<(), String> {
+    let _guard = SETTINGS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let file = settings_path(root);
+    if !file.exists() {
+        return Ok(());
+    }
+    let mut settings = read_settings(&file)?;
+    remove_path(&mut settings, &["character", "scale"]);
+    write_settings(&file, &mut settings)
+}
+
 async fn blocking<T: Send + 'static>(
     job: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
@@ -279,6 +339,58 @@ pub async fn confirm(
 pub async fn mascot_reset(manager: State<'_, Manager>) -> Result<ResetOutcome, String> {
     let root = root_of(&manager)?;
     blocking(move || Ok(apply_reset(&root))).await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MascotState {
+    running: bool,
+    motions: Option<Vec<String>>,
+}
+
+#[tauri::command]
+pub async fn mascot_state(manager: State<'_, Manager>) -> Result<MascotState, String> {
+    let root = root_of(&manager)?;
+    blocking(move || {
+        Ok(MascotState {
+            running: !crate::mascot_app::running_pids().is_empty(),
+            motions: read_motions(&root),
+        })
+    })
+    .await
+}
+
+/// 動いていないマスコットへは置かない（起動時に捨てられるため）。
+#[tauri::command]
+pub async fn mascot_request(
+    manager: State<'_, Manager>,
+    kind: String,
+    id: Option<String>,
+) -> Result<(), String> {
+    let root = root_of(&manager)?;
+    let req = match (kind.as_str(), id) {
+        ("resetWindow", _) => Request::ResetWindow,
+        ("playMotion", Some(id)) if !id.is_empty() => Request::PlayMotion { id },
+        _ => return Err(format!("不正な依頼: {kind}")),
+    };
+    blocking(move || {
+        if crate::mascot_app::running_pids().is_empty() {
+            return Err("not_running".into());
+        }
+        place_request(&root, &req)
+    })
+    .await
+}
+
+/// 位置のリセットは settings.json に依存しないので、大きさを戻せなくても依頼は置く。
+fn place_request(root: &Path, req: &Request) -> Result<(), String> {
+    let cleared = if matches!(req, Request::ResetWindow) {
+        clear_scale(root)
+    } else {
+        Ok(())
+    };
+    send_request(root, req)?;
+    cleared
 }
 
 #[cfg(test)]
@@ -524,5 +636,103 @@ mod tests {
         fs::write(&bad, b"x").unwrap();
         assert_eq!(install_vrm(&root, &bad).unwrap_err(), "not_vrm");
         assert_eq!(fs::read(models.join("mascot.vrm")).unwrap(), b"new");
+    }
+
+    #[test]
+    fn scale_is_settable_and_survives_reset() {
+        let root = tmp("scale");
+        apply_set(&root, &p(&["character", "scale"]), json!(1.5)).unwrap();
+        assert_eq!(load(&root)["character"]["scale"], json!(1.5));
+        assert!(apply_reset(&root).error.is_none());
+        assert_eq!(load(&root)["character"]["scale"], json!(1.5));
+    }
+
+    #[test]
+    fn clear_scale_keeps_other_keys() {
+        let root = tmp("clear-scale");
+        clear_scale(&root).unwrap();
+        assert!(!settings_path(&root).exists());
+        seed(
+            &root,
+            &json!({"version": 1, "character": {"scale": 1.5, "blink": false}, "xr": {"scale": 2}})
+                .to_string(),
+        );
+        clear_scale(&root).unwrap();
+        assert_eq!(
+            load(&root),
+            json!({"version": 1, "character": {"blink": false}, "xr": {"scale": 2}})
+        );
+    }
+
+    fn requests(root: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(root.join("mascot").join("requests"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn send_request_writes_ordered_files_without_tmp() {
+        let root = tmp("request");
+        send_request(&root, &Request::ResetWindow).unwrap();
+        send_request(
+            &root,
+            &Request::PlayMotion {
+                id: "idle/a.vrma".into(),
+            },
+        )
+        .unwrap();
+        let names = requests(&root);
+        assert_eq!(names.len(), 2);
+        for n in &names {
+            let (stem, ext) = n.split_once('.').unwrap();
+            assert_eq!(ext, "json", "{n}");
+            let (ms, ctr) = stem.split_once('-').unwrap();
+            assert!(ms.len() == 13 && ctr.len() == 4, "{n}");
+            assert!(stem.chars().all(|c| c.is_ascii_digit() || c == '-'), "{n}");
+        }
+        let read = |n: &String| -> Value {
+            let path = root.join("mascot").join("requests").join(n);
+            serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
+        };
+        assert_eq!(
+            read(&names[0]),
+            json!({"version": 1, "type": "resetWindow"})
+        );
+        assert_eq!(
+            read(&names[1]),
+            json!({"version": 1, "type": "playMotion", "id": "idle/a.vrma"})
+        );
+    }
+
+    #[test]
+    fn reset_window_is_requested_even_when_settings_are_broken() {
+        let root = tmp("reset-request-broken");
+        seed(&root, "{broken");
+        assert!(place_request(&root, &Request::ResetWindow).is_err());
+        assert_eq!(requests(&root).len(), 1);
+    }
+
+    #[test]
+    fn motions_are_read_only_when_valid() {
+        let root = tmp("motions");
+        assert_eq!(read_motions(&root), None);
+        let write = |text: &str| {
+            fs::create_dir_all(root.join("mascot")).unwrap();
+            fs::write(root.join("mascot").join("motions.json"), text).unwrap();
+        };
+        write("{broken");
+        assert_eq!(read_motions(&root), None);
+        write(r#"{"version":2,"motions":["a/b.vrma"]}"#);
+        assert_eq!(read_motions(&root), None);
+        write(r#"{"version":1,"motions":[]}"#);
+        assert_eq!(read_motions(&root), Some(vec![]));
+        write(r#"{"version":1,"motions":["idle/a.vrma","happy/b.vrma"]}"#);
+        assert_eq!(
+            read_motions(&root),
+            Some(vec!["idle/a.vrma".into(), "happy/b.vrma".into()])
+        );
     }
 }

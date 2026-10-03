@@ -32,8 +32,7 @@ namespace ChatterMascot.EditorTools
     ///   「Dock にアイコンが出る」だけで、マスコットは動く。
     ///   例外を投げると <c>BuildPipeline</c> がビルドごと失敗させる。
     ///
-    /// ★ 実行時の切り替えは <c>CM_SetActivationPolicy</c>（<c>StatusItemBridge</c>）。
-    ///   ここが書くのは<b>起動時の既定</b>だけ。
+    /// ★ Dock に出さない手段は、この <c>LSUIElement</c> だけ。実行時に切り替える道は無い。
     /// </summary>
     public sealed class MacPostBuild : IPostprocessBuildWithReport
     {

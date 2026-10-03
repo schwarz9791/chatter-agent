@@ -208,7 +208,7 @@ VRMA が適用されて腕が下りるまでのあいだだけ広い箱のまま
 広げるクリップ）を確認し、はみ出しは解消した。★ **`boneBoundsMarginMeters` 自体は
 変えていない。** これを広げると余白は**カメラの前後（Z）方向にも**効き、クリック透過の
 当たり判定の半径まで一緒に広がってしまうため——縦方向だけを広げたいときの調整つまみは
-`headroom` の方（→ [`mascot-settings.md`](./mascot-settings.md)「『大きさ』の権威は `window.json` ひとつ」）。
+`headroom` の方（→ [`mascot-settings.md`](./mascot-settings.md)「『大きさ』の権威は `settings.json` の `character.scale`」）。
 
 ## ★ `VrmProbe` の出力は「ランタイムと同じ関数」でなければならない
 
@@ -325,7 +325,7 @@ $ ./scripts/run.sh ChatterMascot.EditorTools.VrmProbe.Report -vrm /tmp/decoy.vrm
 `PersistentDataPath` だけだった。**その食い違いが、そのまま2回のバグになった**
 （ユーザー設定の走査 = #64、環境変数 = その直後）。`AssetPath` の探索順の表に段を足したら、
 `ProbeEnv` も見直すこと。★ **段を番号で指さないこと** —— 表に段を挿すと全部ずれる。
-設定パネルの段が入った #76 で実際にずれ、気づかないまま残っていた。
+設定で選んだモデルの段が入った #76 で実際にずれ、気づかないまま残っていた。
 
 ★ **`persistentDataPath` の段も、実は「消えていなかった」（PR #69 の再レビューで判明）。** `env.PersistentDataPath = "";`
 は「この段を消す」つもりの1行だったが、`AssetPath.Join` は
@@ -1103,7 +1103,7 @@ Renderer（PC / Mobile とも）に `MToonOutlineRenderFeature` を足し忘れ�
 感情モーションと小ネタの置き場）はこの段の対象に**含まれない**——直下に `.vrma` を1本置くと、
 それが同梱 `idle_loop.vrma` の代わりに待機ループとして使われる。
 
-★★ **モデル（`.vrm`）と違って `.vrma` に対応する設定パネルの項目は無い。** モーションを選ばせる
+★★ **モデル（`.vrm`）と違って `.vrma` に対応する設定の項目は無い。** モーションを選ばせる
 UI を作っていないための意図的な非対称。
 
 ## ★ VRM 0.x（`com.vrmc.univrm`）は入れない
@@ -1170,21 +1170,20 @@ sad と surprised が両方潰れたので、**クールダウンを1秒に縮�
 B = #70 **27.3%**（26.7 26.8 27.8 28.3 27.3 27.3。途中で小ネタが1本再生された）。15本を寝かせた
 ぶんの回帰は無い。
 
-**設定パネルの「モーションを確認」**: 「待機モーション」の下に、読み込んだ全クリップを
+**「モーションを確認」**（ChatterAgent の「モーション」節と XR の設定パネル）: 読み込んだ全クリップを
 `カテゴリ/ファイル名`（`idle/Hub_Idle01.vrma`）で並べた Select と「再生」ボタン。本番と同じ経路
 （`VrmMotionPlayer.Play` → クロスフェード → 待機へ）で1本流すので、ファイル名とモーションの対応と
-実際の見え方を同時に確かめられる。**選択は保存しない**（`settings.json` にも core にも書かない。
-値の行き先が3つある設定の中で、これだけがそのどれでもない）。読み込み中・一覧が空・
-「待機モーション」OFF はそれぞれ無効化して理由を note に出す。踏んだ罠2つ:
+実際の見え方を同時に確かめられる。ChatterAgent は一覧をマスコットが書く `mascot/motions.json` から
+読み、「再生」は依頼箱の `playMotion` で頼む（→ [`../agent.md`](../agent.md)「マスコットとのやり取り」）。
+**選択は保存しない**（`settings.json` にも core にも書かない）。読み込み中・一覧が空・
+「待機モーション」OFF はそれぞれ無効化して理由を出す。踏んだ罠:
 一度も選び直していないと `SettingsContext.MotionPreview` は空で、表示だけを先頭に倒すと
 「再生」が「選べるモーションがありません」になる（表示と押下の解決を
-`SettingsSchema.EffectiveMotionPreview` の1関数に寄せた）。「待機モーション」を切り替えても
-自分起点なのでパネルは作り直されず、この項目の有効/無効が古いまま残る（チェックボックスは
-引きずるものではないので、この1箇所だけ `Push(update: true)` で出し直す）。「再生」を押した
+`SettingsSchema.EffectiveMotionPreview` の1関数に寄せた）。「再生」を押した
 結果は `MotionPlayResult`（`Started` / `Disposed` / `IdleNotLoaded` / `IdleDisabled` / `NotLoaded` /
 `Busy`）で返り、`SettingsSchema.MotionPlayNotice` が文言に変換する——読み込み中で押せない
-（`NotLoaded`）ともう鳴っている（`Busy`）は別の文言で出る（PR #91 レビュー#5。以前は両方
-「再生中です」に潰れていた）。
+（`NotLoaded`）ともう鳴っている（`Busy`）は別の文言で出る（以前は両方「再生中です」に潰れていた）。
+ChatterAgent への依頼は結果を返さないので、`playMotion` が始まらなかった理由はログにだけ出る。
 
 **目視の道具**: `open Build/ChatterMascot.app --args -serverUrl ws://127.0.0.1:9 -motionProbe happy`
 で読み込み完了の3秒後に1本だけ再生する。ログは
@@ -1238,6 +1237,6 @@ VRoid Studio 由来なので**再配布できない** —— `.vrma` は同梱�
   素材を別の道具で作るときも同じ除外にすること（除外の一覧は exporter 側と
   `FingerFallbackPoseProvider` の両方にあり、片側だけ直すとズレる）
 - importer の `wrapMode` 固定と `ClampForever` への上書き → 上の「ワンショット再生とクロスフェードで踏んだ罠」の表
-- 同名のクリップは `__<pathID>` 付きで出てくる（`Hub_Idle01〜04` は 2 組ある）。設定パネルの
+- 同名のクリップは `__<pathID>` 付きで出てくる（`Hub_Idle01〜04` は 2 組ある）。ChatterAgent の
   「モーションを確認」で見比べて、残す方だけカテゴリに置く
 

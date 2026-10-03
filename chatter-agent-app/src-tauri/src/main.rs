@@ -77,7 +77,6 @@ impl Settings {
     }
 }
 
-/// 設定窓を前面に出す。無ければ作る。
 #[derive(serde::Serialize)]
 struct About {
     version: String,
@@ -93,6 +92,7 @@ fn about(app: tauri::AppHandle) -> About {
     }
 }
 
+/// 設定窓を前面に出す。無ければ作る。
 fn open_settings(app: &tauri::AppHandle, title: &str) {
     if let Some(w) = app.get_webview_window("settings") {
         let _ = w.unminimize();

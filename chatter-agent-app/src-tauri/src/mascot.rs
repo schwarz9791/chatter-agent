@@ -377,12 +377,20 @@ pub async fn mascot_request(
         if crate::mascot_app::running_pids().is_empty() {
             return Err("not_running".into());
         }
-        if matches!(req, Request::ResetWindow) {
-            clear_scale(&root)?;
-        }
-        send_request(&root, &req)
+        place_request(&root, &req)
     })
     .await
+}
+
+/// 位置のリセットは settings.json に依存しないので、大きさを戻せなくても依頼は置く。
+fn place_request(root: &Path, req: &Request) -> Result<(), String> {
+    let cleared = if matches!(req, Request::ResetWindow) {
+        clear_scale(root)
+    } else {
+        Ok(())
+    };
+    send_request(root, req)?;
+    cleared
 }
 
 #[cfg(test)]
@@ -697,6 +705,14 @@ mod tests {
             read(&names[1]),
             json!({"version": 1, "type": "playMotion", "id": "idle/a.vrma"})
         );
+    }
+
+    #[test]
+    fn reset_window_is_requested_even_when_settings_are_broken() {
+        let root = tmp("reset-request-broken");
+        seed(&root, "{broken");
+        assert!(place_request(&root, &Request::ResetWindow).is_err());
+        assert_eq!(requests(&root).len(), 1);
     }
 
     #[test]

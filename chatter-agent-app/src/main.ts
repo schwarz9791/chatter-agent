@@ -212,6 +212,19 @@ async function loadMascotState(): Promise<void> {
   }
 }
 
+// 窓にフォーカスが残ったままでも、マスコットの起動・一覧の書き出しに追従する。
+// 変わっていないときは描き直さない（操作中の入力を壊さないため）。
+function watchMascotState(): void {
+  setTimeout(async () => {
+    if (!document.hidden) {
+      const before = JSON.stringify([mascotRunning, motions]);
+      await loadMascotState();
+      if (JSON.stringify([mascotRunning, motions]) !== before) render();
+    }
+    watchMascotState();
+  }, RETRY_MS);
+}
+
 async function reloadAll(): Promise<void> {
   await Promise.all([loadConfig(), loadMascot(), loadMascotState()]);
   render();
@@ -731,6 +744,7 @@ async function main(): Promise<void> {
   render();
   await reloadAll();
   window.addEventListener("focus", () => void reloadAll());
+  watchMascotState();
 }
 
 void main();

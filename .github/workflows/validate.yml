@@ -140,7 +140,7 @@ jobs:
             fi
           done
 
-      # 同梱コピーは消せない（.app からリポジトリの NOTICE は見えず、設定パネルは Editor からも読む）。
+      # 同梱コピーは消せない（.app / .apk に通知を同梱するため）。
       # 一致は EditMode テスト（NoticeTests）も見ているが、このワークフローに Unity ジョブが無いので
       # ズレたままマージできてしまう。**古いライセンス表記が出荷される**ので、ここでも落とす
       - name: Verify bundled NOTICE matches the repository NOTICE

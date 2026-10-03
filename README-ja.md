@@ -71,6 +71,7 @@ Claude Code
 ### 前提
 
 - **Node 24.11 以上**（`mise.toml` で 24.19.0 に固定しています）
+- **Rust**（`chatter-agent-app/mise.toml` で固定しています）—— ChatterAgent をビルドするとき
 - **Unity 6000.3.14f1** —— macOS / Android のビルドサポートモジュールが必要です
 - **Unity CLI**（`unity` コマンド） —— `chatter-mascot/scripts/*.sh` がこれ経由で Editor を動かします
 - **Android SDK の platform-tools**（`adb`）—— Android 版を端末へ入れるとき
@@ -86,6 +87,16 @@ npm run build
 ```
 
 `plugin/bin/chatter-agent-speak.mjs`（プラグイン同梱の CLI）と `core/dist/` にサーバー・プレーヤーが出ます。
+
+### ChatterAgent（macOS）
+
+```bash
+cd chatter-agent-app
+npm install
+npm run build      # → build/ChatterAgent.app
+```
+
+サーバーの起動・停止と設定パネルを受け持つメニューバー常駐アプリです。使い方は「実行」の「サーバー」にあります。
 
 ### macOS クライアント
 
@@ -159,15 +170,7 @@ cd core && npm run start:server
 ```
 
 macOS では、メニューバー常駐アプリ **ChatterAgent** にサーバーの起動・停止・再起動を任せることもできます。
-先に `core/` をビルドしてから:
-
-```bash
-cd chatter-agent-app
-npm install
-npm run build      # → build/ChatterAgent.app
-```
-
-アプリを開き、メニューの「core の場所を選ぶ…」で `core/` を一度選ぶと、ログインシェルと同じ環境で
+`core/` と ChatterAgent をビルドしたら（→「ビルド」）、`chatter-agent-app/build/ChatterAgent.app` を開き、メニューの「core の場所を選ぶ…」で `core/` を一度選ぶと、ログインシェルと同じ環境で
 サーバーを起こします。上の手動起動もこれまでどおり使えます（ChatterAgent は「外で動いている」と表示するだけで、
 手を出しません）。メニューの「設定…」から、サーバーの設定とマスコットの設定（モデル・大きさ・音量・モーションなど）を変えられます。マスコットを右クリックするか、Finder などから ChatterAgent を開き直しても、設定窓が前面に出ます。
 

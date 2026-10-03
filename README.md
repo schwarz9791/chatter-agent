@@ -71,6 +71,7 @@ There are four deliverables.
 ### Prerequisites
 
 - **Node 24.11 or later** (pinned to 24.19.0 in `mise.toml`)
+- **Rust** (pinned in `chatter-agent-app/mise.toml`) — to build ChatterAgent
 - **Unity 6000.3.14f1** — requires the macOS / Android build support modules
 - **Unity CLI** (`unity` command) — `chatter-mascot/scripts/*.sh` run the Editor through it
 - **Android SDK platform-tools** (`adb`) — when installing the Android version onto a device
@@ -86,6 +87,16 @@ npm run build
 ```
 
 This produces `plugin/bin/chatter-agent-speak.mjs` (the CLI bundled with the plugin) and the server / player under `core/dist/`.
+
+### ChatterAgent (macOS)
+
+```bash
+cd chatter-agent-app
+npm install
+npm run build      # → build/ChatterAgent.app
+```
+
+The menu bar app that starts and stops the server and hosts the settings panel. How to use it is under "Running" → "Server".
 
 ### macOS client
 
@@ -159,15 +170,7 @@ cd core && npm run start:server
 ```
 
 On macOS you can let **ChatterAgent** (a menu bar app) start, stop, and restart the server instead.
-Build `core/` first, then:
-
-```bash
-cd chatter-agent-app
-npm install
-npm run build      # → build/ChatterAgent.app
-```
-
-Open the app and choose the `core/` folder once from the menu ("Choose Core Folder…"). It then starts
+Once `core/` and ChatterAgent are built (see "Building"), open `chatter-agent-app/build/ChatterAgent.app` and choose the `core/` folder once from the menu ("Choose Core Folder…"). It then starts
 the server with the same environment a login shell gives you. Starting it by hand as above keeps
 working; ChatterAgent shows it as running outside and leaves it alone. Its settings panel (menu → "Settings…")
 edits the server settings and the mascot settings (model, size, volume, motion, and so on). Right-clicking the mascot, or reopening ChatterAgent from Finder, brings the settings window to the front too.

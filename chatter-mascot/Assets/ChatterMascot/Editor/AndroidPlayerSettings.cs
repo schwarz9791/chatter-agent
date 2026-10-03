@@ -22,7 +22,7 @@ namespace ChatterMascot.EditorTools
     ///
     ///   ./scripts/run.sh ChatterMascot.EditorTools.AndroidPlayerSettings.FixAll
     ///
-    /// ★ <b><c>NativePluginSettings</c> / <c>SceneFixups</c> と同じ立ち位置。</b>
+    /// ★ <b><c>SceneFixups</c> と同じ立ち位置。</b>
     ///   Inspector の Player Settings を手で触ると「誰かのマシンでだけ通る」状態になるので、
     ///   直し方をコードに置いておく。
     ///

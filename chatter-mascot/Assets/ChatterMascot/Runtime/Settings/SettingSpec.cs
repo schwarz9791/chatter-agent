@@ -4,10 +4,10 @@ using System.Collections.Generic;
 namespace ChatterMascot.Settings
 {
     /// <summary>
-    /// 設定パネルの項目の種類。<b>ネイティブ（<c>CMSettingsPanel.m</c>）はこれだけを見て
-    /// ビューを組む</b>ので、ここに無い見た目は作れない。
+    /// 設定パネルの項目の種類。<b>XR の設定パネルはこれだけを見て
+    /// 行を組む</b>ので、ここに無い見た目は作れない。
     ///
-    /// ★ <b>ネイティブ側に設定のキーを書かないこと。</b> 項目の追加・並び替え・ラベルの変更が
+    /// ★ <b>描画側に設定のキーを書かないこと。</b> 項目の追加・並び替え・ラベルの変更が
     ///   C# だけの変更で済むのが、この作りを選んだ理由そのもの。
     /// </summary>
     public enum SettingKind

@@ -8,8 +8,7 @@ namespace ChatterMascot.Xr
 {
     /// <summary>
     /// 設定パネルのレンダラ。world-space <c>Canvas</c> + legacy uGUI（<c>Image</c> / <c>Text</c>）で
-    /// <see cref="SettingSpec"/> の並びを描く。<c>Kind</c> だけを見て行を組む——
-    /// デスクトップの <c>CMSettingsPanel.m</c> と同じ規律。
+    /// <see cref="SettingSpec"/> の並びを描く。<c>Kind</c> だけを見て行を組む。
     ///
     /// ★★ <b>このファイルに設定のキー定数や具体的なキー文字列・項目ラベルの日本語を
     ///   1つも書かないこと。</b> キーは <see cref="SettingSpec.Key"/> を不透明に持ち回すだけで、

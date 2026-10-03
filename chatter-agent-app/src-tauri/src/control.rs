@@ -70,16 +70,17 @@ impl From<Failure> for ApiError {
     }
 }
 
-/// 数値か数字だけの文字列で、1–65535 の整数。
+/// core の `toInt` と同じ規則で、1–65535 の整数値（`9000.0` や前後に空白のある文字列も受ける）。
 fn parse_port(v: &Value) -> Option<u16> {
     let n = match v {
-        Value::Number(n) => n.as_u64()?,
-        Value::String(s) if !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) => {
-            s.parse().ok()?
-        }
+        Value::Number(n) => n.as_f64()?,
+        Value::String(s) => s.trim().parse::<f64>().ok()?,
         _ => return None,
     };
-    u16::try_from(n).ok().filter(|p| *p != 0)
+    if n.fract() != 0.0 || !(1.0..=65535.0).contains(&n) {
+        return None;
+    }
+    Some(n as u16)
 }
 
 fn env_nonempty<'a>(env: &'a Env, key: &str) -> Option<&'a str> {
@@ -321,7 +322,11 @@ mod tests {
     fn port_accepts_digit_strings_and_rejects_the_rest() {
         let from = |config: &str| target(&env_with_config("port", config, &[])).1;
         assert_eq!(from(r#"{"port":"9300"}"#), 9300);
+        assert_eq!(from(r#"{"port":9000.0}"#), 9000);
+        assert_eq!(from(r#"{"port":" 9100 "}"#), 9100);
         for bad in [
+            r#"{"port":"inf"}"#,
+            r#"{"port":"NaN"}"#,
             r#"{"port":0}"#,
             r#"{"port":65536}"#,
             r#"{"port":-1}"#,

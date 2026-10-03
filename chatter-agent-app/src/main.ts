@@ -28,11 +28,14 @@ import {
 import { EN, JA, type Text } from "./text.ts";
 
 const RETRY_MS = 3000;
+/** 再生の終わりが通知されないときにボタンを戻す上限 */
+const PREVIEW_MAX_MS = 60_000;
 
 let t: Text = JA;
 let snap: ConfigSnapshot | null = null;
 let serverErr: { status: number; body: string } | null = null;
 let speakers: { id: string; label: string }[] | null = null;
+let speakersEngine: string | null = null;
 let speakersUnavailable = false;
 let mascot: unknown = {};
 let mascotErr = "";
@@ -157,7 +160,7 @@ async function loadConfig(): Promise<void> {
   }
   if (serverErr?.status === 0) {
     cfgTimer = setTimeout(() => void loadConfig().then(render), RETRY_MS);
-  } else if (serverErr === null && speakers === null) {
+  } else if (serverErr === null && (speakers === null || speakersEngine !== String(snap?.values.ttsEngine))) {
     void loadSpeakers();
   }
 }
@@ -165,10 +168,13 @@ async function loadConfig(): Promise<void> {
 async function loadSpeakers(): Promise<void> {
   clearTimeout(spkTimer);
   const gen = ++spkGen;
+  const engine = String(cfgValue("ttsEngine"));
   try {
     const r = await serverJson<{ speakers: { id: string; label: string }[] }>("GET", "/v1/speakers");
     if (gen !== spkGen) return;
     speakers = r.speakers;
+    speakersEngine = engine;
+    delete flash.voice;
     speakersUnavailable = false;
   } catch (e) {
     if (gen !== spkGen) return;
@@ -449,7 +455,7 @@ function render(): void {
   fillSelect(
     ui.fps as HTMLSelectElement,
     [30, 60].map((n) => ({ value: String(n), label: `${n} fps` })),
-    String(mascotGet(mascot, "display.frameRate")),
+    String(mascotGet(mascot, "display.frameRate") === 60 ? 60 : 30),
   );
   (ui.sum as HTMLInputElement).checked = v?.aiSummaryEnabled ?? true;
   fillSelect(
@@ -524,52 +530,63 @@ async function onEngine(value: string): Promise<void> {
 }
 
 async function playTest(): Promise<void> {
+  if (busyPreview) return;
+  busyPreview = true;
   delete flash.test;
   warn.delete("test");
-  // ミュートはショートカットでマスコットが書き換えるので、窓にフォーカスがあったままでも古くなる
-  await loadMascot();
-  if (mascotGet(mascot, "audio.mute")) {
-    flash.test = t.mutedNoSound;
-    render();
-    return;
-  }
-  busyPreview = true;
   render();
   try {
+    // ミュートはショートカットでマスコットが書き換えるので、窓にフォーカスがあったままでも古くなる
+    await loadMascot();
+    if (mascotGet(mascot, "audio.mute")) {
+      flash.test = t.mutedNoSound;
+      return;
+    }
     const buf = await serverRequest("POST", "/v1/tts/preview", {});
-    const audio = new Audio(URL.createObjectURL(new Blob([buf], { type: "audio/wav" })));
-    audio.volume = Math.min(1, Math.max(0, mascotGet(mascot, "audio.volume")));
-    const done = new Promise<void>((resolve) => {
-      audio.addEventListener("ended", () => resolve());
-      audio.addEventListener("error", () => resolve());
-    });
-    await audio.play();
-    await done;
-    URL.revokeObjectURL(audio.src);
+    const url = URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+    try {
+      const audio = new Audio(url);
+      audio.volume = Math.min(1, Math.max(0, mascotGet(mascot, "audio.volume")));
+      const done = new Promise<void>((resolve) => {
+        for (const ev of ["ended", "error", "pause"]) audio.addEventListener(ev, () => resolve());
+        setTimeout(resolve, PREVIEW_MAX_MS);
+      });
+      await audio.play();
+      await done;
+      audio.pause();
+    } finally {
+      URL.revokeObjectURL(url);
+    }
   } catch (e) {
     flash.test = failText(e, "preview");
     warn.add("test");
+  } finally {
+    busyPreview = false;
+    render();
   }
-  busyPreview = false;
-  render();
 }
 
-// マスコット側はファイルなので、server に繋がらなくても戻せる
+// マスコット側 → server の順に、途中で失敗しても残りを進める
 async function resetAll(): Promise<void> {
   if (!(await confirmDialog(t.confirmResetTitle, t.confirmResetMessage, t.confirmResetOk, t.confirmResetCancel))) {
     return;
   }
-  warn.add("reset");
-  let removed: number;
+  // 行ごとの注記が残ると、ショートカットの行が保存値を読み直さない
+  for (const k of Object.keys(flash)) delete flash[k];
+  warn.clear();
+  const failures: string[] = [];
+  let removed = 0;
   try {
-    removed = await mascotReset();
+    const r = await mascotReset();
+    removed = r.removed;
+    if (r.error !== null) failures.push(t.resetMascotFailed(r.error));
   } catch (e) {
-    flash.reset = t.resetMascotFailed(String(e));
-    return reloadAll();
+    failures.push(t.resetMascotFailed(String(e)));
   }
   const coreError = await resetServer();
-  flash.reset = coreError === null ? t.resetDone(removed) : `${t.resetDone(removed)} / ${coreError}`;
-  if (coreError === null) warn.delete("reset");
+  if (coreError !== null) failures.push(coreError);
+  flash.reset = [t.resetDone(removed), ...failures].join(" / ");
+  if (failures.length > 0) warn.add("reset");
   await reloadAll();
 }
 

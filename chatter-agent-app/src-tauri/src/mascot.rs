@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use serde::Serialize;
 use serde_json::{Map, Value};
 use tauri::State;
 use tauri_plugin_dialog::{DialogExt as _, MessageDialogButtons, MessageDialogKind};
@@ -121,33 +122,59 @@ fn apply_set(root: &Path, path: &[String], value: Value) -> Result<(), String> {
     write_settings(&file, &mut settings)
 }
 
-/// 管理キーを消し、`models/` の `.vrm` を消す。消した VRM の数を返す。
-fn apply_reset(root: &Path) -> Result<u32, String> {
-    {
-        let _guard = SETTINGS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let file = settings_path(root);
-        if file.exists() {
-            let mut settings = read_settings(&file)?;
-            for key in MANAGED {
-                remove_path(&mut settings, key);
-            }
-            write_settings(&file, &mut settings)?;
-        }
+/// リセットの結果。設定と VRM の両方を試すので、失敗しても消せた数は残る。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetOutcome {
+    removed: u32,
+    error: Option<String>,
+}
+
+fn reset_settings(root: &Path) -> Result<(), String> {
+    let _guard = SETTINGS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let file = settings_path(root);
+    if !file.exists() {
+        return Ok(());
     }
+    let mut settings = read_settings(&file)?;
+    for key in MANAGED {
+        remove_path(&mut settings, key);
+    }
+    write_settings(&file, &mut settings)
+}
+
+/// 消した数と、最初に起きた失敗。1件失敗しても残りは続ける。
+fn reset_models(root: &Path) -> (u32, Option<String>) {
     let entries = match fs::read_dir(models_dir(root)) {
         Ok(e) => e,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
-        Err(e) => return Err(format!("models を読めない: {e}")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (0, None),
+        Err(e) => return (0, Some(format!("models を読めない: {e}"))),
     };
     let mut removed = 0;
+    let mut error = None;
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_file() && is_vrm(&path) {
-            fs::remove_file(&path).map_err(|e| format!("{} を消せない: {e}", path.display()))?;
-            removed += 1;
+            match fs::remove_file(&path) {
+                Ok(()) => removed += 1,
+                Err(e) => {
+                    error.get_or_insert(format!("{} を消せない: {e}", path.display()));
+                }
+            }
         }
     }
-    Ok(removed)
+    (removed, error)
+}
+
+/// 管理キーと `models/` の `.vrm` を、片方が失敗してももう片方まで消す。
+fn apply_reset(root: &Path) -> ResetOutcome {
+    let settings_error = reset_settings(root).err();
+    let (removed, models_error) = reset_models(root);
+    let errors: Vec<String> = settings_error.into_iter().chain(models_error).collect();
+    ResetOutcome {
+        removed,
+        error: (!errors.is_empty()).then(|| errors.join(" / ")),
+    }
 }
 
 /// `src` を `models/mascot.vrm` へ置き換え、元のファイル名を返す。
@@ -238,11 +265,11 @@ pub async fn confirm(
     .await
 }
 
-/// 消した VRM の数を返す。
+/// 失敗は `ResetOutcome.error` に載せる。`Err` はルートを決められないときだけ。
 #[tauri::command]
-pub async fn mascot_reset(manager: State<'_, Manager>) -> Result<u32, String> {
+pub async fn mascot_reset(manager: State<'_, Manager>) -> Result<ResetOutcome, String> {
     let root = root_of(&manager)?;
-    blocking(move || apply_reset(&root)).await
+    blocking(move || Ok(apply_reset(&root))).await
 }
 
 #[cfg(test)]
@@ -333,7 +360,7 @@ mod tests {
             let root = tmp(&format!("broken{i}"));
             seed(&root, bad);
             assert!(apply_set(&root, &p(&["audio", "volume"]), json!(1)).is_err());
-            assert!(apply_reset(&root).is_err());
+            assert!(apply_reset(&root).error.is_some());
             assert_eq!(fs::read_to_string(settings_path(&root)).unwrap(), bad);
         }
     }
@@ -391,7 +418,8 @@ mod tests {
         }
         fs::create_dir_all(models.join("dir.vrm")).unwrap();
 
-        assert_eq!(apply_reset(&root).unwrap(), 2);
+        let outcome = apply_reset(&root);
+        assert_eq!((outcome.removed, outcome.error), (2, None));
         assert_eq!(
             load(&root),
             json!({
@@ -414,8 +442,25 @@ mod tests {
     #[test]
     fn reset_without_files_does_nothing() {
         let root = tmp("reset-empty");
-        assert_eq!(apply_reset(&root).unwrap(), 0);
+        let outcome = apply_reset(&root);
+        assert_eq!((outcome.removed, outcome.error), (0, None));
         assert!(!settings_path(&root).exists());
+    }
+
+    #[test]
+    fn reset_removes_vrm_even_when_settings_are_broken() {
+        let root = tmp("reset-broken");
+        seed(&root, "{broken");
+        let models = models_dir(&root);
+        fs::create_dir_all(&models).unwrap();
+        fs::write(models.join("a.vrm"), "x").unwrap();
+        fs::write(models.join("b.VRM"), "x").unwrap();
+
+        let outcome = apply_reset(&root);
+        assert_eq!(outcome.removed, 2);
+        assert!(outcome.error.is_some());
+        assert!(!models.join("a.vrm").exists());
+        assert_eq!(fs::read_to_string(settings_path(&root)).unwrap(), "{broken");
     }
 
     #[test]

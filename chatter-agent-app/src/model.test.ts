@@ -34,7 +34,7 @@ test("ショートカットは別名・大小を吸収して正規順に組み�
 });
 
 test("不正なショートカットは null", () => {
-  for (const bad of ["", "m", "opt", "opt+m+n", "opt+", "opt+ö", "opt+f13", "+m", 3, null]) {
+  for (const bad of ["", "m", "opt", "opt+m+n", "opt+", "opt+ö", "opt+f13", "+m", "ctrl+toString+m", "constructor+m", 3, null]) {
     assert.equal(parseHotKey(bad), null, String(bad));
   }
 });

@@ -97,7 +97,7 @@ export function parseHotKey(text: unknown): HotKey | null {
   for (const raw of text.split("+")) {
     const token = raw.trim().toLowerCase();
     if (token === "") return null;
-    const mod = MODIFIERS[token];
+    const mod = Object.hasOwn(MODIFIERS, token) ? MODIFIERS[token] : undefined;
     if (mod) {
       out[mod] = true;
       continue;

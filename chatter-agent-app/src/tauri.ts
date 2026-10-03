@@ -51,5 +51,5 @@ export const mascotSettingsSet = (path: string[], value: unknown) =>
 export const pickVrm = () => invoke<string | null>("pick_vrm");
 export const confirmDialog = (title: string, message: string, ok: string, cancel: string) =>
   invoke<boolean>("confirm", { title, message, ok, cancel });
-export const mascotReset = () => invoke<number>("mascot_reset");
+export const mascotReset = () => invoke<{ removed: number; error: string | null }>("mascot_reset");
 export const lang = () => invoke<"ja" | "en">("lang");

@@ -272,5 +272,5 @@ Unity 側でのミュートの変更をメニューのチェックに反映す�
 - ★ **ChatterAgent がメニューの「終了」やログアウト（quit の Apple Event）以外で終わると server と player が残る。**
   `kill` の SIGTERM や強制終了がこれに当たる（マスコットも終了しない）。次に起動した ChatterAgent からは「外で動いている」に見える
   （→ [`knowledge/agent.md`](./knowledge/agent.md)）
-- **Unity 側も同じショートカットを登録しているので、押すと両方に届きうる**
+- **Unity 側も同じショートカットを登録しているので、押すと両方に届く**（→ [`knowledge/agent.md`](./knowledge/agent.md)「実機確認」）
 - **Windows は未対応。** 停止が穏当でなく（server の後始末が走らない）、環境の解決もしない

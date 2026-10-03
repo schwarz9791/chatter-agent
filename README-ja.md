@@ -50,7 +50,7 @@ Claude Code
 | `plugin/` | Claude Code プラグイン。bash の hook が payload を置くだけ |
 | `core/` | サーバーと CLI（TypeScript / Node）。`src/server/` `src/cli/` `src/player/` |
 | `chatter-mascot/` | 表示側アプリ（Unity + UniVRM）。macOS と Android XR を1プロジェクトから |
-| `chatter-agent-app/` | ChatterAgent（Tauri）。メニューバー常駐でサーバーを起動・停止する |
+| `chatter-agent-app/` | ChatterAgent（Tauri）。メニューバー常駐でサーバーを起動・停止し、マスコットの表示とミュートを操作する |
 | `docs/` | 基本設計・ファイル構成・コマンド。実装で踏んだことは `docs/knowledge/` |
 
 ## 現在の状態
@@ -169,7 +169,13 @@ npm run build      # → src-tauri/target/release/bundle/macos/ChatterAgent.app
 
 アプリを開き、メニューの「core の場所を選ぶ…」で `core/` を一度選ぶと、ログインシェルと同じ環境で
 サーバーを起こします。上の手動起動もこれまでどおり使えます（ChatterAgent は「外で動いている」と表示するだけで、
-手を出しません）。メニューの「設定…」から、サーバーの設定とマスコットの設定を変えられます。詳細は [`docs/agent.md`](./docs/agent.md)。
+手を出しません）。メニューの「設定…」から、サーバーの設定とマスコットの設定を変えられます。
+
+メニューの「マスコットを表示 / 隠す」と「ミュート」で、繋ぐクライアントも切り替わります。表示中は macOS アプリ、
+隠している間は CLI プレーヤーで声だけを鳴らし、隠してミュートしているときは何も繋ぎません（2つを同時に繋ぐと
+二重に鳴るので、ChatterAgent がどちらか一方だけを動かします）。macOS アプリは `/Applications` →
+`~/Applications` → `chatter-mascot/Build` の順に `ChatterMascot.app` を探します。ショートカット
+（既定は ⌃⌥M がミュート、⌃⌥H が表示切替）でも操作できます。詳細は [`docs/agent.md`](./docs/agent.md)。
 
 ### クライアント
 
@@ -272,7 +278,7 @@ cd chatter-mascot
 | [`docs/core.md`](./docs/core.md) | `core/` を触るとき |
 | [`docs/plugin.md`](./docs/plugin.md) | `plugin/` を触るとき |
 | [`docs/mascot.md`](./docs/mascot.md) | 表示側アプリを触るとき |
-| [`docs/agent.md`](./docs/agent.md) | ChatterAgent（サーバーを起動するメニューバーアプリ）を触るとき |
+| [`docs/agent.md`](./docs/agent.md) | ChatterAgent（サーバーとマスコットの面倒を見るメニューバーアプリ）を触るとき |
 | [`docs/origin.md`](./docs/origin.md) | cc-mascot 由来のコードを触るとき |
 | [`docs/kokoro.md`](./docs/kokoro.md) | Kokoro-FastAPI（日本語以外向けの TTS）を使うとき |
 | [`docs/knowledge/`](./docs/knowledge) | 実装で踏んだこと・なぜそうしたか・実測値 |

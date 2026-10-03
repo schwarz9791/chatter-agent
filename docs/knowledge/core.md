@@ -474,6 +474,8 @@ player だけが読むキーの一覧・既定値・意味は [`../core.md`](../
 時計のずれ、そのどれもが「古い」と誤判定されて無関係な発話まで消える。合成できない1文で
 後ろが詰まる問題はこれで解かず、`server/audioStore.ts` の `SynthesisRejectedError`
 （→ `../CLAUDE.md`「絶対に守ること」7の例外）が担う。
+繋ぎ直したときの古い発話は `speechBacklogMaxAgeMs` で飛ばす。判定の基準を player の起動時点に
+固定し、起動後に積まれた発話には効かせないので、上の誤判定を踏まない。
 
 `chatter-agent-speak`（`summarizer/` の AI要約）だけが読むキーの一覧・既定値・意味は
 [`../core.md`](../core.md)「設定と環境変数」の「AI要約」にある。

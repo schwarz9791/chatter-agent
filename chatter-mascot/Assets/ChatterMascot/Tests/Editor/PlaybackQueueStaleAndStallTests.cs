@@ -50,6 +50,62 @@ namespace ChatterMascot.Tests
     }
 
     [TestFixture]
+    public sealed class PlaybackQueueNotBeforeTests : PlaybackQueueTestBase
+    {
+        /// <summary>NotBeforeMs より前の ts は音を出さずに ack する</summary>
+        [Test]
+        public void BeforeCutoffIsAckedWithoutAudio()
+        {
+            var state = Start(o => o.NotBeforeMs = T0 + 1500);
+            var commands = Run(state, PlaybackEvent.Received(Record(1)), T0 + 2000);
+            Assert.That(Only(commands, PlaybackCommandKind.FetchAudio), Is.Empty);
+            var acks = Only(commands, PlaybackCommandKind.Ack);
+            Assert.That(acks.Count, Is.EqualTo(1));
+            Assert.That(acks[0].Seq, Is.EqualTo(1L));
+        }
+
+        /// <summary>NotBeforeMs 以後の ts は、どれだけ時間が経っても飛ばさない</summary>
+        [Test]
+        public void AtOrAfterCutoffIsNeverStale()
+        {
+            var state = Start(o => o.NotBeforeMs = T0 + 1000);
+            var commands = Run(state, PlaybackEvent.Received(Record(1)), T0 + 600000);
+            Assert.That(Only(commands, PlaybackCommandKind.FetchAudio).Count, Is.EqualTo(1));
+        }
+
+        /// <summary>0 なら無効</summary>
+        [Test]
+        public void ZeroDisablesCutoff()
+        {
+            var state = Start(o => o.NotBeforeMs = 0);
+            var commands = Run(state, PlaybackEvent.Received(Record(1)), T0 + 600000);
+            Assert.That(Only(commands, PlaybackCommandKind.FetchAudio).Count, Is.EqualTo(1));
+        }
+
+        /// <summary>ts が読めないものは捨てない</summary>
+        [Test]
+        public void UnparsableTsIsNotStale()
+        {
+            var state = Start(o => o.NotBeforeMs = T0 + 1500);
+            var commands = Run(state, PlaybackEvent.Received(Record(1, ts: "いつか")), T0 + 2000);
+            Assert.That(Only(commands, PlaybackCommandKind.FetchAudio).Count, Is.EqualTo(1));
+        }
+
+        /// <summary>再生中のものは止めない</summary>
+        [Test]
+        public void PlayingItemIsNotCutOff()
+        {
+            var state = Start();
+            Run(state, PlaybackEvent.Received(Record(1)));
+            Run(state, PlaybackEvent.AudioReady(0, 1, Clip(1)));
+            state.Options.NotBeforeMs = T0 + 1500;
+            var commands = Run(state, PlaybackEvent.Tick(), T0 + 2000);
+            Assert.That(Only(commands, PlaybackCommandKind.Ack), Is.Empty);
+            Assert.That(state.Items[1].Status, Is.EqualTo(ItemStatus.Playing));
+        }
+    }
+
+    [TestFixture]
     public sealed class PlaybackQueueStallTests : PlaybackQueueTestBase
     {
         /// <summary>head が動かないまま時間が経つと警告し、★ StallWarnMs ごとに出し直す</summary>

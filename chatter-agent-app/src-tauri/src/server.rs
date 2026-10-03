@@ -135,7 +135,10 @@ pub fn external_server_pid(root: &Path) -> Option<u32> {
 
 /// 動かすのに要る成果物が core に揃っているか。
 pub fn check_core(core: &Path) -> Result<(), Fail> {
-    if !core.join("dist").join("chatter-agent-server.mjs").is_file() {
+    let dist = core.join("dist");
+    if !dist.join("chatter-agent-server.mjs").is_file()
+        || !dist.join("chatter-agent-player.mjs").is_file()
+    {
         return Err(Fail::NoDist);
     }
     if !core.join("node_modules").is_dir() {
@@ -163,13 +166,13 @@ pub fn rotate_log(path: &Path, max_bytes: u64) -> std::io::Result<()> {
 const ENV_SCRIPT: &str = "printf '\\0__CHATTER_AGENT_ENV__\\0'; exec /usr/bin/env -0";
 const ENV_TIMEOUT: Duration = Duration::from_secs(10);
 /// server の終了処理の上限（`SHUTDOWN_TIMEOUT_MS`）より長く待つ。
-const STOP_TIMEOUT: Duration = Duration::from_secs(10);
+pub(crate) const STOP_TIMEOUT: Duration = Duration::from_secs(10);
 const MONITOR_INTERVAL: Duration = Duration::from_secs(2);
 const STDERR_TAIL_BYTES: usize = 500;
 /// 子が終わったあと、パイプの EOF を待つ猶予。子孫がパイプを握っていると EOF は来ない。
 const PIPE_GRACE: Duration = Duration::from_millis(300);
 
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -284,7 +287,7 @@ fn request_stop(child: &mut Child) {
     let _ = child.kill();
 }
 
-fn exit_info(status: &ExitStatus) -> ExitInfo {
+pub(crate) fn exit_info(status: &ExitStatus) -> ExitInfo {
     if let Some(code) = status.code() {
         return ExitInfo::Code(code);
     }
@@ -293,6 +296,30 @@ fn exit_info(status: &ExitStatus) -> ExitInfo {
         return ExitInfo::Signal(sig);
     }
     ExitInfo::Unknown
+}
+
+/// ログ用の終了状態。
+pub(crate) fn exit_label(info: ExitInfo) -> String {
+    match info {
+        ExitInfo::Code(c) => format!("終了コード {c}"),
+        ExitInfo::Signal(s) => format!("シグナル {s}"),
+        ExitInfo::Unknown => "終了状態不明".into(),
+    }
+}
+
+/// SIGTERM を1回だけ送り、`STOP_TIMEOUT` 待っても終わらなければ kill する。穏当に終わったら true。
+pub(crate) fn stop_child(child: &mut Child) -> bool {
+    request_stop(child);
+    let deadline = Instant::now() + STOP_TIMEOUT;
+    while Instant::now() < deadline {
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    false
 }
 
 /// 自分が起こした server が終わったときの状態。
@@ -319,13 +346,13 @@ enum Poll {
 
 /// 処理を背景で1本ずつ流す。処理中に来た要求は捨てず、今の処理が終わったあとに1回だけ流し直す。
 #[derive(Default)]
-struct Serial {
-    busy: AtomicBool,
+pub(crate) struct Serial {
+    pub(crate) busy: AtomicBool,
     pending: AtomicBool,
 }
 
 impl Serial {
-    fn request(self: &Arc<Self>, job: impl Fn() + Send + 'static) {
+    pub(crate) fn request(self: &Arc<Self>, job: impl Fn() + Send + 'static) {
         self.pending.store(true, Ordering::SeqCst);
         if self.busy.swap(true, Ordering::SeqCst) {
             return;
@@ -396,7 +423,7 @@ impl Manager {
     }
 
     /// `server.log` に ChatterAgent 自身の出来事を1行足す。
-    fn log(&self, msg: &str) {
+    pub(crate) fn log(&self, msg: &str) {
         let line = format!(
             "[Agent] {} {msg}\n",
             chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
@@ -407,7 +434,7 @@ impl Manager {
     }
 
     /// ログを追記で開く。ディレクトリが無ければ作る。
-    fn open_log(&self) -> std::io::Result<fs::File> {
+    pub(crate) fn open_log(&self) -> std::io::Result<fs::File> {
         if let Some(dir) = self.0.log_path.parent() {
             fs::create_dir_all(dir)?;
         }
@@ -520,19 +547,7 @@ impl Manager {
         let pid = child.id();
         self.set_status(Status::Stopping);
         self.log(&format!("停止を要求した: pid={pid}"));
-        request_stop(&mut child);
-        let deadline = Instant::now() + STOP_TIMEOUT;
-        let mut exited = false;
-        while Instant::now() < deadline {
-            if matches!(child.try_wait(), Ok(Some(_))) {
-                exited = true;
-                break;
-            }
-            thread::sleep(Duration::from_millis(100));
-        }
-        if !exited {
-            let _ = child.kill();
-            let _ = child.wait();
+        if !stop_child(&mut child) {
             self.log("止まらなかったので強制終了した。合成エンジンが残っている可能性がある");
         }
         self.log(&format!("停止を完了した: pid={pid}"));
@@ -554,6 +569,15 @@ impl Manager {
         }
     }
 
+    /// 解決済みの環境。まだなら None（`env()` と違い、ChatterAgent 自身の環境で代用しない）。
+    pub fn resolved_env(&self) -> Option<Env> {
+        lock(&self.0.env).clone()
+    }
+
+    pub fn core_dir(&self) -> Option<PathBuf> {
+        lock(&self.0.core_dir).clone()
+    }
+
     /// server に渡している環境。まだ解決していなければ ChatterAgent 自身の環境。
     pub fn env(&self) -> Env {
         lock(&self.0.env)
@@ -573,11 +597,7 @@ impl Manager {
                 let info = exit_info(&st);
                 let owner = self.current_root().and_then(|r| external_server_pid(&r));
                 let status = status_after_exit(info, owner);
-                let how = match info {
-                    ExitInfo::Code(c) => format!("終了コード {c}"),
-                    ExitInfo::Signal(s) => format!("シグナル {s}"),
-                    ExitInfo::Unknown => "終了状態不明".into(),
-                };
+                let how = exit_label(info);
                 self.log(&format!(
                     "server が終わった: pid={pid} {how} → {}",
                     text::JA.status(&status)

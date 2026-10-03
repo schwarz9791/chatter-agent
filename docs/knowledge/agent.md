@@ -86,6 +86,39 @@ JS の `confirm()` は wry で効かない。確認は `tauri-plugin-dialog` の
 `tauri.conf.json` の `build.devUrl` があると、`cargo clippy` / `cargo test` は `frontendDist`
 （`dist/`）の存在を要求しない。CI の Rust のジョブが、フロントの事前ビルド無しで通る理由。
 
+## マスコットの終了は `NSRunningApplication.terminate()` で頼む
+
+`terminate()` は通常の quit の Apple Event を送るだけで、Unity はそれを `wantsToQuit` で受ける
+（`Player.log` に `[Mascot] 終了要求: 未 ack=… → 通します/保留します` が出る）。保留した回の戻りは
+「拒否」になるので、終わったかは pid が消えたことで見る（`clients.rs` の `quit_mascot`）。
+
+pid で引くので、別のワークツリーのビルドを名前で取り違えない。bundle id で列挙する
+（`runningApplicationsWithBundleIdentifier`）ので、どのワークツリーのビルドも「動いているマスコット」に入る。
+
+## 終わらないスレッドから AppKit を呼ぶなら autoreleasepool で包む
+
+AppKit の内部で autorelease されたオブジェクトは、呼んだスレッドの暗黙のプールに積まれる。
+監視スレッドは終わらないので、そのプールが掃除されず、常駐中にメモリが増え続ける。`Serial` のスレッドは
+ジョブのたびに終わるので掃除される。`mascot_app.rs` の `running_pids` / `request_quit` は
+`objc2::rc::autoreleasepool` で包んでいる。
+
+実測（新しいスレッドで `running_pids()` を 20 万回呼び、マスコットが動いている状態で 2 万回ごとに RSS を見た）:
+
+- 包まない: 1 回あたり約 310 バイトずつ一定の傾きで増え、9.5MB → 72MB になった
+- `objc_autoreleasePoolPush` / `Pop` で包む: 最初に約 1.4MB 増えたあとは横ばい
+- 2 秒ごとの監視なら、包まないと 1 日で約 13MB 増える計算になる
+
+## 画面のロック中は GUI の操作を自動化できない
+
+- Orca の computer-use はメニューバーとメニューを扱えない（`capabilities` の `surfaces.menubar` /
+  `menus` が false）
+- System Events から状態メニューの項目に `AXPress` は送れるが、ロック中はメニューが開かない
+  （`menus` が 0 個のまま）。ショートカットも同じ理由で届かない
+
+→ メニューとショートカットの確認は、ロックを外した画面で行う。表示状態の切り替えのうち、外での
+終了・起動、`audio.mute` / `audio.volume` の書き換え、ChatterAgent の起動時の決め直しは GUI を通らないので、
+ロック中でも確かめられる。
+
 ## 実機確認
 
 - 2026-10-02（macOS。AivisSpeech と Ollaya を server が spawn する構成）: `open` での起動、メニューからの
@@ -96,3 +129,18 @@ JS の `confirm()` は wry で効かない。確認は `tauri-plugin-dialog` の
   `netsimd` が Mac 自身の IP から張るので Mac の外に出ず、「ローカルネットワーク」の許可は求められない
   （システム設定の一覧にも載らない）。** 許可が ChatterAgent に付くかは、実機のヘッドセットでないと
   確かめられない
+- 2026-10-03（macOS。画面ロック中。AivisSpeech と Ollaya を server が spawn する構成）: GUI を通らない経路だけ確認した。
+  全部通った
+  - 起動時に表示ならマスコットを `-speechBacklogMaxAgeMs 60000` 付きで起こす
+  - 外での終了 → 非表示に寄せて player を起こす
+  - ミュート → player を止めて誰も繋がない
+  - ミュートを外す → 起動時点で 60 秒より古い発話を飛ばす
+  - 音量の変更 → `-v` を変えて player を起こし直す
+  - 非表示で起動したときに動いていたマスコットを終了させてから player を起こす（Unity は 0.5 秒以内に終了）
+  - quit の Apple Event → player → マスコット → server の順に残らず止まる
+  - 8570 に繋がるクライアントは常に1台
+- 2026-10-03（macOS。画面のロックを外して手で操作）: メニューの表示切替・ミュート、⌃⌥H / ⌃⌥M、メニューの「終了」。
+  全部通った。どの切り替えも、片方が止まってから、もう片方が起きた
+  - ★ **Unity も同じ組み合わせを登録しているので、押すと両方に届く。** ⌃⌥H では Unity が「キャラクターを隠しました」
+    （カメラを隠す）を出した直後に、ChatterAgent の終了要求で終わる。⌃⌥M ではどちらもミュートを反転するが、
+    同じ値を書くので結果は崩れなかった

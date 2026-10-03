@@ -701,6 +701,42 @@ describe("古い発話", () => {
     expect(only(commands, "fetchAudio")).toHaveLength(1);
   });
 
+  it("notBeforeMs より前の ts は音声を取得せず無音で ack する", () => {
+    const state = start({ notBeforeMs: T0 + 2_000 });
+    const commands = run(state, [{ kind: "received", record: record(1) }]);
+    expect(only(commands, "fetchAudio")).toEqual([]);
+    expect(only(commands, "ack")).toEqual([{ kind: "ack", seq: 1, epochId: E1 }]);
+  });
+
+  it("notBeforeMs 以後の ts は時間が経っても飛ばさない", () => {
+    const state = start({ notBeforeMs: T0 + 1_000 });
+    const commands = run(state, [{ kind: "received", record: record(1) }], T0 + 600_000);
+    expect(only(commands, "fetchAudio")).toHaveLength(1);
+  });
+
+  it("notBeforeMs が 0 なら無効", () => {
+    const state = start({ notBeforeMs: 0 });
+    const commands = run(state, [{ kind: "received", record: record(1) }], T0 + 600_000);
+    expect(only(commands, "fetchAudio")).toHaveLength(1);
+  });
+
+  it("notBeforeMs でも ts が読めないものは捨てない", () => {
+    const state = start({ notBeforeMs: T0 + 2_000 });
+    const commands = run(state, [{ kind: "received", record: record(1, { ts: "いつか" }) }]);
+    expect(only(commands, "fetchAudio")).toHaveLength(1);
+  });
+
+  it("notBeforeMs でも再生中のものは止めない", () => {
+    const state = start({ notBeforeMs: T0 + 2_000 });
+    state.options.notBeforeMs = 0;
+    run(state, [{ kind: "received", record: record(1) }]);
+    run(state, [{ kind: "audioReady", epoch: 0, seq: 1, file: "/tmp/1.wav" }]);
+    state.options.notBeforeMs = T0 + 2_000;
+    const commands = run(state, [{ kind: "tick" }]);
+    expect(only(commands, "ack")).toEqual([]);
+    expect(state.items.get(1)?.status).toBe("playing");
+  });
+
   it("再生中のものは古くなっても止めない", () => {
     const state = start({ maxAgeMs: 60_000 });
     run(state, [{ kind: "received", record: record(1) }]);

@@ -50,7 +50,7 @@ The speech contract is in [`docs/protocol.md`](./docs/protocol.md). If you're wr
 | `plugin/` | The Claude Code plugin. A bash hook just drops the payload |
 | `core/` | The server and CLIs (TypeScript / Node). `src/server/` `src/cli/` `src/player/` |
 | `chatter-mascot/` | The display-side app (Unity + UniVRM). macOS and Android XR from a single project |
-| `chatter-agent-app/` | ChatterAgent (Tauri). A menu bar app that starts and stops the server |
+| `chatter-agent-app/` | ChatterAgent (Tauri). A menu bar app that starts and stops the server and shows, hides, and mutes the mascot |
 | `docs/` | The basic design, file layout, and commands. What was learned along the way is in `docs/knowledge/` |
 
 ## Current state
@@ -170,7 +170,14 @@ npm run build      # → src-tauri/target/release/bundle/macos/ChatterAgent.app
 Open the app and choose the `core/` folder once from the menu ("Choose Core Folder…"). It then starts
 the server with the same environment a login shell gives you. Starting it by hand as above keeps
 working; ChatterAgent shows it as running outside and leaves it alone. Its settings panel (menu → "Settings…")
-edits the server settings and the mascot settings. Details are in
+edits the server settings and the mascot settings.
+
+"Show Mascot / Hide Mascot" and "Mute" in the menu also switch which client is connected. While the
+mascot is shown, the macOS app plays the speech; while it is hidden, the CLI player plays the voice
+only; when it is hidden and muted, nothing is connected (connecting both would play everything twice,
+so ChatterAgent runs only one of them). The macOS app is looked up as `ChatterMascot.app` in
+`/Applications`, then `~/Applications`, then `chatter-mascot/Build`. Shortcuts work too (by default
+⌃⌥M toggles mute and ⌃⌥H shows or hides the mascot). Details are in
 [`docs/agent.md`](./docs/agent.md).
 
 ### Client
@@ -275,7 +282,7 @@ cd chatter-mascot
 | [`docs/core.md`](./docs/core.md) | when touching `core/` |
 | [`docs/plugin.md`](./docs/plugin.md) | when touching `plugin/` |
 | [`docs/mascot.md`](./docs/mascot.md) | when touching the display-side app |
-| [`docs/agent.md`](./docs/agent.md) | when touching ChatterAgent (the menu bar app that runs the server) |
+| [`docs/agent.md`](./docs/agent.md) | when touching ChatterAgent (the menu bar app that looks after the server and the mascot) |
 | [`docs/origin.md`](./docs/origin.md) | when touching code that comes from cc-mascot |
 | [`docs/kokoro.md`](./docs/kokoro.md) | when using Kokoro-FastAPI (TTS for non-Japanese languages) |
 | [`docs/knowledge/`](./docs/knowledge) | what was learned along the way, why, and measured values |

@@ -248,7 +248,8 @@ namespace ChatterMascot.Playback
         private static bool IsStale(PlaybackState state, QueueItem item, long now)
         {
             var maxAgeMs = state.Options.MaxAgeMs;
-            if (maxAgeMs <= 0) return false;
+            var notBeforeMs = state.Options.NotBeforeMs;
+            if (maxAgeMs <= 0 && notBeforeMs <= 0) return false;
 
             DateTimeOffset parsed;
             var ok = DateTimeOffset.TryParse(
@@ -256,7 +257,9 @@ namespace ChatterMascot.Playback
             // 読めない ts で発話を捨てない
             if (!ok) return false;
 
-            return now - parsed.ToUnixTimeMilliseconds() > maxAgeMs;
+            var tsMs = parsed.ToUnixTimeMilliseconds();
+            if (maxAgeMs > 0 && now - tsMs > maxAgeMs) return true;
+            return notBeforeMs > 0 && tsMs < notBeforeMs;
         }
 
         /// <summary>
@@ -354,7 +357,7 @@ namespace ChatterMascot.Playback
         private static bool MarkStale(PlaybackState state, long now, List<PlaybackCommand> commands)
         {
             // 既定（0 = 無効）では判定するものが無い。Step のループから毎回呼ばれるので入口で抜ける
-            if (state.Options.MaxAgeMs <= 0) return false;
+            if (state.Options.MaxAgeMs <= 0 && state.Options.NotBeforeMs <= 0) return false;
 
             var changed = false;
             foreach (var item in state.Items.Values)

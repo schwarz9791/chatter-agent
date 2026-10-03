@@ -440,10 +440,13 @@ server / player はこのファイルを読みも書きもしない（読むの�
 | `playerArgs` | `["{file}"]` | `CHATTER_AGENT_PLAYER_ARGS`（カンマ区切り） |
 | `playerServerUrl` | `""`（空なら `host`/`port` から導出） | `CHATTER_AGENT_PLAYER_SERVER_URL` |
 | `speechMaxAgeMs` | `0`（無効） | `CHATTER_AGENT_SPEECH_MAX_AGE_MS` |
+| `speechBacklogMaxAgeMs` | `0`（無効） | `CHATTER_AGENT_SPEECH_BACKLOG_MAX_AGE_MS` |
 
 - ★ `synthesisLookahead` はサーバーの先読みではなく、player が「先何件を先読み取得するか」の窓。
   サーバーは投機的な先読みを持たず `GET` が来たときに合成するので、この窓がそのまま合成の
   需要信号になる
+- `speechBacklogMaxAgeMs` は、player の起動時点で既にこれより古かった発話を音を出さずに飛ばす。
+  起動後に積まれた発話には効かない。0 なら無効
 - ★ `audioFetchTimeoutMs` と `synthesisTimeoutMs` の順序は気にしなくてよい。サーバーが `GET`
   の応答を自分で打ち切って `503` を返すため、両者の長さの間に暗黙の制約は無い
 - ★ `playerServerUrl` が `host` と別なのは、`0.0.0.0` / `::`（LAN 公開のため明示的に指定した

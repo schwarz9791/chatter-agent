@@ -87,6 +87,8 @@ export interface PlaybackOptions {
   lookahead: number;
   /** これより古い発話は音を出さずに飛ばす。0 なら無効 */
   maxAgeMs: number;
+  /** この時刻（unix ms）より前に生成された発話は音を出さずに飛ばす。0 以下なら無効 */
+  notBeforeMs: number;
   /** 取得を試みる上限回数。2 = 初回 + 1リトライ。**503 はこれを消費しない** */
   synthesisAttempts: number;
   /**
@@ -129,6 +131,7 @@ export function createDefaultOptions(): PlaybackOptions {
   return {
     lookahead: 3,
     maxAgeMs: 0,
+    notBeforeMs: 0,
     synthesisAttempts: 2,
     audioRetryMs: 1_000,
     audioRetryMaxMs: 30_000,
@@ -300,11 +303,11 @@ function remember(state: PlaybackState, record: SpeechFrame): void {
 }
 
 function isStale(state: PlaybackState, item: QueueItem, now: number): boolean {
-  const { maxAgeMs } = state.options;
-  if (maxAgeMs <= 0) return false;
+  const { maxAgeMs, notBeforeMs } = state.options;
+  if (maxAgeMs <= 0 && notBeforeMs <= 0) return false;
   const ts = Date.parse(item.record.ts);
   if (Number.isNaN(ts)) return false; // 読めない ts で発話を捨てない
-  return now - ts > maxAgeMs;
+  return (maxAgeMs > 0 && now - ts > maxAgeMs) || (notBeforeMs > 0 && ts < notBeforeMs);
 }
 
 /**
@@ -372,7 +375,7 @@ function emitAck(state: PlaybackState, seq: number, commands: PlaybackCommand[])
 /** 古くなった pending / ready を落とす。再生中には触らない（もう鳴っている） */
 function markStale(state: PlaybackState, now: number, commands: PlaybackCommand[]): boolean {
   // 既定（0 = 無効）では判定するものが無い。step() のループから毎回呼ばれるので入口で抜ける
-  if (state.options.maxAgeMs <= 0) return false;
+  if (state.options.maxAgeMs <= 0 && state.options.notBeforeMs <= 0) return false;
 
   let changed = false;
   for (const item of state.items.values()) {

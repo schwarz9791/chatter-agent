@@ -30,6 +30,12 @@ pub struct Text {
     pub settings_title: &'static str,
     pub autostart: &'static str,
     pub quit: &'static str,
+    pub mute: &'static str,
+    pub show_mascot: &'static str,
+    pub hide_mascot: &'static str,
+    pub mascot_unavailable_title: &'static str,
+    mascot_not_found: fn(&str) -> String,
+    mascot_launch_failed: fn(&str) -> String,
 }
 
 pub const JA: Text = Text {
@@ -60,6 +66,16 @@ pub const JA: Text = Text {
     settings_title: "Chatter Agent 設定",
     autostart: "ログイン時に起動",
     quit: "終了",
+    mute: "ミュート",
+    show_mascot: "マスコットを表示",
+    hide_mascot: "マスコットを隠す",
+    mascot_unavailable_title: "マスコットを表示できません",
+    mascot_not_found: |places| {
+        format!("ChatterMascot.app が見つかりません。探した場所:\n{places}\n\nマスコットは隠したままにします。")
+    },
+    mascot_launch_failed: |e| {
+        format!("ChatterMascot.app を起動できません（{e}）。\n\nマスコットは隠したままにします。")
+    },
 };
 
 pub const EN: Text = Text {
@@ -90,6 +106,16 @@ pub const EN: Text = Text {
     settings_title: "Chatter Agent Settings",
     autostart: "Launch at Login",
     quit: "Quit",
+    mute: "Mute",
+    show_mascot: "Show Mascot",
+    hide_mascot: "Hide Mascot",
+    mascot_unavailable_title: "Cannot Show the Mascot",
+    mascot_not_found: |places| {
+        format!("ChatterMascot.app was not found. Searched:\n{places}\n\nThe mascot stays hidden.")
+    },
+    mascot_launch_failed: |e| {
+        format!("Could not launch ChatterMascot.app ({e}).\n\nThe mascot stays hidden.")
+    },
 };
 
 /// OS のロケールが `ja` で始まるか。
@@ -129,6 +155,14 @@ impl Text {
             Fail::SpawnFailed(e) => (self.spawn_failed)(e),
         };
         format!("{}{reason}", self.cannot_prefix)
+    }
+
+    pub fn mascot_not_found(&self, places: &str) -> String {
+        (self.mascot_not_found)(places)
+    }
+
+    pub fn mascot_launch_failed(&self, e: &str) -> String {
+        (self.mascot_launch_failed)(e)
     }
 
     /// 状態欄の文言（「サーバー: …」）。

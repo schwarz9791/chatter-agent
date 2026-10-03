@@ -42,10 +42,9 @@ namespace ChatterMascot.Settings
                     //   そのまま残すと、次に開いたときハンドルが刻みに乗らない位置から始まる
                     ["volume"] = Round(settings.Volume, SettingsMapping.VolumeStep),
                 },
-                // ★ ここに「大きさ」は入らない。ウィンドウの大きさは window.json が持つ
-                //   （→ MascotSettings の型 doc）
                 ["character"] = new JObject
                 {
+                    ["scale"] = Round(settings.Scale, SettingsMapping.ScaleStep),
                     ["idleMotion"] = settings.IdleMotion,
                     ["cursorGaze"] = settings.CursorGaze,
                     ["blink"] = settings.Blink,
@@ -280,6 +279,12 @@ namespace ChatterMascot.Settings
                     case "vrm":
                         settings = settings.WithVrmFileName(
                             ReadFileName(property.Value, "character.vrm", settings.VrmFileName, warn));
+                        break;
+
+                    case "scale":
+                        settings = settings.WithScale(ReadNumber(
+                            property.Value, "character.scale", settings.Scale,
+                            SettingsMapping.ScaleMin, SettingsMapping.ScaleMax, SettingsMapping.ScaleStep, warn));
                         break;
 
                     case "walk":

@@ -18,6 +18,7 @@ namespace ChatterMascot.Settings
         public const float ScaleMin = 0.5f;
         public const float ScaleMax = 2.0f;
         public const float ScaleStep = 0.1f;
+        public const float DefaultScale = 1f;
 
         /// <summary>
         /// 音量の範囲と刻み。<b>0.0〜1.0</b>（画面には <b>0〜100%</b> で出る。
@@ -223,21 +224,6 @@ namespace ChatterMascot.Settings
             var clamped = Clamp(RoundToStep(scale, ScaleStep), ScaleMin, ScaleMax);
             width = baseWidth * clamped;
             height = baseHeight * clamped;
-        }
-
-        /// <summary>
-        /// <see cref="WindowSizeFor"/> の逆。**いまのウィンドウの大きさ**を倍率に読み替える。
-        ///
-        /// ★★ <b>倍率を <c>settings.json</c> に持たないための関数。</b> ウィンドウの大きさは
-        ///   既に <c>window.json</c> が持っているので、両方に持つと権威が2つになる
-        ///   （ユーザーが窓を直接リサイズしたとき、どちらが勝つのか説明できない）。
-        ///
-        /// ★ 高さで見る。窓の縦横比が変わっても（#88）権威は高さのままで、幅は同じ倍率で付いてくる。
-        /// </summary>
-        public static float ScaleForWindow(float height, float baseHeight)
-        {
-            if (!(baseHeight > 0f) || !(height > 0f)) return 1f;
-            return Clamp(RoundToStep(height / baseHeight, ScaleStep), ScaleMin, ScaleMax);
         }
 
         /// <summary>

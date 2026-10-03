@@ -117,6 +117,18 @@ namespace ChatterMascot.Window
         private static bool IsNear(float aspect, float reference) =>
             Math.Abs(aspect - reference) <= reference * 0.01f;
 
+        /// <summary>
+        /// 保存された矩形から<b>位置だけ</b>を採り、大きさは引数で決める。
+        ///
+        /// ★ 大きさの権威は <c>character.scale</c>（<c>window.json</c> に保存された幅高は使わない）。
+        ///   保存が無い（矩形が無効）ときはそのまま返し、既定の大きさは
+        ///   <see cref="PlacementLimits.DefaultWidth"/> / <see cref="PlacementLimits.DefaultHeight"/> が担う。
+        /// </summary>
+        public static WindowState AtSize(WindowState saved, float width, float height) =>
+            saved.Rect.IsValid
+                ? new WindowState(saved.Rect.WithSize(width, height), saved.DisplaySignature)
+                : saved;
+
         public static Placement Resolve(WindowState saved, DisplayLayout now, PlacementLimits limits)
         {
             var hasMonitors = now != null && now.HasMonitors;

@@ -15,11 +15,10 @@ namespace ChatterMascot.Settings
     ///   同じ音量である必要は無い）。話速は<b>合成のパラメータ</b>で、
     ///   <c>audio_query</c> の <c>speedScale</c> を変えない限り WAV が変わらない。
     ///
-    /// ★★ <b>キャラクターの大きさをここに持たないこと。</b> あれは<b>ウィンドウの大きさ</b>で、
-    ///   <c>window.json</c> が既に持っている。両方に持つと権威が2つになり、ユーザーが窓を
-    ///   直接リサイズしたときどちらが勝つのか説明できない
-    ///   （→ <see cref="SettingsMapping.ScaleForWindow"/>）。
-    ///
+    /// ★★ <b>デスクトップのキャラクターの大きさの権威はここ（<see cref="Scale"/>）。</b>
+    ///   <c>window.json</c> は位置だけを持つ。窓の大きさを2か所に持たないための分担
+    ///   （→ <see cref="SettingsMapping.WindowSizeFor"/>）。
+
     /// ★ <b>「キャラクターを隠す」を入れないこと。</b> 隠した状態を永続化すると、
     ///   次の起動で「マスコットが出ない」に化ける。ミュートはアイコンが薄くなるので
     ///   気づけるが、隠れているものは気づきようが無い。
@@ -44,7 +43,8 @@ namespace ChatterMascot.Settings
             int frameRate,
             string serverUrl, string token, string assetSync,
             float xrHeight, float xrLegacyScale, float xrDistance, float xrAzimuth, float xrFeetBelowEye,
-            bool walk)
+            bool walk,
+            float scale)
         {
             Muted = muted;
             Volume = volume;
@@ -62,6 +62,7 @@ namespace ChatterMascot.Settings
             XrAzimuth = xrAzimuth;
             XrFeetBelowEye = xrFeetBelowEye;
             Walk = walk;
+            Scale = scale;
         }
 
         public bool Muted { get; }
@@ -184,6 +185,15 @@ namespace ChatterMascot.Settings
         /// </summary>
         public bool Walk { get; }
 
+        /// <summary>
+        /// デスクトップのキャラクターの大きさ（ウィンドウの倍率。<b>0.5〜2.0</b>、既定 1.0）。
+        ///
+        /// ★ 窓の幅高は常に「既定の大きさ × この値」で決まる（→ <see cref="SettingsMapping.WindowSizeFor"/>）。
+        ///   <c>window.json</c> は位置だけを持ち、大きさの権威はここ。
+        /// ★ Android XR は使わない（XR の大きさは <see cref="XrHeight"/>）。
+        /// </summary>
+        public float Scale { get; }
+
         public static MascotSettings Defaults
         {
             get
@@ -197,7 +207,8 @@ namespace ChatterMascot.Settings
                     "", "", SettingsMapping.DefaultAssetSync,
                     SettingsMapping.XrDefaultHeight, 0f, SettingsMapping.XrDefaultDistance,
                     SettingsMapping.XrDefaultAzimuth, SettingsMapping.XrDefaultFeetBelowEye,
-                    true);
+                    true,
+                    SettingsMapping.DefaultScale);
             }
         }
 
@@ -217,7 +228,8 @@ namespace ChatterMascot.Settings
             string serverUrl = null, string token = null, string assetSync = null,
             float? xrHeight = null, float? xrLegacyScale = null,
             float? xrDistance = null, float? xrAzimuth = null, float? xrFeetBelowEye = null,
-            bool? walk = null)
+            bool? walk = null,
+            float? scale = null)
         {
             return new MascotSettings(
                 muted ?? Muted,
@@ -235,7 +247,8 @@ namespace ChatterMascot.Settings
                 xrDistance ?? XrDistance,
                 xrAzimuth ?? XrAzimuth,
                 xrFeetBelowEye ?? XrFeetBelowEye,
-                walk ?? Walk);
+                walk ?? Walk,
+                scale ?? Scale);
         }
 
         public MascotSettings WithMuted(bool value) => Copy(muted: value);
@@ -254,6 +267,7 @@ namespace ChatterMascot.Settings
         public MascotSettings WithXrAzimuth(float value) => Copy(xrAzimuth: value);
         public MascotSettings WithXrFeetBelowEye(float value) => Copy(xrFeetBelowEye: value);
         public MascotSettings WithWalk(bool value) => Copy(walk: value);
+        public MascotSettings WithScale(float value) => Copy(scale: value);
 
         /// <summary>
         /// 「すべての設定をリセット」用。<b>接続先とトークンだけは残す</b>。
@@ -287,7 +301,8 @@ namespace ChatterMascot.Settings
                 && XrDistance.Equals(other.XrDistance)
                 && XrAzimuth.Equals(other.XrAzimuth)
                 && XrFeetBelowEye.Equals(other.XrFeetBelowEye)
-                && Walk == other.Walk;
+                && Walk == other.Walk
+                && Scale.Equals(other.Scale);
         }
 
         public override bool Equals(object obj)
@@ -313,6 +328,7 @@ namespace ChatterMascot.Settings
             hash = (hash * 397) ^ XrAzimuth.GetHashCode();
             hash = (hash * 397) ^ XrFeetBelowEye.GetHashCode();
             hash = (hash * 397) ^ (Walk ? 1 : 0);
+            hash = (hash * 397) ^ Scale.GetHashCode();
             return hash;
         }
     }

@@ -27,6 +27,17 @@ namespace ChatterMascot.Tests
             Assert.That(defaults.XrDistance, Is.EqualTo(SettingsMapping.XrDefaultDistance));
             Assert.That(defaults.XrAzimuth, Is.EqualTo(SettingsMapping.XrDefaultAzimuth));
             Assert.That(defaults.XrFeetBelowEye, Is.EqualTo(SettingsMapping.XrDefaultFeetBelowEye));
+            Assert.That(defaults.Scale, Is.EqualTo(SettingsMapping.DefaultScale));
+        }
+
+        [Test]
+        public void WithScaleChangesOnlyTheScale()
+        {
+            var settings = MascotSettings.Defaults.WithVolume(0.3f).WithScale(1.5f);
+
+            Assert.That(settings.Scale, Is.EqualTo(1.5f));
+            Assert.That(settings.Volume, Is.EqualTo(0.3f));
+            Assert.That(settings, Is.Not.EqualTo(MascotSettings.Defaults.WithVolume(0.3f)));
         }
 
         [Test]

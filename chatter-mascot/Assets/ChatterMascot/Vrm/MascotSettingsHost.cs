@@ -78,7 +78,15 @@ namespace ChatterMascot.Vrm
         {
             if (Time.realtimeSinceStartup < _nextPollAt) return;
             _nextPollAt = Time.realtimeSinceStartup + PollSeconds;
+            Refresh();
+        }
 
+        /// <summary>
+        /// ファイルを読み直して、変わっていれば反映する。間隔を待たずに最新を使いたい呼び手
+        /// （ChatterAgent からの依頼の直前）が呼ぶ。
+        /// </summary>
+        public void Refresh()
+        {
             var previous = Current;
             if (!_store.Refresh()) return;
 
@@ -148,7 +156,7 @@ namespace ChatterMascot.Vrm
             // ★★ ここで VrmStage の headroom を触らないこと。 あれは「bounds をどれだけ
             //   余裕を持って収めるか」の係数で、1 を下回るとモデルが画面からはみ出す
             //   （実機で頭と足が対称に欠けた）。キャラの大きさは**ウィンドウ**で変える
-            //   （→ WindowGeometry.SetSize）。窓が変われば VrmStage が自動で収め直す。
+            //   （→ WindowGeometry、<c>character.scale</c>）。窓が変われば VrmStage が自動で収め直す。
             var character = ResolveCharacter();
             if (character != null)
             {

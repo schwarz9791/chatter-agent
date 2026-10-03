@@ -389,5 +389,36 @@ namespace ChatterMascot.Tests
             Assert.That(placement.MonitorIndex, Is.EqualTo(1));
             Assert.That(placement.Rect, Is.EqualTo(new PointRect(1500f, -1100f, 500f, 1072f)));
         }
+
+        // ── 大きさは引数が決める（保存された幅高は使わない） ──────────────
+
+        [Test]
+        public void AtSizeKeepsThePositionAndReplacesTheSize()
+        {
+            var sized = WindowPlacement.AtSize(Saved(new PointRect(1770f, 1598f, 300f, 480f)), 540f, 540f);
+
+            Assert.That(sized.Rect, Is.EqualTo(new PointRect(1770f, 1598f, 540f, 540f)));
+            Assert.That(sized.DisplaySignature, Is.EqualTo(TwoDisplays.Signature));
+        }
+
+        [Test]
+        public void AtSizeLeavesAMissingSaveAlone()
+        {
+            Assert.That(WindowPlacement.AtSize(WindowState.None, 540f, 540f).Rect.IsValid, Is.False);
+        }
+
+        /// <summary>
+        /// 旧 5:8 の保存を渡しても、大きさを引数で差し替えてから解決するので
+        /// 旧既定の比の移行は走らず、幅は引数のまま。
+        /// </summary>
+        [Test]
+        public void ResolveAfterAtSizeKeepsTheRequestedSize()
+        {
+            var sized = WindowPlacement.AtSize(Saved(new PointRect(1770f, 1598f, 300f, 480f)), 540f, 540f);
+            var placement = WindowPlacement.Resolve(sized, TwoDisplays, Limits);
+
+            Assert.That(placement.Rect.Width, Is.EqualTo(540f));
+            Assert.That(placement.Rect.Height, Is.EqualTo(540f));
+        }
     }
 }

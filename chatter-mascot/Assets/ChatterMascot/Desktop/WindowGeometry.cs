@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using ChatterMascot.Settings;
 using ChatterMascot.Vrm;
 using ChatterMascot.Window;
 using Kirurobo;
@@ -69,11 +70,17 @@ namespace ChatterMascot.Desktop
         private const string StateDirectory = "mascot";
         private const string StateFile = "window.json";
 
-        internal static PlacementLimits Limits => new PlacementLimits(
-            DefaultWidthPoints, DefaultHeightPoints,
-            MinWidthPoints, MinHeightPoints,
-            MinVisiblePoints, MinVisiblePoints,
-            StrictVisiblePoints, StrictVisiblePoints);
+        /// <summary>窓の幅高を決める点。既定の大きさ × <c>character.scale</c>。</summary>
+        internal static PlacementLimits LimitsFor(float scale)
+        {
+            SettingsMapping.WindowSizeFor(
+                scale, DefaultWidthPoints, DefaultHeightPoints, out var width, out var height);
+            return new PlacementLimits(
+                width, height,
+                MinWidthPoints, MinHeightPoints,
+                MinVisiblePoints, MinVisiblePoints,
+                StrictVisiblePoints, StrictVisiblePoints);
+        }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Install()
@@ -100,36 +107,14 @@ namespace ChatterMascot.Desktop
         ///   <c>FindObjectsInactive.Include</c> は「非アクティブを含めるか」だけの指定で、
         ///   こちらには効かない。
         ///
-        /// ★ **実際に踏んだ**（#76）—— 「キャラクターの位置のリセット」が常に
+        /// ★ **実際に踏んだ**（#76）—— 位置のリセットが常に
         ///   「管理が動いていません」の枝へ落ち、ファイルを消すだけで終わっていた
         ///   （症状は「アプリを再起動しないとリセットされない」）。
-        ///   <c>StatusItemBridge</c> は最初から static で持っていて、そちらは動いている。
         /// </summary>
         private static Keeper _keeper;
 
         /// <summary>
-        /// ウィンドウの大きさが<b>まだ落ち着いていない</b>か（設定パネル / #76）。
-        ///
-        /// ★★ <b>「押した直後に読むと古い値が返る」を、状態として外へ出すためのもの。</b>
-        ///   <see cref="SetSize"/> / <see cref="Reset"/> は窓に書くだけで、
-        ///   <see cref="CurrentSize"/> が新しい値を返すのは <c>Applying</c> が
-        ///   一致を確かめた後（最大5回の書き直しぶん遅れる）。設定パネルはこれを見て
-        ///   「外から変わった」の誤読を避ける（→ <c>ISettingsHost.WindowSizeSettling</c>）。
-        ///
-        /// ★ <b>管理が動いていなければ <c>false</c>。</b> 「落ち着くのを待つ」相手が
-        ///   居ないので、待たせる理由も無い。
-        /// </summary>
-        internal static bool IsApplying
-        {
-            get
-            {
-                var keeper = _keeper;
-                return keeper != null && keeper.IsApplying;
-            }
-        }
-
-        /// <summary>
-        /// 位置と大きさを既定へ戻す（設定パネル / #76）。
+        /// 位置を既定へ戻す（ChatterAgent の依頼）。大きさは <c>character.scale</c> が決める。
         ///
         /// ★ <b>ファイルを消すだけにしないこと。</b> 次の起動まで何も起きないと、
         ///   押した人からは「効かないボタン」にしか見えない。走っている管理側にも
@@ -155,43 +140,6 @@ namespace ChatterMascot.Desktop
                 return;
             }
             keeper.ResetToDefault();
-        }
-
-        /// <summary>
-        /// ウィンドウの大きさを変える（設定パネルの「大きさ」／#76）。位置は動かさない。
-        ///
-        /// ★★ <b>キャラの大きさは <c>VrmStage.headroom</c> ではなく窓で変えること。</b>
-        ///   <c>headroom</c> は「bounds をどれだけ余裕を持って収めるか」の係数で、
-        ///   1 を下回るとモデルが画面からはみ出す（実機で頭と足が対称に欠けた）。
-        ///   窓を変えれば <c>VrmStage</c> が <c>Screen.width/height</c> の変化を毎フレーム見て
-        ///   自動で収め直す。
-        ///
-        /// ★ <b>ここが唯一の「外から大きさを変える」口。</b> <c>UniWindowController.windowSize</c> に
-        ///   直接代入すると、<c>Keeper</c> が <c>Applying</c> 中だった場合に打ち消される
-        ///   （あちらは目標の矩形に一致するまで最大5回書き直す）。
-        ///
-        /// ★ モニタからはみ出す大きさは <c>WindowPlacement.Resolve</c> が切り詰める。
-        /// </summary>
-        public static void SetSize(float widthPoints, float heightPoints)
-        {
-            var keeper = _keeper;
-            if (keeper == null)
-            {
-                Debug.Log("[Mascot] ウィンドウの管理が動いていないので、大きさは変えられません");
-                return;
-            }
-            keeper.SetSize(widthPoints, heightPoints);
-        }
-
-        /// <summary>
-        /// いまのウィンドウの大きさ（ポイント）。取れなければ既定値。
-        /// 設定パネルがスライダーの初期値に使う（→ <c>Settings.SettingsMapping.ScaleForWindow</c>）。
-        /// </summary>
-        public static Vector2 CurrentSize()
-        {
-            var keeper = _keeper;
-            if (keeper == null) return new Vector2(DefaultWidthPoints, DefaultHeightPoints);
-            return keeper.CurrentSize();
         }
 
         /// <summary>
@@ -282,6 +230,9 @@ namespace ChatterMascot.Desktop
             /// </summary>
             private string _signature = string.Empty;
 
+            /// <summary>窓の大きさの倍率（<c>character.scale</c>）。</summary>
+            private float _scale = SettingsMapping.DefaultScale;
+
             private PointRect _wanted;
             private int _corrections;
             private float _applyDeadline;
@@ -307,12 +258,6 @@ namespace ChatterMascot.Desktop
             private float _reapplyAt = -1f;
             private PointRect _reapplyFrom;
 
-            /// <summary>→ <see cref="WindowGeometry.IsApplying"/></summary>
-            internal bool IsApplying
-            {
-                get { return _phase == Phase.Applying; }
-            }
-
             private void Start()
             {
                 // ★ ここで static に握ること（→ WindowGeometry._keeper の doc）。
@@ -330,6 +275,13 @@ namespace ChatterMascot.Desktop
                 //   —— それで**構成変化の追従が丸ごと動いていなかった**（レビュー指摘）。
                 // ★ 取りこぼしは無い: 通知の発火元はどれも最初の Start より後に走る。
                 if (_controller != null) _controller.OnMonitorChanged += OnMonitorChanged;
+
+                var host = MascotSettingsHost.Instance;
+                if (host != null)
+                {
+                    _scale = host.Current.Scale;
+                    host.ChangedExternally += OnSettingsChanged;
+                }
             }
 
             private void OnApplicationQuit()
@@ -343,6 +295,7 @@ namespace ChatterMascot.Desktop
             {
                 if (_keeper == this) _keeper = null;
                 if (_controller != null) _controller.OnMonitorChanged -= OnMonitorChanged;
+                if (MascotSettingsHost.Instance != null) MascotSettingsHost.Instance.ChangedExternally -= OnSettingsChanged;
 
                 // 終了以外の経路（自壊・シーンの破棄）で溜めていた変更を投げ切る。
                 // 二重に呼ばれても保存の判断が弾く
@@ -413,30 +366,24 @@ namespace ChatterMascot.Desktop
             }
 
             /// <summary>
-            /// 位置はそのまま、大きさだけ変える（→ <see cref="WindowGeometry.SetSize"/>）。
+            /// 倍率が変わったら、位置を保ったまま拡縮する。
             ///
-            /// ★ <c>BeginApplying</c> を通すこと。直接 <c>Write</c> すると
-            ///   <c>Applying</c> の追従（最大5回の書き直し）と喧嘩する。
-            /// ★ <c>_saved</c> は触らない —— 保存は <c>Applying</c> → <c>Persist</c> が
-            ///   実際に効いた矩形で行う。
+            /// ★ 拡縮の基準は窓の最小コーナー（<c>Write</c> と同じ）。<c>BeginApplying</c> を通すこと。
+            ///   直接 <c>Write</c> すると <c>Applying</c> の追従（最大5回の書き直し）と喧嘩する。
             /// </summary>
-            internal void SetSize(float widthPoints, float heightPoints)
+            private void OnSettingsChanged(MascotSettings previous, MascotSettings current)
             {
+                if (previous.Scale.Equals(current.Scale)) return;
+                _scale = current.Scale;
+                if (_phase == Phase.Attaching) return;
+
                 var from = _lastSeen.IsValid ? _lastSeen : Current();
                 if (!from.IsValid)
                 {
                     Debug.LogWarning("[Mascot] いまのウィンドウを読めないので、大きさを変えられません");
                     return;
                 }
-                BeginApplying(new WindowState(
-                    new PointRect(from.X, from.Y, widthPoints, heightPoints), _signature));
-            }
-
-            internal Vector2 CurrentSize()
-            {
-                var rect = _lastSeen.IsValid ? _lastSeen : Current();
-                if (!rect.IsValid) return new Vector2(DefaultWidthPoints, DefaultHeightPoints);
-                return new Vector2(rect.Width, rect.Height);
+                BeginApplying(new WindowState(from, _signature));
             }
 
             /// <summary>
@@ -457,7 +404,11 @@ namespace ChatterMascot.Desktop
             private void BeginApplying(WindowState from)
             {
                 var layout = ReadLayout();
-                var placement = WindowPlacement.Resolve(from, layout, Limits);
+                // ★ 幅高を決めるのはここだけ（起動・置き直し・リセット・倍率の変更がすべて通る）。
+                //   保存された幅高は大きさとして使わず、位置だけ採る
+                var limits = LimitsFor(_scale);
+                from = WindowPlacement.AtSize(from, limits.DefaultWidth, limits.DefaultHeight);
+                var placement = WindowPlacement.Resolve(from, layout, limits);
 
                 // ★ **モニタが1枚も取れないフレームでは指紋を上書きしない。** 空の指紋を焼くと、
                 //   次の起動で「構成が変わった」と読まれて厳しい方の閾値が使われ、

@@ -203,31 +203,26 @@ namespace ChatterMascot.Tests
             Assert.That(parsed.Volume, Is.EqualTo(SettingsMapping.VolumeMax));
         }
 
-        /// <summary>
-        /// ★★ キャラクターの大きさは <c>window.json</c> が持つ。
-        ///   ここに書くと権威が2つになるので、<c>character</c> には**書かないし読まない**
-        ///   （前の版が書いた <c>character.scale</c> は未知キーとして警告して無視する）。
-        ///
-        /// ★ <b><c>character</c> セクションに絞って見ること。</b> <c>xr.height</c>
-        ///   （→ <see cref="MascotSettings.XrHeight"/>）は別概念で、こちらは正当に書く。
-        /// </summary>
         [Test]
-        public void DoesNotStoreTheCharacterSize()
+        public void RoundTripsTheCharacterScale()
         {
-            var character = (JObject)JObject.Parse(SettingsJson.Write(MascotSettings.Defaults))["character"];
-            Assert.That(character.ContainsKey("scale"), Is.False);
+            var parsed = Parse(SettingsJson.Write(MascotSettings.Defaults.WithScale(1.4f)));
 
-            MascotSettings parsed;
-            string error;
-            var warnings = new List<string>();
-            Assert.That(
-                SettingsJson.TryParse(
-                    "{\"version\":1,\"character\":{\"scale\":1.4,\"blink\":false}}",
-                    out parsed, out error, warnings.Add),
-                Is.True, error);
+            Assert.That(parsed.Scale, Is.EqualTo(1.4f).Within(0.0001f));
+            Assert.That(_warnings, Is.Empty);
+        }
 
-            Assert.That(parsed.Blink, Is.False, "他のキーは読めること");
-            Assert.That(warnings, Has.Some.Contains("scale"));
+        [Test]
+        public void DefaultsTheCharacterScaleWhenMissing()
+        {
+            Assert.That(Parse("{\"character\":{\"blink\":false}}").Scale, Is.EqualTo(SettingsMapping.DefaultScale));
+        }
+
+        [Test]
+        public void ClampsTheCharacterScaleIntoTheSliderRange()
+        {
+            Assert.That(Parse("{\"character\":{\"scale\":9}}").Scale, Is.EqualTo(SettingsMapping.ScaleMax));
+            Assert.That(Parse("{\"character\":{\"scale\":0.1}}").Scale, Is.EqualTo(SettingsMapping.ScaleMin));
         }
 
         /// <summary>★ 数値ですらないときは既定に倒す（クランプする先が無い）</summary>
@@ -529,7 +524,7 @@ namespace ChatterMascot.Tests
             Assert.That(written, Does.Contain("\"feetBelowEye\""));
             // ★ 未換算の倍率が無い（既定）間は scale を書かない——
             //   両方書き続けると、手で height を直しても scale が優先されるように見えかねない
-            Assert.That(written, Does.Not.Contain("\"scale\""));
+            Assert.That(((JObject)JObject.Parse(written)["xr"]).ContainsKey("scale"), Is.False);
         }
 
         [Test]
@@ -646,11 +641,11 @@ namespace ChatterMascot.Tests
         public void WritesBackTheLegacyScaleUntilItIsResolved()
         {
             var pending = SettingsJson.Write(MascotSettings.Defaults.WithXrLegacyScale(0.3f));
-            Assert.That(pending, Does.Contain("\"scale\": 0.3"), "情報を失わないよう書き戻す");
+            Assert.That(JObject.Parse(pending)["xr"]["scale"].Value<float>(), Is.EqualTo(0.3f).Within(0.0001f), "情報を失わないよう書き戻す");
 
             var resolved = SettingsJson.Write(
                 MascotSettings.Defaults.WithXrHeight(60f).WithXrLegacyScale(0f));
-            Assert.That(resolved, Does.Not.Contain("\"scale\""), "確定したら書かない");
+            Assert.That(((JObject)JObject.Parse(resolved)["xr"]).ContainsKey("scale"), Is.False, "確定したら書かない");
         }
 
         [Test]

@@ -55,6 +55,14 @@ fn skips_backlog(prev: Option<Want>) -> bool {
     matches!(prev, None | Some(Want::Nothing))
 }
 
+/// マスコットを起こせなかった理由。中身は利用者へ見せる文言。
+enum StartFail {
+    /// `.app` が無い。置くまで直らないので、非表示を保存して次の起動で繰り返さない。
+    NotFound(String),
+    /// `open` の失敗や起動待ちの打ち切り。一時的でありうるので保存しない。
+    Failed(String),
+}
+
 /// player の子と、起こしたときの音量・core。
 struct PlayerProc {
     child: Child,
@@ -286,7 +294,7 @@ impl Clients {
         self.set_mute(on);
     }
 
-    /// `persist` は利用者の操作のときだけ true。外で起きた変化は保存しない
+    /// `persist` は利用者の操作と、`.app` が無いときだけ true。外で起きた変化は保存しない
     /// （ログアウトではマスコットが先に終わるため、保存すると次のログインで出なくなる）。
     fn set_visible(&self, visible: bool, persist: bool) {
         lock(&self.0.st).visible = visible;
@@ -362,7 +370,11 @@ impl Clients {
         match w {
             Want::Mascot => {
                 if running_pids().is_empty() {
-                    if let Err(msg) = self.start_mascot(&env, &core, backlog) {
+                    if let Err(fail) = self.start_mascot(&env, &core, backlog) {
+                        let (msg, persist) = match fail {
+                            StartFail::NotFound(m) => (m, true),
+                            StartFail::Failed(m) => (m, false),
+                        };
                         self.log(&format!("マスコットを起動できない: {msg}"));
                         let t = text::current();
                         self.0
@@ -373,7 +385,7 @@ impl Clients {
                             .kind(MessageDialogKind::Warning)
                             .show(|_| {});
                         // 隠した状態に寄せ、player への切り替えへ進める。
-                        self.set_visible(false, false);
+                        self.set_visible(false, persist);
                         return;
                     }
                     // ★ 終了処理（`stop_sync`）は `serial.busy` を取らないので、起こした直後に見直して残さない。
@@ -416,8 +428,7 @@ impl Clients {
         wait_until(MASCOT_QUIT_TIMEOUT, || running_pids().is_empty())
     }
 
-    /// 失敗は利用者へ見せる文言で返す。
-    fn start_mascot(&self, env: &Env, core: &Path, backlog: bool) -> Result<(), String> {
+    fn start_mascot(&self, env: &Env, core: &Path, backlog: bool) -> Result<(), StartFail> {
         let t = text::current();
         let home = env
             .get("HOME")
@@ -429,11 +440,12 @@ impl Clients {
                 .iter()
                 .map(|p| p.display().to_string())
                 .collect();
-            return Err(t.mascot_not_found(&places.join("\n")));
+            return Err(StartFail::NotFound(t.mascot_not_found(&places.join("\n"))));
         };
-        launch(&app, env, backlog).map_err(|e| t.mascot_launch_failed(&e.to_string()))?;
+        launch(&app, env, backlog)
+            .map_err(|e| StartFail::Failed(t.mascot_launch_failed(&e.to_string())))?;
         if !wait_until(MASCOT_START_TIMEOUT, || !running_pids().is_empty()) {
-            return Err(t.mascot_launch_failed("timeout"));
+            return Err(StartFail::Failed(t.mascot_launch_failed("timeout")));
         }
         self.log(&format!("マスコットを起動した: {}", app.display()));
         Ok(())
@@ -555,6 +567,8 @@ impl Clients {
                     let (pid, info) = (p.child.id(), exit_label(exit_info(&st)));
                     *guard = None;
                     drop(guard);
+                    // 終わっていた間は誰も繋いでいないので、次に起こすときは溜まった古い発話を飛ばす。
+                    lock(&self.0.st).applied = Some(Want::Nothing);
                     // ponytail: 自動では起こし直さない。主因は外で動いている player の `player.lock` で、
                     // 起こし直すと再起動を繰り返すだけになる。次の reconcile か手動の切り替えで戻る。
                     self.log(&format!("player が終わった: pid={pid} {info}"));

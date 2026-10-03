@@ -31,7 +31,7 @@ fn root_of(manager: &Manager) -> Result<PathBuf, String> {
     runtime_root(&manager.env()).ok_or_else(|| "ランタイムルートを決められない".to_string())
 }
 
-fn settings_path(root: &Path) -> PathBuf {
+pub(crate) fn settings_path(root: &Path) -> PathBuf {
     root.join("mascot").join("settings.json")
 }
 
@@ -51,7 +51,7 @@ fn is_vrm(path: &Path) -> bool {
 }
 
 /// 無ければ `{}`。壊れている・最上位が object でないときはエラー（書き戻して潰さないため）。
-fn read_settings(path: &Path) -> Result<Value, String> {
+pub(crate) fn read_settings(path: &Path) -> Result<Value, String> {
     let text = match fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Value::Object(Map::new())),
@@ -111,15 +111,24 @@ fn write_settings(path: &Path, settings: &mut Value) -> Result<(), String> {
     fs::rename(&tmp, path).map_err(io)
 }
 
-fn apply_set(root: &Path, path: &[String], value: Value) -> Result<(), String> {
-    if !is_managed(path) {
-        return Err(format!("管理外のキー: {}", path.join(".")));
-    }
+fn update_path(root: &Path, path: &[String], value: Value) -> Result<(), String> {
     let _guard = SETTINGS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let file = settings_path(root);
     let mut settings = read_settings(&file)?;
     set_path(&mut settings, path, value);
     write_settings(&file, &mut settings)
+}
+
+fn apply_set(root: &Path, path: &[String], value: Value) -> Result<(), String> {
+    if !is_managed(path) {
+        return Err(format!("管理外のキー: {}", path.join(".")));
+    }
+    update_path(root, path, value)
+}
+
+/// ミュートの切り替え。リセットで戻さない設定なので `MANAGED` には入れず、ここだけから書く。
+pub(crate) fn set_mute(root: &Path, on: bool) -> Result<(), String> {
+    update_path(root, &["audio".into(), "mute".into()], Value::from(on))
 }
 
 /// リセットの結果。設定と VRM の両方を試すので、失敗しても消せた数は残る。
@@ -379,6 +388,26 @@ mod tests {
             assert!(apply_set(&root, &path, json!(1)).is_err(), "{path:?}");
         }
         assert!(!settings_path(&root).exists());
+    }
+
+    #[test]
+    fn set_mute_changes_only_mute() {
+        let root = tmp("mute");
+        seed(
+            &root,
+            &json!({"version": 1, "audio": {"volume": 0.2}, "xr": {"scale": 2}, "future": 1})
+                .to_string(),
+        );
+        set_mute(&root, true).unwrap();
+        assert_eq!(
+            load(&root),
+            json!({"version": 1, "audio": {"volume": 0.2, "mute": true}, "xr": {"scale": 2}, "future": 1})
+        );
+        set_mute(&root, false).unwrap();
+        assert_eq!(load(&root)["audio"], json!({"volume": 0.2, "mute": false}));
+        seed(&root, "{broken");
+        assert!(set_mute(&root, true).is_err());
+        assert_eq!(fs::read_to_string(settings_path(&root)).unwrap(), "{broken");
     }
 
     #[test]

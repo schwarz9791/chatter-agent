@@ -13,6 +13,12 @@ namespace ChatterMascot.Playback
         public long MaxAgeMs = 0;
 
         /// <summary>
+        /// この時刻（unix ms）より前に作られた発話は音を出さずに飛ばす。0 以下なら無効。
+        /// <see cref="MaxAgeMs"/> と違い基準が固定なので、後から積まれた発話は時間が経っても飛ばない。
+        /// </summary>
+        public long NotBeforeMs = 0;
+
+        /// <summary>
         /// 取得を試みる上限回数。2 = 初回 + 1リトライ。
         /// <b>503 はこれを消費しない</b>（→ <see cref="PlaybackQueue"/> の <c>AudioUnavailable</c>）。
         /// </summary>

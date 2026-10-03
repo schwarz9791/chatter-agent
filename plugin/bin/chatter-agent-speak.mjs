@@ -178,6 +178,7 @@ function createDefaultConfig() {
 		playerArgs: ["{file}"],
 		playerServerUrl: "",
 		speechMaxAgeMs: 0,
+		speechBacklogMaxAgeMs: 0,
 		aiSummaryEnabled: true,
 		aiSummaryBackend: "fm",
 		aiSummaryThreshold: 200,
@@ -510,6 +511,10 @@ const SPECS = {
 	},
 	speechMaxAgeMs: {
 		env: "CHATTER_AGENT_SPEECH_MAX_AGE_MS",
+		parse: parseNonNegativeInt
+	},
+	speechBacklogMaxAgeMs: {
+		env: "CHATTER_AGENT_SPEECH_BACKLOG_MAX_AGE_MS",
 		parse: parseNonNegativeInt
 	},
 	aiSummaryEnabled: {

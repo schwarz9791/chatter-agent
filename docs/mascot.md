@@ -256,6 +256,11 @@ ack は累積で、サーバーは `seq <= N` をキューから物理削除す�
 `player.lock`（`core/src/core/paths.ts` の `getPlayerLockDir`）を Unity 側からも取ることになるが、ランタイムルートの発見が要るうえ Android XR
 にはサーバーと共有するファイルシステムが無いので、今は立てていない。
 
+ChatterAgent から起動したときは、マスコットと `chatter-agent-player` のどちらか一方だけを動かす順序を
+ChatterAgent が守る（→ [`agent.md`](./agent.md)）。誰も繋がない間に溜まった発話は、起動引数
+`-speechBacklogMaxAgeMs <ms>` で飛ばす。起動時点で既にこれより古かった発話を音を出さずに ack し、
+起動後に積まれた発話には効かない。
+
 WebSocket クライアントには `ClientWebSocket` を選んだ。`Origin` を送らないのでサーバーの
 `allowedOrigins`（既定 `[]` = Origin 付きは全拒否）の設定が要らず（Origin が付くのは WebView から
 張ったとき。→ [`protocol.md`](./protocol.md) の表）、追加依存も無いまま

@@ -2,7 +2,7 @@
 
 **メニューバーに常駐して `chatter-agent-server` を起動・停止・再起動するアプリ。** 端末で
 `npm run start:server` を叩く代わりに、server の面倒を見る親になる。**設定パネル**（サーバーの設定と
-マスコットの設定）を持つ。マスコットの表示はまだ持たない。発話の契約は [`protocol.md`](./protocol.md) が正。
+マスコットの設定）を持ち、**マスコットの表示・非表示とミュートを操作する**（非表示でミュートしていないときは `chatter-agent-player` で声だけ鳴らす）。発話の契約は [`protocol.md`](./protocol.md) が正。
 
 実体は `chatter-agent-app/`（Tauri v2。Rust は `src-tauri/src/`）。
 
@@ -11,6 +11,8 @@
 | `src-tauri/src/main.rs` | トレイ・メニュー・設定窓・設定（`settings.json`）の読み書き・終了時の後始末 |
 | `src-tauri/src/server.rs` | 環境の解決・事前チェック・起動・停止・監視・ロックの確認・ログの退避 |
 | `src-tauri/src/control.rs` | server の制御 API を Rust から叩く。接続先の解決・HTTP/1.0・許可リスト |
+| `src-tauri/src/clients.rs` | 繋ぐクライアント（マスコット / player）を表示とミュートから1つに決める。切り替え・player の起動と停止・監視・ショートカット |
+| `src-tauri/src/mascot_app.rs` | Chatter Mascot（Unity アプリ）の探索・起動・終了要求・実行中の pid（macOS 依存部） |
 | `src-tauri/src/mascot.rs` | `mascot/settings.json` と VRM |
 | `src-tauri/src/text.rs` | 日英の文言（OS のロケールが `ja` で始まれば日本語、それ以外は英語）と、画面へ渡す言語 |
 | `index.html` | 設定窓（CSS も中に持つ） |
@@ -62,12 +64,61 @@ Dock にも ⌘Tab にも出ない。操作はメニューバーのアイコン�
 
 | 項目 | 動き |
 |---|---|
+| ミュート | チェックで `audio.mute` を書く（→「マスコットの表示と player」） |
+| マスコットを表示 / マスコットを隠す | 表示状態を反転して保存し、繋ぐクライアントを切り替える |
 | 設定… | 設定窓を前面に出す。無ければ作る（次節） |
 | サーバーを再起動 / サーバーを起動 | 自分の server が動いていれば再起動、そうでなければ起動。外で動いている間と処理中は無効 |
 | ログを開く | `server.log` を開く。無ければディレクトリを開く |
 | core の場所を選ぶ… | 上記。保存したら起動（動いていれば再起動）。処理中に選び直したときは、今の処理が終わってから、選び直した core で起こし直す |
 | ログイン時に起動 | 下記 |
-| 終了 | server を止めてから終わる |
+| 終了 | player → マスコット → server の順に止めてから終わる |
+
+## マスコットの表示と player
+
+表示とミュートから、Mac から繋ぐクライアントを1つに決める。
+
+| 表示 | ミュート | 繋ぐもの |
+|---|---|---|
+| 表示 | しない / する | Chatter Mascot（ミュートは Unity 自身が `audio.mute` を1秒ごとに読んで無音にする） |
+| 非表示 | しない | `chatter-agent-player`（`node dist/chatter-agent-player.mjs`。cwd は `core/`） |
+| 非表示 | する | 何も繋がない |
+
+★ **マスコットと player を同時に繋がない。** server はフレームを全員に配り、誰か1台が ack すればキューを
+消すので、両方繋ぐと二重に鳴る（→ [`protocol.md`](./protocol.md)）。Unity はロックを取らないので、順序の
+保証は ChatterAgent の責任。**片方が止まったのを確かめてから、もう片方を起こす。** マスコットの終了は
+pid が消えたことで判定し（10秒まで待つ。消えなければその回は打ち切り、player を起こさない）、
+player は SIGTERM を1回だけ送って待つ（停止の仕組みと同じ）。マスコットには通常の quit を要求し、
+**強制終了はしない**（Unity は未送信の ack を投げ切ってから自分で終わる）。
+
+- **`.app` の探す順**: `/Applications/ChatterMascot.app` → `~/Applications/ChatterMascot.app` →
+  `<core>/../chatter-mascot/Build/ChatterMascot.app`。見つからない・`open` が失敗する・pid が現れない
+  ときは、探した場所を警告ダイアログとログに出し、**非表示として保存して player に切り替える**
+- マスコットは `open -a` で、server に渡している環境を引き継いで起こす（同じ設定の場所を見る）。
+  別のワークツリーのビルドも同じ bundle id なので、動いているものは全部「動いているマスコット」として扱う
+- **起動時点で古い発話は飛ばす。** マスコットには起動引数 `-speechBacklogMaxAgeMs 60000`、player には
+  環境変数 `CHATTER_AGENT_SPEECH_BACKLOG_MAX_AGE_MS=60000` を渡す
+- **player の音量**は `audio.volume`。1.0 でないときだけ `CHATTER_AGENT_PLAYER_ARGS=-v,<音量>,{file}`
+  （`afplay` の引数列）を足す。1.0 のときは足さないので、`config.json` の `playerArgs` が生きる。
+  音量が変わると player を起こし直す。player の出力は `server.log` に追記する
+- ★ **player は自動で起こし直さない。** 終わったら `[Agent]` ログに終了状態を残して捨てるだけ。
+  主因は外で動いている player の `player.lock` で、起こし直すと再起動を繰り返すだけになる。
+  次の切り替え（表示・ミュートの操作）で、必要なら起こし直す
+- 環境（server に渡す環境）が解決するまでは何も起こさない。解決したあとに決め直す
+
+**表示状態は `settings.json`（ChatterAgent 自身のもの）の `mascotVisible`**（既定は表示）に保存する。
+Unity のメニューの「終了」やクラッシュで外から終わった、Finder などで外から起動された、という変化は
+監視（2秒ごと）が**最後に実現できた状態と実態を比べて**拾い、表示状態を実態に寄せる
+（外で起動されたら player を止める）。`mascot/settings.json` の変化（`mtime:size`）も同じ監視で拾い、
+Unity 側でのミュートの変更をメニューのチェックに反映する。
+
+**終了のときは `mascotVisible` を書き換えない**（次の起動で元の状態に戻すため）。
+
+### ショートカット
+
+`audio.muteHotKey`（既定 `ctrl+opt+m`）がミュート、`ui.hideHotKey`（既定 `ctrl+opt+h`）が表示切替。
+値は `mascot/settings.json` から読み、設定窓の書式（`ctrl+opt+shift+cmd+<key>`）と同じ規則で解釈する。
+不正な値は既定に倒す。2つが同じ組み合わせなら、表示切替は登録しない。**押したときだけ反応する。**
+登録は環境が解決してから行い、失敗したら `[Agent]` ログに出す。Rust 側からだけ登録するので、capabilities は要らない。
 
 ## server に渡す環境
 
@@ -218,7 +269,8 @@ Dock にも ⌘Tab にも出ない。操作はメニューバーのアイコン�
 
 ## 制約
 
-- ★ **ChatterAgent がメニューの「終了」やログアウト（quit の Apple Event）以外で終わると server が残る。**
-  `kill` の SIGTERM や強制終了がこれに当たる。次に起動した ChatterAgent からは「外で動いている」に見える
+- ★ **ChatterAgent がメニューの「終了」やログアウト（quit の Apple Event）以外で終わると server と player が残る。**
+  `kill` の SIGTERM や強制終了がこれに当たる（マスコットも終了しない）。次に起動した ChatterAgent からは「外で動いている」に見える
   （→ [`knowledge/agent.md`](./knowledge/agent.md)）
+- **Unity 側も同じショートカットを登録しているので、押すと両方に届きうる**
 - **Windows は未対応。** 停止が穏当でなく（server の後始末が走らない）、環境の解決もしない

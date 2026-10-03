@@ -43,6 +43,7 @@ const DEFAULTS: ChatterAgentConfig = {
   playerArgs: ["{file}"],
   playerServerUrl: "",
   speechMaxAgeMs: 0,
+  speechBacklogMaxAgeMs: 0,
 
   aiSummaryEnabled: true,
   aiSummaryBackend: "fm",
@@ -120,6 +121,7 @@ describe("createDefaultConfig", () => {
     expect(c.playerServerUrl).toBe("");
     // ★ 既定は無効。起動待ち・長いメッセージ・端末の時計のずれで無関係な発話まで消えるため
     expect(c.speechMaxAgeMs).toBe(0);
+    expect(c.speechBacklogMaxAgeMs).toBe(0);
   });
 });
 
@@ -220,10 +222,12 @@ describe("createConfigStore", () => {
     const s = store({
       CHATTER_AGENT_SYNTHESIS_LOOKAHEAD: "0",
       CHATTER_AGENT_SPEECH_MAX_AGE_MS: "0",
+      CHATTER_AGENT_SPEECH_BACKLOG_MAX_AGE_MS: "0",
       CHATTER_AGENT_TTS_SPEAKER_ID: "0",
     });
     expect(s.get("synthesisLookahead")).toBe(0);
     expect(s.get("speechMaxAgeMs")).toBe(0);
+    expect(s.get("speechBacklogMaxAgeMs")).toBe(0);
     expect(s.get("ttsSpeakerId")).toBe("0");
   });
 

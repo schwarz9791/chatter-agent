@@ -128,10 +128,13 @@ async function main(): Promise<void> {
   // 前回の残骸を消す。ロックを取ってあるので、他プロセスの現物を消す心配は無い
   audio.reset();
 
+  const backlogMaxAgeMs = config.get("speechBacklogMaxAgeMs");
   const state = createPlaybackState({
     ...createDefaultOptions(),
     lookahead: config.get("synthesisLookahead"),
     maxAgeMs: config.get("speechMaxAgeMs"),
+    // 起動時点で固定する。再接続しても基準を動かさない
+    notBeforeMs: backlogMaxAgeMs > 0 ? Date.now() - backlogMaxAgeMs : 0,
     // サーバーは自分のキューにある分しか再送できないので、その上限を覚えていれば足りる
     seenCapacity: Math.max(config.get("speechQueueMaxEntries"), 512),
   });

@@ -216,6 +216,14 @@ export interface ChatterAgentConfig {
    * ★ 合成できない1文で後ろが詰まる問題への対処はこれではない（→ `server/audioStore.ts`）。
    */
   speechMaxAgeMs: number;
+  /**
+   * player の起動時点で既にこれより古かった発話は、音を出さずに ack だけして飛ばす。**既定 0（無効）。**
+   *
+   * 誰も繋がない間に配信キューへ溜まった発話を、繋ぎ直したときに喋らないための区切り。
+   * 起動後に積まれた発話には効かない。`speechMaxAgeMs` と違い、判定の基準が起動時点で固定なので、
+   * 長いメッセージの後半やエンジン起動待ちの発話が古いと誤判定されることはない。
+   */
+  speechBacklogMaxAgeMs: number;
 
   // ── 以下は AI要約（summarizer）だけが読む ─────────────────────────
   // ★ ここに置くこと。理由は player のキーと同じ（→上の註記）だが、**警告を吐く側が逆になる**。
@@ -362,6 +370,7 @@ export function createDefaultConfig(): ChatterAgentConfig {
     playerArgs: ["{file}"],
     playerServerUrl: "",
     speechMaxAgeMs: 0,
+    speechBacklogMaxAgeMs: 0,
 
     aiSummaryEnabled: true,
     aiSummaryBackend: "fm",
@@ -451,7 +460,7 @@ const parsePositiveInt: Parser<number> = (raw) => {
   return n !== undefined && n >= 1 ? n : undefined;
 };
 
-// 0 を「無効」「直列」として意味づけているキー用（synthesisLookahead / speechMaxAgeMs）
+// 0 を「無効」「直列」として意味づけているキー用（synthesisLookahead / speechMaxAgeMs / speechBacklogMaxAgeMs）
 const parseNonNegativeInt: Parser<number> = (raw) => {
   const n = toInt(raw);
   return n !== undefined && n >= 0 ? n : undefined;
@@ -667,6 +676,7 @@ const SPECS = {
   playerArgs: { env: "CHATTER_AGENT_PLAYER_ARGS", parse: parsePlayerArgs },
   playerServerUrl: { env: "CHATTER_AGENT_PLAYER_SERVER_URL", parse: makeUrlParser(["ws:", "wss:"]) },
   speechMaxAgeMs: { env: "CHATTER_AGENT_SPEECH_MAX_AGE_MS", parse: parseNonNegativeInt },
+  speechBacklogMaxAgeMs: { env: "CHATTER_AGENT_SPEECH_BACKLOG_MAX_AGE_MS", parse: parseNonNegativeInt },
 
   aiSummaryEnabled: { env: "CHATTER_AGENT_AI_SUMMARY_ENABLED", parse: parseBoolean },
   aiSummaryBackend: { env: "CHATTER_AGENT_AI_SUMMARY_BACKEND", parse: parseAiSummaryBackend },

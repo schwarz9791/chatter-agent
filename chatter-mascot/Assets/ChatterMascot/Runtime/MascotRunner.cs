@@ -748,6 +748,7 @@ namespace ChatterMascot
             {
                 Lookahead = lookahead,
                 MaxAgeMs = speechMaxAgeMs,
+                NotBeforeMs = ResolveNotBeforeMs(),
                 // サーバーは自分のキューにある分しか再送できないので、その上限を覚えていれば足りる
                 SeenCapacity = 512,
             };
@@ -1062,6 +1063,17 @@ namespace ChatterMascot
 
             kind = item.Record.Kind;
             emotion = item.Record.Emotion;
+        }
+
+        /// <summary>
+        /// 起動引数 <c>-speechBacklogMaxAgeMs</c>。起動時点で既にこれより古かった発話だけを飛ばす基準を返す。
+        /// 無い・読めない値は 0（無効）。
+        /// </summary>
+        private static long ResolveNotBeforeMs()
+        {
+            long ageMs;
+            if (!long.TryParse(CommandLine.Argument("-speechBacklogMaxAgeMs"), out ageMs) || ageMs <= 0) return 0;
+            return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - ageMs;
         }
 
         private void Dispatch(PlaybackEvent ev)

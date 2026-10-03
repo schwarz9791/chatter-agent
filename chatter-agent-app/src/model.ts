@@ -46,10 +46,6 @@ export const SERVER_RESET_KEYS = [
   "emotionClassifier",
 ] as const satisfies readonly PanelKey[];
 
-export function voiceKey(engine: string): "ttsSpeakerId" | "kokoroVoiceId" {
-  return engine === "openai" ? "kokoroVoiceId" : "ttsSpeakerId";
-}
-
 /** 環境変数で固定されているときの注記。固定でなければ null */
 export function envNote(
   key: PanelKey,

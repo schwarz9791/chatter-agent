@@ -8,14 +8,8 @@ import {
   mascotGet,
   parseHotKey,
   sameCombination,
-  voiceKey,
 } from "./model.ts";
 import { EN, JA } from "./text.ts";
-
-test("声のキーはエンジンで決まる", () => {
-  assert.equal(voiceKey("voicevox"), "ttsSpeakerId");
-  assert.equal(voiceKey("openai"), "kokoroVoiceId");
-});
 
 test("env 注記は origins が env のときだけ", () => {
   assert.equal(

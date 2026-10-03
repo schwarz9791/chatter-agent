@@ -1,4 +1,5 @@
 import type { ConfigKey } from "../../core/src/core/config.ts";
+import { engineKeys } from "../../core/src/core/engineKeys.ts";
 import {
   HOTKEY_KEYS,
   SERVER_RESET_KEYS,
@@ -8,7 +9,6 @@ import {
   formatHotKey,
   mascotGet,
   parseHotKey,
-  voiceKey,
   type ConfigSnapshot,
   type HotKey,
   type MascotKey,
@@ -271,13 +271,13 @@ function build(): void {
   row(s, "engine", () => t.ttsEngine, [engine], { server: true, envKey: () => "ttsEngine" });
 
   const voice = select((v) => {
-    const key = voiceKey(String(cfgValue("ttsEngine")));
+    const key = engineKeys(String(cfgValue("ttsEngine"))).voice;
     void patch(key, v, "voice");
   });
   ui.voice = voice;
   row(s, "voice", () => t.voiceStyle, [voice], {
     server: true,
-    envKey: () => voiceKey(String(cfgValue("ttsEngine"))),
+    envKey: () => engineKeys(String(cfgValue("ttsEngine"))).voice,
     staticNote: () => (speakersUnavailable ? t.speakerListUnavailable : ""),
   });
 
@@ -440,7 +440,7 @@ function render(): void {
     ],
     String(v?.ttsEngine ?? "voicevox"),
   );
-  const cur = v ? String(v[voiceKey(String(v.ttsEngine))]) : "";
+  const cur = v ? String(v[engineKeys(String(v.ttsEngine)).voice]) : "";
   const list = (speakers ?? []).map((s) => ({ value: s.id, label: s.label }));
   if (!list.some((o) => o.value === cur)) list.unshift({ value: cur, label: cur || t.panelEmpty });
   fillSelect(ui.voice as HTMLSelectElement, list, cur);

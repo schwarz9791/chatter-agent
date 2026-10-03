@@ -36,8 +36,8 @@ namespace ChatterMascot.Desktop
             //   この判定も Editor / ランタイムで1箇所にしておく
             if (Object.FindFirstObjectByType<UniWindowController>() == null) return added;
 
-            // 非アクティブも含める。フォールバックの Cube は読み込み成功で
-            // SetActive(false) されるが、失敗すれば出しっぱなしになる
+            // 非アクティブも含める。フォールバックの Cube は起動時は非表示で、
+            // 全候補が読めなかったときだけ出るので、その時にも掴めるようにしておく
             foreach (var collider in root.GetComponentsInChildren<Collider>(true))
             {
                 var go = collider.gameObject;

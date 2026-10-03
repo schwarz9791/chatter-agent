@@ -74,6 +74,7 @@ Claude Code
 - **Rust**（`chatter-agent-app/mise.toml` で固定しています）—— ChatterAgent をビルドするとき
 - **Unity 6000.3.14f1** —— macOS / Android のビルドサポートモジュールが必要です
 - **Unity CLI**（`unity` コマンド） —— `chatter-mascot/scripts/*.sh` がこれ経由で Editor を動かします
+- **Git LFS** —— マスコットの同梱モデル・モーション・アイコンは LFS 管理です。無しで clone するとポインタのままビルドされ、モデルが出ません（clone 済みなら `git lfs install` のあと `git lfs pull`）
 - **Android SDK の platform-tools**（`adb`）—— Android 版を端末へ入れるとき
 
 Unity プロジェクトのセットアップ手順は [`docs/mascot.md`](./docs/mascot.md) にあります。

@@ -18,6 +18,16 @@
 | XR（Android のみ） | `com.unity.xr.androidxr-openxr`（Android XR Extensions for Unity は入れない → [#119](https://github.com/schwarz9791/chatter-agent/issues/119)） |
 | グラフィックス API | Metal（macOS）/ Android は **Vulkan 単独**（URP で Android XR を使うときの必須設定） |
 
+### Git LFS
+
+`chatter-mascot/.gitattributes` が `*.vrm` / `*.vrma` / `*.png` などを LFS 追跡にしている。
+同梱モデル（`StreamingAssets/vita.vrm`）・待機モーション（`StreamingAssets/idle_loop.vrma`）・
+アイコンがこれに当たる（一覧は `git lfs ls-files`）。
+
+★ **`git lfs` 無しで clone すると、これらが LFS のポインタ（小さなテキスト）になる。** そのまま
+ビルドすると**同梱モデルが読めず Cube だけが出る**。clone 済みなら `git lfs install` のあと
+`git lfs pull` で実体を取ってくる（→ [`knowledge/mascot-unity.md`](./knowledge/mascot-unity.md)「Git-LFS 依存は #56 で復活した」）。
+
 ### 必要な Unity モジュール
 
 - **Mac Build Support (IL2CPP)** — macOS Standalone のビルドに要る
@@ -131,7 +141,8 @@ Assets/ChatterMascot/
 の設定はここ1箇所」を保つため）。辞書順の先頭を採る。`animations/<category>/*.vrma`
 （`idle` / `happy` / `angry` / `sad` / `relaxed` / `surprised` / `walk`。感情モーション・小ネタ・歩行の置き場）
 は候補には入らない——探索順は下の「感情モーションと小ネタの素材」を見ること。全部読めなければ
-Cube が出たままになる——無地の Cube は「異常事態」の可視のシグナル。
+Cube が出る（起動中は隠してあり、全候補を試し終えて採れなかったときだけ出す）——無地の Cube は
+「異常事態」の可視のシグナル。
 
 ## Player Settings（macOS Standalone）
 

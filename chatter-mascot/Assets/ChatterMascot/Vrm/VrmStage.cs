@@ -26,15 +26,17 @@ namespace ChatterMascot.Vrm
         [SerializeField] private Transform modelAnchor;
 
         /// <summary>
-        /// 読み込めなかったときに出しっぱなしにする Cube。
+        /// 全候補が読めなかったときだけ出す Cube。
         ///
         /// ★ <b>名前で <c>GameObject.Find</c> しないこと。</b> このプロジェクトは
         ///   「対象を名前で決め打ちにしない」で通してある（→ <c>SceneFixups</c>）。
         ///
         /// ★ <b>無地の Cube が出ていること自体が可視のシグナル。</b> 同梱モデルまで
         ///   読めないのは異常事態なので、静かに何も出さないより良い。
+        ///
+        /// ★ <b>読み込み中は出さない。</b> 成功する通常の起動で Cube が一瞬映らないように。
         /// </summary>
-        [Tooltip("読み込めなかったときに残すプレースホルダ")]
+        [Tooltip("全候補が読めなかったときだけ出すプレースホルダ")]
         [SerializeField] private GameObject placeholder;
 
         [Header("画角")]
@@ -218,6 +220,8 @@ namespace ChatterMascot.Vrm
             //   「読めたのに真っ黒」と区別がつかない
             VrmMaterialCheck.WarnIfShadersStripped();
 
+            if (placeholder != null) placeholder.SetActive(false);
+
             _cancellation = new CancellationTokenSource();
             // MascotRunner の `_ = ShutdownThenQuitAsync()` と同じ形。
             // 例外は LoadAsync が内側で全部握る
@@ -276,6 +280,7 @@ namespace ChatterMascot.Vrm
                 // ★ **候補を全部並べること。** 探索順のどこで外れたかはこれが無いと分からない
                 Debug.LogError("[Mascot] 読めて VRM として解釈できた候補が1つもありませんでした。探した順:" +
                                VrmAssetLoader.DescribeCandidates(candidates));
+                if (placeholder != null) placeholder.SetActive(true);
             }
             catch (OperationCanceledException)
             {
@@ -284,8 +289,9 @@ namespace ChatterMascot.Vrm
             catch (Exception e)
             {
                 // ★ 握ること。ここから漏らすと `_ = LoadAsync()` の未観測 Task として
-                //   捨てられ、Cube が出たまま理由がどこにも残らない
+                //   捨てられ、Cube すら出ないまま理由がどこにも残らない
                 Debug.LogError("[Mascot] VRM の読み込みで例外が出ました: " + e);
+                if (placeholder != null) placeholder.SetActive(true);
             }
             finally
             {
@@ -393,8 +399,6 @@ namespace ChatterMascot.Vrm
             RealHeightCm = scale > 0f
                 ? VrmBounds.RealHeightCm(_bounds.size.y, scale, boneBoundsMarginMeters)
                 : (float?)null;
-
-            if (placeholder != null) placeholder.SetActive(false);
 
             Model = instance.gameObject;
 

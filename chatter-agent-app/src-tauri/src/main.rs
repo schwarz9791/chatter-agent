@@ -116,6 +116,8 @@ fn main() {
             mascot::pick_vrm,
             mascot::confirm,
             mascot::mascot_reset,
+            mascot::mascot_state,
+            mascot::mascot_request,
             text::lang,
         ])
         .setup(|app| {

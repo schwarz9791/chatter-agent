@@ -6,6 +6,7 @@ import {
   errorMessage,
   formatHotKey,
   mascotGet,
+  motionPreviewState,
   parseHotKey,
   sameCombination,
 } from "./model.ts";
@@ -52,6 +53,21 @@ test("マスコット設定は無い・型違いのとき既定値", () => {
   assert.equal(mascotGet({ audio: { volume: "x" } }, "audio.volume"), 1);
   assert.equal(mascotGet({ character: { blink: false } }, "character.blink"), false);
   assert.equal(mascotGet(null, "display.frameRate"), 30);
+});
+
+test("モーション確認の状態は未起動・待機OFF・読み込み中・空・可の順", () => {
+  const s = (running: boolean, idleMotion: boolean, motions: string[] | null) =>
+    motionPreviewState({ running, idleMotion, motions });
+  assert.equal(s(false, false, null), "notRunning");
+  assert.equal(s(true, false, null), "idleOff");
+  assert.equal(s(true, true, null), "loading");
+  assert.equal(s(true, true, []), "empty");
+  assert.equal(s(true, true, ["idle/a.vrma"]), "ready");
+});
+
+test("大きさの既定値は 1", () => {
+  assert.equal(mascotGet({}, "character.scale"), 1);
+  assert.equal(mascotGet({ character: { scale: 1.5 } }, "character.scale"), 1.5);
 });
 
 test("エラー文言", () => {

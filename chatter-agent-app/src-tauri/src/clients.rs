@@ -587,7 +587,7 @@ impl Clients {
             }
             _ => {}
         }
-        // 設定ファイルの変化（Unity のメニューやショートカットでのミュートを含む）。
+        // 設定ファイルの変化（ミュートを含む）。
         let Some(env) = self.0.manager.get().and_then(Manager::resolved_env) else {
             return;
         };

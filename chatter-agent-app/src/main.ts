@@ -8,6 +8,7 @@ import {
   errorMessage,
   formatHotKey,
   mascotGet,
+  motionPreviewState,
   parseHotKey,
   type ConfigSnapshot,
   type HotKey,
@@ -18,9 +19,11 @@ import {
   asServerError,
   confirmDialog,
   lang,
+  mascotRequest,
   mascotReset,
   mascotSettingsGet,
   mascotSettingsSet,
+  mascotState,
   pickVrm,
   serverJson,
   serverRequest,
@@ -40,6 +43,9 @@ let speakersUnavailable = false;
 let mascot: unknown = {};
 let mascotErr = "";
 let busyPreview = false;
+let mascotRunning = false;
+let motions: string[] | null = null;
+let selectedMotion = "";
 
 /** 行ごとの一時的な注記（失敗理由など）。成功すると消える */
 const flash: Record<string, string> = {};
@@ -196,8 +202,17 @@ async function loadMascot(): Promise<void> {
   }
 }
 
+async function loadMascotState(): Promise<void> {
+  try {
+    ({ running: mascotRunning, motions } = await mascotState());
+  } catch {
+    mascotRunning = false;
+    motions = null;
+  }
+}
+
 async function reloadAll(): Promise<void> {
-  await Promise.all([loadConfig(), loadMascot()]);
+  await Promise.all([loadConfig(), loadMascot(), loadMascotState()]);
   render();
 }
 
@@ -264,6 +279,20 @@ function build(): void {
   });
   row(s, "vrm", () => "VRM", [vrmName, vrmBtn]);
 
+  const size = range(0.5, 2, 0.1, (v) => (sizeVal.textContent = v.toFixed(1)), (v) =>
+    void setMascot("character.scale", Math.round(v * 10) / 10, "size"),
+  );
+  const sizeVal = el("span", "val");
+  ui.size = size;
+  ui.sizeVal = sizeVal;
+  row(s, "size", () => t.characterSize, [size, sizeVal]);
+
+  const resetWin = el("button");
+  ui.resetWin = resetWin;
+  updaters.push(() => (resetWin.textContent = t.resetWindow));
+  resetWin.addEventListener("click", () => void resetWindow());
+  row(s, "resetWin", () => "", [resetWin]);
+
   // オーディオ
   s = section(() => t.sectionAudio);
   const engine = select((v) => void onEngine(v));
@@ -322,6 +351,14 @@ function build(): void {
   const fps = select((v) => void setMascot("display.frameRate", Number(v), "fps"));
   ui.fps = fps;
   row(s, "fps", () => t.frameRate, [fps], { staticNote: () => t.frameRateNote });
+
+  const motion = select((v) => (selectedMotion = v));
+  const play = el("button");
+  ui.motion = motion;
+  ui.play = play;
+  updaters.push(() => (play.textContent = t.playMotion));
+  play.addEventListener("click", () => void playMotion());
+  row(s, "motion", () => t.previewMotion, [motion, play], { staticNote: () => t.previewNote });
 
   // AI要約
   s = section(() => t.sectionAiSummary);
@@ -476,6 +513,17 @@ function render(): void {
     String(v?.emotionClassifier ?? "ollaya"),
   );
 
+  setRange(ui.size as HTMLInputElement, ui.sizeVal, mascotGet(mascot, "character.scale"), (x) => x.toFixed(1));
+
+  const preview = motionPreviewState({
+    running: mascotRunning,
+    idleMotion: mascotGet(mascot, "character.idleMotion"),
+    motions,
+  });
+  const motionList = (motions ?? []).map((m) => ({ value: m, label: m }));
+  if (!motionList.some((o) => o.value === selectedMotion)) selectedMotion = motionList[0]?.value ?? "";
+  fillSelect(ui.motion as HTMLSelectElement, motionList, selectedMotion);
+
   const vrm = mascotGet(mascot, "character.vrm");
   ui.vrmName.textContent = vrm || t.bundledModelNote;
 
@@ -488,15 +536,34 @@ function render(): void {
     if (envText) disabled = true;
     if (id === "voice" && speakersUnavailable) disabled = true;
     if (id === "test" && busyPreview) disabled = true;
+    if (id === "resetWin" && !mascotRunning) disabled = true;
+    if (id === "motion" && preview !== "ready") disabled = true;
     for (const c of r.controls) setDisabled(c, disabled);
 
     let text = flash[id] ?? "";
     if (!text && r.server && down) text = serverErrText();
     if (!text && envText) text = envText;
     if (!text && id === "vrm") text = mascotErr;
+    if (!text && id === "resetWin" && !mascotRunning) text = t.mascotNotRunning;
+    if (!text && id === "motion") text = previewText(preview) || r.staticNote();
     if (!text) text = r.staticNote();
     r.note.textContent = text;
     r.note.classList.toggle("warn", warn.has(id) && !!flash[id]);
+  }
+}
+
+function previewText(state: ReturnType<typeof motionPreviewState>): string {
+  switch (state) {
+    case "notRunning":
+      return t.mascotNotRunning;
+    case "idleOff":
+      return t.previewIdleOff;
+    case "loading":
+      return t.previewLoading;
+    case "empty":
+      return t.previewEmpty;
+    default:
+      return "";
   }
 }
 
@@ -536,7 +603,7 @@ async function playTest(): Promise<void> {
   warn.delete("test");
   render();
   try {
-    // ミュートはショートカットでマスコットが書き換えるので、窓にフォーカスがあったままでも古くなる
+    // ミュートはメニューやショートカットからも書き換わるので、窓にフォーカスがあったままでも古くなる
     await loadMascot();
     if (mascotGet(mascot, "audio.mute")) {
       flash.test = t.mutedNoSound;
@@ -564,6 +631,34 @@ async function playTest(): Promise<void> {
     busyPreview = false;
     render();
   }
+}
+
+/** 依頼の失敗。起動していなかったときは状態を読み直して注記に反映する */
+async function request(kind: "resetWindow" | "playMotion", rowId: string, id?: string): Promise<boolean> {
+  delete flash[rowId];
+  warn.delete(rowId);
+  try {
+    await mascotRequest(kind, id);
+    return true;
+  } catch (e) {
+    if (String(e) === "not_running") await loadMascotState();
+    else {
+      flash[rowId] = String(e);
+      warn.add(rowId);
+    }
+    return false;
+  } finally {
+    render();
+  }
+}
+
+async function resetWindow(): Promise<void> {
+  if (await request("resetWindow", "resetWin")) await loadMascot();
+  render();
+}
+
+async function playMotion(): Promise<void> {
+  if (selectedMotion) await request("playMotion", "motion", selectedMotion);
 }
 
 // マスコット側 → server の順に、途中で失敗しても残りを進める

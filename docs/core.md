@@ -24,7 +24,7 @@ core/src/
 │   ├── engineProcess.ts     ★合成エンジンを起こす条件の判断と、プロセスグループごとの停止（issue #51）
 │   ├── assetCatalog.ts      配布する VRM / VRMA のカタログ（固定名優先→Ordinal 先頭、sha256 のキャッシュ。issue #117）
 │   ├── httpServer.ts        ルーティング（`/audio/…` と `/v1/*`）。認証の関所（issue #98）と、書き込み口の3重の絞り（issue #76）
-│   ├── controlApi.ts        ★設定パネルの制御 API（`/v1/*`）。**HTTP を知らない層**（issue #76）
+│   ├── controlApi.ts        ★設定パネル（ChatterAgent）の制御 API（`/v1/*`）。**HTTP を知らない層**（issue #76）
 │   ├── auth.ts              非ループバックからの `Authorization: Bearer` を検証する（純粋関数。issue #98）
 │   ├── lanToken.ts          共有トークンの読み書き（`{root}/server.token`。無ければ生成。issue #98）
 │   ├── loopback.ts          peer がループバックか（純粋関数）。`auth.ts` の免除判定と、書き込み口を絞るのに使う（issue #76 / #98）
@@ -48,6 +48,7 @@ core/src/
 │   ├── paths.ts             ← cc-mascot-xr 流用。`getServerTokenPath` は `server.token`（issue #98）
 │   ├── config.ts            ← cc-mascot-xr configStore 流用
 │   ├── configPatch.ts       ★`PATCH /v1/config` の検証と書き戻しの組み立て（純粋関数。issue #76）
+│   ├── engineKeys.ts        エンジン → 声・接続先のキーの対応。**葉モジュール（実行時 import を持たない）**。ChatterAgent の WebView からも値 import されるため、server の `currentVoice()` と設定パネルが同じ表を共有できる
 │   ├── version.ts           バンドルに焼き込むバージョン。`package.json` との一致はテストが固定する
 │   ├── summarizerSessions.ts サーバーが起こした要約の session_id（無限ループ防止の第2層。issue #76）
 │   ├── lock.ts              mkdir の原子性を使った単一ワーカー / 単一サーバーのロック
@@ -287,8 +288,12 @@ cc-mascot から移植したコードを oxfmt で整形すると、上流との
 | サーバーのロック | `{root}/server.lock/`（ディレクトリ） | **server**（bind の前に取る。2台目は起動に失敗する） |
 | player のロック | `{root}/player.lock/`（ディレクトリ） | **player**（接続の前に取る。2台目は起動に失敗する） |
 | player の一時 WAV | `{root}/player-tmp/<エポック>-<seq>.wav` | **player**（起動時にディレクトリごと作り直す。`seq` は採番の世代を跨いで一意でないので、ファイル名に世代を混ぜる） |
-| VRM モデル | `{root}/models/` | 人間 / 設定パネル（書く）。server が読んでマニフェストに載せる（→ `server/assetCatalog.ts`） |
+| VRM モデル | `{root}/models/` | 人間 / ChatterAgent の設定パネル（書く）。server が読んでマニフェストに載せる（→ `server/assetCatalog.ts`） |
 | VRMA モーション | `{root}/animations/` | 人間（書く）。server が読んでマニフェストに載せる |
+| マスコットの設定 | `{root}/mascot/settings.json` | **ChatterAgent**（書く）。マスコットは読むだけ（→ `docs/agent.md`） |
+| マスコットの窓の位置 | `{root}/mascot/window.json` | マスコット（位置だけ。大きさは `settings.json` の `character.scale`） |
+| マスコットへの依頼 | `{root}/mascot/requests/*.json` | ChatterAgent が置き、マスコットが読んで消す |
+| モーション一覧 | `{root}/mascot/motions.json` | マスコット（起動時に消し、読み込み後に書く） |
 
 ★ **`emotion-keywords.json` は「書く人」が2者になる唯一のファイル。** 最初だけ CLI が既定を書き出し、
 以後は人間が編集する。CLI は**ファイルが無いときだけ**書く——既にあれば絶対に上書きしない。
@@ -383,7 +388,7 @@ server / player はこのファイルを読みも書きもしない（読むの�
   （`http://127.0.0.1:10101` / `"888753760"`。AivisSpeech 標準構成の Anneli・ノーマル）。
   `ttsSpeakerId` は非負整数しか受けない（Kokoro の声 ID を書き違えても既定値に倒れ、警告が出る）。
   Kokoro は `kokoroBaseUrl` / `kokoroVoiceId`（既定 `http://127.0.0.1:8880` / `"af_heart"`）。
-  設定パネルの「すべての設定をリセット」は `createDefaultConfig()` をそのまま書く（`ttsEngine` は戻さない）。
+  ChatterAgent の設定パネルの「すべての設定をリセット」は `createDefaultConfig()` をそのまま書く（`ttsEngine` は戻さない）。
   cc-mascot はエンジンを自分で `--port 8564` で spawn するので、そちらに繋ぐなら明示的に指定する
   ★ `kokoroBaseUrl` は **`/v1` を含まない origin** を書くこと（パスはクライアントが足す。
   書いてしまっても `tts/openaiClient.ts` が末尾の `/v1` を正規化してから連結する）
@@ -402,7 +407,7 @@ server / player はこのファイルを読みも書きもしない（読むの�
   404 を返す。**テキストの配信は止まらない**ので、自前で合成するクライアントや字幕だけの
   クライアントの逃げ道になる。
   ★ `POST /v1/tts/preview` は 409 `tts_disabled`。ここを見ずに合成へ入ると、待ち切って
-  `503 synthesis_unavailable` になり、設定パネルには「エンジンに繋がりません」と出る ——
+  `503 synthesis_unavailable` になり、ChatterAgent の設定パネルには「エンジンに繋がりません」と出る ——
   本当の理由は利用者自身が切ったことなので、名指しで断る
 - `ttsSpawnCommand` / `ttsSpawnArgs` は **AivisSpeech 専用**（空なら AivisSpeech.app の既知の場所）。
   Kokoro は `kokoroDir` から Kokoro-FastAPI（`uv`）だけを起こす

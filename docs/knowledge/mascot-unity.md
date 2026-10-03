@@ -40,8 +40,8 @@
 
 ★ **#88 で表示側にフレームレート上限を選ぶ設定を足した。** `settings.json` の
 `display.frameRate`（`30` か `60` のみ。既定 `SettingsMapping.DefaultFrameRate = 30`）を
-設定パネル「モーション」の「フレームレート」で切り替えると、
-`StatusItemBridge.ApplySettingsToScene` → `MascotRunner.SetTargetFrameRate` →
+ChatterAgent の設定パネル「モーション」の「フレームレート」で切り替えると、
+マスコットが設定ファイルの変更を読み直し（`MascotSettingsHost`）、`MascotRunner.SetTargetFrameRate` →
 `FrameRateBudget.SetBaseline` の経路で反映される。`Application.targetFrameRate` へ直接
 書かないのは、VRM 読み込み中の一時的な引き上げ（`FrameRateBudget.Boost`）を上書きで
 消さないため。選択肢に無い値（`settings.json` を手で壊した場合など）は**クランプではなく
@@ -396,7 +396,7 @@ VRM のテクスチャは `.vrm` の中にあるので、`.png` が単体で入�
 
 ## ★★ `HideFlags.HideAndDontSave` のオブジェクトは `FindFirstObjectByType` から見えない
 
-**症状**: 「キャラクターの位置をリセット」がその場で効かず、アプリを再起動して初めて反映される。
+**症状**: 位置と大きさのリセット（ChatterAgent の依頼 `resetWindow`）がその場で効かず、アプリを再起動して初めて反映される。
 
 `WindowGeometry` の `Keeper` は `HideFlags.HideAndDontSave` を持つ GameObject に載っている。
 Unity のドキュメントに明記されているとおり、`Object.FindFirstObjectByType` は
@@ -404,38 +404,8 @@ Unity のドキュメントに明記されているとおり、`Object.FindFirst
 「見つからない」枝に落ち、`window.json` を消すだけで終わっていた（ログにも
 `ウィンドウの管理が動いていないので、位置のリセットは次の起動から効きます` が出ていた）。
 
-**手当て**: `StatusItemBridge` と同じ形に揃えて **static フィールドで保持**する
+**手当て**: **static フィールドで保持**する
 （`Start` で代入、`OnDestroy` で解除）。`FindFirstObjectByType` を使わない。
-
-## ★★ `.bundle` が無い状態で Unity を起動すると `.bundle.meta` が壊れる（#93 で踏んだ）
-
-`Assets/Plugins/macOS/ChatterMascotNative.bundle` は git に入れていない（→ `NativePluginSettings`）ので、
-**新規クローンやクリーンなワークツリーには `.meta` しか無い**。この状態で Unity を起動すると、
-Unity は「`.meta` はあるがアセットが無い」と見て**孤児として `.meta` を捨てる**。
-あとから `./scripts/build-native.sh` が `.bundle` を作ると、**新しい GUID で再インポートされる**。
-
-実測（2026-09-06 / #93）: `./scripts/run.sh …IconSettings.FixAll` を単独で先に走らせたところ、
-`ChatterMascotNative.bundle.meta` から **`PluginImporter` の `platformData` ごと設定が消え、
-`guid` が別の値に変わっていた**（残っていたのは `fileFormatVersion` と `guid` の 2 行だけ）。**`.gitignore` が「`.meta` は追跡する
-（GUID が動くと、参照している側が壊れる）」と書いている、まさにその事故。**
-
-★ **`scripts/unity.sh` が Unity の手前でバンドルの実体を用意するので、`scripts/` 経由で
-回すかぎり踏まない**（[#95](https://github.com/schwarz9791/chatter-agent/issues/95)）。
-**残る経路は `scripts/` を通らないとき** —— Unity Hub から手で開く、MCP 経由で Editor を
-触るなど。そこは CI の grep ジョブ（コミットされた `.meta` の GUID と `PluginImporter` ブロックを
-検査する）が最後の砦になる。[#93](https://github.com/schwarz9791/chatter-agent/issues/93) と
-[#97](https://github.com/schwarz9791/chatter-agent/issues/97) では、この形で実際に踏んだ。
-
-★★ **ビルドは通ってしまう。** `.app` の `Contents/PlugIns/` にはバンドルが入るし、
-EditMode テストも全部通る。**気づけるのは `git diff` だけ** —— batchmode で Unity を回したら
-`.meta` の差分を必ず見ること。
-
-直し方は 2 手（`.bundle` が**ある**状態で行うこと）:
-
-```bash
-git checkout -- chatter-mascot/Assets/Plugins/macOS/ChatterMascotNative.bundle.meta
-./scripts/run.sh ChatterMascot.EditorTools.NativePluginSettings.FixAll
-```
 
 ## アイコン生成は**元 PNG**を読む —— `textureCompression` は効かない
 
@@ -490,7 +460,7 @@ PNG は静止画なので OS 側では吸収されない。差し替えたら
 `ProjectSettings.asset` の差分をコミットすること。
 
 ★ **アイコンの確認は Dock ではできない**（`LSUIElement`。⌘Tab にも出ない）。
-効くのは **Finder / Spotlight / ⌘I / 通知 / 設定パネル**。
+効くのは **Finder / Spotlight / ⌘I / 通知**。
 
 ## ★ Unity CLI
 
@@ -602,7 +572,7 @@ Unity 本体の作り（「`-runTests` に `-quit` を付けない」「`-execut
 targetSdk / symbol / versionCode は `ProjectSettings` が持ち、署名は値が argv に出るのでここでは
 行わない。
 
-`build-native.sh` / `configure-android.sh` / `run-android.sh` は Unity を起動しないので、
+`configure-android.sh` / `run-android.sh` は Unity を起動しないので、
 Unity CLI へ寄せる対象ではない。
 
 ## Unity の版を切り替えたときに踏んだこと（#97: 6000.5.8f1 → 6000.3.14f1）
@@ -627,9 +597,6 @@ collections / burst / mathematics / shadergraph / render-pipelines.core も）�
   `AudioManager.asset` は不変（→ [`mascot-speech.md`](./mascot-speech.md)「プロジェクト設定まわりで踏んだこと」）
 - macOS の透過は切り替え後にビルドして目視で再確認した
   （→ [`mascot-desktop.md`](./mascot-desktop.md)「Unity 6 の URP で透過しないのは `Supports HDR` のせい」）
-
-★★ **`.bundle.meta` が壊れる罠は #93 で踏んだものを #97 でまた踏んだ**
-（→ 上の「`.bundle` が無い状態で Unity を起動すると `.bundle.meta` が壊れる」）。
 
 ★★ **シェーダーのコンパイル中に Unity を殺すと `Library/ShaderCache` が壊れる。** 症状は
 ビルドエラーではなく、次のビルドで **MToon10 の本体パスだけが描かれず、アウトラインの
@@ -656,7 +623,6 @@ UniVRM 型が漏れると、`ChatterMascot.Tests.asmdef`（`overrideReferences: 
 ## `IconSettings.FixAll` は毎回のセットアップでは要らない
 
 結果（`m_BuildTargetIcons`）は `ProjectSettings.asset` にコミット済みなので、新規クローンでは
-何もしなくてよい —— `NativePluginSettings.FixAll`（`scripts/` を通さず Unity を開いてしまった
-ときの復旧手順）とはここが違う。再実行が要るのはアイコン画像
+何もしなくてよい。再実行が要るのはアイコン画像
 （`Assets/ChatterMascot/Icon/AppIcon.png`）を差し替えたときだけ。
 

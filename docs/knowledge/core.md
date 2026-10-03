@@ -15,7 +15,7 @@
 **サーバーは違う。** 止めている間は WebSocket の配信も `GET /audio/…` の応答も止まるので、
 クライアント側の音声取得が `audioFetchTimeoutMs`（既定45秒）で**転送エラーになり、試行回数を
 消費して発話が捨てられる**（→ [`protocol.md`](../protocol.md) の責務8）。
-要約は最悪 `aiSummaryTimeoutMs`（既定60秒）掛かるので、設定パネルのテストボタンを押しただけで
+要約は最悪 `aiSummaryTimeoutMs`（既定60秒）掛かるので、ChatterAgent の設定パネルのテストボタンを押しただけで
 発話が落ちることになる。`summaryPreview.ts` が非同期版（`runClaudeCliAsync`）を使うのはこのため。
 
 ★★ **失敗の見分け方が同期版と違う**（Node 24.19.0 実測）。同期版の判定をコピーすると

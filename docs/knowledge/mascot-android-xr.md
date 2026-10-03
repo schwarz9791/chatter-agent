@@ -169,8 +169,7 @@ Transform しか持たない空オブジェクトで、初版は「空だから�
 で落ちる。
 
 ★★ **git 参照のパッケージは読み取り専用で、`PluginImporter.SetCompatibleWithAnyPlatform` +
-`SaveAndReimport` は成功したように見えて永続化されない**（自前の `.bundle` に
-`NativePluginSettings.FixAll` が使っている手は効かない）。`BuildScript.BuildAndroid` は
+`SaveAndReimport` は成功したように見えて永続化されない**。`BuildScript.BuildAndroid` は
 `ExcludeDesktopWindowPluginsFromBuild()` で `PluginImporter.GetAllImporters()` を舐め、
 `Packages/com.kirurobo.uniwinc/` 配下の3件（`.bundle` / x64 dll / x86 dll）に
 `SetIncludeInBuildDelegate(_ => false)` を掛ける。**その1回のビルド呼び出しの間だけ**効き、
@@ -187,9 +186,7 @@ Transform しか持たない空オブジェクトで、初版は「空だから�
 
 `BuildAndroid` は `Disable Unity Audio` を切り替えない。コミットされている `m_DisableAudio: 0` が
 Android の出荷値そのもの（→ [`mascot-speech.md`](./mascot-speech.md)「無音時にオーディオ出力デバイスを掴まない」）。
-`scripts/build-android.sh` に `build-native.sh` の呼び出しも `AudioManager.asset` の trap も無いのは
-変わらないが、ネイティブプラグインのバンドルの実体は `unity.sh` が Unity の手前で用意する
-（Android には積まないが、実体が無いと `.bundle.meta` が孤児として捨てられるため）。
+`scripts/build-android.sh` に `AudioManager.asset` の trap は無い。
 IL2CPP の作業ディレクトリ `.utmp/` は `.gitignore` 済み。
 
 ### 端末に1行出す（Toast）は JNI 直呼び。`CharSequence` に C# の `string` をそのまま渡せる
@@ -303,13 +300,13 @@ Mac の LAN IP へ接続する経路（`configure-android.sh` が書く経路）
 
 #### Android で効くキーと効かないキー
 
-`settings.json` の書き手は `MascotSettingsHost`（`Vrm/`）に一本化されていて、
-「設定 → シーン」の反映経路（ミュート・音量・待機モーション・視線・瞬き）はデスクトップと
+`settings.json` の読み込みと反映は `MascotSettingsHost`（`Vrm/`）に一本化されていて（デスクトップは読むだけ、
+書くのは XR だけ）、「設定 → シーン」の反映経路（ミュート・音量・待機モーション・視線・瞬き）はデスクトップと
 Android で共通。1秒ポーリングで外部変更も拾う。
 
 | キー | Android で効くか |
 |---|---|
-| `audio.mute` / `audio.volume` | 効く。XR は設定パネルの「ミュート」（`SettingKeys.Mute`）からも切り替えられる。デスクトップはメニューバーとショートカットで操作し、パネルには出さない |
+| `audio.mute` / `audio.volume` | 効く。XR は設定パネルの「ミュート」（`SettingKeys.Mute`）からも切り替えられる。デスクトップは ChatterAgent のメニューとショートカットで操作する |
 | `display.frameRate` | **効かない。** XR ではランタイムがフレームペーシングを握り、XR が起動しなかったときはシーンの `targetFrameRate`（`[SerializeField]`）が権威 |
 | `xr.distance` / `xr.azimuth` / `xr.feetBelowEye` | 効く（XR が起動したときだけ。起動時に1回だけ読む。→「XR（Full Space）」） |
 | `xr.height` | 効く（XR が起動したときだけ）。他の `xr.*` と違い**設定パネルの「大きさ」からその場で変えられる**——起動時の読み込みだけに限らない |
@@ -318,7 +315,7 @@ Android で共通。1秒ポーリングで外部変更も拾う。
 | `connection.serverUrl` / `connection.token` | 効く（起動時に1回だけ） |
 | `connection.assetSync` | 効く（設定パネルの「モデルとモーションを同期」からも変えられるが、**次回の起動から**——読むのは起動時の1回だけ。パネルの「今すぐ同期」は設定のいまの値を見るので、ON にしたその場で押せる） |
 | `character.vrm` | **効かない。** VRM の探索は `AssetEnv.HasUserConfigDirectory` のときだけユーザー段を見るが、Android はこれが `false`（共有ファイルシステムが無い） |
-| `audio.muteHotKey` / `ui.hideHotKey` | **効かない。** グローバルショートカットはデスクトップ固有のネイティブプラグイン（`StatusItemBridge`）にしか無い |
+| `audio.muteHotKey` / `ui.hideHotKey` | **効かない。** グローバルショートカットを登録するのは ChatterAgent（macOS）だけで、マスコットは読み飛ばす |
 
 #### 繋がらないときの症状と切り分け
 
@@ -527,7 +524,7 @@ Android XR Extensions for Unity（`com.google.xr.extensions`）は入れない�
    （legacy scale からの見積もり、または実寸が分かってからの合わせ直し）もこの経路を通る
 5. **配置（`distance` / `azimuth` / `feetBelowEye`）は `settings.json` の `xr` を直接書き換えて変える。**
    これが効くのは**起動時の配置だけ**——大きさと違い、設定パネルに項目が無い。既定は
-   「机の上のミニチュアを、正面の画面を避けた右側に」。デスクトップのパネルには出さないが、往復で
+   「机の上のミニチュアを、正面の画面を避けた右側に」。ChatterAgent の設定パネルには出さないが、往復で
    落とさない（`connection` と同じ扱い）。**手で置き直した位置は再起動で戻る**（永続化は
    [#122](https://github.com/schwarz9791/chatter-agent/issues/122)。設定パネルの「位置をリセット」は
    再起動せずに同じ状態へ戻す）
@@ -762,9 +759,8 @@ hips の平行移動は 1cm 未満で、**root motion は焼かれていない**
 ハンドル → キャラ**。別のコンポーネントで pinch を読むと、同じつまみで2つが反応する
 （歩行範囲のハンドルと同じ理由。→ 上「掴む対象を増やすのであって〜」）。
 
-★ **ミュートだけはパネルの先頭に出す**（`SettingsSchema.BuildXr`。デスクトップの
-`BuildDesktop` には出さない）。デスクトップと違い、XR にはメニューバーもショートカットも無く、
-パネル以外に切り替える手段が無いため。
+★ **ミュートだけはパネルの先頭に出す**（`SettingsSchema.BuildXr`）。XR にはメニューバーも
+ショートカットも無く、パネル以外に切り替える手段が無いため。
 
 ★ **`MascotSettingsHost.Apply` は `ChangedExternally` を出さない**（自分起点の変更として扱うため）。
 パネル以外の経路から設定を変えるなら、その呼び出し側がパネルの `Refresh` も直接呼ぶこと——
@@ -774,8 +770,7 @@ hips の平行移動は 1cm 未満で、**root motion は焼かれていない**
 読めなければ `⚙`（`LegacyRuntime.ttf`）の `Text` で代用する——`XrWalkAreaView` が `WalkArea`
 マテリアルを読めないときと同じ扱いで、画像が無くてもビルドを壊さない。
 
-★★ **レンダラ（`XrSettingsPanel`）に設定のキーを1つも書かない。** デスクトップの
-`CMSettingsPanel.m` と同じ規律（→ [`mascot-settings.md`](./mascot-settings.md)）——`SettingSpec.Kind`
+★★ **レンダラ（`XrSettingsPanel`）に設定のキーを1つも書かない。** `SettingSpec.Kind`
 だけを見て行を組み、押されたキーは不透明な文字列のまま `XrSettingsBridge` へ返す。キーの意味を
 知るのは `XrSettingsBridge` だけ。レビューでは `XrSettingsPanel.cs` に `SettingKeys.` が出てこない
 ことを見る。
@@ -788,8 +783,7 @@ hips の平行移動は 1cm 未満で、**root motion は焼かれていない**
 追わなくても実際の Transform 階層がそのまま答えになる。
 
 ★ **同じ項目構成（キーの並び）での更新は行を作り直さない。** 値・有効/無効・note だけ差し替える
-（→ [`mascot-settings.md`](./mascot-settings.md)「自分起点の変更でパネルを作り直さない」と同じ
-教訓）。構成そのもの（キーと種類の並び）が変わったときだけ作り直す。
+（作り直すと、掴んでいる最中のつまみごと消える）。構成そのもの（キーと種類の並び）が変わったときだけ作り直す。
 
 ★ **Choice の ‹ › は見た目の位置と押す判定の位置をそろえる。** ‹ を値欄の左端、› を値欄の右端に
 別々の `Text` として置き、押す判定も同じ境界（値欄の左半分 / 右半分）で分ける——1つの `Text` に
@@ -797,14 +791,14 @@ hips の平行移動は 1cm 未満で、**root motion は焼かれていない**
 空の Choice は値欄を行の全幅にする（レンダラはラベルの有無だけを見て、キーでは分岐しない）。
 
 ★ **「すべての設定をリセット」の確認はダイアログではなく「もう一度押す」。** XR にはネイティブの
-確認ダイアログが無い——デスクトップの `NSAlert` に相当するものが無いので、1回目は確認待ちの note
+確認ダイアログが無いので、1回目は確認待ちの note
 に差し替えるだけにし、既定値の猶予以内の2回目で確定する。パネル側にキーは増やさない
 （`XrSettingsBridge` が出来上がった並びの該当行だけ note を差し替える）。
 
 **「すべての設定をリセット」は `ResetKeepingConnection`（接続先を残す）に、位置と大きさのリセットを
 重ねたもの。** 同期して取得済みのモデルファイル（`persistentDataPath/synced/`）は消さない——次の
-起動でまた同じものを取りに行けばよいので消す必要が無い（デスクトップ版の「すべての設定をリセット」
-との違い）。位置は「位置をリセット」と同じ経路（`XrGrab.ResetPosition` + `XrWalk.ResetArea`）を
+起動でまた同じものを取りに行けばよいので消す必要が無い（ChatterAgent の「すべての設定をリセット」は
+`models/*.vrm` を消す。これとは別物）。位置は「位置をリセット」と同じ経路（`XrGrab.ResetPosition` + `XrWalk.ResetArea`）を
 そのまま呼ぶ。
 
 大きさ（実寸の測り方、比での焼き直し）は上「空間配置の決めごと」3・4。

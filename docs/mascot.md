@@ -25,8 +25,10 @@
 アイコンがこれに当たる（一覧は `git lfs ls-files`）。
 
 ★ **`git lfs` 無しで clone すると、これらが LFS のポインタ（小さなテキスト）になる。** そのまま
-ビルドすると**同梱モデルが読めず Cube だけが出る**。clone 済みなら `git lfs install` のあと
-`git lfs pull` で実体を取ってくる（→ [`knowledge/mascot-unity.md`](./knowledge/mascot-unity.md)「Git-LFS 依存は #56 で復活した」）。
+ビルドすると、探索順の 1〜6 にモデルが無ければ（＝同梱モデルに頼っていれば）**同梱モデルが読めず
+Cube だけが出る**（→「モデルとアニメーションの探索順」）。clone 済みなら `git lfs install` のあと
+`git lfs pull` で実体を取ってきて、**ビルドし直す**。ビルド済みの `.app` はコピー済みのポインタを
+読み続ける（→ [`knowledge/mascot-unity.md`](./knowledge/mascot-unity.md)「Git-LFS 依存は #56 で復活した」）。
 
 ### 必要な Unity モジュール
 
@@ -140,9 +142,9 @@ Assets/ChatterMascot/
 6 は `core/src/core/paths.ts` の `getRuntimeDir` と**同じ規則**（ユーザーから見て「chatter-agent
 の設定はここ1箇所」を保つため）。辞書順の先頭を採る。`animations/<category>/*.vrma`
 （`idle` / `happy` / `angry` / `sad` / `relaxed` / `surprised` / `walk`。感情モーション・小ネタ・歩行の置き場）
-は候補には入らない——探索順は下の「感情モーションと小ネタの素材」を見ること。全部読めなければ
-Cube が出る（起動中は隠してあり、全候補を試し終えて採れなかったときだけ出す）——無地の Cube は
-「異常事態」の可視のシグナル。
+は候補には入らない——探索順は下の「感情モーションと小ネタの素材」を見ること。全部読めないか、
+読み込みで例外が出れば Cube が出る（起動中は隠してあり、モデルを採れなかったときだけ出す）。
+無地の Cube は「異常事態」の可視のシグナル。
 
 ## Player Settings（macOS Standalone）
 

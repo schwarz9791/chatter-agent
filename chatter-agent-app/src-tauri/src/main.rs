@@ -302,6 +302,11 @@ fn main() {
                 RunEvent::ExitRequested {
                     code: None, api, ..
                 } => api.prevent_exit(),
+                // マスコットの右クリックと Finder 等からの開き直しで設定窓を出す。
+                #[cfg(target_os = "macos")]
+                RunEvent::Reopen { .. } => {
+                    open_settings(app, text::current().settings_title);
+                }
                 RunEvent::Exit => {
                     if let Some(c) = app.try_state::<Clients>() {
                         c.stop_sync();

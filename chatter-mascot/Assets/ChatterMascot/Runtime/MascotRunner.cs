@@ -917,7 +917,7 @@ namespace ChatterMascot
         /// <summary>
         /// ペアリングの接続先を LAN から探す。見つからなければ <c>null</c>。
         ///
-        /// ★★ <b><see cref="ServerDiscovery"/> を呼ぶのはここと <see cref="PollDiscovery"/> だけ。</b>
+        /// ★★ <b><see cref="ServerDiscovery"/> を <see cref="MascotRunner"/> の外から呼ばない。</b>
         ///   Java 側は static で、<c>take()</c> が結果を消費し、<c>stop()</c> が相手の探索も止める。
         ///   起動時の探索が走っている間は自分では探さず、その結果（<see cref="PollDiscovery"/> がセッションまで
         ///   進める）を待つ。

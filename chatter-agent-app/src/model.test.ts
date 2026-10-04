@@ -100,7 +100,7 @@ test("ペアリングの表示は状態で決まり、pending だけが PIN を�
     keepPolling: true,
   });
   assert.equal(pairingView("paired").keepPolling, false);
-  assert.equal(pairingView("paired").showReissue, false);
+  assert.equal(pairingView("paired").showReissue, true);
   for (const s of ["expired", "locked", "none"] as const) {
     const v = pairingView(s);
     assert.ok(v.showReissue && !v.showPin && !v.keepPolling, s);

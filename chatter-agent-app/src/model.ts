@@ -241,7 +241,7 @@ export function pairingView(state: PairingState): PairingView {
     case "pending":
       return { message: "pending", showPin: true, showReissue: false, keepPolling: true };
     case "paired":
-      return { message: "paired", showPin: false, showReissue: false, keepPolling: false };
+      return { message: "paired", showPin: false, showReissue: true, keepPolling: false };
     case "locked":
       return { message: "locked", showPin: false, showReissue: true, keepPolling: false };
     case "expired":

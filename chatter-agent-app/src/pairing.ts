@@ -13,6 +13,8 @@ const reissueEl = el("reissue") as HTMLButtonElement;
 let t: Text = JA;
 let expiresAt = 0;
 let timer: number | undefined;
+// 発行のたびに進める。古い発行への応答が、今の表示を上書きしないようにする。
+let generation = 0;
 
 function show(text: string, kind: "" | "sub" | "error"): void {
   statusEl.textContent = text;
@@ -20,10 +22,11 @@ function show(text: string, kind: "" | "sub" | "error"): void {
 }
 
 function stop(): void {
-  clearInterval(timer);
+  clearTimeout(timer);
   timer = undefined;
 }
 
+/** 発行の失敗。PIN を隠して、発行し直せるようにする */
 function fail(e: unknown): void {
   stop();
   pinEl.hidden = true;
@@ -31,9 +34,13 @@ function fail(e: unknown): void {
   show(errorMessage(asServerError(e), e, "", t), "error");
 }
 
+/** 前の問い合わせが終わってから次を張る。応答が遅くても重ならない */
 async function tick(): Promise<void> {
+  const mine = generation;
+  let keepPolling = true;
   try {
     const r = await serverJson<{ state: PairingState }>("GET", "/v1/pairing");
+    if (mine !== generation) return;
     const view = pairingView(r.state);
     pinEl.hidden = !view.showPin;
     reissueEl.hidden = !view.showReissue;
@@ -45,14 +52,18 @@ async function tick(): Promise<void> {
         view.message === "paired" ? "" : "error",
       );
     }
-    if (!view.keepPolling) stop();
+    keepPolling = view.keepPolling;
   } catch (e) {
-    fail(e);
+    // server ではまだ有効な PIN なので、隠さずに続ける。
+    if (mine !== generation) return;
+    show(errorMessage(asServerError(e), e, "", t), "error");
   }
+  if (keepPolling) timer = window.setTimeout(() => void tick(), 1000);
 }
 
 async function issue(): Promise<void> {
   stop();
+  generation++;
   reissueEl.hidden = true;
   try {
     const r = await serverJson<{ pin: string; expiresAt: number }>("POST", "/v1/pairing", {});
@@ -62,9 +73,8 @@ async function issue(): Promise<void> {
     fail(e);
     return;
   }
+  pinEl.hidden = false;
   await tick();
-  // 状態が pending のままのときだけ続ける。
-  if (!pinEl.hidden) timer = window.setInterval(() => void tick(), 1000);
 }
 
 async function main(): Promise<void> {

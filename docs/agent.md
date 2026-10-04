@@ -339,7 +339,9 @@ macOS 限定。Windows は single-instance プラグインで同じ口にでき�
 （契約は [`protocol.md`](./protocol.md)「ペアリング」）。
 
 - 開くと `POST /v1/pairing` で PIN を発行し、大きく表示する。1 秒ごとに残り時間と `GET /v1/pairing` を見て、
-  `paired` なら「ペアリングしました」、`expired` / `locked` / `none` なら「発行し直す」を出す
+  `paired` なら「ペアリングしました」、`expired` / `locked` / `none` なら期限切れやロックの旨を出す。
+  「発行し直す」は `paired` でも出す（2 台目の PIN を出す手段になる）
+- 状態の取得に失敗しても PIN は隠さない（server ではまだ有効なため）。エラーを出して取り直し続ける
 - ★ **窓を閉じても PIN は取り消さない。** 期限（5 分）か、成功、失敗の上限で終わる。取り消す口は無い
 - ★ **`409 not_lan` は、server が LAN に出ていないということ。** `config.json` の `host` か
   `CHATTER_AGENT_HOST` を `0.0.0.0` にして server を再起動するよう案内する（→「LAN に公開するとき」）

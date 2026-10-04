@@ -139,7 +139,7 @@ fn is_allowed(method: &str, path: &str) -> bool {
 }
 
 fn read_timeout(path: &str) -> Duration {
-    if path == "/v1/config" {
+    if matches!(path, "/v1/config" | "/v1/pairing") {
         CONFIG_TIMEOUT
     } else {
         SYNTHESIS_TIMEOUT
@@ -254,6 +254,13 @@ mod tests {
     use std::net::TcpListener;
     use std::sync::mpsc;
     use std::thread;
+
+    #[test]
+    fn read_timeout_is_long_only_for_synthesis() {
+        assert_eq!(read_timeout("/v1/config"), CONFIG_TIMEOUT);
+        assert_eq!(read_timeout("/v1/pairing"), CONFIG_TIMEOUT);
+        assert_eq!(read_timeout("/v1/tts/preview"), SYNTHESIS_TIMEOUT);
+    }
 
     fn env_of(pairs: &[(&str, &str)]) -> Env {
         pairs

@@ -26,6 +26,8 @@ const ALLOWED: &[(&str, &str)] = &[
     ("PATCH", "/v1/config"),
     ("GET", "/v1/speakers"),
     ("POST", "/v1/tts/preview"),
+    ("GET", "/v1/pairing"),
+    ("POST", "/v1/pairing"),
 ];
 
 #[derive(Debug, PartialEq)]
@@ -482,6 +484,7 @@ mod tests {
             ("GET", "/v1/tts/preview"),
             ("GET", "/audio/1-1.wav"),
             ("GET", "/v1/config?x=1"),
+            ("POST", "/v1/pairing/claim"),
         ] {
             let e = call(&t, m, p, None).unwrap_err();
             assert_eq!((e.status, e.body.as_str()), (0, "not_allowed"), "{m} {p}");

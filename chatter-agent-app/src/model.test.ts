@@ -5,8 +5,10 @@ import {
   envNote,
   errorMessage,
   formatHotKey,
+  formatRemaining,
   mascotGet,
   motionPreviewState,
+  pairingView,
   parseHotKey,
   sameCombination,
 } from "./model.ts";
@@ -81,4 +83,34 @@ test("エラー文言", () => {
   assert.equal(e(500, "oops"), JA.errorHttp(500));
   assert.equal(e(418, '{"error":"teapot"}'), JA.errorUnknown("teapot", "k"));
   assert.equal(errorMessage(null, "boom", "k", JA), "boom");
+});
+
+test("残り時間は m:ss で、負は 0:00", () => {
+  assert.equal(formatRemaining(272_000), "4:32");
+  assert.equal(formatRemaining(59_100), "1:00");
+  assert.equal(formatRemaining(5_000), "0:05");
+  assert.equal(formatRemaining(-1), "0:00");
+});
+
+test("ペアリングの表示は状態で決まり、pending だけが PIN を出してポーリングを続ける", () => {
+  assert.deepEqual(pairingView("pending"), {
+    message: "pending",
+    showPin: true,
+    showReissue: false,
+    keepPolling: true,
+  });
+  assert.equal(pairingView("paired").keepPolling, false);
+  assert.equal(pairingView("paired").showReissue, false);
+  for (const s of ["expired", "locked", "none"] as const) {
+    const v = pairingView(s);
+    assert.ok(v.showReissue && !v.showPin && !v.keepPolling, s);
+  }
+  assert.equal(pairingView("locked").message, "locked");
+  assert.equal(pairingView("none").message, "expired");
+});
+
+test("not_lan は専用の文言", () => {
+  const err = { status: 409, body: JSON.stringify({ error: "not_lan" }) };
+  assert.equal(errorMessage(err, err, "", JA), JA.pairingNotLan);
+  assert.equal(errorMessage(err, err, "", EN), EN.pairingNotLan);
 });

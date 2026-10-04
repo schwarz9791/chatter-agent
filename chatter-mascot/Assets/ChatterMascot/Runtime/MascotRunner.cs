@@ -218,6 +218,7 @@ namespace ChatterMascot
         ///   上書きを <c>Start</c> でやると<b>順序が未規定になる</b>。
         /// ★ <b>LAN から探すとき（→ <see cref="ResolveServerUrl"/>）は、見つかるまで既定値のまま。</b>
         ///   決まる前に読んでも既定値を焼くだけなので、読み手を足すときはセッションの開始後に読むこと。
+        /// ★ <b>ペアリング（<see cref="Reconnect"/>）で変わりうる。</b> 値を持ち越さず、使う時点で読むこと。
         /// </summary>
         public string ServerUrl
         {
@@ -227,8 +228,9 @@ namespace ChatterMascot
         /// <summary>
         /// 非ループバックの接続に要る共有トークン（<c>connection.token</c>）。空なら未指定。
         ///
-        /// ★ <see cref="ServerUrl"/> と同じ <c>settings.json</c> から <c>Awake</c> で1回だけ読む
-        ///   （→ <see cref="ResolveServerUrl"/>）。<b>値そのものをログに出さないこと</b> ——
+        /// ★ <see cref="ServerUrl"/> と同じ <c>settings.json</c> から <c>Awake</c> で読む
+        ///   （→ <see cref="ResolveServerUrl"/>）。以後はペアリングで受け取ったとき（<see cref="Reconnect"/>）だけ変わる。
+        ///   <b>値そのものをログに出さないこと</b> ——
         ///   出してよいのは「あるかどうか」だけ。
         /// ★★ <b>起動引数（<c>-serverUrl</c>）で接続先を上書きしたときは空にする。</b>
         ///   トークンは接続先と対になる値なので、URL だけ差し替えてトークンを残すと、
@@ -525,8 +527,9 @@ namespace ChatterMascot
         /// ★★ <b>設定ファイルは専用のストアを作らず、ここで直接・1回だけ読む。</b> 書き手は
         ///   <c>MascotSettingsHost</c> だけで、こちらは<b>読むだけで一切書かない</b>ので、
         ///   2つのストアが同じファイルへ競合して書く問題は起こらない。
-        ///   接続先を起動後に書き換えても<b>次回の起動まで反映されない</b>のは、
-        ///   接続を1回きり捕まえる設計（上の doc）と同じ理由。
+        ///   外から（<c>adb</c> など）ファイルを書き換えても<b>次回の起動まで反映されない</b>。
+        ///   起動中に繋ぎ直すのはペアリング（<see cref="Reconnect"/>）だけで、その値はここではなく
+        ///   呼び出し側が渡す。
         /// </summary>
         private void ResolveServerUrl()
         {
@@ -777,8 +780,9 @@ namespace ChatterMascot
         }
 
         /// <summary>
-        /// 接続先が決まった後の本体。<see cref="Start"/>（接続先が <c>Awake</c> で決まったとき）か
-        /// <see cref="PollDiscovery"/>（探索で決まったとき）から1回だけ呼ぶ。
+        /// 接続先が決まった後の本体。<see cref="Start"/>（接続先が <c>Awake</c> で決まったとき）、
+        /// <see cref="PollDiscovery"/>（探索で決まったとき）、<see cref="Reconnect"/>（セッション未開始のとき）の
+        /// どれかから、セッションにつき1回だけ呼ぶ。
         /// </summary>
         private void BeginSession()
         {
@@ -836,20 +840,125 @@ namespace ChatterMascot
                     ? "[Mascot] このプラットフォームでは出力デバイスを手放せないので、アイドル判定は動かしません"
                     : "[Mascot] audioIdleSuspendMs が 0 以下なのでアイドル判定は動かしません");
             }
+            Connect();
+        }
+
+        /// <summary>
+        /// 現在の <see cref="serverUrl"/> / <see cref="ServerToken"/> でクライアントを作って繋ぎ始める。
+        /// <see cref="BeginSession"/> と <see cref="Reconnect"/> の共通の入口。
+        ///
+        /// ★★ <b>イベントは自分のクライアント（<c>c</c>）が現役のときだけ通すこと。</b>
+        ///   <see cref="SpeechClient"/> は <c>CloseAsync</c> の後でも、確立済みの接続の継続から
+        ///   <c>Connected</c> を発火しうる。捨てたクライアントの通知が <see cref="PlaybackState"/> へ
+        ///   入ると、新しい接続の状態を上書きする。
+        /// </summary>
+        private void Connect()
+        {
             // 音声は WebSocket と同じ authority から取る。サーバーは自分の到達アドレスを
             // 知らないので、フレームには相対パスしか載らない
             _fetcher = new AudioFetcher(AudioFetcher.DeriveAudioBaseUrl(serverUrl), audioFetchTimeoutMs, ServerToken);
 
-            _client = new SpeechClient(serverUrl, ServerToken);
-            _client.FrameReceived += OnFrame;
-            _client.Connected += OnConnected;
-            _client.Disconnected += () => Dispatch(PlaybackEvent.Disconnected());
-            _client.Log += message => Debug.Log("[Mascot] " + message);
-            _client.Warn += message => Debug.LogWarning("[Mascot] " + message);
+            var c = new SpeechClient(serverUrl, ServerToken);
+            _client = c;
+            c.FrameReceived += raw => { if (c == _client) OnFrame(raw); };
+            c.Connected += () => { if (c == _client) OnConnected(); };
+            c.Disconnected += () => { if (c == _client) Dispatch(PlaybackEvent.Disconnected()); };
+            c.Log += message => Debug.Log("[Mascot] " + message);
+            c.Warn += message => Debug.LogWarning("[Mascot] " + message);
 
             Debug.Log($"[Mascot] server: {serverUrl} / audio: {_fetcher.BaseUrl}/audio/");
-            _client.Start();
+            c.Start();
             _nextTickAt = Time.realtimeSinceStartup + TickIntervalSeconds;
+        }
+
+        /// <summary>
+        /// 接続先とトークンを差し替えて、アプリを再起動せずに繋ぎ直す（ペアリングの後）。
+        /// 入れられない接続先なら何もせず <c>false</c>。
+        ///
+        /// ★ <b><see cref="PlaybackState"/> は作り直さず引き継ぐ。</b> 重複と世代違いは epoch と Seen が
+        ///   処理するので、繋ぎ直しで再生中の音を止めたり、取得済みを捨てたりしない。
+        /// ★★ <b>古いクライアントを外してから <c>Disconnected</c> を流すこと。</b> 保留中の ack は
+        ///   接続が戻って最初のフレームで世代を確かめてから流す（→ <c>PlaybackQueue</c> の Connected）ので、
+        ///   旧サーバー宛ての ack が新しいクライアントへ出ない。
+        /// ★ セッション未開始（探索中・URL 不正で止まっていた）なら、そのまま開始する。
+        /// </summary>
+        public bool Reconnect(string url, string token)
+        {
+            if (_shuttingDown || !ChatterMascot.Net.ServerUrl.IsValid(url)) return false;
+
+            if (_discovering)
+            {
+                _discovering = false;
+                ServerDiscovery.Stop();
+            }
+
+            serverUrl = url;
+            ServerToken = token ?? "";
+            _warnedUnreachable = false;
+
+            if (_state == null)
+            {
+                enabled = true;
+                BeginSession();
+                return _client != null;
+            }
+
+            var old = _client;
+            _client = null;
+            Dispatch(PlaybackEvent.Disconnected());
+            if (old != null) _ = old.CloseAsync();
+            Connect();
+            return true;
+        }
+
+        /// <summary>ペアリング用の探索が走っている間は <c>true</c>（<see cref="FindServerForPairingAsync"/>）</summary>
+        private bool _pairingDiscovering;
+
+        /// <summary>
+        /// ペアリングの接続先を LAN から探す。見つからなければ <c>null</c>。
+        ///
+        /// ★★ <b><see cref="ServerDiscovery"/> を呼ぶのはここと <see cref="PollDiscovery"/> だけ。</b>
+        ///   Java 側は static で、<c>take()</c> が結果を消費し、<c>stop()</c> が相手の探索も止める。
+        ///   起動時の探索が走っている間は自分では探さず、その結果（<see cref="PollDiscovery"/> がセッションまで
+        ///   進める）を待つ。
+        /// </summary>
+        public async Task<string> FindServerForPairingAsync(float timeoutSeconds)
+        {
+            if (Application.platform != RuntimePlatform.Android || _shuttingDown) return null;
+
+            var deadline = Time.realtimeSinceStartup + timeoutSeconds;
+
+            if (_discovering)
+            {
+                while (_discovering && !_shuttingDown && Time.realtimeSinceStartup < deadline)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(DiscoveryPollIntervalSeconds));
+                }
+                return _discovering || _shuttingDown ? null : serverUrl;
+            }
+
+            if (_pairingDiscovering || !ServerDiscovery.Start()) return null;
+            _pairingDiscovering = true;
+            try
+            {
+                while (!_shuttingDown && Time.realtimeSinceStartup < deadline)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(DiscoveryPollIntervalSeconds));
+                    if (_shuttingDown) break;
+
+                    string host, name;
+                    int port;
+                    if (!ServerDiscovery.TryTake(out host, out port, out name)) continue;
+                    var url = ChatterMascot.Net.ServerUrl.FromHostPort(host, port);
+                    if (url != null) return url;
+                }
+                return null;
+            }
+            finally
+            {
+                _pairingDiscovering = false;
+                ServerDiscovery.Stop();
+            }
         }
 
         private void Update()
@@ -862,8 +971,8 @@ namespace ChatterMascot
 
             if (_discovering) PollDiscovery();
 
-            // ★ 接続先はセッション中固定（探索で決めた場合も）。Mac のアドレスが変わるとアプリを
-            //   起動し直すしかなく、これが無いと端末側にはそれが伝わらない
+            // ★ 接続先はペアリング（Reconnect）以外では変わらない。Mac のアドレスが変わるとペアリングし直すか
+            //   アプリを起動し直すしかなく、これが無いと端末側にはそれが伝わらない
             // ★ 端末に出すのは使う人が打てる手だけにする。トークンの不一致（401）も同じ失敗として
             //   数えられるが、Android では見分けられないので、候補としてログにだけ残す
             if (_client != null && !_warnedUnreachable
@@ -872,7 +981,10 @@ namespace ChatterMascot
                 _warnedUnreachable = true;
                 Debug.LogWarning("[Mascot] サーバーに繋がりません。サーバーが止まっている・接続先が変わった・" +
                                  "トークンが合っていない（Android では 401 と見分けられない）のどれか");
-                DeviceToast.Show("サーバーに繋がりません\nサーバーの起動状態を確認し、\nアプリを再起動してください");
+                // ★ トークンが無いなら、再起動ではなくペアリングが打てる手
+                DeviceToast.Show(ServerToken.Length == 0
+                    ? UiText.For(Application.systemLanguage).PairingNeededToast
+                    : "サーバーに繋がりません\nサーバーの起動状態を確認し、\nアプリを再起動してください");
             }
 
             // ack の間引き送出と、無受信 watchdog
@@ -951,7 +1063,7 @@ namespace ChatterMascot
         {
             Application.wantsToQuit -= OnWantsToQuit;
             _shuttingDown = true;
-            if (_discovering)
+            if (_discovering || _pairingDiscovering)
             {
                 _discovering = false;
                 ServerDiscovery.Stop();

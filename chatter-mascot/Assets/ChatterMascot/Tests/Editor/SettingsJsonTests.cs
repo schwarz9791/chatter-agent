@@ -438,6 +438,17 @@ namespace ChatterMascot.Tests
             Assert.That(parsed.Token, Is.EqualTo("s3cr3t"));
         }
 
+        [TestCase("a1_B2-c3", true)]
+        [TestCase("", false)]
+        [TestCase(null, false)]
+        [TestCase("abc\n", false)]
+        [TestCase("ab\r\ncd", false)]
+        [TestCase("a b", false)]
+        public void IsValidTokenMatchesTheServerAlphabet(string token, bool expected)
+        {
+            Assert.That(SettingsJson.IsValidToken(token), Is.EqualTo(expected));
+        }
+
         [Test]
         public void AcceptsATokenWithUnderscoresAndDashes()
         {

@@ -93,8 +93,8 @@ namespace ChatterMascot.Vrm
             Current = _store.Current;
             ApplySettingsToScene();
 
-            // ★ 接続先は Awake で1回きり捕まえる設計（→ MascotRunner.ResolveServerUrl）。
-            //   ここで書き換わっても次回の起動まで反映されない
+            // ★ 外から書き換えられた接続先は起動時にしか読まれない（→ MascotRunner.ResolveServerUrl）。
+            //   起動中に繋ぎ直すのは XR のペアリング（MascotRunner.Reconnect）だけで、ここは通らない
             if (!string.Equals(previous.ServerUrl, Current.ServerUrl, StringComparison.Ordinal) ||
                 !string.Equals(previous.Token, Current.Token, StringComparison.Ordinal))
             {

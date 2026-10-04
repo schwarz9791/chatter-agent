@@ -50,5 +50,26 @@ namespace ChatterMascot.Ui
         public override string XrResetAllNote => "接続先は残します";
         public override string XrResetAllConfirmNote => "もう一度押すとすべての設定をリセットします";
         public override string XrClose => "閉じる";
+
+        public override string SectionPairing => "接続";
+        public override string XrPairOpen => "ペアリング…";
+        public override string XrPairingDigit(int position) => $"{position + 1} 桁目";
+        public override string XrPairKeyboard => "キーボードで入力";
+        public override string XrPairKeyboardUnavailable => "キーボードを開けません";
+        public override string XrPairKeyboardInvalid => "4 桁の数字を入れてください";
+        public override string XrPair => "ペアリング";
+        public override string XrPairNote => "Mac に表示された 4 桁の PIN を入れます";
+        public override string XrPairing => "ペアリングしています…";
+        public override string XrPairDone => "ペアリングしました";
+        public override string XrPairWrongPin(int remaining) => $"PIN が違います（あと {remaining} 回）";
+        public override string XrPairReissue => "Mac のメニュー「Android とペアリング…」で PIN を出し直してください";
+        public override string XrPairNotFound => "サーバーが見つかりません";
+        public override string XrPairUnreachable => "サーバーに繋がりません";
+        public override string XrPairOldServer => "このサーバーはペアリングに対応していません。更新してください";
+        public override string XrPairBadResponse => "サーバーの応答を読めませんでした";
+        public override string XrBack => "戻る";
+        public override string PairingNeededToast =>
+            "サーバーに繋がりません\nMac の ChatterAgent のメニュー「Android とペアリング…」で PIN を表示し、\n" +
+            "設定パネルの「ペアリング…」で入力してください";
     }
 }

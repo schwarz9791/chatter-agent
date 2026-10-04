@@ -40,6 +40,22 @@ namespace ChatterMascot.Settings
         /// <summary>XR で歩行範囲の円を出し、指した先へ歩かせるか。XR の設定パネルだけに出す</summary>
         public const string Walk = "walk";
 
+        /// <summary>ペアリングのサブページを開く／閉じる。XR の設定パネルだけに出す</summary>
+        public const string PairingOpen = "pairingOpen";
+        public const string PairingBack = "pairingBack";
+
+        /// <summary>PIN の桁の Choice。<c>PairingDigit0</c>〜<c>PairingDigit3</c></summary>
+        public const string PairingDigit0 = "pairingDigit0";
+        public const string PairingDigit1 = "pairingDigit1";
+        public const string PairingDigit2 = "pairingDigit2";
+        public const string PairingDigit3 = "pairingDigit3";
+
+        /// <summary>端末のキーボードで PIN を入れる。入力が済むと、そのままペアリングへ進む</summary>
+        public const string PairingKeyboard = "pairingKeyboard";
+
+        /// <summary>PIN を送って繋ぎ直す。押した瞬間だけ意味を持つ</summary>
+        public const string PairingClaim = "pairingClaim";
+
         public const string ResetPosition = "resetPosition";
         public const string ResetAll = "resetAll";
     }
@@ -64,6 +80,8 @@ namespace ChatterMascot.Settings
         public static IReadOnlyList<SettingSpec> BuildXr(SettingsContext context)
         {
             var c = context ?? new SettingsContext();
+            if (c.PairingOpen) return BuildXrPairing(c);
+
             var settings = c.Settings;
             var text = c.Text;
             var items = new List<SettingSpec>();
@@ -92,6 +110,12 @@ namespace ChatterMascot.Settings
             items.Add(SettingSpec.Bool(SettingKeys.CursorGaze, text.XrCursorGaze, settings.CursorGaze));
             items.Add(SettingSpec.Bool(SettingKeys.Blink, text.Blink, settings.Blink));
 
+            // ── 接続 ─────────────────────────────────────────
+            // ★ 入力の行はここに直に足さない。XrSettingsPanel は高さの上限で全体を縮めるので、
+            //   行が増えると文字が小さくなる——入力はサブページに逃がす
+            items.Add(SettingSpec.Section(text.SectionPairing));
+            items.Add(SettingSpec.Button(SettingKeys.PairingOpen, text.XrPairOpen));
+
             // ── リセット ─────────────────────────────────────
             items.Add(SettingSpec.Section(text.SectionReset));
             items.Add(SettingSpec.Button(SettingKeys.ResetPosition, text.XrResetPosition));
@@ -101,6 +125,83 @@ namespace ChatterMascot.Settings
                 SettingKeys.ResetAll, text.XrResetAll, note: text.XrResetAllNote));
 
             return items;
+        }
+
+        private static readonly SettingChoice[] PinDigits = BuildPinDigits();
+
+        private static SettingChoice[] BuildPinDigits()
+        {
+            var digits = new SettingChoice[10];
+            for (var i = 0; i < digits.Length; i++)
+            {
+                var d = i.ToString();
+                digits[i] = new SettingChoice(d, d);
+            }
+            return digits;
+        }
+
+        private static readonly string[] PairingDigitKeys =
+        {
+            SettingKeys.PairingDigit0, SettingKeys.PairingDigit1, SettingKeys.PairingDigit2, SettingKeys.PairingDigit3,
+        };
+
+        /// <summary>
+        /// <see cref="PairingDigitKeys"/> の桁（0〜3）。桁のキーでなければ -1。
+        /// </summary>
+        public static int PairingDigitIndex(string key)
+        {
+            return Array.IndexOf(PairingDigitKeys, key);
+        }
+
+        /// <summary>
+        /// ペアリングのサブページ。<see cref="SettingsContext.PairingOpen"/> のときの並び。
+        ///
+        /// ★ <b>ボタンの note は常に出す。</b> 有無が変わると <c>XrSettingsPanel.Signature</c> が変わって
+        ///   行を作り直し、押そうとした行がずれる（→ <see cref="BuildXr"/> の同期ボタン）。
+        ///   結果の通知は呼び出し側が note を上書きする。
+        /// </summary>
+        private static IReadOnlyList<SettingSpec> BuildXrPairing(SettingsContext c)
+        {
+            var text = c.Text;
+            var items = new List<SettingSpec>();
+
+            items.Add(SettingSpec.Section(text.SectionPairing));
+            for (var i = 0; i < PairingDigitKeys.Length; i++)
+            {
+                items.Add(SettingSpec.Choice(PairingDigitKeys[i], text.XrPairingDigit(i), PinDigitAt(c.PairingPin, i), PinDigits));
+            }
+            items.Add(SettingSpec.Button(SettingKeys.PairingKeyboard, text.XrPairKeyboard, enabled: !c.PairingRunning));
+            items.Add(SettingSpec.Button(
+                SettingKeys.PairingClaim, text.XrPair,
+                enabled: !c.PairingRunning,
+                note: c.PairingRunning ? text.XrPairing : text.XrPairNote));
+            items.Add(SettingSpec.Button(SettingKeys.PairingBack, text.XrBack));
+            return items;
+        }
+
+        /// <summary>
+        /// キーボードの入力から PIN を取り出す。数字（半角）以外は捨て、ちょうど 4 桁でなければ <c>null</c>。
+        /// </summary>
+        public static string ParseTypedPin(string typed)
+        {
+            if (typed == null) return null;
+            var digits = new System.Text.StringBuilder(4);
+            foreach (var ch in typed)
+            {
+                if (ch >= '0' && ch <= '9') digits.Append(ch);
+            }
+            return digits.Length == 4 ? digits.ToString() : null;
+        }
+
+        /// <summary>
+        /// <paramref name="pin"/> の <paramref name="index"/> 桁目。数字でなければ "0"。
+        /// ★ 選択中の値が選択肢に無い状態を作らないための保険（<c>ChoiceValuesExistInTheirChoices</c>）。
+        /// </summary>
+        public static string PinDigitAt(string pin, int index)
+        {
+            if (pin == null || index >= pin.Length) return "0";
+            var ch = pin[index];
+            return ch >= '0' && ch <= '9' ? ch.ToString() : "0";
         }
 
         /// <summary>

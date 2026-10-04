@@ -20,20 +20,23 @@ namespace ChatterMascot.Tests
         [Test]
         public void KeysAreUnique()
         {
-            var keys = SettingsSchema.BuildXr(XrContext())
-                .Where(s => s.Kind != SettingKind.Section)
-                .Select(s => s.Key)
-                .ToList();
+            foreach (var layout in XrLayouts())
+            {
+                var keys = layout
+                    .Where(s => s.Kind != SettingKind.Section)
+                    .Select(s => s.Key)
+                    .ToList();
 
-            Assert.That(keys, Is.Unique);
-            Assert.That(keys, Is.All.Not.Null.And.All.Not.Empty);
+                Assert.That(keys, Is.Unique);
+                Assert.That(keys, Is.All.Not.Null.And.All.Not.Empty);
+            }
         }
 
         /// <summary>見出し以外はキーを持ち、見出しはキーを持たない</summary>
         [Test]
         public void SectionsHaveNoKeyAndEverythingElseDoes()
         {
-            foreach (var spec in SettingsSchema.BuildXr(XrContext()))
+            foreach (var spec in XrLayouts().SelectMany(l => l))
             {
                 if (spec.Kind == SettingKind.Section) Assert.That(spec.Key, Is.Null, spec.Label);
                 else Assert.That(spec.Key, Is.Not.Null.And.Not.Empty, spec.Label);
@@ -46,7 +49,7 @@ namespace ChatterMascot.Tests
         [Test]
         public void ChoiceValuesExistInTheirChoices()
         {
-            foreach (var spec in SettingsSchema.BuildXr(XrContext()).Where(s => s.Kind == SettingKind.Choice))
+            foreach (var spec in XrLayouts().SelectMany(l => l).Where(s => s.Kind == SettingKind.Choice))
             {
                 if (spec.Choices.Count == 0) continue;
                 Assert.That(spec.Choices.Select(c => c.Value), Contains.Item(spec.Value), spec.Key);
@@ -212,6 +215,97 @@ namespace ChatterMascot.Tests
             };
         }
 
+        /// <summary>本体とペアリングのサブページ（実行中を含む）。不変条件はどちらにも掛ける</summary>
+        private static IEnumerable<IReadOnlyList<SettingSpec>> XrLayouts()
+        {
+            yield return SettingsSchema.BuildXr(XrContext());
+            var pairing = XrContext();
+            pairing.PairingOpen = true;
+            yield return SettingsSchema.BuildXr(pairing);
+            pairing.PairingRunning = true;
+            yield return SettingsSchema.BuildXr(pairing);
+        }
+
+        [Test]
+        public void XrPairingPageOffersFourDigitsClaimAndBackInOrder()
+        {
+            var context = XrContext();
+            context.PairingOpen = true;
+            context.PairingPin = "0427";
+
+            var items = SettingsSchema.BuildXr(context);
+
+            Assert.That(items.Select(s => s.Key), Is.EqualTo(new[]
+            {
+                null,
+                SettingKeys.PairingDigit0, SettingKeys.PairingDigit1, SettingKeys.PairingDigit2, SettingKeys.PairingDigit3,
+                SettingKeys.PairingKeyboard, SettingKeys.PairingClaim, SettingKeys.PairingBack,
+            }));
+            Assert.That(
+                new[] { SettingKeys.PairingDigit0, SettingKeys.PairingDigit1, SettingKeys.PairingDigit2, SettingKeys.PairingDigit3 }
+                    .Select(k => Find(items, k).Value),
+                Is.EqualTo(new[] { "0", "4", "2", "7" }));
+            Assert.That(Find(items, SettingKeys.PairingDigit0).Choices.Select(c => c.Value),
+                Is.EqualTo(new[] { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9" }));
+        }
+
+        [Test]
+        public void XrPairingKeyboardIsDisabledWhileRunning()
+        {
+            var context = XrContext();
+            context.PairingOpen = true;
+
+            Assert.That(Find(SettingsSchema.BuildXr(context), SettingKeys.PairingKeyboard).Enabled, Is.True);
+            context.PairingRunning = true;
+            Assert.That(Find(SettingsSchema.BuildXr(context), SettingKeys.PairingKeyboard).Enabled, Is.False);
+        }
+
+        [TestCase("0427", "0427")]
+        [TestCase(" 0 4 2 7 ", "0427")]
+        [TestCase("042", null)]
+        [TestCase("04271", null)]
+        [TestCase("０４２７", null)]
+        [TestCase(null, null)]
+        public void ParseTypedPinKeepsOnlyExactlyFourAsciiDigits(string typed, string expected)
+        {
+            Assert.That(SettingsSchema.ParseTypedPin(typed), Is.EqualTo(expected));
+        }
+
+        /// <summary>★ note の有無が変わるとパネルが行を作り直して、押そうとした行がずれる</summary>
+        [Test]
+        public void XrPairingClaimIsDisabledWhileRunningAndKeepsItsNote()
+        {
+            var context = XrContext();
+            context.PairingOpen = true;
+
+            var idle = Find(SettingsSchema.BuildXr(context), SettingKeys.PairingClaim);
+            context.PairingRunning = true;
+            var running = Find(SettingsSchema.BuildXr(context), SettingKeys.PairingClaim);
+
+            Assert.That(idle.Enabled, Is.True);
+            Assert.That(idle.Note, Is.Not.Empty);
+            Assert.That(running.Enabled, Is.False);
+            Assert.That(running.Note, Is.Not.Empty);
+        }
+
+        [Test]
+        public void XrMainPageOffersPairingBeforeReset()
+        {
+            var keys = SettingsSchema.BuildXr(XrContext()).Select(s => s.Key).ToList();
+
+            Assert.That(keys.IndexOf(SettingKeys.PairingOpen), Is.LessThan(keys.IndexOf(SettingKeys.ResetPosition)));
+            Assert.That(keys, Has.None.EqualTo(SettingKeys.PairingClaim));
+        }
+
+        [TestCase("0427", 2, "2")]
+        [TestCase("12", 3, "0")]
+        [TestCase("ab12", 0, "0")]
+        [TestCase(null, 1, "0")]
+        public void PinDigitAtFallsBackToZero(string pin, int index, string expected)
+        {
+            Assert.That(SettingsSchema.PinDigitAt(pin, index), Is.EqualTo(expected));
+        }
+
         [Test]
         public void XrOffersOnlyTheListedKeysInOrder()
         {
@@ -223,6 +317,7 @@ namespace ChatterMascot.Tests
                 null, SettingKeys.XrHeight, SettingKeys.AssetSync, SettingKeys.AssetSyncNow,
                 null, SettingKeys.MotionPreview, SettingKeys.MotionPreviewPlay,
                 SettingKeys.Walk, SettingKeys.CursorGaze, SettingKeys.Blink,
+                null, SettingKeys.PairingOpen,
                 null, SettingKeys.ResetPosition, SettingKeys.ResetAll,
             }));
         }

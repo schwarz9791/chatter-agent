@@ -69,5 +69,25 @@ namespace ChatterMascot.Ui
         public abstract string XrResetAllNote { get; }
         public abstract string XrResetAllConfirmNote { get; }
         public abstract string XrClose { get; }
+
+        // ── XR: 接続（ペアリング） ──────────────────────────────────
+        public abstract string SectionPairing { get; }
+        public abstract string XrPairOpen { get; }
+        public abstract string XrPairingDigit(int position);
+        public abstract string XrPairKeyboard { get; }
+        public abstract string XrPairKeyboardUnavailable { get; }
+        public abstract string XrPairKeyboardInvalid { get; }
+        public abstract string XrPair { get; }
+        public abstract string XrPairNote { get; }
+        public abstract string XrPairing { get; }
+        public abstract string XrPairDone { get; }
+        public abstract string XrPairWrongPin(int remaining);
+        public abstract string XrPairReissue { get; }
+        public abstract string XrPairNotFound { get; }
+        public abstract string XrPairUnreachable { get; }
+        public abstract string XrPairOldServer { get; }
+        public abstract string XrPairBadResponse { get; }
+        public abstract string XrBack { get; }
+        public abstract string PairingNeededToast { get; }
     }
 }

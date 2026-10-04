@@ -119,16 +119,18 @@ namespace ChatterMascot.Settings
         /// 接続先（<c>ws://</c> / <c>wss://</c> の絶対 URL）。空なら未指定（→ <c>MascotRunner</c> の既定 /
         /// 起動引数に譲る）。
         ///
-        /// ★★ <b>起動時に1回だけ読まれる</b>（<see cref="MascotRunner.ResolveServerUrl"/>）。
-        ///   ファイルを書き換えても、<b>次回の起動まで反映されない</b> ——
-        ///   接続を1回きり捕まえる設計（→ <c>MascotRunner.ServerUrl</c> の doc）を保つため。
+        /// ★★ <b>起動時に読まれる</b>（<see cref="MascotRunner.ResolveServerUrl"/>）。
+        ///   外から（<c>adb</c> など）ファイルを書き換えても、<b>次回の起動まで反映されない</b>。
+        ///   起動中に繋ぎ直すのは XR のペアリングだけ（→ <c>MascotRunner.Reconnect</c>）。
+        ///   ペアリングは接続先をファイルに書かない——次回の起動も探索で見つける。
         /// </summary>
         public string ServerUrl { get; }
 
         /// <summary>
         /// 非ループバックの接続に要る共有トークン。空なら未指定。
         ///
-        /// ★ <see cref="ServerUrl"/> と同じく<b>起動時に1回だけ</b>読まれる。
+        /// ★ <see cref="ServerUrl"/> と同じく<b>起動時に読まれる</b>。XR のペアリングで受け取った値は
+        ///   ここへ保存され、その場で <c>MascotRunner.Reconnect</c> にも渡される。
         /// </summary>
         public string Token { get; }
 

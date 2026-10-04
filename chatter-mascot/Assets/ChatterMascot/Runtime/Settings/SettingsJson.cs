@@ -459,6 +459,15 @@ namespace ChatterMascot.Settings
         /// </summary>
         private static readonly Regex TokenPattern = new Regex(@"\A[A-Za-z0-9_-]+\z", RegexOptions.None);
 
+        /// <summary>
+        /// ヘッダに載せてよいトークンか。★ ファイルから読んだ値だけでなく、サーバーから受け取った値も
+        /// ヘッダに載せる前にここを通すこと（→ <see cref="TokenPattern"/>）。
+        /// </summary>
+        public static bool IsValidToken(string token)
+        {
+            return token != null && TokenPattern.IsMatch(token);
+        }
+
         private static string ReadToken(JToken value, string key, string fallback, Action<string> warn)
         {
             if (value.Type != JTokenType.String)
@@ -470,7 +479,7 @@ namespace ChatterMascot.Settings
             var text = value.Value<string>().Trim();
             // ★ 空文字は「未指定」（→ MascotSettings.Token の doc）。検査の対象外
             if (text.Length == 0) return "";
-            if (TokenPattern.IsMatch(text)) return text;
+            if (IsValidToken(text)) return text;
 
             // ★ 値そのものは出さない。トークンをログに残さない規律は MascotRunner と揃える
             Warn(warn, $"{key} に使える文字は英数字と _ - だけです。既定を使います");

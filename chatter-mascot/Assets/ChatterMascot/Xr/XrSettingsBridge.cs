@@ -1,4 +1,7 @@
+using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
+using ChatterMascot.Net;
 using ChatterMascot.Settings;
 using ChatterMascot.Ui;
 using ChatterMascot.Vrm;
@@ -100,6 +103,7 @@ namespace ChatterMascot.Xr
 
         private void OnDestroy()
         {
+            CloseKeyboard();
             var host = MascotSettingsHost.Instance;
             if (host != null) host.ChangedExternally -= OnSettingsChangedExternally;
         }
@@ -112,6 +116,52 @@ namespace ChatterMascot.Xr
             WatchResetAllConfirmExpiry(now);
             WatchMotionClips();
             WatchAssetSync();
+            WatchKeyboard();
+        }
+
+        private TouchScreenKeyboard _keyboard;
+
+        private void OpenKeyboard()
+        {
+            if (_keyboard != null) return;
+            if (!TouchScreenKeyboard.isSupported)
+            {
+                Notice(SettingKeys.PairingClaim, _context.Text.XrPairKeyboardUnavailable);
+                Refresh();
+                return;
+            }
+            Notice(SettingKeys.PairingClaim, null);
+            _keyboard = TouchScreenKeyboard.Open("", TouchScreenKeyboardType.NumberPad, false, false, false, false, "PIN", 4);
+        }
+
+        private void CloseKeyboard()
+        {
+            if (_keyboard == null) return;
+            _keyboard.active = false;
+            _keyboard = null;
+        }
+
+        /// <summary>確定（Done）のときだけ PIN として使う。取り消しやフォーカス喪失は捨てる。</summary>
+        private void WatchKeyboard()
+        {
+            if (_keyboard == null) return;
+            var status = _keyboard.status;
+            if (status == TouchScreenKeyboard.Status.Visible) return;
+
+            var typed = status == TouchScreenKeyboard.Status.Done ? _keyboard.text : null;
+            _keyboard = null;
+            if (status != TouchScreenKeyboard.Status.Done) return;
+
+            var pin = SettingsSchema.ParseTypedPin(typed);
+            if (pin == null)
+            {
+                Notice(SettingKeys.PairingClaim, _context.Text.XrPairKeyboardInvalid);
+                Refresh();
+                return;
+            }
+            _context.PairingPin = pin;
+            Refresh();
+            _ = PairAsync();
         }
 
         /// <summary>
@@ -252,6 +302,8 @@ namespace ChatterMascot.Xr
 
         private void OnPanelClosed()
         {
+            CloseKeyboard();
+            _context.PairingOpen = false;
             _notices.Clear();
             _resetAllArmedUntil = double.NegativeInfinity;
         }
@@ -345,8 +397,33 @@ namespace ChatterMascot.Xr
             var host = MascotSettingsHost.Instance;
             if (host == null) return;
 
+            var digit = SettingsSchema.PairingDigitIndex(key);
+            if (digit >= 0)
+            {
+                var pin = _context.PairingPin.ToCharArray();
+                var chosen = SettingsSchema.PinDigitAt(value, 0)[0];
+                pin[digit] = chosen;
+                _context.PairingPin = new string(pin);
+                Refresh();
+                return;
+            }
+
             switch (key)
             {
+                case SettingKeys.PairingOpen:
+                case SettingKeys.PairingBack:
+                    _context.PairingOpen = key == SettingKeys.PairingOpen;
+                    Refresh();
+                    return;
+
+                case SettingKeys.PairingKeyboard:
+                    OpenKeyboard();
+                    return;
+
+                case SettingKeys.PairingClaim:
+                    _ = PairAsync();
+                    return;
+
                 case SettingKeys.Mute:
                     host.Apply(host.Current.WithMuted(SettingsPanelJson.ParseBool(value, host.Current.Muted)));
                     Refresh();
@@ -420,6 +497,89 @@ namespace ChatterMascot.Xr
                     Debug.LogWarning($"[Mascot] XR settings: 知らない設定のキーです: \"{key}\"");
                     return;
             }
+        }
+
+        /// <summary>サーバーを LAN から探す待ち時間（秒）。</summary>
+        private const float PairingDiscoverySeconds = 10f;
+
+        /// <summary>ペアリングの要求 1 回の上限（ミリ秒）。</summary>
+        private const int PairingTimeoutMs = 10000;
+
+        /// <summary>
+        /// 「ペアリング」。PIN をサーバーへ送り、受け取ったトークンを保存してその場で繋ぎ直す。
+        ///
+        /// ★ <b>接続先（<c>serverUrl</c>）は保存しない。</b> 設定に無ければ次回の起動も探索で見つける。
+        /// ★ await のたびに <c>this == null</c> を見る。パネルごと破棄された後に進めない。
+        /// </summary>
+        private async Task PairAsync()
+        {
+            if (_context.PairingRunning) return;
+
+            try
+            {
+                await PairCoreAsync();
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[Mascot] XR settings: ペアリングで例外が出ました: " + e);
+                if (this == null) return;
+                Notice(SettingKeys.PairingClaim, _context.Text.XrPairUnreachable);
+            }
+            finally
+            {
+                if (this != null)
+                {
+                    _context.PairingRunning = false;
+                    Refresh();
+                }
+            }
+        }
+
+        private async Task PairCoreAsync()
+        {
+            var host = MascotSettingsHost.Instance;
+            var runner = ResolveRunner();
+            if (host == null || runner == null) return;
+
+            var text = _context.Text;
+            Notice(SettingKeys.PairingClaim, null);
+            _context.PairingRunning = true;
+            Refresh();
+
+            var url = host.Current.ServerUrl;
+            if (string.IsNullOrEmpty(url))
+            {
+                url = await runner.FindServerForPairingAsync(PairingDiscoverySeconds);
+                if (this == null) return;
+            }
+            if (string.IsNullOrEmpty(url))
+            {
+                Notice(SettingKeys.PairingClaim, text.XrPairNotFound);
+                return;
+            }
+
+            var result = await PairingClient.ClaimAsync(ServerUrl.ToHttpBase(url), _context.PairingPin, PairingTimeoutMs);
+            if (this == null) return;
+
+            if (result.Kind != PairingKind.Paired)
+            {
+                Notice(SettingKeys.PairingClaim, PairingClient.Describe(result, text));
+                return;
+            }
+
+            // ★ トークンだけ保存する。値そのものはログに出さない
+            host.Apply(host.Current.WithToken(result.Token));
+            if (!runner.Reconnect(url, result.Token))
+            {
+                Notice(SettingKeys.PairingClaim, text.XrPairBadResponse);
+                return;
+            }
+            if (host.Current.AssetSync != SettingsMapping.AssetSyncOff) runner.TryStartAssetSync(requested: false);
+
+            var done = PairingClient.Describe(result, text);
+            Debug.Log("[Mascot] XR settings: ペアリングして繋ぎ直しました");
+            DeviceToast.Show(done);
+            Notice(SettingKeys.PairingClaim, done);
         }
 
         /// <summary>

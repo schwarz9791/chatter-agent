@@ -50,5 +50,17 @@ namespace ChatterMascot.Settings
         ///   パネルを閉じたら忘れてよい。
         /// </summary>
         public string MotionPreview { get; set; } = "";
+
+        /// <summary>
+        /// ペアリングのサブページを開いているか（→ <see cref="SettingsSchema.BuildXr"/>）。
+        /// ★ <b>保存しない</b>（<see cref="MotionPreview"/> と同じ）。
+        /// </summary>
+        public bool PairingOpen { get; set; }
+
+        /// <summary>入力中の PIN（4桁）。★ <b>保存しない</b>。パネルを閉じても残してよいが、設定には書かない</summary>
+        public string PairingPin { get; set; } = "0000";
+
+        /// <summary>ペアリングの要求が走っているか</summary>
+        public bool PairingRunning { get; set; }
     }
 }

@@ -227,7 +227,7 @@ namespace ChatterMascot.Tests
         }
 
         [Test]
-        public void XrPairingPageOffersFourDigitsClaimAndBackInOrder()
+        public void XrPairingPageOffersPinKeyboardClaimAndBackInOrder()
         {
             var context = XrContext();
             context.PairingOpen = true;
@@ -238,15 +238,38 @@ namespace ChatterMascot.Tests
             Assert.That(items.Select(s => s.Key), Is.EqualTo(new[]
             {
                 null,
-                SettingKeys.PairingDigit0, SettingKeys.PairingDigit1, SettingKeys.PairingDigit2, SettingKeys.PairingDigit3,
+                SettingKeys.PairingPin,
                 SettingKeys.PairingKeyboard, SettingKeys.PairingClaim, SettingKeys.PairingBack,
             }));
-            Assert.That(
-                new[] { SettingKeys.PairingDigit0, SettingKeys.PairingDigit1, SettingKeys.PairingDigit2, SettingKeys.PairingDigit3 }
-                    .Select(k => Find(items, k).Value),
-                Is.EqualTo(new[] { "0", "4", "2", "7" }));
-            Assert.That(Find(items, SettingKeys.PairingDigit0).Choices.Select(c => c.Value),
-                Is.EqualTo(new[] { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9" }));
+            var pin = Find(items, SettingKeys.PairingPin);
+            Assert.That(pin.Kind, Is.EqualTo(SettingKind.Pin));
+            Assert.That(pin.Value, Is.EqualTo("0427"));
+        }
+
+        [Test]
+        public void XrPairingPinIsDisabledWhileRunning()
+        {
+            var context = XrContext();
+            context.PairingOpen = true;
+
+            Assert.That(Find(SettingsSchema.BuildXr(context), SettingKeys.PairingPin).Enabled, Is.True);
+            context.PairingRunning = true;
+            Assert.That(Find(SettingsSchema.BuildXr(context), SettingKeys.PairingPin).Enabled, Is.False);
+        }
+
+        [TestCase("0427", 0, true, "1427")]
+        [TestCase("9999", 2, true, "9909")]
+        [TestCase("0000", 3, false, "0009")]
+        [TestCase("0427", 1, false, "0327")]
+        [TestCase(null, 1, true, "0100")]
+        [TestCase("12", 3, true, "1201")]
+        [TestCase("a1b2", 0, true, "1102")]
+        [TestCase("0427", 4, true, "0427")]
+        [TestCase("0427", -1, false, "0427")]
+        [TestCase("ab", 9, true, "0000")]
+        public void StepPinDigitWrapsAndNormalizes(string pin, int index, bool up, string expected)
+        {
+            Assert.That(SettingsSchema.StepPinDigit(pin, index, up), Is.EqualTo(expected));
         }
 
         [Test]

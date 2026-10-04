@@ -44,11 +44,8 @@ namespace ChatterMascot.Settings
         public const string PairingOpen = "pairingOpen";
         public const string PairingBack = "pairingBack";
 
-        /// <summary>PIN の桁の Choice。<c>PairingDigit0</c>〜<c>PairingDigit3</c></summary>
-        public const string PairingDigit0 = "pairingDigit0";
-        public const string PairingDigit1 = "pairingDigit1";
-        public const string PairingDigit2 = "pairingDigit2";
-        public const string PairingDigit3 = "pairingDigit3";
+        /// <summary>4 桁のダイヤル。値は 4 桁の数字の文字列</summary>
+        public const string PairingPin = "pairingPin";
 
         /// <summary>端末のキーボードで PIN を入れる。入力が済むと、そのままペアリングへ進む</summary>
         public const string PairingKeyboard = "pairingKeyboard";
@@ -127,32 +124,6 @@ namespace ChatterMascot.Settings
             return items;
         }
 
-        private static readonly SettingChoice[] PinDigits = BuildPinDigits();
-
-        private static SettingChoice[] BuildPinDigits()
-        {
-            var digits = new SettingChoice[10];
-            for (var i = 0; i < digits.Length; i++)
-            {
-                var d = i.ToString();
-                digits[i] = new SettingChoice(d, d);
-            }
-            return digits;
-        }
-
-        private static readonly string[] PairingDigitKeys =
-        {
-            SettingKeys.PairingDigit0, SettingKeys.PairingDigit1, SettingKeys.PairingDigit2, SettingKeys.PairingDigit3,
-        };
-
-        /// <summary>
-        /// <see cref="PairingDigitKeys"/> の桁（0〜3）。桁のキーでなければ -1。
-        /// </summary>
-        public static int PairingDigitIndex(string key)
-        {
-            return Array.IndexOf(PairingDigitKeys, key);
-        }
-
         /// <summary>
         /// ペアリングのサブページ。<see cref="SettingsContext.PairingOpen"/> のときの並び。
         ///
@@ -166,10 +137,7 @@ namespace ChatterMascot.Settings
             var items = new List<SettingSpec>();
 
             items.Add(SettingSpec.Section(text.SectionPairing));
-            for (var i = 0; i < PairingDigitKeys.Length; i++)
-            {
-                items.Add(SettingSpec.Choice(PairingDigitKeys[i], text.XrPairingDigit(i), PinDigitAt(c.PairingPin, i), PinDigits));
-            }
+            items.Add(SettingSpec.Pin(SettingKeys.PairingPin, text.XrPairingPin, NormalizePin(c.PairingPin), enabled: !c.PairingRunning));
             items.Add(SettingSpec.Button(SettingKeys.PairingKeyboard, text.XrPairKeyboard, enabled: !c.PairingRunning));
             items.Add(SettingSpec.Button(
                 SettingKeys.PairingClaim, text.XrPair,
@@ -195,13 +163,36 @@ namespace ChatterMascot.Settings
 
         /// <summary>
         /// <paramref name="pin"/> の <paramref name="index"/> 桁目。数字でなければ "0"。
-        /// ★ 選択中の値が選択肢に無い状態を作らないための保険（<c>ChoiceValuesExistInTheirChoices</c>）。
+        /// ★ 壊れた値を 4 桁の数字へ整える土台（→ <see cref="NormalizePin"/>）。
         /// </summary>
         public static string PinDigitAt(string pin, int index)
         {
             if (pin == null || index >= pin.Length) return "0";
             var ch = pin[index];
             return ch >= '0' && ch <= '9' ? ch.ToString() : "0";
+        }
+
+        public const int PinLength = 4;
+
+        /// <summary><see cref="PinDigitAt"/> と同じ規則で、ちょうど 4 桁の数字に整える。</summary>
+        public static string NormalizePin(string pin)
+        {
+            var digits = new char[PinLength];
+            for (var i = 0; i < PinLength; i++) digits[i] = PinDigitAt(pin, i)[0];
+            return new string(digits);
+        }
+
+        /// <summary>
+        /// <paramref name="index"/> 桁目を ±1（0〜9 を巡回）した 4 桁の PIN。範囲外の桁は整えただけで返す。
+        /// </summary>
+        public static string StepPinDigit(string pin, int index, bool up)
+        {
+            var digits = NormalizePin(pin).ToCharArray();
+            if (index < 0 || index >= PinLength) return new string(digits);
+
+            var next = (digits[index] - '0' + (up ? 1 : 9)) % 10;
+            digits[index] = (char)('0' + next);
+            return new string(digits);
         }
 
         /// <summary>

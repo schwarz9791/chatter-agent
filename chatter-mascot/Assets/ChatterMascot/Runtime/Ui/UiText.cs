@@ -73,7 +73,7 @@ namespace ChatterMascot.Ui
         // ── XR: 接続（ペアリング） ──────────────────────────────────
         public abstract string SectionPairing { get; }
         public abstract string XrPairOpen { get; }
-        public abstract string XrPairingDigit(int position);
+        public abstract string XrPairingPin { get; }
         public abstract string XrPairKeyboard { get; }
         public abstract string XrPairKeyboardUnavailable { get; }
         public abstract string XrPairKeyboardInvalid { get; }

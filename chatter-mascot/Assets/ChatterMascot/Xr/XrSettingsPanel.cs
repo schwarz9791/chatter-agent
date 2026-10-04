@@ -62,6 +62,20 @@ namespace ChatterMascot.Xr
         /// <summary>値欄の中で ‹ › が占める割合（行の幅に対して）。</summary>
         private const float ChoiceArrowFraction = ChoiceArrowWidthPixels / RowContentWidthPixels;
 
+        // ── PIN のダイヤル（4 列の箱。各列は上から ▲ ・数字・▼） ──────────────
+        // ★ 箱の幅は行の内寸から決める（左右の余白と列の間を引いて 4 等分）。当たり判定も同じ式を使う。
+        private const int PinColumns = SettingsSchema.PinLength;
+        private const float PinLabelHeightPixels = 32f;
+        private const float PinArrowHeightPixels = 36f;
+        private const float PinDigitHeightPixels = 60f;
+        private const float PinBoxHeightPixels = PinArrowHeightPixels * 2f + PinDigitHeightPixels;
+        private const float PinBoxGapPixels = 12f;
+        private const float PinRowBottomPixels = 8f;
+        private const float PinRowHeightPixels = PinLabelHeightPixels + PinBoxHeightPixels + PinRowBottomPixels;
+        private const float PinBoxWidthPixels =
+            (RowContentWidthPixels - SidePaddingPixels * 2f - PinBoxGapPixels * (PinColumns - 1)) / PinColumns;
+        private const float PinDigitFontSize = 44f;
+
         private const float LabelFontSize = 22f;
         private const float ValueFontSize = 22f;
         private const float NoteFontSize = 15f;
@@ -78,6 +92,7 @@ namespace ChatterMascot.Xr
         private static readonly Color DisabledLabelColor = new Color(1f, 1f, 1f, 0.4f);
         private static readonly Color DisabledNoteColor = new Color(0.85f, 0.85f, 0.9f, 0.35f);
         private static readonly Color SectionColor = new Color(0.75f, 0.82f, 1f, 1f);
+        private static readonly Color PinBoxColor = new Color(1f, 1f, 1f, 0.12f);
         private static readonly Color CloseRowColor = new Color(1f, 1f, 1f, 0.1f);
 
         /// <summary>Choice で、ホバーしている側の ‹ / › を目立たせる色。</summary>
@@ -98,6 +113,11 @@ namespace ChatterMascot.Xr
             public Text ChoicePrev;
             public Text ChoiceNext;
 
+            /// <summary>Pin だけが持つ列ごとの表示。それ以外では null。</summary>
+            public Text[] PinUp;
+            public Text[] PinDigit;
+            public Text[] PinDown;
+
             /// <summary>この行が操作を受け付けるか（<c>Section</c> や <c>Enabled=false</c> は不可）。</summary>
             public bool Interactive;
         }
@@ -109,6 +129,7 @@ namespace ChatterMascot.Xr
             ToggleBool,
             Choice,
             Press,
+            Pin,
         }
 
         public event Action<string, string> SettingChanged;
@@ -137,6 +158,13 @@ namespace ChatterMascot.Xr
         private string _layoutSignature = "";
 
         private Row _hoveredRow;
+
+        /// <summary>
+        /// Pin の行だけで意味を持つ、ホバー中の列（箱の外なら -1）。
+        /// このとき <see cref="_hoveredIsNext"/> は「上半分（▲）か」を表す。
+        /// </summary>
+        private int _hoveredColumn = -1;
+
         private bool _hoveredIsNext;
         private bool _hoveringClose;
 
@@ -217,7 +245,7 @@ namespace ChatterMascot.Xr
 
             if (_hoveredRow != null && _hoveredRow.Interactive)
             {
-                Invoke(_hoveredRow, _hoveredIsNext);
+                Invoke(_hoveredRow, _hoveredIsNext, _hoveredColumn);
             }
             return true;
         }
@@ -310,6 +338,7 @@ namespace ChatterMascot.Xr
 
             Row hit = null;
             var isNext = false;
+            var column = -1;
             if (!hoveringClose)
             {
                 foreach (var row in _rows)
@@ -318,22 +347,25 @@ namespace ChatterMascot.Xr
                     if (!TryRowLocalPoint(row.Rect, local, out var rowLocal)) continue;
 
                     hit = row;
-                    isNext = HoverIsNext(row, rowLocal.x);
+                    if (row.Spec.Kind == SettingKind.Pin) isNext = PinHit(rowLocal, out column);
+                    else isNext = HoverIsNext(row, rowLocal.x);
                     break;
                 }
             }
 
-            if (hit == _hoveredRow && hoveringClose == _hoveringClose && isNext == _hoveredIsNext) return;
+            if (hit == _hoveredRow && hoveringClose == _hoveringClose && isNext == _hoveredIsNext && column == _hoveredColumn) return;
 
             ClearHover();
             _hoveredRow = hit;
             _hoveredIsNext = isNext;
+            _hoveredColumn = column;
             _hoveringClose = hoveringClose;
 
             if (_hoveredRow != null)
             {
                 _hoveredRow.Background.color = RowHoverColor;
                 SetChoiceArrowColors(_hoveredRow, _hoveredIsNext);
+                SetPinArrowColors(_hoveredRow, _hoveredColumn, _hoveredIsNext);
             }
             if (_hoveringClose && _closeBackground != null) _closeBackground.color = RowHoverColor;
         }
@@ -355,15 +387,42 @@ namespace ChatterMascot.Xr
             return localX >= valueAreaMidX;
         }
 
+        /// <summary>
+        /// Pin の押す判定: 箱の列と、箱の上半分（▲ = 上げる）か下半分（▼ = 下げる）か。
+        /// 箱の外（列の間・ラベルの段・下の余白）は <paramref name="column"/> が -1 で、押しても何も起きない。
+        /// </summary>
+        private static bool PinHit(Vector2 rowLocal, out int column)
+        {
+            column = -1;
+            var fromBoxTop = -rowLocal.y - PinLabelHeightPixels;
+            var up = fromBoxTop < PinBoxHeightPixels / 2f;
+            if (fromBoxTop < 0f || fromBoxTop >= PinBoxHeightPixels) return up;
+
+            for (var i = 0; i < PinColumns; i++)
+            {
+                var left = PinBoxLeft(i);
+                if (rowLocal.x >= left && rowLocal.x < left + PinBoxWidthPixels)
+                {
+                    column = i;
+                    break;
+                }
+            }
+            return up;
+        }
+
+        private static float PinBoxLeft(int column) => SidePaddingPixels + column * (PinBoxWidthPixels + PinBoxGapPixels);
+
         private void ClearHover()
         {
             if (_hoveredRow != null)
             {
                 _hoveredRow.Background.color = RowColor;
                 ResetChoiceArrowColors(_hoveredRow);
+                SetPinArrowColors(_hoveredRow, -1, false);
             }
             if (_hoveringClose && _closeBackground != null) _closeBackground.color = CloseRowColor;
             _hoveredRow = null;
+            _hoveredColumn = -1;
             _hoveringClose = false;
         }
 
@@ -382,7 +441,19 @@ namespace ChatterMascot.Xr
             row.ChoiceNext.color = color;
         }
 
-        private void Invoke(Row row, bool isNext)
+        /// <summary>Pin の ▲ / ▼ の色。ホバー中の列の、指している側だけ目立たせる（無ければ全部ふつう）。</summary>
+        private static void SetPinArrowColors(Row row, int column, bool up)
+        {
+            if (row.PinUp == null) return;
+            var color = row.Spec.Enabled ? LabelColor : DisabledLabelColor;
+            for (var i = 0; i < PinColumns; i++)
+            {
+                row.PinUp[i].color = i == column && up ? ChoiceActiveArrowColor : color;
+                row.PinDown[i].color = i == column && !up ? ChoiceActiveArrowColor : color;
+            }
+        }
+
+        private void Invoke(Row row, bool isNext, int column)
         {
             var spec = row.Spec;
             switch (RowActionFor(spec))
@@ -401,6 +472,10 @@ namespace ChatterMascot.Xr
                 case RowAction.Press:
                     Raise(spec.Key, "");
                     return;
+
+                case RowAction.Pin:
+                    if (column >= 0) Raise(spec.Key, SettingsSchema.StepPinDigit(spec.Value, column, isNext));
+                    return;
             }
         }
 
@@ -416,6 +491,7 @@ namespace ChatterMascot.Xr
                 case SettingKind.Bool: return RowAction.ToggleBool;
                 case SettingKind.Choice: return spec.Choices.Count > 1 ? RowAction.Choice : RowAction.None;
                 case SettingKind.Button: return RowAction.Press;
+                case SettingKind.Pin: return RowAction.Pin;
                 default: return RowAction.None;
             }
         }
@@ -540,13 +616,14 @@ namespace ChatterMascot.Xr
                 return y - RowSpacingPixels;
             }
 
-            if (spec.Kind != SettingKind.Bool && spec.Kind != SettingKind.Choice && spec.Kind != SettingKind.Button)
+            if (!IsRowKind(spec))
             {
                 // ★★ 知らない Kind は描かない
                 return y;
             }
 
-            var rowRect = NewChild(y, RowHeightPixels);
+            var rowHeight = spec.Kind == SettingKind.Pin ? PinRowHeightPixels : RowHeightPixels;
+            var rowRect = NewChild(y, rowHeight);
             _builtRects.Add(rowRect);
             var background = rowRect.gameObject.AddComponent<Image>();
             background.color = RowColor;
@@ -555,8 +632,23 @@ namespace ChatterMascot.Xr
             Text value = null;
             Text choicePrev = null;
             Text choiceNext = null;
+            Text[] pinUp = null;
+            Text[] pinDigit = null;
+            Text[] pinDown = null;
 
-            if (spec.Kind == SettingKind.Button)
+            if (spec.Kind == SettingKind.Pin)
+            {
+                label = BuildText(rowRect, new Vector2(0f, 1f - PinLabelHeightPixels / rowHeight), Vector2.one,
+                    TextAnchor.MiddleLeft, LabelFontSize, LabelColor);
+                label.text = spec.Label;
+                label.rectTransform.offsetMin = new Vector2(SidePaddingPixels, label.rectTransform.offsetMin.y);
+
+                pinUp = new Text[PinColumns];
+                pinDigit = new Text[PinColumns];
+                pinDown = new Text[PinColumns];
+                for (var i = 0; i < PinColumns; i++) BuildPinBox(rowRect, i, pinUp, pinDigit, pinDown);
+            }
+            else if (spec.Kind == SettingKind.Button)
             {
                 label = BuildText(rowRect, Vector2.zero, Vector2.one, TextAnchor.MiddleCenter, LabelFontSize, LabelColor);
                 label.text = spec.Label;
@@ -603,7 +695,7 @@ namespace ChatterMascot.Xr
                 value.rectTransform.offsetMax = new Vector2(-SidePaddingPixels, 0f);
             }
 
-            y -= RowHeightPixels;
+            y -= rowHeight;
 
             Text note = null;
             RectTransform noteRect = null;
@@ -626,6 +718,9 @@ namespace ChatterMascot.Xr
                 Value = value,
                 ChoicePrev = choicePrev,
                 ChoiceNext = choiceNext,
+                PinUp = pinUp,
+                PinDigit = pinDigit,
+                PinDown = pinDown,
                 Note = note,
                 NoteRect = noteRect,
                 Interactive = spec.Enabled && RowActionFor(spec) != RowAction.None,
@@ -635,16 +730,40 @@ namespace ChatterMascot.Xr
             return y;
         }
 
+        /// <summary>行の矩形の中に、列 <paramref name="column"/> の箱（▲・数字・▼）を作る。</summary>
+        private static void BuildPinBox(RectTransform rowRect, int column, Text[] up, Text[] digit, Text[] down)
+        {
+            var go = new GameObject("PinBox", typeof(RectTransform));
+            var rect = (RectTransform)go.transform;
+            rect.SetParent(rowRect, false);
+            rect.anchorMin = new Vector2(0f, 1f);
+            rect.anchorMax = new Vector2(0f, 1f);
+            rect.pivot = new Vector2(0f, 1f);
+            rect.sizeDelta = new Vector2(PinBoxWidthPixels, PinBoxHeightPixels);
+            rect.anchoredPosition = new Vector2(PinBoxLeft(column), -PinLabelHeightPixels);
+            go.AddComponent<Image>().color = PinBoxColor;
+
+            var arrow = PinArrowHeightPixels / PinBoxHeightPixels;
+            up[column] = BuildText(rect, new Vector2(0f, 1f - arrow), Vector2.one, TextAnchor.MiddleCenter, ValueFontSize, LabelColor);
+            up[column].text = "▲";
+            digit[column] = BuildText(rect, new Vector2(0f, arrow), new Vector2(1f, 1f - arrow), TextAnchor.MiddleCenter, PinDigitFontSize, LabelColor);
+            down[column] = BuildText(rect, Vector2.zero, new Vector2(1f, arrow), TextAnchor.MiddleCenter, ValueFontSize, LabelColor);
+            down[column].text = "▼";
+        }
+
+        private static bool IsRowKind(SettingSpec spec)
+        {
+            return spec.Kind == SettingKind.Bool || spec.Kind == SettingKind.Choice
+                || spec.Kind == SettingKind.Button || spec.Kind == SettingKind.Pin;
+        }
+
         /// <summary>行を作り直さずに、値・有効/無効・note を反映する。</summary>
         private void UpdateRows(IReadOnlyList<SettingSpec> items)
         {
             var index = 0;
             foreach (var spec in items)
             {
-                if (spec.Kind != SettingKind.Bool && spec.Kind != SettingKind.Choice && spec.Kind != SettingKind.Button)
-                {
-                    continue;
-                }
+                if (!IsRowKind(spec)) continue;
                 if (index >= _rows.Count) break;
 
                 var row = _rows[index];
@@ -683,6 +802,15 @@ namespace ChatterMascot.Xr
                     row.ChoicePrev.color = labelColor;
                     row.ChoiceNext.color = labelColor;
                 }
+            }
+
+            if (row.PinDigit != null)
+            {
+                for (var i = 0; i < PinColumns; i++) row.PinDigit[i].text = SettingsSchema.PinDigitAt(spec.Value, i);
+                foreach (var digit in row.PinDigit) digit.color = labelColor;
+                // ★ ホバー中の列の表示を作り直しで崩さない（Choice の ‹ › と同じ）
+                if (row == _hoveredRow) SetPinArrowColors(row, _hoveredColumn, _hoveredIsNext);
+                else SetPinArrowColors(row, -1, false);
             }
 
             if (row.Note != null) row.Note.text = spec.Note;

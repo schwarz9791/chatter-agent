@@ -18,6 +18,9 @@ namespace ChatterMascot.Settings
         Slider,
         Choice,
         Button,
+
+        /// <summary>4 桁の PIN。<see cref="SettingSpec.Value"/> は 4 桁の数字の文字列</summary>
+        Pin,
     }
 
     /// <summary>
@@ -191,6 +194,14 @@ namespace ChatterMascot.Settings
             spec.Choices = choices ?? NoChoices;
             spec.Enabled = enabled;
             spec.Note = note ?? "";
+            return spec;
+        }
+
+        public static SettingSpec Pin(string key, string label, string value, bool enabled = true)
+        {
+            var spec = new SettingSpec(SettingKind.Pin, key, label);
+            spec.Value = value ?? "";
+            spec.Enabled = enabled;
             return spec;
         }
 

@@ -397,19 +397,13 @@ namespace ChatterMascot.Xr
             var host = MascotSettingsHost.Instance;
             if (host == null) return;
 
-            var digit = SettingsSchema.PairingDigitIndex(key);
-            if (digit >= 0)
-            {
-                var pin = _context.PairingPin.ToCharArray();
-                var chosen = SettingsSchema.PinDigitAt(value, 0)[0];
-                pin[digit] = chosen;
-                _context.PairingPin = new string(pin);
-                Refresh();
-                return;
-            }
-
             switch (key)
             {
+                case SettingKeys.PairingPin:
+                    _context.PairingPin = SettingsSchema.NormalizePin(value);
+                    Refresh();
+                    return;
+
                 case SettingKeys.PairingOpen:
                 case SettingKeys.PairingBack:
                     _context.PairingOpen = key == SettingKeys.PairingOpen;

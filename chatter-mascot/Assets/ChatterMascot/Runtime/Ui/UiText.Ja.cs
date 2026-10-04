@@ -53,7 +53,7 @@ namespace ChatterMascot.Ui
 
         public override string SectionPairing => "接続";
         public override string XrPairOpen => "ペアリング…";
-        public override string XrPairingDigit(int position) => $"{position + 1} 桁目";
+        public override string XrPairingPin => "PIN";
         public override string XrPairKeyboard => "キーボードで入力";
         public override string XrPairKeyboardUnavailable => "キーボードを開けません";
         public override string XrPairKeyboardInvalid => "4 桁の数字を入れてください";

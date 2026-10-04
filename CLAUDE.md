@@ -47,6 +47,7 @@ chatter-agent-server         キューを読んで WebSocket 配信（テキス�
   │  │                       （エンジンが居なければ起動時に起こす。待たない）
   │  └──▶ /v1/*              設定パネルの制御 API。**書き込み口はループバック限定**
   │                          既定 bind は 127.0.0.1。LAN から繋ぐなら Bearer トークン必須
+  │                          例外は POST /v1/pairing/claim だけ（4桁 PIN でトークンを渡す）
   │ ack
   ├──▶ chatter-agent-player  発話 CLI
   ▼

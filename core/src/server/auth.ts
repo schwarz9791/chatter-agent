@@ -21,7 +21,7 @@ function extractBearerToken(header: string | undefined | null): string | null {
  * ★ `crypto.timingSafeEqual` は長さが違うバッファを渡すと例外を投げる。
  *   長さの比較は**内容の比較より前に**行い、違えば即 false にする。
  */
-function timingSafeEqualString(a: string, b: string): boolean {
+export function timingSafeEqualString(a: string, b: string): boolean {
   const bufA = Buffer.from(a, "utf-8");
   const bufB = Buffer.from(b, "utf-8");
   if (bufA.length !== bufB.length) return false;

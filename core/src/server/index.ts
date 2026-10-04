@@ -38,6 +38,7 @@ import { TtsHttpError, type TtsEngine } from "../tts/ttsEngine";
 import { createAssetCatalog } from "./assetCatalog";
 import { createAudioStore, type Voice } from "./audioStore";
 import { createControlApi } from "./controlApi";
+import { createPairing } from "./pairing";
 import {
   describeEngineSkip,
   resolveEngineSpawn,
@@ -190,7 +191,9 @@ function logLanReachability(host: string, port: number, tokenPath: string): void
     console.log("[Server] LAN からの接続先候補:");
     for (const ip of candidates) console.log(`[Server]   ws://${ip}:${port}`);
   }
-  console.log(`[Server] LAN からの接続にはトークンが要ります: ${tokenPath}`);
+  console.log(
+    `[Server] LAN からの接続にはトークンが要ります: ${tokenPath}（ChatterAgent のメニュー「Android とペアリング…」か configure-android.sh で端末へ渡せます）`,
+  );
 }
 
 /** 非 internal な IPv4 アドレスの一覧（`os.networkInterfaces()` から） */
@@ -231,11 +234,11 @@ async function main(): Promise<void> {
   const { token, created } = ensureServerToken(tokenPath);
   if (created === "new") {
     console.log(
-      `[Server] トークンを新しく作りました: ${tokenPath}（LAN から繋ぐ端末を設定済みなら、configure-android.sh で書き込み直してください）`,
+      `[Server] トークンを新しく作りました: ${tokenPath}（LAN から繋ぐ端末を設定済みなら、ChatterAgent のメニュー「Android とペアリング…」か configure-android.sh で設定し直してください）`,
     );
   } else if (created === "replaced") {
     console.warn(
-      `[Server] ${tokenPath} の内容が壊れていたので作り直しました。設定済みの端末は configure-android.sh で書き込み直してください`,
+      `[Server] ${tokenPath} の内容が壊れていたので作り直しました。設定済みの端末は ChatterAgent のメニュー「Android とペアリング…」か configure-android.sh で設定し直してください`,
     );
   }
 
@@ -478,8 +481,12 @@ async function main(): Promise<void> {
    *   （`ttsFor(currentVoice())`）。別々に組むと、テストボタンだけ通って本番が鳴らない
    *   （またはその逆）という切り分けにくいズレになる。
    */
+  // ★ bind より前に作るので、LAN に出ているかは bind 後に決まる
+  let lan = false;
   const control = createControlApi({
     config,
+    pairing: createPairing({ token }),
+    lan: () => lan,
     listSpeakers: () => ttsFor(currentVoice()).listVoices(),
     // ★ `audioStore` を通さない。キューに無い文なので `lookup` が引けない
     synthesizePreview: (text) => ttsFor(currentVoice()).synthesize(text),
@@ -552,11 +559,10 @@ async function main(): Promise<void> {
   } else {
     console.log("[Server] ttsEnabled=false: 音声は配りません（クライアントは無音で ack します）");
   }
+  lan = !isLoopbackBind(bound.host);
   logLanReachability(bound.host, bound.port, tokenPath);
   // ★ LAN に出るときだけ広告する。待たない（結果はログに出る）
-  const advertiser = isLoopbackBind(bound.host)
-    ? undefined
-    : startMdnsAdvertiser({ host: bound.host, port: bound.port, version: VERSION });
+  const advertiser = lan ? startMdnsAdvertiser({ host: bound.host, port: bound.port, version: VERSION }) : undefined;
 
   // ★ サーバーは1台しかいない前提（上のロック）なので、「2台目が1台目のキューを消す」
   //   事故はここでは考えなくてよい。掃除は STARTUP_KEEP_MS の時間条件だけで判断する

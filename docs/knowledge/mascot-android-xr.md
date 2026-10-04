@@ -259,8 +259,8 @@ CHATTER_AGENT_PORT=8571 ./scripts/run-android.sh
 非ループバックで待ち受けているときだけ広告し、インスタンス名は Mac のホスト名）。
 トークンを条件にするのは、非ループバックの接続にトークンが要るため。トークンが無ければ従来どおり既定
 （`adb reverse` の経路は `connection` が空であることに頼る）。見つかるまで探索を一定間隔で張り直し続け（解決の失敗や後から起動したサーバーも拾う）、ループバックへは
-倒さない。繋がらない状態が続けば端末の通知で知らせる（接続先は起動中固定。通知は使う人が打てる手——
-サーバーの起動状態の確認とアプリの再起動——だけを言い、トークンの不一致の可能性はログにだけ出す）。複数の Mac が見つかったら最初に解決できた1台に繋ぐ。パーミッションは足さない。
+倒さない。繋がらない状態が続けば端末の通知で知らせる（接続先はペアリング以外では起動中固定。通知は使う人が打てる手——
+サーバーの起動状態の確認とアプリの再起動、トークンが無いときはペアリング——だけを言い、トークンの不一致の可能性はログにだけ出す）。複数の Mac が見つかったら最初に解決できた1台に繋ぐ。パーミッションは足さない。
 
 トークンは `connection.token` からしか読まない
 （起動引数は無い）。**`-serverUrl` で接続先を上書きしたときは `connection.token` を使わない**
@@ -269,7 +269,8 @@ CHATTER_AGENT_PORT=8571 ./scripts/run-android.sh
 ★★ **どちらも `Awake` で**、専用のストアを作らず**起動時に1回だけ**読む（探索のときだけ、
 接続先が決まるのが見つかった後になり、その時点で `BeginSession` が走る）。ファイルを
 書き換えても**次回の起動まで反映されない** —— 接続を1回きり捕まえる設計（`MascotRunner.ServerUrl`
-の doc）を保つため。採用した出どころ（起動引数 / 設定ファイル / 既定）とトークンの有無はログ（デスクトップは
+の doc）を保つため。**例外はペアリングだけ**で、成功するとアプリを再起動せず `MascotRunner.Reconnect` で
+その場で繋ぎ直す（受け取ったトークンは、ファイルの読み直しではなく呼び出し側が渡す）。採用した出どころ（起動引数 / 設定ファイル / 既定）とトークンの有無はログ（デスクトップは
 Player.log、Android は `adb logcat -s Unity`）に出る。
 
 #### Mac 側の準備
@@ -310,6 +311,18 @@ mDNS が通らない環境では接続先を明示する。
 トークンの経路を検証したことにならない。トークンを確かめるときは端末の実 IP から
 Mac の LAN IP へ接続する経路（`configure-android.sh` が書く経路）を使うこと。
 
+#### ペアリング（4桁 PIN）
+
+XR の設定パネルから `configure-android.sh` なしでトークンを受け取る手順（契約は
+[`protocol.md`](../protocol.md)「ペアリング」、操作は [`../mascot.md`](../mascot.md)「ペアリング（サブページ）」）。
+
+- ★ **端末が叩くのは `POST /v1/pairing/claim` だけ。** 発行はループバック限定で、LAN の端末には見せない
+- ★ **保存するのは `token` だけで、`serverUrl` は書かない。** 書くと次回から mDNS を使わなくなり、
+  Mac のアドレスが変わったときに固定した古い先へ繋ぎ続ける
+- ★ **探索は `MascotRunner` の中だけで走らせる。** `ServerDiscovery` は1つしか動かせず、ペアリング用に
+  別の呼び出し口を作ると起動時の探索と取り合う
+- ★ **サブページにしたのはパネルの高さ上限のため。** 本体に4桁の入力を足すと、パネル全体が縮んで他の行が読めなくなる
+
 #### Android で効くキーと効かないキー
 
 `settings.json` の読み込みと反映は `MascotSettingsHost`（`Vrm/`）に一本化されていて（デスクトップは読むだけ、
@@ -324,7 +337,7 @@ Android で共通。1秒ポーリングで外部変更も拾う。
 | `xr.height` | 効く（XR が起動したときだけ）。他の `xr.*` と違い**設定パネルの「大きさ」からその場で変えられる**——起動時の読み込みだけに限らない |
 | `character.idleMotion` / `character.cursorGaze` / `character.blink` | 効く（視線は手を追跡できている間だけ追従し、それ以外は自律的な漂いになる） |
 | `character.walk`（既定 `true`） | 効く。設定パネルの「歩く」からその場で切り替えられる。デスクトップでは何もしない（歩かないため） |
-| `connection.serverUrl` / `connection.token` | 効く（起動時に1回だけ。`serverUrl` が空で `token` があれば LAN から探す） |
+| `connection.serverUrl` / `connection.token` | 効く（起動時に1回だけ。`serverUrl` が空で `token` があれば LAN から探す）。ペアリングが書く `token` だけは、その場で繋ぎ直して使う |
 | `connection.assetSync` | 効く（設定パネルの「モデルとモーションを同期」からも変えられるが、**次回の起動から**——読むのは起動時の1回だけ。パネルの「今すぐ同期」は設定のいまの値を見るので、ON にしたその場で押せる） |
 | `character.vrm` | **効かない。** VRM の探索は `AssetEnv.HasUserConfigDirectory` のときだけユーザー段を見るが、Android はこれが `false`（共有ファイルシステムが無い） |
 | `audio.muteHotKey` / `ui.hideHotKey` | **効かない。** グローバルショートカットを登録するのは ChatterAgent（macOS）だけで、マスコットは読み飛ばす |
@@ -338,7 +351,7 @@ Android のログは `adb logcat -s Unity`。★★ **Android では 401 と「�
 
 | 症状（ログ） | 原因 | 確かめ方 |
 |---|---|---|
-| `[Mascot] 接続エラー: Unable to connect to the remote server`（**内側の例外が付かない**）。サーバー側に `[WS] Rejected unauthorized connection: <端末の IP>`。続くと端末に「サーバーに繋がりません」の通知も出る（通知はトークンに触れない） | トークンが無いか違う（`401`） | 起動ログの `[Mascot] トークン: 設定あり / 設定なし`。`connection.token` が `server.token` と一致しているか（`configure-android.sh` を同じ `XDG_CONFIG_HOME` で撃ち直す） |
+| `[Mascot] 接続エラー: Unable to connect to the remote server`（**内側の例外が付かない**）。サーバー側に `[WS] Rejected unauthorized connection: <端末の IP>`。続くと端末に「サーバーに繋がりません」の通知も出る（通知はトークンに触れない） | トークンが無いか違う（`401`） | 起動ログの `[Mascot] トークン: 設定あり / 設定なし`。`connection.token` が `server.token` と一致しているか（XR ならペアリングで取り直す。`configure-android.sh` を同じ `XDG_CONFIG_HOME` で撃ち直してもよい） |
 | `[Mascot] 接続エラー: Unable to connect to the remote server → mono-io-layer-error (111)` | 相手のポートが開いていない。サーバーが止まっている、または `host` がループバックのまま | Mac 側の起動ログに「LAN からは繋げません（host=127.0.0.1）」が出ていないか |
 | （未実測）Mac から `curl http://<LAN IP>:<port>/v1/health` は `401` が返るのに、端末からは届かない | macOS のローカルネットワーク許可が拒否されている | システム設定 → プライバシーとセキュリティ → ローカルネットワーク。**この許可は node ではなく起動元のターミナルアプリに紐づく** —— 過去に拒否していると 127.0.0.1 からは繋がるのに LAN からだけ症状が出る |
 | （未実測）WS は `接続しました` まで進むが、音声の取得だけ失敗する | `insecureHttpOption` が `AlwaysAllowed` になっていない（`UnityWebRequest` だけが掛かる門） | `Edit > Project Settings > Player` の `Configuration > Insecure HTTP Option`。出荷値は `AndroidPlayerSettings.FixAll` が書く |
@@ -348,6 +361,13 @@ Android のログは `adb logcat -s Unity`。★★ **Android では 401 と「�
 | `ServerDiscovery: 見つけました` が出るが別の Mac に繋がる／繋がった後 `401` | 複数の Mac が広告していると最初に解決できた1台を使う。トークンはその Mac のものと一致している必要がある | ログの `LAN で見つけた <名前>` を見る。意図した Mac でなければ接続先を明示する |
 | `ServerDiscovery: 解決できません: … error=…` | 見つけたが名前解決に失敗した（次の探索の張り直しで再び試す） | 同じネットワークか。Mac 側のサーバーを再起動する |
 | `[Mascot] serverUrl: 起動引数を使います (…)` | `-serverUrl` が設定より優先されている | 起動引数を外す |
+| ペアリング: ChatterAgent の窓に `not_lan` の案内が出て PIN が出ない | server がループバックに bind していて、LAN に出ていない | `config.json` の `host` か `CHATTER_AGENT_HOST` を `0.0.0.0` にして server を再起動する |
+| ペアリング: 端末に「サーバーが見つかりません」 | mDNS が届かない（別の Wi-Fi・VLAN・AP やクライアントの分離）／server が LAN に出ていない | 端末と Mac が同じネットワークか。server の host が `0.0.0.0` か。届かないなら `configure-android.sh ws://<ip>:<port>` で明示する |
+| ペアリング: 端末に「サーバーが見つかりません」。server のログには `[mDNS] 広告を始めました` が出ている | ChatterAgent に「ローカルネットワーク」の許可が無い（または許可より前に起動した server のまま）。広告がループバックにしか出ていない | Mac で `dns-sd -B _chatter-agent._tcp local.` の `if` 欄が `1` だけなら届いていない。システム設定 → プライバシーとセキュリティ → ローカルネットワーク で ChatterAgent をオンにし、メニューの「サーバーを再起動」（→ [`../agent.md`](../agent.md)「LAN に公開するとき」） |
+| ペアリング: 端末に「PIN が違います（あと N 回）」 | PIN の入れ間違い・古い PIN（発行し直すと置き換わる） | ChatterAgent の窓に出ている最新の PIN を確かめる |
+| ペアリング: 端末に「PIN を出し直してください」 | 期限（5 分）切れ、失敗が 5 回に達して `locked`、または未発行 | ChatterAgent の「Android とペアリング…」で出し直す（窓を開き直すか「発行し直す」） |
+| ペアリング: 端末に「このサーバーはペアリングに対応していません」 | 古い server（`401` / `404`） | server を更新して再起動する |
+| ペアリング: 端末に「サーバーに繋がりません」「サーバーの応答を読めませんでした」 | server が止まっている・LAN の経路が通らない／想定外の応答 | server の起動状態と、同じネットワークか。ログに `ペアリングに失敗しました: <端末の IP> (<status>)` が出ていれば届いている |
 
 #### ★★ close フレーム無しで切れた後、Android では `Abort` しないと再接続が止まる
 

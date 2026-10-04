@@ -118,6 +118,28 @@ fn open_settings(app: &tauri::AppHandle, title: &str) {
     }
 }
 
+/// ペアリング窓を前面に出す。無ければ作る。
+fn open_pairing(app: &tauri::AppHandle, title: &str) {
+    if let Some(w) = app.get_webview_window("pairing") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let built = tauri::WebviewWindowBuilder::new(
+        app,
+        "pairing",
+        tauri::WebviewUrl::App("pairing.html".into()),
+    )
+    .title(title)
+    .inner_size(360.0, 340.0)
+    .resizable(false)
+    .build();
+    if let Ok(w) = built {
+        let _ = w.set_focus();
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -161,6 +183,7 @@ fn main() {
             )
             .build(app)?;
             let settings_item = MenuItemBuilder::with_id("settings", t.settings).build(app)?;
+            let pairing_item = MenuItemBuilder::with_id("pairing", t.pairing).build(app)?;
             let restart_item = MenuItemBuilder::with_id("restart", t.start)
                 .enabled(false)
                 .build(app)?;
@@ -177,6 +200,7 @@ fn main() {
                 .item(&visible_item)
                 .item(&PredefinedMenuItem::separator(app)?)
                 .item(&settings_item)
+                .item(&pairing_item)
                 .item(&restart_item)
                 .item(&open_log_item)
                 .item(&pick_core_item)
@@ -248,6 +272,7 @@ fn main() {
                         thread::spawn(move || c.toggle_visible());
                     }
                     "settings" => open_settings(app, t.settings_title),
+                    "pairing" => open_pairing(app, t.pairing_title),
                     "open_log" => {
                         // ファイルがまだ無ければディレクトリを開く。
                         let target = if log_path.exists() {

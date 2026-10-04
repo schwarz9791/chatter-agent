@@ -50,5 +50,26 @@ namespace ChatterMascot.Ui
         public override string XrResetAllNote => "Keeps the server connection.";
         public override string XrResetAllConfirmNote => "Press again to reset everything.";
         public override string XrClose => "Close";
+
+        public override string SectionPairing => "Connection";
+        public override string XrPairOpen => "Pair…";
+        public override string XrPairingPin => "PIN";
+        public override string XrPairKeyboard => "Type with keyboard";
+        public override string XrPairKeyboardUnavailable => "Couldn't open the keyboard.";
+        public override string XrPairKeyboardInvalid => "Enter a 4-digit number.";
+        public override string XrPair => "Pair";
+        public override string XrPairNote => "Enter the 4-digit PIN shown on your Mac.";
+        public override string XrPairing => "Pairing…";
+        public override string XrPairDone => "Paired.";
+        public override string XrPairWrongPin(int remaining) => $"Wrong PIN ({remaining} left).";
+        public override string XrPairReissue => "Show a new PIN from \"Pair with Android…\" in the Mac menu.";
+        public override string XrPairNotFound => "Couldn't find the server.";
+        public override string XrPairUnreachable => "Couldn't reach the server.";
+        public override string XrPairOldServer => "This server doesn't support pairing. Please update it.";
+        public override string XrPairBadResponse => "Couldn't read the server's response.";
+        public override string XrBack => "Back";
+        public override string PairingNeededToast =>
+            "Can't reach the server\nShow a PIN from \"Pair with Android…\" in the ChatterAgent menu on your Mac,\n" +
+            "then enter it from \"Pair…\" in the settings panel.";
     }
 }

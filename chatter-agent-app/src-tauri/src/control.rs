@@ -26,6 +26,8 @@ const ALLOWED: &[(&str, &str)] = &[
     ("PATCH", "/v1/config"),
     ("GET", "/v1/speakers"),
     ("POST", "/v1/tts/preview"),
+    ("GET", "/v1/pairing"),
+    ("POST", "/v1/pairing"),
 ];
 
 #[derive(Debug, PartialEq)]
@@ -137,7 +139,7 @@ fn is_allowed(method: &str, path: &str) -> bool {
 }
 
 fn read_timeout(path: &str) -> Duration {
-    if path == "/v1/config" {
+    if matches!(path, "/v1/config" | "/v1/pairing") {
         CONFIG_TIMEOUT
     } else {
         SYNTHESIS_TIMEOUT
@@ -252,6 +254,13 @@ mod tests {
     use std::net::TcpListener;
     use std::sync::mpsc;
     use std::thread;
+
+    #[test]
+    fn read_timeout_is_long_only_for_synthesis() {
+        assert_eq!(read_timeout("/v1/config"), CONFIG_TIMEOUT);
+        assert_eq!(read_timeout("/v1/pairing"), CONFIG_TIMEOUT);
+        assert_eq!(read_timeout("/v1/tts/preview"), SYNTHESIS_TIMEOUT);
+    }
 
     fn env_of(pairs: &[(&str, &str)]) -> Env {
         pairs
@@ -482,6 +491,7 @@ mod tests {
             ("GET", "/v1/tts/preview"),
             ("GET", "/audio/1-1.wav"),
             ("GET", "/v1/config?x=1"),
+            ("POST", "/v1/pairing/claim"),
         ] {
             let e = call(&t, m, p, None).unwrap_err();
             assert_eq!((e.status, e.body.as_str()), (0, "not_allowed"), "{m} {p}");

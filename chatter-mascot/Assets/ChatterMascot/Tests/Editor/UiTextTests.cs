@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using ChatterMascot.Net;
 using ChatterMascot.Settings;
 using ChatterMascot.Ui;
 using ChatterMascot.Vrm;
@@ -56,6 +57,8 @@ namespace ChatterMascot.Tests
                 Xr(c => c.MotionClips = null),
                 Xr(c => c.MotionClips = new SettingChoice[0]),
                 Xr(c => c.Settings = c.Settings.WithIdleMotion(false)),
+                Xr(c => c.PairingOpen = true),
+                Xr(c => { c.PairingOpen = true; c.PairingRunning = true; }),
             };
 
             foreach (var c in contexts) yield return SettingsSchema.BuildXr(c);
@@ -148,6 +151,24 @@ namespace ChatterMascot.Tests
                 Assert.That(en, Is.Not.Null.And.Not.Empty, "En." + member.Name);
                 AssertNoJapanese(new[] { en });
                 Assert.That(member.Get(UiText.Ja), Is.Not.Null.And.Not.Empty, "Ja." + member.Name);
+            }
+        }
+
+        [Test]
+        public void EnglishPairingResultsHaveNoJapanese()
+        {
+            var results = new[]
+            {
+                PairingResult.Paired("tok"), PairingResult.WrongPin(2), PairingResult.Of(PairingKind.Reissue),
+                PairingResult.Of(PairingKind.OldServer), PairingResult.Of(PairingKind.Unreachable),
+                PairingResult.Of(PairingKind.BadResponse),
+            };
+            foreach (var r in results)
+            {
+                var en = PairingClient.Describe(r, UiText.En);
+                Assert.That(en, Is.Not.Empty, r.Kind.ToString());
+                AssertNoJapanese(new[] { en });
+                Assert.That(PairingClient.Describe(r, UiText.Ja), Is.Not.Empty, r.Kind.ToString());
             }
         }
 

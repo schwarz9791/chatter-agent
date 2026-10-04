@@ -11,6 +11,7 @@
  *   503  エンジンに繋がらない・合成が返らない。**あとで取りに来い**
  *
  * /v1/*   設定パネル（#76）の制御 API。中身は `server/controlApi.ts`
+ *         （トークン無しで通すのは `POST /v1/pairing/claim` だけ。→ `handle` の冒頭）
  *
  * GET /v1/assets/<path>
  *   200 / 206  本体全体 / `Range: bytes=<N>-` に応じた途中から（→ `server/assetCatalog.ts`）
@@ -19,8 +20,8 @@
  * ```
  *
  * ★★ **非ループバックからの接続は、ルーティングより前にトークン認証を通る**
- *   （→ `server/auth.ts`）。ループバックは免除される。未認証の相手には、ルートの有無も
- *   書き込み口の 404 も見せない（`resolveRoute` より前に置く理由）。
+ *   （→ `server/auth.ts`）。ループバックは免除される。唯一の例外はペアリングの claim。
+ *   未認証の相手には、ルートの有無も書き込み口の 404 も見せない（`resolveRoute` より前に置く理由）。
  *
  * ★ **404 と 503 を混ぜないこと。** クライアントは 503 では試行回数を減らさずに
  *   待ち、404 では諦めて ack する。混ぜると、エンジンを起動し忘れているだけで
@@ -115,6 +116,11 @@ const RETRY_AFTER_SECONDS = 1;
 /** リクエストボディの上限。設定の差分しか来ないので十分すぎるほど大きい */
 const MAX_BODY_BYTES = 64 * 1024;
 
+/** claim のボディ上限。`{"pin":"0427"}` しか来ない */
+const MAX_CLAIM_BODY_BYTES = 256;
+
+const CLAIM_PATH = "/v1/pairing/claim";
+
 /**
  * `Allow` に出すときの並び。**リソースごとにここから絞り込む**ので、
  * 表記ゆれ（`GET, HEAD` と `HEAD, GET`）が出ない。
@@ -148,6 +154,7 @@ const CONTROL_ROUTES = new Map<string, Route>([
   ["/v1/tts/preview", { methods: ["POST"], kind: "control" }],
   ["/v1/summary/preview", { methods: ["POST"], kind: "control" }],
   ["/v1/assets", { methods: ["GET"], kind: "control" }],
+  ["/v1/pairing", { methods: ["GET", "POST"], kind: "control" }],
 ]);
 
 function resolveRoute(pathname: string): Route | null {
@@ -372,6 +379,15 @@ export function createHttpServer(deps: HttpServerDeps): http.Server {
   });
 
   async function handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const pathname = (req.url ?? "").split("?")[0] ?? "";
+    const method = req.method ?? "";
+
+    // ★★ 認証の関所の唯一の例外: ペアリングの claim。**トークンを持たない端末が、トークンを
+    //   受け取るための口**なので、関所の後ろには置けない。守りは PIN の試行回数と期限。
+    //   **`POST` の完全一致だけ**を通す。`CONTROL_ROUTES` にも入れない —— OPTIONS / GET /
+    //   HEAD や別パスは関所へ落ち、未認証の LAN からは 401、プリフライトは必ず失敗する。
+    if (method === "POST" && pathname === CLAIM_PATH) return handleClaim(req, res);
+
     // ★★ 認証の関所。**`resolveRoute` より前に置く**。未認証の LAN の相手には、
     //   ルートの有無も書き込み口の 404 も見せない。403 でも 404 でもなく 401 にするのは、
     //   トークン違いとパス違いをクライアントのログで見分けられるようにするため。
@@ -382,8 +398,6 @@ export function createHttpServer(deps: HttpServerDeps): http.Server {
       return endWith(res, 401, "unauthorized\n");
     }
 
-    const pathname = (req.url ?? "").split("?")[0] ?? "";
-    const method = req.method ?? "";
     const route = resolveRoute(pathname);
     if (route === null) return endWith(res, 404, "not found\n");
 
@@ -391,7 +405,8 @@ export function createHttpServer(deps: HttpServerDeps): http.Server {
     // `Origin` が付いている＝ WebView / ブラウザから張られた（下の絞り2）
     const hasOrigin = typeof req.headers.origin === "string" && req.headers.origin.length > 0;
 
-    // ★★ 絞り1: 書き込み口はループバックからだけ。**403 ではなく 404。**
+    // ★★ 絞り1: 書き込み口はループバックからだけ（唯一の例外はペアリングの claim で、
+    //   上で先に処理している）。**403 ではなく 404。**
     //   403 は「口はあるが権限が無い」と教えることになる。存在そのものを見せない。
     //
     // ★★ **`X-Forwarded-For` を見ないこと。** クライアントが自由に付けられるヘッダなので、
@@ -458,6 +473,34 @@ export function createHttpServer(deps: HttpServerDeps): http.Server {
     return handleAudio(res, pathname, method);
   }
 
+  async function handleClaim(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    // ★ `checkOrigin` を使わない（許可 Origin に ACAO を返してしまう）。ブラウザから叩かせる口
+    //   ではないので、`Origin` が付いていれば許可リストにあっても拒否する。
+    if (typeof req.headers.origin === "string" && req.headers.origin.length > 0) {
+      return endWith(res, 403, "forbidden\n");
+    }
+    if (!isJsonContentType(req.headers["content-type"])) return endWith(res, 415, "unsupported media type\n");
+
+    const raw = await readBody(req, MAX_CLAIM_BODY_BYTES);
+    if (!raw.ok) {
+      if (raw.reason === "aborted") return;
+      return endWithJson(res, 413, { error: "payload_too_large" }, {}, false);
+    }
+    let body: unknown;
+    try {
+      body = JSON.parse(raw.text);
+    } catch {
+      return endWithJson(res, 400, { error: "invalid_json" }, {}, false);
+    }
+
+    const response = deps.control.claimPairing(body);
+    const peer = req.socket.remoteAddress ?? "unknown";
+    // ★ 相手のアドレスだけ。PIN とトークンはログに出さない
+    if (response.status === 200) console.log(`[HTTP] ペアリングが完了しました: ${peer}`);
+    else warn(`[HTTP] ペアリングに失敗しました: ${peer} (${response.status})`);
+    return endWithJson(res, response.status, response.body, {}, false);
+  }
+
   async function handleControl(
     req: http.IncomingMessage,
     res: http.ServerResponse,
@@ -517,6 +560,8 @@ export function createHttpServer(deps: HttpServerDeps): http.Server {
         return deps.control.summaryPreview();
       case "/v1/assets":
         return deps.control.assets();
+      case "/v1/pairing":
+        return method === "POST" ? deps.control.issuePairing() : deps.control.pairingStatus();
       default:
         // resolveRoute を通っている以上ここには来ない。来たら表とこの switch がズレている
         return { status: 404, kind: "json", body: { error: "not_found" } };

@@ -20,6 +20,7 @@ core/src/
 ├── server/       chatter-agent-server（配信キュー → WebSocket 配信 + 音声の HTTP 配布）
 │   ├── index.ts             合成ルート。ロック → トークン確保 → bind → 古いキューの掃除 → ポーリング
 │   ├── dispatcher.ts        配信済み seq と**採番の世代**の判断。フレームの組み立てもここ（ユニットテストのため純粋な部品に切り出してある）
+│   ├── pairing.ts           4桁 PIN のペアリング（発行・照合・試行回数・期限）。時刻と乱数は注入できる（→ protocol.md「ペアリング」）
 │   ├── audioStore.ts        ★合成のキャッシュと single-flight。ディスクを持たない（issue #29）
 │   ├── engineProcess.ts     ★合成エンジンを起こす条件の判断と、プロセスグループごとの停止（issue #51）
 │   ├── assetCatalog.ts      配布する VRM / VRMA のカタログ（固定名優先→Ordinal 先頭、sha256 のキャッシュ。issue #117）
@@ -73,7 +74,7 @@ core/src/
 
 判断ロジックは基本的に `cli/` と `core/` に置く。**`server/index.ts` と `wsServer.ts` は判断ロジックを持たない** — 配線に留める。
 
-判断は**3つの部品に切り出してある**。`index.ts` に埋めるとユニットテストから触れないため。
+判断は**いくつかの部品に切り出してある**。`index.ts` に埋めるとユニットテストから触れないため。
 
 | | |
 |---|---|
@@ -81,6 +82,7 @@ core/src/
 | `server/audioStore.ts` | 何を合成し、何を覚えておくか（issue #29） |
 | `server/engineProcess.ts` | 合成エンジンを起こしてよいか、どう止めるか（issue #51） |
 | `server/controlApi.ts` | 設定を読み書きしてよいか、プレビューを走らせてよいか（issue #76） |
+| `server/pairing.ts` | この PIN にトークンを渡してよいか。試行回数と期限の数え方 |
 
 > ★ **`controlApi.ts` は「HTTP を知らない層」にしてある。** `req` / `res` は `httpServer.ts` が扱い、
 > こちらは「入力 → レスポンスの値」だけを返す。実サーバーを立てずにテストが書ける。

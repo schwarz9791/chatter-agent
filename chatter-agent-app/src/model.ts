@@ -213,6 +213,39 @@ export function errorMessage(err: ServerError | null, raw: unknown, key: string,
     case "config_unwritable":
       return t.errorConfigUnwritable;
   }
+  if (err.status === 409 && error === "not_lan") return t.pairingNotLan;
   if (err.status === 429) return t.errorTooManyRequests;
   return error ? t.errorUnknown(error, target) : t.errorHttp(err.status);
+}
+
+// ── ペアリング ──
+
+export type PairingState = "none" | "pending" | "paired" | "expired" | "locked";
+
+/** `m:ss`。負は `0:00` */
+export function formatRemaining(ms: number): string {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+export interface PairingView {
+  message: "pending" | "paired" | "expired" | "locked";
+  showPin: boolean;
+  showReissue: boolean;
+  keepPolling: boolean;
+}
+
+/** 発行済みの PIN の状態から表示を決める。`none`（server が忘れた）は期限切れと同じ扱い */
+export function pairingView(state: PairingState): PairingView {
+  switch (state) {
+    case "pending":
+      return { message: "pending", showPin: true, showReissue: false, keepPolling: true };
+    case "paired":
+      return { message: "paired", showPin: false, showReissue: true, keepPolling: false };
+    case "locked":
+      return { message: "locked", showPin: false, showReissue: true, keepPolling: false };
+    case "expired":
+    case "none":
+      return { message: "expired", showPin: false, showReissue: true, keepPolling: false };
+  }
 }

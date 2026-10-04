@@ -67,6 +67,9 @@ function stubControl(): ControlApi {
     ttsPreview: () => Promise.resolve({ status: 200, kind: "wav", body: wavOf(44) }),
     summaryPreview: () => Promise.resolve(ok("summaryPreview")),
     assets: () => ok("assets"),
+    issuePairing: () => ok("issuePairing"),
+    pairingStatus: () => ok("pairingStatus"),
+    claimPairing: (body) => ({ status: 200, kind: "json", body: { called: "claimPairing", body } }),
   };
 }
 
@@ -825,5 +828,93 @@ describe("書き込み口の3重の絞り（#76）", () => {
   it("GET には Content-Type を要求しない", async () => {
     const base = await start();
     expect((await fetch(`${base}/v1/config`)).status).toBe(200);
+  });
+});
+
+describe("ペアリング（認証の関所の例外）", () => {
+  const CLAIM = { method: "POST", path: "/v1/pairing/claim" };
+  const claimBody = JSON.stringify({ pin: "0427" });
+
+  it("★★ トークン無しの非ループバックから claim できる", async () => {
+    const socketPath = await startUnix();
+    const res = await requestUnix(socketPath, { ...CLAIM, headers: JSON_HEADERS, body: claimBody });
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.text)).toEqual({ called: "claimPairing", body: { pin: "0427" } });
+  });
+
+  it("★★ Origin 付きの claim は許可済みの Origin でも 403", async () => {
+    const socketPath = await startUnix({ allowedOrigins: ["http://localhost:3000"] });
+    const res = await requestUnix(socketPath, {
+      ...CLAIM,
+      headers: { ...JSON_HEADERS, origin: "http://localhost:3000" },
+      body: claimBody,
+    });
+    expect(res.status).toBe(403);
+    expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
+  it("Content-Type が JSON でない claim は 415", async () => {
+    const socketPath = await startUnix();
+    const res = await requestUnix(socketPath, { ...CLAIM, headers: { "content-type": "text/plain" }, body: claimBody });
+    expect(res.status).toBe(415);
+  });
+
+  it("256 バイトを超える claim は 413", async () => {
+    const socketPath = await startUnix();
+    const res = await requestUnix(socketPath, {
+      ...CLAIM,
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ pin: "0427", pad: "x".repeat(300) }),
+    });
+    expect(res.status).toBe(413);
+  });
+
+  it("JSON として読めない claim は 400 invalid_json", async () => {
+    const socketPath = await startUnix();
+    const res = await requestUnix(socketPath, { ...CLAIM, headers: JSON_HEADERS, body: "{ 壊れている" });
+    expect(res.status).toBe(400);
+    expect(JSON.parse(res.text)).toEqual({ error: "invalid_json" });
+  });
+
+  it("★★ claim の口は POST の完全一致だけ。GET / OPTIONS / 別パスはトークン無しなら 401", async () => {
+    const socketPath = await startUnix();
+    for (const [method, path] of [
+      ["GET", "/v1/pairing/claim"],
+      ["OPTIONS", "/v1/pairing/claim"],
+      ["POST", "/v1/pairing/claimx"],
+      ["GET", "/v1/pairing"],
+    ] as const) {
+      const res = await requestUnix(socketPath, { method, path });
+      expect(res.status, `${method} ${path}`).toBe(401);
+    }
+  });
+
+  it("トークン付きでも claim への GET は 404（CONTROL_ROUTES に無い）", async () => {
+    const socketPath = await startUnix();
+    const res = await requestUnix(socketPath, {
+      method: "GET",
+      path: "/v1/pairing/claim",
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("★ 非ループバックからの POST /v1/pairing（発行）は、トークンがあっても 404", async () => {
+    const socketPath = await startUnix();
+    const res = await requestUnix(socketPath, {
+      method: "POST",
+      path: "/v1/pairing",
+      headers: { ...JSON_HEADERS, authorization: `Bearer ${TOKEN}` },
+      body: "{}",
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("ループバックからの POST / GET /v1/pairing は制御 API に届く", async () => {
+    const base = await start();
+    const issued = await fetch(`${base}/v1/pairing`, { method: "POST", headers: JSON_HEADERS, body: "{}" });
+    expect(await issued.json()).toEqual({ called: "issuePairing" });
+    const status = await fetch(`${base}/v1/pairing`);
+    expect(await status.json()).toEqual({ called: "pairingStatus" });
   });
 });

@@ -183,7 +183,7 @@ namespace ChatterMascot.Net
         ///   Unity の <c>SynchronizationContext</c> でメインスレッドに戻る。
         ///   だから呼び出し側は <c>AudioSource</c> や <c>AudioClip</c> をそのまま触れる。
         /// </summary>
-        private static Task SendAsync(UnityWebRequest request)
+        internal static Task SendAsync(UnityWebRequest request)
         {
             var tcs = new TaskCompletionSource<bool>();
             var operation = request.SendWebRequest();

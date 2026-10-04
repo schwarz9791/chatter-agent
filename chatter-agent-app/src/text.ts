@@ -88,6 +88,15 @@ export type Text = {
   errorConfigUnreadable: string;
   errorConfigUnwritable: string;
   errorTooManyRequests: string;
+
+  pairingTitle: string;
+  pairingGuide: string;
+  pairingRemaining(time: string): string;
+  pairingPaired: string;
+  pairingExpired: string;
+  pairingLocked: string;
+  pairingReissue: string;
+  pairingNotLan: string;
   errorUnknown(error: string, key: string): string;
 };
 
@@ -180,6 +189,16 @@ export const JA: Text = {
   errorConfigUnreadable: "config.json を読めないので書き込みませんでした",
   errorConfigUnwritable: "config.json に書けませんでした",
   errorTooManyRequests: "続けて押しすぎです。少し待ってください",
+
+  pairingTitle: "Android とペアリング",
+  pairingGuide: "グラスの設定パネル →「ペアリング…」でこの数字を入力してください",
+  pairingRemaining: (time) => `残り ${time}`,
+  pairingPaired: "ペアリングしました",
+  pairingExpired: "有効期限が切れました",
+  pairingLocked: "入力の失敗が続いたので、この PIN は使えなくなりました",
+  pairingReissue: "発行し直す",
+  pairingNotLan:
+    "サーバーが LAN に公開されていません。config.json の host か環境変数 CHATTER_AGENT_HOST を 0.0.0.0 にして、サーバーを再起動してください",
   errorUnknown: (error, key) => `${error}（${key}）`,
 };
 
@@ -271,5 +290,15 @@ export const EN: Text = {
   errorConfigUnreadable: "Couldn't read config.json, so nothing was written.",
   errorConfigUnwritable: "Couldn't write to config.json.",
   errorTooManyRequests: "Too many requests. Please wait a moment.",
+
+  pairingTitle: "Pair with Android",
+  pairingGuide: 'On the glasses, open Settings → "Pair…" and enter these digits.',
+  pairingRemaining: (time) => `${time} left`,
+  pairingPaired: "Paired.",
+  pairingExpired: "This PIN has expired.",
+  pairingLocked: "Too many failed attempts, so this PIN can no longer be used.",
+  pairingReissue: "Get a new PIN",
+  pairingNotLan:
+    "The server isn't exposed to the LAN. Set host in config.json or the CHATTER_AGENT_HOST environment variable to 0.0.0.0, then restart the server.",
   errorUnknown: (error, key) => `${error} (${key})`,
 };

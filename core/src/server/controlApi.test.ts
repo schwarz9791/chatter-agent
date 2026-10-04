@@ -5,6 +5,7 @@ import * as path from "path";
 import { createConfigStore, createDefaultConfig, type ConfigStore } from "../core/config";
 import { VERSION } from "../core/version";
 import type { AssetCatalog } from "./assetCatalog";
+import { createPairing } from "./pairing";
 import { createControlApi, type ControlApiDeps } from "./controlApi";
 
 let dir: string;
@@ -52,6 +53,8 @@ function api(overrides: Partial<ControlApiDeps> = {}) {
       registerSessionId: () => {},
     },
     assetCatalog: stubAssetCatalog,
+    pairing: createPairing({ token: "tok", randomPin: () => "0427" }),
+    lan: () => true,
     ...overrides,
   });
 }
@@ -371,5 +374,48 @@ describe("POST /v1/summary/preview", () => {
     const control = api({ now: () => 1_000 });
     expect((await control.summaryPreview()).status).toBe(200);
     expect((await control.summaryPreview()).status).toBe(429);
+  });
+});
+
+describe("ペアリング", () => {
+  it("発行 → 状態 → claim で token が返る。状態に PIN は載らない", () => {
+    const a = api();
+    expect(body(a.issuePairing())).toMatchObject({ pin: "0427" });
+
+    const status = a.pairingStatus();
+    expect(status.status).toBe(200);
+    expect(JSON.stringify(status.body)).not.toContain("0427");
+    expect(body<{ state: string }>(status).state).toBe("pending");
+
+    const claimed = a.claimPairing({ pin: "0427" });
+    expect(claimed.status).toBe(200);
+    expect(body(claimed)).toEqual({ token: "tok" });
+    expect(body<{ state: string }>(a.pairingStatus()).state).toBe("paired");
+  });
+
+  it("LAN に出ていなければ発行は 409 not_lan", () => {
+    const res = api({ lan: () => false }).issuePairing();
+    expect(res.status).toBe(409);
+    expect(body(res)).toEqual({ error: "not_lan" });
+  });
+
+  it("claim: ボディがオブジェクトでない / pin の形が違うは 400", () => {
+    const a = api();
+    a.issuePairing();
+    for (const bad of [null, "0427", [], {}, { pin: 427 }, { pin: "42" }]) {
+      const res = a.claimPairing(bad);
+      expect(res.status).toBe(400);
+      expect(body(res)).toEqual({ error: "invalid_body" });
+    }
+    expect(a.claimPairing({ pin: "0427" }).status).toBe(200);
+  });
+
+  it("claim: 失敗は 403。wrong_pin は残り回数を返す", () => {
+    const a = api();
+    expect(body(a.claimPairing({ pin: "0427" }))).toEqual({ error: "no_pairing" });
+    a.issuePairing();
+    const res = a.claimPairing({ pin: "1111" });
+    expect(res.status).toBe(403);
+    expect(body(res)).toEqual({ error: "wrong_pin", remaining: 4 });
   });
 });

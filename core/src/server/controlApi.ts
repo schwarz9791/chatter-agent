@@ -9,6 +9,9 @@
  * POST  /v1/tts/preview      200 audio/wav（★ 固定文）
  * POST  /v1/summary/preview  200 {"summary":…,"outcome":…,"elapsedMs":…}（★ 失敗も 200）
  * GET   /v1/assets           200 {"files":[{"path":…,"size":…,"sha256":…}]}（→ `server/assetCatalog.ts`）
+ * POST  /v1/pairing          200 {"pin":…,"expiresAt":…} / 409 not_lan（→ `server/pairing.ts`）
+ * GET   /v1/pairing          200 {"state":…,"expiresAt"?:…}（★ PIN は返さない）
+ * POST  /v1/pairing/claim    200 {"token":…} / 400 invalid_body / 403 wrong_pin|expired|locked|no_pairing
  * ```
  *
  * ★ **HTTP を知らない層にしてある。** `req` / `res` は `httpServer.ts` が扱い、ここは
@@ -31,6 +34,7 @@ import { writeFileAtomic } from "../core/atomicWrite";
 import { VERSION } from "../core/version";
 import { runSummaryPreview, type SummaryPreviewDeps } from "../summarizer/summaryPreview";
 import type { AssetCatalog } from "./assetCatalog";
+import type { Pairing } from "./pairing";
 
 /**
  * テスト音声の固定文。
@@ -126,6 +130,10 @@ export interface ControlApiDeps {
   summaryPreview: Omit<SummaryPreviewDeps, "now">;
   /** 配布する VRM / VRMA のカタログ（→ `server/assetCatalog.ts`） */
   assetCatalog: AssetCatalog;
+  /** PIN ペアリング（→ `server/pairing.ts`） */
+  pairing: Pairing;
+  /** LAN に出ているか。出ていなければ PIN を発行しても受け取る相手が居ない */
+  lan: () => boolean;
   /**
    * `PATCH /v1/config` が書き込みに成功した直後に、実際に変わったキーの一覧で呼ばれる。
    *
@@ -145,6 +153,10 @@ export interface ControlApi {
   ttsPreview(): Promise<ControlResponse>;
   summaryPreview(): Promise<ControlResponse>;
   assets(): ControlResponse;
+  issuePairing(): ControlResponse;
+  pairingStatus(): ControlResponse;
+  /** トークン無しの LAN 端末から呼ばれる唯一の口 */
+  claimPairing(body: unknown): ControlResponse;
 }
 
 export function createControlApi(deps: ControlApiDeps): ControlApi {
@@ -277,6 +289,34 @@ export function createControlApi(deps: ControlApiDeps): ControlApi {
 
     assets() {
       return json(200, { files: deps.assetCatalog.manifest() });
+    },
+
+    issuePairing() {
+      if (!deps.lan()) return fail(409, "not_lan");
+      return json(200, deps.pairing.issue());
+    },
+
+    pairingStatus() {
+      // ★★ **PIN を返さないこと。** 同一オリジンの GET には `Origin` が付かないので、
+      //   DNS リバインディングで読まれうる。PIN を見られる口は発行の応答（ループバック限定・
+      //   `Origin` 禁止）だけに絞る
+      return json(200, deps.pairing.status());
+    },
+
+    claimPairing(body) {
+      if (typeof body !== "object" || body === null || Array.isArray(body)) {
+        return fail(400, "invalid_body");
+      }
+      const result = deps.pairing.claim((body as Record<string, unknown>).pin);
+      if (result.ok) return json(200, { token: result.token });
+      switch (result.reason) {
+        case "invalid":
+          return fail(400, "invalid_body");
+        case "wrong_pin":
+          return fail(403, "wrong_pin", { remaining: result.remaining });
+        default:
+          return fail(403, result.reason);
+      }
     },
   };
 }

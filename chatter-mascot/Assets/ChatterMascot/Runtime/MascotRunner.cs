@@ -864,13 +864,15 @@ namespace ChatterMascot
 
             // ★ 接続先はセッション中固定（探索で決めた場合も）。Mac のアドレスが変わるとアプリを
             //   起動し直すしかなく、これが無いと端末側にはそれが伝わらない
+            // ★ 端末に出すのは使う人が打てる手だけにする。トークンの不一致（401）も同じ失敗として
+            //   数えられるが、Android では見分けられないので、候補としてログにだけ残す
             if (_client != null && !_warnedUnreachable
                 && _client.ConsecutiveConnectFailures >= ConnectFailureNoticeCount)
             {
                 _warnedUnreachable = true;
-                Debug.LogWarning("[Mascot] サーバーに繋がりません。サーバーが動いているか、接続先が変わっていないか確認してください");
-                DeviceToast.Show("サーバーに繋がりません\nMac のサーバーが動いているか確認してください。\n" +
-                                 "接続先が変わったときはアプリを起動し直してください");
+                Debug.LogWarning("[Mascot] サーバーに繋がりません。サーバーが止まっている・接続先が変わった・" +
+                                 "トークンが合っていない（Android では 401 と見分けられない）のどれか");
+                DeviceToast.Show("サーバーに繋がりません\nサーバーの起動状態を確認し、\nアプリを再起動してください");
             }
 
             // ack の間引き送出と、無受信 watchdog

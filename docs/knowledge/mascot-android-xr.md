@@ -259,7 +259,8 @@ CHATTER_AGENT_PORT=8571 ./scripts/run-android.sh
 非ループバックで待ち受けているときだけ広告し、インスタンス名は Mac のホスト名）。
 トークンを条件にするのは、非ループバックの接続にトークンが要るため。トークンが無ければ従来どおり既定
 （`adb reverse` の経路は `connection` が空であることに頼る）。見つかるまで探索を一定間隔で張り直し続け（解決の失敗や後から起動したサーバーも拾う）、ループバックへは
-倒さない。繋がらない状態が続けば端末の通知で知らせる（接続先は起動中固定）。複数の Mac が見つかったら最初に解決できた1台に繋ぐ。パーミッションは足さない。
+倒さない。繋がらない状態が続けば端末の通知で知らせる（接続先は起動中固定。通知は使う人が打てる手——
+サーバーの起動状態の確認とアプリの再起動——だけを言い、トークンの不一致の可能性はログにだけ出す）。複数の Mac が見つかったら最初に解決できた1台に繋ぐ。パーミッションは足さない。
 
 トークンは `connection.token` からしか読まない
 （起動引数は無い）。**`-serverUrl` で接続先を上書きしたときは `connection.token` を使わない**
@@ -337,7 +338,7 @@ Android のログは `adb logcat -s Unity`。★★ **Android では 401 と「�
 
 | 症状（ログ） | 原因 | 確かめ方 |
 |---|---|---|
-| `[Mascot] 接続エラー: Unable to connect to the remote server`（**内側の例外が付かない**）。サーバー側に `[WS] Rejected unauthorized connection: <端末の IP>` | トークンが無いか違う（`401`） | 起動ログの `[Mascot] トークン: 設定あり / 設定なし`。`connection.token` が `server.token` と一致しているか（`configure-android.sh` を同じ `XDG_CONFIG_HOME` で撃ち直す） |
+| `[Mascot] 接続エラー: Unable to connect to the remote server`（**内側の例外が付かない**）。サーバー側に `[WS] Rejected unauthorized connection: <端末の IP>`。続くと端末に「サーバーに繋がりません」の通知も出る（通知はトークンに触れない） | トークンが無いか違う（`401`） | 起動ログの `[Mascot] トークン: 設定あり / 設定なし`。`connection.token` が `server.token` と一致しているか（`configure-android.sh` を同じ `XDG_CONFIG_HOME` で撃ち直す） |
 | `[Mascot] 接続エラー: Unable to connect to the remote server → mono-io-layer-error (111)` | 相手のポートが開いていない。サーバーが止まっている、または `host` がループバックのまま | Mac 側の起動ログに「LAN からは繋げません（host=127.0.0.1）」が出ていないか |
 | （未実測）Mac から `curl http://<LAN IP>:<port>/v1/health` は `401` が返るのに、端末からは届かない | macOS のローカルネットワーク許可が拒否されている | システム設定 → プライバシーとセキュリティ → ローカルネットワーク。**この許可は node ではなく起動元のターミナルアプリに紐づく** —— 過去に拒否していると 127.0.0.1 からは繋がるのに LAN からだけ症状が出る |
 | （未実測）WS は `接続しました` まで進むが、音声の取得だけ失敗する | `insecureHttpOption` が `AlwaysAllowed` になっていない（`UnityWebRequest` だけが掛かる門） | `Edit > Project Settings > Player` の `Configuration > Insecure HTTP Option`。出荷値は `AndroidPlayerSettings.FixAll` が書く |

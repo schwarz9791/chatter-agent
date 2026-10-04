@@ -376,7 +376,7 @@ Android のログは `adb logcat -s Unity`。★★ **Android では 401 と「�
 | `[Mascot] serverUrl: 起動引数を使います (…)` | `-serverUrl` が設定より優先されている | 起動引数を外す |
 | ペアリング: ChatterAgent の窓に `not_lan` の案内が出て PIN が出ない | server がループバックに bind していて、LAN に出ていない | `config.json` の `host` か `CHATTER_AGENT_HOST` を `0.0.0.0` にして server を再起動する |
 | ペアリング: 端末に「サーバーが見つかりません」 | mDNS が届かない（別の Wi-Fi・VLAN・AP やクライアントの分離）／server が LAN に出ていない | 端末と Mac が同じネットワークか。server の host が `0.0.0.0` か。届かないなら `configure-android.sh ws://<ip>:<port>` で明示する |
-| ペアリング: 端末に「サーバーが見つかりません」。server のログには `[mDNS] 広告を始めました` が出ている | ChatterAgent に「ローカルネットワーク」の許可が無い（または許可より前に起動した server のまま）。広告がループバックにしか出ていない | Mac で `dns-sd -B _chatter-agent._tcp local.` の `if` 欄が `1` だけなら届いていない。システム設定 → プライバシーとセキュリティ → ローカルネットワーク で ChatterAgent をオンにし、メニューの「サーバーを再起動」（→ [`../agent.md`](../agent.md)「LAN に公開するとき」） |
+| ペアリング: 端末に「サーバーが見つかりません」。server のログには `[mDNS] 広告を始めました` が出ている | ChatterAgent に「ローカルネットワーク」の許可が無い（または許可より前に起動した server のまま）。広告がループバックにしか出ていない | Mac で `dns-sd -B _chatter-agent._tcp local.` の `if` 欄が `1` だけなら届いていない。システム設定 → プライバシーとセキュリティ → ローカルネットワーク で ChatterAgent をオンにし、メニューの「サーバーを再起動」（→ [`../agent.md`](../agent.md)「LAN に公開するとき」）。一覧ですでにオンなのに `1` だけなら、`codesign -dv ChatterAgent.app` の `Identifier` が `tech.sukima.chatter-agent` かを見る（→ [`agent.md`](./agent.md)「「ローカルネットワーク」の許可は署名の識別子とパスで引かれる」） |
 | ペアリング: 端末に「PIN が違います（あと N 回）」 | PIN の入れ間違い・古い PIN（発行し直すと置き換わる） | ChatterAgent の窓に出ている最新の PIN を確かめる |
 | ペアリング: 端末に「PIN を出し直してください」 | 期限（5 分）切れ、失敗が 5 回に達して `locked`、または未発行 | ChatterAgent の「Android とペアリング…」で出し直す（窓を開き直すか「発行し直す」） |
 | ペアリング: 端末に「このサーバーはペアリングに対応していません」 | 古い server（`401` / `404`） | server を更新して再起動する |

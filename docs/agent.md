@@ -378,6 +378,9 @@ mDNS での広告（`_chatter-agent._tcp`。→ [`protocol.md`](./protocol.md)�
 ダイアログも出ない（→ [`knowledge/agent.md`](./knowledge/agent.md)）。識別子は `codesign -dv ChatterAgent.app` の
 `Identifier` で確かめる。
 
+★ **一度「許可しない」を選ぶと、置き場所に関係なくどのビルドもダイアログ無しで拒否される**（一覧では「オフ」に見える）。
+戻すには、システム設定 → プライバシーとセキュリティ → ローカルネットワーク で ChatterAgent を手でオンにする。
+
 ## 制約
 
 - ★ **ChatterAgent がメニューの「終了」やログアウト（quit の Apple Event）以外で終わると server と player が残る。**

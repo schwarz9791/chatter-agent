@@ -29,7 +29,8 @@
     ],
     "macOS": {
       "infoPlist": "Info.plist",
-      "signingIdentity": "-"
+      "signingIdentity": "-",
+      "hardenedRuntime": false
     }
   }
 }

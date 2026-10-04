@@ -283,10 +283,21 @@ namespace ChatterMascot
         private bool _discovering;
         private float _nextDiscoveryPollAt;
         private float _discoveryStartedAt;
+        private float _discoveryRestartedAt;
+        private bool _warnedUnreachable;
         private bool _warnedDiscoveryNotFound;
 
         /// <summary>探索結果を見に行く間隔。</summary>
         private const float DiscoveryPollIntervalSeconds = 0.5f;
+
+        /// <summary>
+        /// 見つかるまでこの間隔で探索を張り直す。NsdManager は広告を1つの探索につき1回しか通知しないので、
+        /// 解決に失敗した・後から起動した server はこうしないと拾えない。
+        /// </summary>
+        private const float DiscoveryRestartSeconds = 10f;
+
+        /// <summary>接続の確立にこの回数続けて失敗したら、確認すべきことを1回だけ知らせる。</summary>
+        private const int ConnectFailureNoticeCount = 5;
 
         /// <summary>この間見つからなければ、確認すべきことを1回だけ知らせる。</summary>
         private const float DiscoveryNotFoundNoticeSeconds = 10f;
@@ -556,6 +567,7 @@ namespace ChatterMascot
             {
                 _discovering = true;
                 _discoveryStartedAt = Time.realtimeSinceStartup;
+                _discoveryRestartedAt = _discoveryStartedAt;
                 Debug.Log("[Mascot] serverUrl: 設定ファイルに接続先が無いので LAN から探します（_chatter-agent._tcp）");
                 return;
             }
@@ -577,7 +589,7 @@ namespace ChatterMascot
                 var url = ChatterMascot.Net.ServerUrl.FromHostPort(host, port);
                 if (url == null)
                 {
-                    Debug.LogWarning($"[Mascot] 見つけた {name} の接続先を組めません (\"{host}\":{port})。探し続けます");
+                    Debug.LogWarning($"[Mascot] 見つけた {name} の接続先を組めません (\"{host}\":{port})。捨てて次の探索に任せます");
                     return;
                 }
 
@@ -590,12 +602,19 @@ namespace ChatterMascot
                 return;
             }
 
+            if (now - _discoveryRestartedAt >= DiscoveryRestartSeconds)
+            {
+                _discoveryRestartedAt = now;
+                ServerDiscovery.Stop();
+                ServerDiscovery.Start();
+            }
+
             if (!_warnedDiscoveryNotFound && now - _discoveryStartedAt >= DiscoveryNotFoundNoticeSeconds)
             {
                 _warnedDiscoveryNotFound = true;
                 Debug.LogWarning("[Mascot] LAN でサーバーが見つかりません。探し続けます");
                 DeviceToast.Show("サーバーが見つかりません\nMac のサーバーが 0.0.0.0 で待ち受けているか、\n" +
-                                 "同じ Wi-Fi か、トークンを確認してください");
+                                 "同じ Wi-Fi か（AP 分離・VLAN に注意）確認してください");
             }
         }
 
@@ -843,6 +862,17 @@ namespace ChatterMascot
 
             if (_discovering) PollDiscovery();
 
+            // ★ 接続先はセッション中固定（探索で決めた場合も）。Mac のアドレスが変わるとアプリを
+            //   起動し直すしかなく、これが無いと端末側にはそれが伝わらない
+            if (_client != null && !_warnedUnreachable
+                && _client.ConsecutiveConnectFailures >= ConnectFailureNoticeCount)
+            {
+                _warnedUnreachable = true;
+                Debug.LogWarning("[Mascot] サーバーに繋がりません。サーバーが動いているか、接続先が変わっていないか確認してください");
+                DeviceToast.Show("サーバーに繋がりません\nMac のサーバーが動いているか確認してください。\n" +
+                                 "接続先が変わったときはアプリを起動し直してください");
+            }
+
             // ack の間引き送出と、無受信 watchdog
             _client?.Tick();
 
@@ -948,6 +978,7 @@ namespace ChatterMascot
         private void OnConnected()
         {
             _warnedBadFrame = false;
+            _warnedUnreachable = false;
             _audioDeclarationChecked = false;
             Dispatch(PlaybackEvent.Connected());
         }

@@ -105,6 +105,10 @@ namespace ChatterMascot.Net
         private ClientWebSocket _socket;
         private bool _closed;
         private int _attempt;
+        private int _consecutiveConnectFailures;
+
+        /// <summary>接続の確立に続けて失敗した回数。成功すると 0 に戻る。</summary>
+        public int ConsecutiveConnectFailures => _consecutiveConnectFailures;
         private long _openedAtMs;
         private long _lastReceivedAtMs;
 
@@ -206,6 +210,7 @@ namespace ChatterMascot.Net
                     catch (OperationCanceledException)
                     {
                         if (_closed) break;
+                        _consecutiveConnectFailures++;
                         Warn?.Invoke($"接続エラー: 接続が {ConnectTimeoutMs / 1000} 秒以内に確立しませんでした");
                         AbortAndDispose(socket);
                         await BackoffAsync();
@@ -214,6 +219,7 @@ namespace ChatterMascot.Net
                     catch (Exception e)
                     {
                         if (_closed) break;
+                        _consecutiveConnectFailures++;
                         // 起動直後にサーバーが居ないのは通常のこと。毎回スタックを出さない
                         var detail = DescribeExceptionChain(e);
                         var message = "接続エラー: " + detail;
@@ -228,6 +234,7 @@ namespace ChatterMascot.Net
                     }
                 }
 
+                _consecutiveConnectFailures = 0;
                 _openedAtMs = NowMs();
                 _lastReceivedAtMs = _openedAtMs;
                 _warnedAckFailure = false;

@@ -1,15 +1,11 @@
 import * as os from "os";
 import ciao from "@homebridge/ciao";
-import { isLoopbackAddress } from "./loopback";
-
-/** LAN から繋がらない bind か。広告は LAN に出るときだけ要る */
-export function isLoopbackBind(host: string): boolean {
-  return isLoopbackAddress(host) || host === "localhost";
-}
 
 /** ciao のサービスのうち、ここが触る面だけ */
 interface MdnsService {
   advertise(): Promise<void>;
+  /** 衝突で改名された後の、現在の名前 */
+  getFQDN(): string;
   on(event: "name-change", listener: (name: string) => void): unknown;
 }
 
@@ -26,6 +22,9 @@ export interface MdnsResponder {
   }): MdnsService;
   shutdown(): Promise<void>;
 }
+
+/** 起動時に LAN のインターフェースが無かったとき、現れるのを待つ間隔 */
+const INTERFACE_RECHECK_MS = 10_000;
 
 type NetworkInterfaces = NodeJS.Dict<os.NetworkInterfaceInfo[]>;
 
@@ -59,8 +58,9 @@ export function addressOptionsForHost(host: string): { disabledIpv6?: boolean; r
  *   `networksetup -getairportnetwork` の出力で判定するが、接続中でも「未接続」と答える macOS が
  *   あり、その Wi-Fi を外す —— いちばん使う経路に広告が出ない。名前を渡せばこの判定を通らない。
  *
- * ponytail: 起動時に1回だけ決める。既存のインターフェースのアドレスの変化は ciao が追うが、
- * 後から増えたもの（Wi-Fi から有線への乗り換えなど）は server の再起動まで拾わない
+ * ponytail: 広告を始めた時点の一覧で決める。既存のインターフェースのアドレスの変化は ciao が追うが、
+ * 広告を始めた後に増えたもの（Wi-Fi から有線への乗り換えなど）は server の再起動まで拾わない。
+ * 起動時に空だった場合だけは、現れるまで待つ
  */
 export function interfacesForHost(host: string, interfaces: NetworkInterfaces): string[] {
   const listens = (addr: os.NetworkInterfaceInfo) => {
@@ -92,40 +92,63 @@ export function startMdnsAdvertiser(
     );
 
   let responder: MdnsResponder | undefined;
-  try {
-    const interfaces = interfacesForHost(opts.host, (deps.networkInterfaces ?? os.networkInterfaces)());
-    if (interfaces.length === 0) {
-      failed(`host=${opts.host} で待ち受けている LAN のインターフェースがありません`);
-      return { stop: () => Promise.resolve() };
-    }
-    responder = (deps.getResponder ?? ((o) => ciao.getResponder(o) as unknown as MdnsResponder))({
-      interface: interfaces,
-    });
-    const name = (deps.hostname ?? os.hostname)().replace(/\.local$/, "");
-    const service = responder.createService({
-      name,
-      // ★ **ホスト名をサービス名から導かせないこと**（ciao の既定）。サービス名は Mac の
-      //   ホスト名そのものなので、OS の mDNS 応答器が持つ `<host>.local` と probing で衝突し、
-      //   負けた側が改名される —— Mac 自身のホスト名が書き換わりうる
-      hostname: `${name}-chatter-agent`,
-      type: "chatter-agent",
-      port: opts.port,
-      txt: { version: opts.version },
-      ...addressOptionsForHost(opts.host),
-    });
-    service.on("name-change", (n) => log(`[mDNS] 名前が衝突したので変わりました: ${n}`));
-    service
-      .advertise()
-      .then(
-        () => log(`[mDNS] 広告しました: ${name} (_chatter-agent._tcp, port ${opts.port}, ${interfaces.join(" / ")})`),
+  let timer: NodeJS.Timeout | undefined;
+  const currentInterfaces = () => interfacesForHost(opts.host, (deps.networkInterfaces ?? os.networkInterfaces)());
+
+  const begin = (interfaces: string[]) => {
+    try {
+      responder = (deps.getResponder ?? ((o) => ciao.getResponder(o) as unknown as MdnsResponder))({
+        interface: interfaces,
+      });
+      const name = (deps.hostname ?? os.hostname)().replace(/\.local$/, "");
+      const service = responder.createService({
+        name,
+        // ★ **ホスト名をサービス名から導かせないこと**（ciao の既定）。サービス名は Mac の
+        //   ホスト名そのものなので、OS の mDNS 応答器が持つ `<host>.local` と probing で衝突し、
+        //   負けた側が改名される —— Mac 自身のホスト名が書き換わりうる
+        hostname: `${name}-chatter-agent`,
+        type: "chatter-agent",
+        port: opts.port,
+        txt: { version: opts.version },
+        ...addressOptionsForHost(opts.host),
+      });
+      service.on("name-change", (n) => log(`[mDNS] 名前が衝突したので変わりました: ${n}`));
+      service.advertise().then(
+        // ★ 送信の失敗（ローカルネットワークの未許可など）を ciao は握りつぶして resolve する。
+        //   これは「届いている」ではなく「始めた」の記録
+        () => log(`[mDNS] 広告を始めました: ${service.getFQDN()} (port ${opts.port}, ${interfaces.join(" / ")})`),
         failed,
       );
+    } catch (err) {
+      failed(err);
+    }
+  };
+
+  try {
+    const interfaces = currentInterfaces();
+    if (interfaces.length > 0) {
+      begin(interfaces);
+    } else {
+      warn(
+        `[mDNS] host=${opts.host} で待ち受けている LAN のインターフェースがありません。現れるまで待ちます（Android からは、それまで自動で見つけられません）`,
+      );
+      timer = setInterval(() => {
+        const found = currentInterfaces();
+        if (found.length === 0) return;
+        clearInterval(timer);
+        timer = undefined;
+        begin(found);
+      }, INTERFACE_RECHECK_MS);
+      timer.unref();
+    }
   } catch (err) {
     failed(err);
   }
 
   return {
     stop: async () => {
+      clearInterval(timer);
+      timer = undefined;
       try {
         await responder?.shutdown();
       } catch (err) {

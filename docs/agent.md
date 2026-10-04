@@ -347,7 +347,8 @@ macOS 限定。Windows は single-instance プラグインで同じ口にでき�
 （→ [`knowledge/mascot-android-xr.md`](./knowledge/mascot-android-xr.md)「繋がらないときの症状と切り分け」）。
 
 mDNS での広告（`_chatter-agent._tcp`。→ [`protocol.md`](./protocol.md)「発見（DNS-SD）」）も、同じ
-「ローカルネットワーク」の許可の対象になる。ChatterAgent から起こしたときに広告が通るかは未確認。
+「ローカルネットワーク」の許可の対象になる。ChatterAgent から起こしたときに広告が通るかは未確認。`広告を始めました` のログは許可が無くても出る
+（ciao は EPERM などの送信エラーを握りつぶす）ので、広告が LAN に届いている証拠にはならない。
 
 ## 制約
 

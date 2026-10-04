@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isLoopbackAddress } from "./loopback";
+import { isLoopbackAddress, isLoopbackBind } from "./loopback";
 
 describe("isLoopbackAddress", () => {
   it("IPv4 / IPv6 のループバックを通す", () => {
@@ -60,5 +60,13 @@ describe("isLoopbackAddress", () => {
     expect(isLoopbackAddress("127.0.0.256")).toBe(false);
     expect(isLoopbackAddress("127.0.0.x")).toBe(false);
     expect(isLoopbackAddress("127.0.0. 1")).toBe(false);
+  });
+});
+
+describe("isLoopbackBind", () => {
+  it("ループバックと localhost だけが真", () => {
+    expect(isLoopbackBind("127.0.0.1")).toBe(true);
+    expect(isLoopbackBind("localhost")).toBe(true);
+    expect(isLoopbackBind("0.0.0.0")).toBe(false);
   });
 });

@@ -59,7 +59,7 @@ namespace ChatterMascot.Net
             }
         }
 
-        /// <summary>解決できていれば <c>true</c>。</summary>
+        /// <summary>解決できていれば <c>true</c>。結果は1回受け取ると Java 側から消える。</summary>
         public static bool TryTake(out string host, out int port, out string name)
         {
             host = null;
@@ -71,7 +71,7 @@ namespace ChatterMascot.Net
             {
                 using (var java = new AndroidJavaClass(JavaClass))
                 {
-                    var result = java.CallStatic<string[]>("poll");
+                    var result = java.CallStatic<string[]>("take");
                     if (result == null || result.Length < 3) return false;
                     if (!int.TryParse(result[1], out port)) return false;
                     host = result[0];

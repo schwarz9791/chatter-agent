@@ -1,12 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import type * as os from "os";
-import {
-  addressOptionsForHost,
-  interfacesForHost,
-  isLoopbackBind,
-  startMdnsAdvertiser,
-  type MdnsResponder,
-} from "./mdns";
+import { addressOptionsForHost, interfacesForHost, startMdnsAdvertiser, type MdnsResponder } from "./mdns";
 
 const iface = (address: string, family: "IPv4" | "IPv6", internal = false) =>
   ({ address, family, internal }) as os.NetworkInterfaceInfo;
@@ -18,7 +12,11 @@ const INTERFACES = {
 };
 
 function setup(advertise: () => Promise<void> = () => Promise.resolve(), shutdown = () => Promise.resolve()) {
-  const createService = vi.fn((_options: unknown) => ({ advertise, on: vi.fn() }));
+  const createService = vi.fn((_options: unknown) => ({
+    advertise,
+    on: vi.fn(),
+    getFQDN: () => "my-mac._chatter-agent._tcp.local.",
+  }));
   const responder = { createService, shutdown: vi.fn(shutdown) } as unknown as MdnsResponder;
   const getResponder = vi.fn((_options: { interface: string[] }) => responder);
   const log = vi.fn();
@@ -51,14 +49,6 @@ describe("interfacesForHost", () => {
   });
 });
 
-describe("isLoopbackBind", () => {
-  it("ループバックと localhost だけが真", () => {
-    expect(isLoopbackBind("127.0.0.1")).toBe(true);
-    expect(isLoopbackBind("localhost")).toBe(true);
-    expect(isLoopbackBind("0.0.0.0")).toBe(false);
-  });
-});
-
 describe("startMdnsAdvertiser", () => {
   it("種別・ポート・バージョンだけを載せ、成功を記録する", async () => {
     const { createService, getResponder, log, start } = setup();
@@ -73,15 +63,49 @@ describe("startMdnsAdvertiser", () => {
       txt: { version: "1.2.3" },
       disabledIpv6: true,
     });
-    expect(log).toHaveBeenCalledWith("[mDNS] 広告しました: my-mac (_chatter-agent._tcp, port 8765, en0)");
+    expect(log).toHaveBeenCalledWith("[mDNS] 広告を始めました: my-mac._chatter-agent._tcp.local. (port 8765, en0)");
   });
 
-  it("待ち受けているインターフェースが無ければ responder を作らず、警告を出す", async () => {
-    const { getResponder, warn, start } = setup();
-    const adv = start("0.0.0.0", { lo0: INTERFACES.lo0 });
-    expect(getResponder).not.toHaveBeenCalled();
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("広告できませんでした"));
-    await expect(adv.stop()).resolves.toBeUndefined();
+  describe("インターフェースが無いまま起動したとき", () => {
+    it("警告を1回だけ出して待ち、現れたら広告する", () => {
+      vi.useFakeTimers();
+      try {
+        const { getResponder, createService, warn, start } = setup();
+        const interfaces: NodeJS.Dict<os.NetworkInterfaceInfo[]> = { lo0: INTERFACES.lo0 };
+        start("0.0.0.0", interfaces);
+        expect(getResponder).not.toHaveBeenCalled();
+        expect(warn).toHaveBeenCalledTimes(1);
+
+        vi.advanceTimersByTime(30_000);
+        expect(getResponder).not.toHaveBeenCalled();
+
+        interfaces.en0 = INTERFACES.en0;
+        vi.advanceTimersByTime(10_000);
+        expect(getResponder).toHaveBeenCalledWith({ interface: ["en0"] });
+        expect(createService).toHaveBeenCalledTimes(1);
+
+        vi.advanceTimersByTime(60_000);
+        expect(getResponder).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("stop で待ちを止める。以後 responder は作られない", async () => {
+      vi.useFakeTimers();
+      try {
+        const { getResponder, start } = setup();
+        const interfaces: NodeJS.Dict<os.NetworkInterfaceInfo[]> = { lo0: INTERFACES.lo0 };
+        const adv = start("0.0.0.0", interfaces);
+        await expect(adv.stop()).resolves.toBeUndefined();
+        interfaces.en0 = INTERFACES.en0;
+        vi.advanceTimersByTime(60_000);
+        expect(getResponder).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it("advertise が reject しても投げず、警告を出す", async () => {

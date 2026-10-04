@@ -258,8 +258,8 @@ CHATTER_AGENT_PORT=8571 ./scripts/run-android.sh
 探索は `NsdManager` で DNS-SD の `_chatter-agent._tcp` を探す（`ServerDiscovery.java`。サーバーは
 非ループバックで待ち受けているときだけ広告し、インスタンス名は Mac のホスト名）。
 トークンを条件にするのは、非ループバックの接続にトークンが要るため。トークンが無ければ従来どおり既定
-（`adb reverse` の経路は `connection` が空であることに頼る）。見つかるまで探し続け、ループバックへは
-倒さない。複数の Mac が見つかったら最初に解決できた1台に繋ぐ。パーミッションは足さない。
+（`adb reverse` の経路は `connection` が空であることに頼る）。見つかるまで探索を一定間隔で張り直し続け（解決の失敗や後から起動したサーバーも拾う）、ループバックへは
+倒さない。繋がらない状態が続けば端末の通知で知らせる（接続先は起動中固定）。複数の Mac が見つかったら最初に解決できた1台に繋ぐ。パーミッションは足さない。
 
 トークンは `connection.token` からしか読まない
 （起動引数は無い）。**`-serverUrl` で接続先を上書きしたときは `connection.token` を使わない**
@@ -299,10 +299,10 @@ mDNS が通らない環境では接続先を明示する。
 （先にサーバーを起動しておくこと）。端末側の `settings.json` は `adb pull` → `connection` だけ
 差し替え → `adb push` するので、共有キー（音量・ミュートなど）は消えない。
 
-★ 別ルートの検証用サーバー（`XDG_CONFIG_HOME` / `CHATTER_AGENT_PORT` を変えて立てたもの）に
-繋ぐときは、`configure-android.sh` を呼ぶときにも**同じ** `XDG_CONFIG_HOME` / `CHATTER_AGENT_PORT`
-を渡すこと。揃えないとトークンファイルの場所がずれ、常用のサーバーのトークンを
-書いてしまう（接続先を明示するときは既定ポートもずれる）。
+★ 別ルートの検証用サーバー（`XDG_CONFIG_HOME` を変えて立てたもの）に繋ぐときは、
+`configure-android.sh` を呼ぶときにも**同じ** `XDG_CONFIG_HOME` を渡すこと。揃えないとトークン
+ファイルの場所がずれ、常用のサーバーのトークンを書いてしまう。`CHATTER_AGENT_PORT` は読まないので、
+接続先を明示するときはポートを URL に書く。
 
 ★★ **`adb reverse`（`10.0.2.2` 経由を含む）は、サーバーから見るとループバック接続になる。**
 ループバックはトークンを免除されるので、トークン無し・誤りのどちらでも繋がってしまい、
@@ -345,7 +345,7 @@ Android のログは `adb logcat -s Unity`。★★ **Android では 401 と「�
 | `[Mascot] serverUrl: 既定を使います ("ws://127.0.0.1:8570")` | 設定が読まれていない。パス違い・JSON が壊れている・`connection.serverUrl` が不正（警告が出る） | `adb shell cat /sdcard/Android/data/tech.sukima.chattermascot/files/settings.json`。`adb reverse` が張られていると既定のままでも繋がってしまい気付かない |
 | `[Mascot] serverUrl: 設定ファイルに接続先が無いので LAN から探します…` のまま `LAN でサーバーが見つかりません`（端末にも通知）。logcat `ChatterMascot` タグの `ServerDiscovery:` に `見つけました` が出ない | サーバーがループバックで待ち受けていて広告されていない／別の Wi-Fi・VLAN／AP やクライアントの分離で mDNS が届かない | Mac 側の起動ログで host が `0.0.0.0` か。端末と Mac が同じネットワークか。届かないなら `configure-android.sh ws://<ip>:<port>` で明示する |
 | `ServerDiscovery: 見つけました` が出るが別の Mac に繋がる／繋がった後 `401` | 複数の Mac が広告していると最初に解決できた1台を使う。トークンはその Mac のものと一致している必要がある | ログの `LAN で見つけた <名前>` を見る。意図した Mac でなければ接続先を明示する |
-| `ServerDiscovery: 解決できません: … error=…` | 見つけたが名前解決に失敗した（見つけた別の広告があれば、そちらを試す） | 同じネットワークか。Mac 側のサーバーを再起動する |
+| `ServerDiscovery: 解決できません: … error=…` | 見つけたが名前解決に失敗した（次の探索の張り直しで再び試す） | 同じネットワークか。Mac 側のサーバーを再起動する |
 | `[Mascot] serverUrl: 起動引数を使います (…)` | `-serverUrl` が設定より優先されている | 起動引数を外す |
 
 #### ★★ close フレーム無しで切れた後、Android では `Abort` しないと再接続が止まる

@@ -49,7 +49,8 @@ import {
 import { createDispatcher, type Dispatcher } from "./dispatcher";
 import { createHttpServer } from "./httpServer";
 import { ensureServerToken } from "./lanToken";
-import { isLoopbackBind, startMdnsAdvertiser } from "./mdns";
+import { isLoopbackBind } from "./loopback";
+import { startMdnsAdvertiser } from "./mdns";
 import { createWsServer } from "./wsServer";
 
 /**

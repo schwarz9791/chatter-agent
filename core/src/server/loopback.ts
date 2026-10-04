@@ -52,3 +52,8 @@ export function isLoopbackAddress(address: string | undefined | null): boolean {
 
   return false;
 }
+
+/** LAN から繋がらない bind か。広告は LAN に出るときだけ要る */
+export function isLoopbackBind(host: string): boolean {
+  return isLoopbackAddress(host) || host === "localhost";
+}

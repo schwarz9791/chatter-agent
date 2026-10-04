@@ -19,6 +19,7 @@ import * as os from "os";
 import * as path from "path";
 import { createConfigStore, type TtsEngineKind } from "../core/config";
 import { acquireLock } from "../core/lock";
+import { VERSION } from "../core/version";
 import {
   getAnimationsDir,
   getModelsDir,
@@ -48,7 +49,8 @@ import {
 import { createDispatcher, type Dispatcher } from "./dispatcher";
 import { createHttpServer } from "./httpServer";
 import { ensureServerToken } from "./lanToken";
-import { isLoopbackAddress } from "./loopback";
+import { isLoopbackBind } from "./loopback";
+import { startMdnsAdvertiser } from "./mdns";
 import { createWsServer } from "./wsServer";
 
 /**
@@ -178,7 +180,7 @@ function installShutdown(cleanup: () => Promise<void>): void {
  *   **トークンの値そのものは出さない**（→ `server/lanToken.ts`）。
  */
 function logLanReachability(host: string, port: number, tokenPath: string): void {
-  if (isLoopbackAddress(host) || host === "localhost") {
+  if (isLoopbackBind(host)) {
     console.log(`[Server] LAN からは繋げません（host=${host}）。Android から繋ぐなら host を 0.0.0.0 に`);
     return;
   }
@@ -551,6 +553,10 @@ async function main(): Promise<void> {
     console.log("[Server] ttsEnabled=false: 音声は配りません（クライアントは無音で ack します）");
   }
   logLanReachability(bound.host, bound.port, tokenPath);
+  // ★ LAN に出るときだけ広告する。待たない（結果はログに出る）
+  const advertiser = isLoopbackBind(bound.host)
+    ? undefined
+    : startMdnsAdvertiser({ host: bound.host, port: bound.port, version: VERSION });
 
   // ★ サーバーは1台しかいない前提（上のロック）なので、「2台目が1台目のキューを消す」
   //   事故はここでは考えなくてよい。掃除は STARTUP_KEEP_MS の時間条件だけで判断する
@@ -599,9 +605,9 @@ async function main(): Promise<void> {
     // ★ **step は2つまで。** `SHUTDOWN_STEP_TIMEOUT_MS`(2500) × 2 = 5000ms で
     //   `SHUTDOWN_TIMEOUT_MS`(6000) の内側に収まるが、3つ目を足すと 7500ms になって
     //   watchdog に食われる。この Issue で枠を使い切った。
-    //   ★ Ollaya も同じ枠に同居させる（並行に stop する。3つ目の named step にしない）
-    await step("合成エンジン / Ollaya", async () => {
-      await Promise.all([engine?.stop(), ollayaEngine?.stop()]);
+    //   ★ Ollaya と mDNS の goodbye も同じ枠に同居させる（並行に stop する。named step にしない）
+    await step("合成エンジン / Ollaya / mDNS", async () => {
+      await Promise.all([engine?.stop(), ollayaEngine?.stop(), advertiser?.stop()]);
     });
     // ★ isStale() は所有印が読めるなら pid の生死だけで判定する（core/lock.ts）。
     //   このサーバーは常駐で staleMs（既定60秒）をとうに超えて動き続けるが、

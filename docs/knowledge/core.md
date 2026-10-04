@@ -590,6 +590,27 @@ delta 単位の早期確定を復活させるなら同じ回帰をもう一度�
 パーセントエンコード形はそのまま送信されるので、検査にはこちらを使う（`assetPath.ts` が
 URL デコードしない設計になっているのが効いている）。
 
+## mDNS の広告（`@homebridge/ciao`）で踏んだこと
+
+確かめ方は Mac の `dns-sd` で足りる。`dns-sd -B _chatter-agent._tcp`（一覧。止めると `Rmv` が出る）、
+`dns-sd -L <名前> _chatter-agent._tcp`（ポートと TXT）、`dns-sd -G v4v6 <名前>-chatter-agent.local`
+（どのインターフェースにどのアドレスを答えているか）。
+
+### ★★ ホスト名をサービス名から導かせない
+
+ciao はホスト名を省略するとサービス名から作る。サービス名を Mac のホスト名にしているので、そのままだと
+OS の mDNSResponder が持つ `<host>.local` を ciao も名乗り、probing で衝突する。負けた側が改名されるので、
+**Mac 自身のホスト名が書き換わりうる。** `<host>-chatter-agent` を別に渡している（`server/mdns.ts`）。
+
+### ★★ 広告先のインターフェースを ciao に選ばせない
+
+ciao は macOS で `arp -a` から候補を拾い、Wi-Fi は `networksetup -getairportnetwork <if>` が
+`Current Wi-Fi Network:` を返すものだけ残す。**Wi-Fi に繋がっているのに
+`You are not associated with an AirPort network.` を返す macOS がある**ので、en0 が外れて、
+lo0 と仮想 NIC にしか広告が出なかった。`server/mdns.ts` の `interfacesForHost` で bind 先の
+インターフェース名を渡し、この判定を通らないようにしている（2026-10-04、Darwin 27 / Wi-Fi 接続の
+MacBook で確認。インターフェースを渡したら en0 のアドレスで答えるようになった）。
+
 ## 既知の欠落
 
 移植した `cleanTextForSpeech` が扱えていない記法がある。上流にもこれを保持する意図のテストは無く、

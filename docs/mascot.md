@@ -427,7 +427,7 @@ cd chatter-mascot
 ADB=~/Library/Android/sdk/platform-tools/adb
 APP=tech.sukima.chattermascot
 
-./scripts/configure-android.sh   # 接続先とトークンを書いて、アプリを起動し直す
+./scripts/configure-android.sh   # 引数なしならトークンだけ書いて（接続先は端末が LAN で探す）、アプリを起動し直す
                                  # → この起動で同期が走る（まだ見た目は変わらない）
 
 # 同期が終わったら、もう一度起動し直すと反映される
@@ -580,6 +580,18 @@ Mac のサーバーに届く。サーバーから見るとループバック接�
 { "connection": { "serverUrl": "ws://192.168.1.10:8570", "token": "…" } }
 ```
 
+**既定は自動検出。** `configure-android.sh` を引数なしで実行すると `serverUrl` を空にしてトークンだけを書き、
+端末は LAN の DNS-SD（`_chatter-agent._tcp`、`NsdManager`）で Mac のサーバーを探して繋ぐ。
+接続先の優先順位は `-serverUrl`（起動引数）＞ `connection.serverUrl` ＞ **探索（Android かつ
+`connection.token` あり）** ＞ `[SerializeField]` の既定（`ws://127.0.0.1:8570`）。明示した値は上書きしない。
+トークンが空のときは探さず既定のまま（B の `adb reverse` は `connection` が空であることに頼る）。
+見つかるまで探索を一定間隔で張り直し続け（解決の失敗や後から起動したサーバーも拾う）、既定の
+ループバックへは倒さない。一定時間見つからなければログと端末の通知で確認事項を1回だけ知らせる。
+接続先は起動中固定なので、繋がらない状態が続いたときも端末の通知で知らせる（Mac のアドレスが変わったときは
+アプリを起動し直す）。複数の Mac が見つかったときは最初に解決できた1台を使う。
+
+mDNS が通らない環境（AP / クライアント分離、別の Wi-Fi・VLAN）では、`ws://<ip>:<port>` を明示する。
+
 Mac 側はサーバーを LAN に公開してから使う。
 
 ```bash
@@ -587,8 +599,8 @@ CHATTER_AGENT_HOST=0.0.0.0 npm run start:server
 ```
 
 ```bash
-./scripts/configure-android.sh                          # en0/en1 の IP + CHATTER_AGENT_PORT（既定 8570）から自動組み立て
-./scripts/configure-android.sh ws://192.168.1.10:8570    # 接続先を明示
+./scripts/configure-android.sh                          # 接続先を空にして端末に探させる（mDNS）
+./scripts/configure-android.sh ws://192.168.1.10:8570    # 接続先を明示（mDNS が通らないとき）
 ./scripts/configure-android.sh --no-restart              # 端末側のアプリを再起動しない
 ```
 
@@ -610,8 +622,8 @@ CHATTER_AGENT_PORT=8571 ./scripts/run-android.sh
 ```
 
 B・C どちらの経路でもこのポートへ向ける。C（`configure-android.sh`）を使うときは、
-サーバーに渡したのと同じ `XDG_CONFIG_HOME` / `CHATTER_AGENT_PORT` を `configure-android.sh`
-にも渡すこと（下の「落とし穴」）。
+サーバーに渡したのと同じ `XDG_CONFIG_HOME` を `configure-android.sh` にも渡すこと（トークンの
+場所を揃える。下の「落とし穴」）。接続先を明示するときはポートを URL に書く。
 
 #### 落とし穴
 
@@ -624,8 +636,10 @@ B・C どちらの経路でもこのポートへ向ける。C（`configure-andro
   を起動してから使うこと
 - `settings.json` は起動時にしか読まれない。書き換えても反映は次回の起動から
   （`--no-restart` を使ったときも同じ）
-- 別ルートのサーバー（D）を使うときは、`configure-android.sh` にも同じ `XDG_CONFIG_HOME` と
-  `CHATTER_AGENT_PORT` を渡す。渡さないと常用サーバーのトークンとポートを書き込んでしまう
+- 別ルートのサーバー（D）を使うときは、`configure-android.sh` にも同じ `XDG_CONFIG_HOME` を
+  渡す。渡さないと常用サーバーのトークンを書き込んでしまう（`CHATTER_AGENT_PORT` は読まない。
+  接続先を明示するならポートは URL に書く）。自動検出は最初に見つかった1台に繋ぐので、サーバーを複数立てているときは
+  接続先を明示する
 
 ### Android 側の必須設定
 
@@ -638,7 +652,8 @@ B・C どちらの経路でもこのポートへ向ける。C（`configure-andro
 - `<uses-feature android:name="android.software.xr.api.openxr" android:required="true" android:version="0x00010001" />`
 
 接続先の手動入力（`settings.json` の `connection.serverUrl` / `configure-android.sh`）はすでに
-入っている。mDNS によるサーバー自動検出（`NsdManager`）は未着手。
+入っている。mDNS によるサーバー自動検出（`NsdManager`）は接続先が空でトークンがあるときに働き、
+追加のパーミッションは要らない。
 
 [公式のプロジェクトセットアップ手順](https://developer.android.com/develop/xr/unity/setup)に従うこと。
 

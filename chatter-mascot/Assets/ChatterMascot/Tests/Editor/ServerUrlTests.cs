@@ -40,5 +40,18 @@ namespace ChatterMascot.Tests
         {
             Assert.That(ServerUrl.ToHttpBase("wss://mascot.example:8570"), Is.EqualTo("https://mascot.example:8570"));
         }
+
+        [TestCase("192.168.1.5", 8570, "ws://192.168.1.5:8570")]
+        [TestCase("fe80::1", 8570, "ws://[fe80::1]:8570")]
+        [TestCase("[fe80::1]", 8570, "ws://[fe80::1]:8570")]
+        [TestCase("", 8570, null)]
+        [TestCase(null, 8570, null)]
+        [TestCase("192.168.1.5", 0, null)]
+        [TestCase("192.168.1.5", 70000, null)]
+        [TestCase("bad host", 8570, null)]
+        public void BuildsFromHostPort(string host, int port, string expected)
+        {
+            Assert.That(ServerUrl.FromHostPort(host, port), Is.EqualTo(expected));
+        }
     }
 }

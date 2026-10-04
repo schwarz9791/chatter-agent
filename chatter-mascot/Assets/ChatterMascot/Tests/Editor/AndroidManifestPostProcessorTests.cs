@@ -189,6 +189,19 @@ namespace ChatterMascot.Tests
             Assert.That(activities[1].Attribute(AndroidNs + "name")?.Value, Is.EqualTo(LauncherClass));
         }
 
+        [TestCase(36)]
+        public void CheckTargetSdkAcceptsPinnedValue(int targetSdk)
+        {
+            Assert.DoesNotThrow(() => AndroidManifestPostProcessor.CheckTargetSdk(targetSdk));
+        }
+
+        [TestCase(0)]
+        [TestCase(37)]
+        public void CheckTargetSdkRejectsAutomaticAndNewer(int targetSdk)
+        {
+            Assert.Throws<BuildFailedException>(() => AndroidManifestPostProcessor.CheckTargetSdk(targetSdk));
+        }
+
         [Test]
         public void ThrowsWhenUnityActivityIsMissing()
         {

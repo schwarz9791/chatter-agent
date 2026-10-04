@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Xml.Linq;
+using UnityEditor;
 using UnityEditor.Android;
 using UnityEditor.Build;
 using UnityEngine;
@@ -33,6 +34,10 @@ namespace ChatterMascot.EditorTools
     /// ★ <b>プラットフォームガードは要らない。</b> このフックは Android ビルドのときにしか
     ///   呼ばれない（Unity 側の契約）。
     ///
+    /// ★ <b>このフックは targetSdk も検査する。</b> このマニフェストは targetSdk 36 以下を前提にしていて、
+    ///   <c>ACCESS_LOCAL_NETWORK</c> を宣言していない。<c>Automatic</c> は黙って上がりうるので、
+    ///   LAN への接続が無言で死ぬ APK を出す代わりにビルドを止める。
+    ///
     /// ★ <b>失敗したらビルドを止めること。</b> 注入が抜けた APK はループバック接続の間は
     ///   気づけず、LAN 上のホストへ http で繋いだときに初めて実行時に落ちる
     ///   （→ <see cref="AndroidPlayerSettings"/> の <c>insecureHttpOption</c>）。
@@ -50,6 +55,8 @@ namespace ChatterMascot.EditorTools
         /// <summary><paramref name="path"/> は unityLibrary モジュールのルート。</summary>
         public void OnPostGenerateGradleAndroidProject(string path)
         {
+            CheckTargetSdk((int)PlayerSettings.Android.targetSdkVersion);
+
             var manifestPath = Path.Combine(path, "src", "main", "AndroidManifest.xml");
             if (!File.Exists(manifestPath))
             {
@@ -75,6 +82,21 @@ namespace ChatterMascot.EditorTools
             {
                 throw new BuildFailedException($"[Build] AndroidManifest.xml を編集できませんでした: {e.Message}");
             }
+        }
+
+        /// <summary>
+        /// targetSdk が <c>Automatic</c>（0）または 37 以上なら <see cref="BuildFailedException"/>。
+        /// テストから呼ぶために <c>public</c>。
+        /// </summary>
+        public static void CheckTargetSdk(int targetSdk)
+        {
+            if (targetSdk > 0 && targetSdk < 37) return;
+
+            throw new BuildFailedException(
+                $"[Build] targetSdk が {targetSdk}（0 は Automatic）です。36 に固定してください: "
+                + "./scripts/run.sh ChatterMascot.EditorTools.AndroidPlayerSettings.FixAll"
+                + "。37 以上へ上げるには ACCESS_LOCAL_NETWORK の宣言とランタイム要求が要ります"
+                + "（docs/knowledge/mascot-android-xr.md「ネットワークまわりの根拠と未着手」）");
         }
 
         /// <summary>

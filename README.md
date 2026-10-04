@@ -193,7 +193,7 @@ How the server and client pair up depends on the case. See
 |---|---|---|
 | A. Mac only | `cd core && npm run start:server` | macOS app / CLI player |
 | B. Emulator or a USB-connected device, against the Mac's server | Start it as-is (listens on loopback only by default) | `./scripts/run-android.sh` (goes over `adb reverse`, so it needs neither a token nor exposing the server to the LAN. Keep the device's `connection` empty — `./scripts/configure-android.sh --clear`) |
-| C. Over the LAN (a Wi-Fi device) | `CHATTER_AGENT_HOST=0.0.0.0 npm run start:server` | `./scripts/configure-android.sh` → `./scripts/run-android.sh` |
+| C. Over the LAN (a Wi-Fi device) | `CHATTER_AGENT_HOST=0.0.0.0 npm run start:server` | XR: enter the 4-digit PIN shown by ChatterAgent's "Pair with Android…" into the device's settings panel ("Pair…"). Non-XR devices, or when mDNS doesn't reach: `./scripts/configure-android.sh` → `./scripts/run-android.sh` |
 | D. Running Mac and Android at once | A second server on its own runtime root and port | Case B or C, pointed at that port |
 
 ```bash
@@ -212,8 +212,14 @@ cd chatter-mascot
 ./scripts/run-android.sh
 ```
 
+On Android XR, case C works without adb once the app is installed. Start the server with `0.0.0.0`, put the device and the Mac on the same Wi-Fi, then:
+
+1. Open "Pair with Android…" from ChatterAgent's menu (a 4-digit PIN appears; valid for 5 minutes, 5 wrong tries allowed)
+2. In the device's settings panel, open "Pair…", enter the PIN, and press "Pair"
+3. On success the token is saved on the device and it reconnects on the spot (no restart; the device finds the Mac over mDNS)
+
 ```bash
-# Android (case C: over the LAN)
+# Android (case C: over the LAN. A non-XR device, or when mDNS doesn't reach)
 cd chatter-mascot
 ./scripts/configure-android.sh          # the device finds the Mac on the LAN (mDNS)
 ./scripts/run-android.sh                # installs, launches, and streams logcat
@@ -248,7 +254,7 @@ The model can be swapped from ChatterAgent's settings panel, and motions can be 
 
 **Android XR uses the same directories** (under `Android/data/tech.sukima.chattermascot/files/` on the
 device), but **you don't need `adb push`.** Once the connection target and token are configured
-(`configure-android.sh`), it fetches automatically from the server's `GET /v1/assets` on every launch
+(pairing, or `configure-android.sh`), it fetches automatically from the server's `GET /v1/assets` on every launch
 (default `auto`; takes effect from the next launch). Manually placed files still work too, and take
 priority over synced ones. **The two files directly under those directories are still fixed names: it
 reads only `models/mascot.vrm` and `animations/idle.vrma`.** The free-form name in the table above

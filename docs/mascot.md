@@ -429,6 +429,8 @@ APP=tech.sukima.chattermascot
 
 ./scripts/configure-android.sh   # 引数なしならトークンだけ書いて（接続先は端末が LAN で探す）、アプリを起動し直す
                                  # → この起動で同期が走る（まだ見た目は変わらない）
+                                 # XR 端末でペアリング済みなら不要（→ 下の「接続」の C）。
+                                 # ペアリングで繋ぎ直したときも、同期は走る
 
 # 同期が終わったら、もう一度起動し直すと反映される
 $ADB shell am force-stop $APP
@@ -500,6 +502,7 @@ $ADB shell chmod -R 777 $D/animations
 |---|---|
 | ミュート | ON/OFF。**その場で反映**される |
 | 大きさ | 下の「置き場所と大きさ」。**その場で反映**される |
+| 接続 / ペアリング… | LAN の server とペアリングしてトークンを受け取る。押すとサブページへ移る（下の「ペアリング」）。**繋ぎ直しはその場で反映**される |
 | モデルとモーションを同期 | ON/OFF。**次回の起動から反映**（→ 上「モデルとモーションを入れる」） |
 | 今すぐ同期 | 起動時と同じ同期をその場で走らせる。反映は次回の起動から。同期が OFF の間と、同期が走っている間は押せない |
 | モーションを確認 / 再生 | 保存しない一時的な選択 |
@@ -510,7 +513,29 @@ $ADB shell chmod -R 777 $D/animations
 | すべての設定をリセット | 接続先は残し、同期済みのモデルファイルも消さない（`ResetKeepingConnection`）。位置と大きさも既定へ戻る。**もう一度押すと確定**——XR にはネイティブの確認ダイアログが無いため |
 
 出さない項目: 音声スタイル・話す速さ・AI要約（core の書き込み口はループバック限定なので XR からは
-変えられない）、音量（端末の音量で足りる）、接続先とトークン。
+変えられない）、音量（端末の音量で足りる）、接続先（手入力の欄は無い。ペアリングか `settings.json`）、
+トークン（手入力しない。ペアリングで受け取る）。
+
+#### ペアリング（サブページ）
+
+「接続」節の「ペアリング…」でサブページへ移る。**サブページにしたのは、パネルが高さの上限で
+全体を縮めるため**（本体に桁の入力を足すと全部の行が小さくなる）。
+
+| 行 | 動き |
+|---|---|
+| 1〜4 桁目 | Choice。‹ › で 0〜9 を巡回する。ChatterAgent の「Android とペアリング…」窓に出ている PIN を入れる |
+| キーボードで入力 | 端末のキーボード（数字）を開く。確定して 4 桁の数字が入ったら、そのままペアリングへ進む。Bluetooth やエミュレータのホストの物理キーボードも同じ入力欄に入る |
+| ペアリング | 送る。接続先は `connection.serverUrl` があればそれ、無ければ mDNS で探して**最初に解決した1台** |
+| 戻る | 本体へ戻る |
+
+- 成功したら**トークンだけ**を `settings.json` に保存する（`serverUrl` は書かない。次回も mDNS で探す）。
+  **アプリを再起動せず、その場で繋ぎ直す**（`MascotRunner.Reconnect`。モデル同期も起こす。見た目への
+  反映は従来どおり次回の起動から）
+- 失敗は端末に文言で出る: PIN 違い（あと N 回）/ 出し直しを促す（期限切れ・ロック・未発行）/
+  サーバーが見つからない / 繋がらない / ペアリング非対応の古い server（401・404）/ 応答を読めない
+- トークン無しで繋がらないときの通知は、ペアリングを案内する
+- ★ **`ServerDiscovery` を呼ぶのは `MascotRunner` だけ。** ペアリングの探索もここを通す
+- 非 XR の Android にはこの入力 UI が無い。`configure-android.sh`（adb）のまま（→ [#180](https://github.com/schwarz9791/chatter-agent/issues/180)）
 
 ### 置き場所と大きさ（`xr`）
 
@@ -562,7 +587,7 @@ $ADB shell am force-stop tech.sukima.chattermascot   # 起動時に1回だけ読
 |---|---|---|
 | A. Mac だけ | `npm run start:server` | macOS アプリ / CLI プレーヤー |
 | B. エミュレータ・USB 接続の実機を Mac のサーバーへ | 既定のまま（127.0.0.1 で listen） | `./scripts/run-android.sh`。`adb reverse` 経由 |
-| C. LAN 越し（Wi-Fi の実機） | `CHATTER_AGENT_HOST=0.0.0.0 npm run start:server` | `./scripts/configure-android.sh` → `./scripts/run-android.sh` |
+| C. LAN 越し（Wi-Fi の実機） | `CHATTER_AGENT_HOST=0.0.0.0 npm run start:server` | XR: 設定パネルの「ペアリング…」（ChatterAgent の PIN）。非 XR・mDNS が届かないとき: `./scripts/configure-android.sh` → `./scripts/run-android.sh` |
 | D. Mac と Android を同時に動かす | 別のランタイムルート・別ポートでもう1本 | B か C をそのポートで |
 
 #### B: ループバック（`adb reverse`）
@@ -573,14 +598,27 @@ Mac のサーバーに届く。サーバーから見るとループバック接�
 
 #### C: LAN 越し
 
-ビルドし直さず、`settings.json` を書き換えるだけで Android から Mac の `chatter-agent-server`
-に繋がる。接続先とトークンは `connection` セクションに持つ。
+ビルドし直さず、Android から Mac の `chatter-agent-server` に繋がる。接続先とトークンは
+`settings.json` の `connection` セクションに持つ。
 
 ```json
 { "connection": { "serverUrl": "ws://192.168.1.10:8570", "token": "…" } }
 ```
 
-**既定は自動検出。** `configure-android.sh` を引数なしで実行すると `serverUrl` を空にしてトークンだけを書き、
+**既定の手順はペアリング（XR 端末）。** 前提は、server が `0.0.0.0` で LAN に出ていることと、端末と Mac が
+同じ Wi-Fi にいること。
+
+1. ChatterAgent のメニュー「Android とペアリング…」を開く（4桁の PIN が出る。有効 5 分）
+2. 端末の設定パネルで「ペアリング…」を開き、PIN を入れて「ペアリング」
+3. 成功するとトークンが `settings.json` に入り、その場で繋ぎ直す（再起動は要らない）
+
+ペアリングの口の契約と守りは [`protocol.md`](./protocol.md)「ペアリング」。
+
+**`configure-android.sh` は代替。** 非 XR の Android（入力 UI が無い）や、mDNS が届かなくて接続先を明示したいときに使う。
+adb の手順に戻すなら、ペアリングで入ったトークンを `./scripts/configure-android.sh --clear` で消してから書き直す
+（`connection` ごと消える）。
+
+**自動検出。** `configure-android.sh` を引数なしで実行すると `serverUrl` を空にしてトークンだけを書き、
 端末は LAN の DNS-SD（`_chatter-agent._tcp`、`NsdManager`）で Mac のサーバーを探して繋ぐ。
 接続先の優先順位は `-serverUrl`（起動引数）＞ `connection.serverUrl` ＞ **探索（Android かつ
 `connection.token` あり）** ＞ `[SerializeField]` の既定（`ws://127.0.0.1:8570`）。明示した値は上書きしない。
@@ -588,9 +626,10 @@ Mac のサーバーに届く。サーバーから見るとループバック接�
 見つかるまで探索を一定間隔で張り直し続け（解決の失敗や後から起動したサーバーも拾う）、既定の
 ループバックへは倒さない。一定時間見つからなければログと端末の通知で確認事項を1回だけ知らせる。
 接続先は起動中固定なので、繋がらない状態が続いたときも端末の通知で知らせる（Mac のアドレスが変わったときは
-アプリを起動し直す）。複数の Mac が見つかったときは最初に解決できた1台を使う。
+ペアリングし直すかアプリを起動し直す。**ペアリングは例外で、起動中に繋ぎ直す**）。複数の Mac が見つかったときは最初に解決できた1台を使う。
 
-mDNS が通らない環境（AP / クライアント分離、別の Wi-Fi・VLAN）では、`ws://<ip>:<port>` を明示する。
+mDNS が通らない環境（AP / クライアント分離、別の Wi-Fi・VLAN）では、ペアリングも探索で止まる。
+`configure-android.sh ws://<ip>:<port>` で明示する。
 
 Mac 側はサーバーを LAN に公開してから使う。
 
@@ -600,6 +639,7 @@ CHATTER_AGENT_HOST=0.0.0.0 npm run start:server
 
 ```bash
 ./scripts/configure-android.sh                          # 接続先を空にして端末に探させる（mDNS）
+./scripts/configure-android.sh --clear                   # connection を消す（B へ戻す・ペアリングをやり直す）
 ./scripts/configure-android.sh ws://192.168.1.10:8570    # 接続先を明示（mDNS が通らないとき）
 ./scripts/configure-android.sh --no-restart              # 端末側のアプリを再起動しない
 ```
@@ -628,14 +668,15 @@ B・C どちらの経路でもこのポートへ向ける。C（`configure-andro
 #### 落とし穴
 
 - ★ **`connection` が入っていると B（`adb reverse`）の経路は使われない。** C から B へ戻すときは
-  `./scripts/configure-android.sh --clear` で `connection` だけ消す
+  `./scripts/configure-android.sh --clear` で `connection` だけ消す（ペアリングで入ったトークンも消える）
 - ★ **`CHATTER_AGENT_HOST=0.0.0.0` を忘れると Android から繋がらない。** logcat には
   `[Mascot] 接続エラー: Unable to connect to the remote server → mono-io-layer-error (111)`
   が出る（サーバーのポートが開いていない＝ECONNREFUSED）
 - トークンはサーバーの起動時に生成される。`configure-android.sh` は先に `chatter-agent-server`
-  を起動してから使うこと
+  を起動してから使うこと。ペアリングも、server が動いていて LAN に出ていないと発行できない
 - `settings.json` は起動時にしか読まれない。書き換えても反映は次回の起動から
-  （`--no-restart` を使ったときも同じ）
+  （`--no-restart` を使ったときも同じ）。**例外はペアリングだけ**で、成功するとその場で繋ぎ直す
+  （端末が自分で書いた `connection.token` は、読み直しではなく受け取った値を直接使う）
 - 別ルートのサーバー（D）を使うときは、`configure-android.sh` にも同じ `XDG_CONFIG_HOME` を
   渡す。渡さないと常用サーバーのトークンを書き込んでしまう（`CHATTER_AGENT_PORT` は読まない。
   接続先を明示するならポートは URL に書く）。自動検出は最初に見つかった1台に繋ぐので、サーバーを複数立てているときは
@@ -651,8 +692,8 @@ B・C どちらの経路でもこのポートへ向ける。C（`configure-andro
 - `<property android:name="android.window.PROPERTY_XR_ACTIVITY_START_MODE" android:value="XR_ACTIVITY_START_MODE_FULL_SPACE_UNMANAGED" />`
 - `<uses-feature android:name="android.software.xr.api.openxr" android:required="true" android:version="0x00010001" />`
 
-接続先の手動入力（`settings.json` の `connection.serverUrl` / `configure-android.sh`）はすでに
-入っている。mDNS によるサーバー自動検出（`NsdManager`）は接続先が空でトークンがあるときに働き、
+接続先の手動入力（`settings.json` の `connection.serverUrl` / `configure-android.sh`）と、
+ペアリング（4桁 PIN。XR のみ）はすでに入っている。mDNS によるサーバー自動検出（`NsdManager`）は接続先が空でトークンがあるときに働き、
 追加のパーミッションは要らない。
 
 [公式のプロジェクトセットアップ手順](https://developer.android.com/develop/xr/unity/setup)に従うこと。

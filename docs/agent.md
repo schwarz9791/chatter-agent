@@ -17,7 +17,9 @@
 | `src-tauri/src/mascot.rs` | `mascot/settings.json`・VRM・マスコットへの依頼（`mascot/requests/`）・モーション一覧（`mascot/motions.json`）の読み取り |
 | `src-tauri/src/text.rs` | 日英の文言（OS のロケールが `ja` で始まれば日本語、それ以外は英語）と、画面へ渡す言語 |
 | `index.html` | 設定窓（CSS も中に持つ） |
+| `pairing.html` | ペアリング窓（Android とペアリング…。CSS も中に持つ） |
 | `src/main.ts` | 設定窓の DOM の組み立てとイベント |
+| `src/pairing.ts` | ペアリング窓の DOM とポーリング |
 | `src/model.ts` | DOM に触らない純粋な判定（声のキーの選択・環境変数の注記・ショートカットの組み立てと分解・エラー文言の選択） |
 | `src/text.ts` | 設定窓の日英の文言 |
 | `src/tauri.ts` | Rust のコマンドの型付きラッパ |
@@ -70,6 +72,7 @@ Dock にも ⌘Tab にも出ない。操作はメニューバーのアイコン�
 |---|---|
 | ミュート | チェックで `audio.mute` を書く（→「マスコットの表示と player」） |
 | マスコットを表示 / マスコットを隠す | 表示状態を反転して保存し、繋ぐクライアントを切り替える |
+| Android とペアリング… | ペアリング窓を前面に出す。無ければ作る（→「ペアリング窓」） |
 | 設定… | 設定窓を前面に出す。無ければ作る（次節）。マスコットの右クリックや Finder からの開き直しでも同じ（→「マスコットとのやり取り」） |
 | サーバーを再起動 / サーバーを起動 | 自分の server が動いていれば再起動、そうでなければ起動。外で動いている間と処理中は無効 |
 | ログを開く | `server.log` を開く。無ければディレクトリを開く |
@@ -279,7 +282,8 @@ macOS 限定。Windows は single-instance プラグインで同じ口にでき�
 ★ **server とは Rust から HTTP で話す。** WebView の `fetch` には `Origin` が付き、server は 403 にする。
 この絞りは緩めない（→ [`protocol.md`](./protocol.md)「制御 API」）。
 
-- **許可しているのは `GET/PATCH /v1/config`、`GET /v1/speakers`、`POST /v1/tts/preview` だけ。**
+- **許可しているのは `GET/PATCH /v1/config`、`GET /v1/speakers`、`POST /v1/tts/preview`、`GET/POST /v1/pairing` だけ。**
+  `POST /v1/pairing/claim` は送らない（端末が叩く口。ChatterAgent が PIN を使い切ってしまう）。
   要約のプレビューは課金されるので入れない
 - 接続できないときの status は 0。応答待ちは設定の読み書きが10秒、話者一覧とテスト音声が70秒
 
@@ -328,6 +332,18 @@ macOS 限定。Windows は single-instance プラグインで同じ口にでき�
 | `settings.json` の管理キー | キャラクターの位置（`window.json`）と大きさ（`character.scale`）。戻すのは「位置と大きさをリセット」だけ |
 | `models/` の `*.vrm`（同梱モデルに戻る） | ミュート（`audio.mute`）、接続先（`connection.*`）、XR のキー |
 
+## ペアリング窓
+
+メニューの「Android とペアリング…」で開く専用の窓（ラベル `pairing`、360×340、リサイズ不可。
+設定窓とは別の vite エントリ）。LAN の Android XR 端末にトークンを渡す PIN を出す
+（契約は [`protocol.md`](./protocol.md)「ペアリング」）。
+
+- 開くと `POST /v1/pairing` で PIN を発行し、大きく表示する。1 秒ごとに残り時間と `GET /v1/pairing` を見て、
+  `paired` なら「ペアリングしました」、`expired` / `locked` / `none` なら「発行し直す」を出す
+- ★ **窓を閉じても PIN は取り消さない。** 期限（5 分）か、成功、失敗の上限で終わる。取り消す口は無い
+- ★ **`409 not_lan` は、server が LAN に出ていないということ。** `config.json` の `host` か
+  `CHATTER_AGENT_HOST` を `0.0.0.0` にして server を再起動するよう案内する（→「LAN に公開するとき」）
+
 ## ログ
 
 `~/Library/Logs/tech.sukima.chatter-agent/server.log`。server の stdout / stderr（ファイルへ直接
@@ -347,8 +363,11 @@ macOS 限定。Windows は single-instance プラグインで同じ口にでき�
 （→ [`knowledge/mascot-android-xr.md`](./knowledge/mascot-android-xr.md)「繋がらないときの症状と切り分け」）。
 
 mDNS での広告（`_chatter-agent._tcp`。→ [`protocol.md`](./protocol.md)「発見（DNS-SD）」）も、同じ
-「ローカルネットワーク」の許可の対象になる。ChatterAgent から起こしたときに広告が通るかは未確認。`広告を始めました` のログは許可が無くても出る
-（ciao は EPERM などの送信エラーを握りつぶす）ので、広告が LAN に届いている証拠にはならない。
+「ローカルネットワーク」の許可の対象になる。**許可が無いと広告はループバックにしか出ず、端末からは見つからない。**
+許可を付けたら server を再起動すること（許可より前に起動した server は、広告を LAN へ送れないまま動き続ける）。
+`広告を始めました` のログは許可が無くても出る（ciao は EPERM などの送信エラーを握りつぶす）ので、
+広告が LAN に届いている証拠にはならない。確かめるには Mac で `dns-sd -B _chatter-agent._tcp local.` を引き、
+`if` 欄に Wi-Fi のインターフェース番号（`ifconfig -v en0` の `index`）が出ているかを見る。`1`（ループバック）だけなら届いていない。
 
 ## 制約
 

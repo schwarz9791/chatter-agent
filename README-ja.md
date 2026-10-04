@@ -190,7 +190,7 @@ macOS では、メニューバー常駐アプリ **ChatterAgent** にサーバ�
 |---|---|---|
 | A. Mac だけ | `cd core && npm run start:server` | macOS アプリ / CLI プレーヤー |
 | B. エミュレータ・USB 接続の実機を Mac のサーバーへ | そのまま起動（既定でループバックのみ listen） | `./scripts/run-android.sh`（`adb reverse` 経由。トークンも LAN 公開も要りません。端末の `connection` は空にしておきます —— `./scripts/configure-android.sh --clear`） |
-| C. LAN 越し（Wi-Fi の実機） | `CHATTER_AGENT_HOST=0.0.0.0 npm run start:server` | `./scripts/configure-android.sh` → `./scripts/run-android.sh` |
+| C. LAN 越し（Wi-Fi の実機） | `CHATTER_AGENT_HOST=0.0.0.0 npm run start:server` | XR: 端末の設定パネルの「ペアリング…」に、ChatterAgent の「Android とペアリング…」に出る4桁の PIN を入れます。非 XR・mDNS が届かないとき: `./scripts/configure-android.sh` → `./scripts/run-android.sh` |
 | D. Mac と Android を同時に動かす | 別のランタイムルート・別ポートでもう1本 | B か C をそのポートで |
 
 ```bash
@@ -209,8 +209,14 @@ cd chatter-mascot
 ./scripts/run-android.sh
 ```
 
+Android XR の C は、アプリを入れたあと adb なしで繋げます。サーバーを `0.0.0.0` で起動し、端末と Mac を同じ Wi-Fi に置いて、次の順に進めます。
+
+1. ChatterAgent のメニュー「Android とペアリング…」を開く（4桁の PIN が出ます。有効 5 分、間違えられるのは 5 回まで）
+2. 端末の設定パネルで「ペアリング…」を開き、PIN を入れて「ペアリング」
+3. 成功するとトークンが端末に保存され、その場で繋ぎ直します（再起動は要りません。端末は mDNS で Mac を探します）
+
 ```bash
-# Android（C: LAN 越し）
+# Android（C: LAN 越し。非 XR の実機、または mDNS が届かないとき）
 cd chatter-mascot
 ./scripts/configure-android.sh          # 端末が LAN の Mac を自動で探します（mDNS）
 ./scripts/run-android.sh                # install して起動、logcat を流します
@@ -244,7 +250,7 @@ cd chatter-mascot
 モデルの差し替えは ChatterAgent の設定パネルからでき、モーションは「モーション」節で再生して確認できますが、**モーションを置く UI はありません。** ディレクトリを掘って `.vrma` を置くと、次の起動で拾います。`neutral` に対応するディレクトリはありません（感情モーションを出さない、が既定の振る舞いです）。
 
 **Android XR もディレクトリは同じです**（端末の `Android/data/tech.sukima.chattermascot/files/` の下）が、
-**`adb push` は要りません。** 接続先とトークンを設定すれば（`configure-android.sh`）、起動のたびに
+**`adb push` は要りません。** 接続先とトークンを設定すれば（ペアリング、または `configure-android.sh`）、起動のたびに
 サーバーの `GET /v1/assets` から自動で取りに行きます（既定 `auto`。反映は次回の起動から）。
 手置きもこれまでどおり使え、同期より優先されます。ただし**直下の2本は固定名で、
 `models/mascot.vrm` と `animations/idle.vrma` しか読みません** —— 上の表の任意名

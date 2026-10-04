@@ -299,10 +299,10 @@ jobs:
           fi
 
   unity-macos-identity-settings:
-    name: Unity の macOS アイコン / カテゴリ設定が出荷値
+    name: Unity のアイコン / カテゴリ設定が出荷値
     runs-on: ubuntu-latest
 
-    # #93 で直した2値は、どちらも「二度と自動で再表明されない」種類の設定で、
+    # ここで守る設定は、どれも「二度と自動で再表明されない」種類の設定で、
     # unity-audio-settings（上のジョブ）と同じ理由でここが最後の砦になる。
     #   - macAppStoreCategory は ProjectSettings.asset を手で編集した値そのもの。
     #     何かが定期的に書き直すわけではないので、Inspector で Mac App Store Category を
@@ -311,7 +311,9 @@ jobs:
     #   - m_BuildTargetIcons を書くのは ./scripts/build.sh が呼ばない一回きりのツール
     #     （IconSettings.FixAll）だけ。実行し忘れたままコミットすると、Info.plist は
     #     アイコンを指すのに実体が無い .app が出荷される
-    # どちらもテストにも通常の CI にも引っかからず、実機で気づくまで気づけない
+    #   - m_BuildTargetPlatformIcons（Android の Adaptive）も IconSettings.FixAll だけが書く。
+    #     空に戻ると、ランチャーで白い丸に縮んだアイコンに黙って戻る
+    # どれもテストにも通常の CI にも引っかからず、実機で気づくまで気づけない
     steps:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -333,5 +335,26 @@ jobs:
           if grep -qx "  m_BuildTargetIcons: \[\]" "$asset"; then
             echo "::error file=$asset::m_BuildTargetIcons が空です。./scripts/run.sh ChatterMascot.EditorTools.IconSettings.FixAll を実行し直してコミットしてください（アイコンの無い .app が出荷されます）"
             grep -n "m_BuildTargetIcons" "$asset" || true
+            exit 1
+          fi
+
+      - name: Android の Adaptive アイコンが空でないこと
+        working-directory: .
+        run: |
+          asset=chatter-mascot/ProjectSettings/ProjectSettings.asset
+          # m_BuildTargetPlatformIcons の Android ブロックだけを見る。m_Kind: 2 が Adaptive
+          result=$(awk '
+            /^  m_BuildTargetPlatformIcons:/ { sec = 1; next }
+            sec && /^  [A-Za-z]/ { sec = 0 }
+            !sec { next }
+            /^  - m_BuildTarget:/ { android = ($0 ~ /m_BuildTarget: Android$/); next }
+            !android { next }
+            /^    - m_Textures:/ { filled = ($0 !~ /\[\]/); next }
+            /^      - \{fileID:/ { filled = 1; next }
+            /^      m_Kind: 2$/ { total++; if (!filled) empty++ }
+            END { printf "%d %d", total, empty }
+          ' "$asset")
+          if [ "${result% *}" -eq 0 ] || [ "${result#* }" -gt 0 ]; then
+            echo "::error file=$asset::Android の Adaptive アイコンが無い、または空です（total empty = ${result}）。./scripts/run.sh ChatterMascot.EditorTools.IconSettings.FixAll を実行し直してコミットしてください（ランチャーで白い丸に縮んだアイコンになります）"
             exit 1
           fi

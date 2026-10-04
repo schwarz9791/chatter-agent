@@ -443,8 +443,9 @@ Apple のグリッドに合わせ、1024 に対して角丸の本体 824・周�
 Xcode の `actool` で、出力は `Assets.car`。
 
 ★ **Liquid Glass（macOS 26 の4外観・鏡面反射・Dock のパララックス）は入れていない。**
-効かせるには `.icon` を `actool` でコンパイルして `Contents/Resources/Assets.car` を置き、
-`Info.plist` に `CFBundleIconName` を書く（`MacPostBuild` に足せる）。**やらない理由は
+効かせるには `.icon`（`~/Pictures/ChatterMascot/ChatterMascot.icon`。リポジトリには入れない）を
+`actool` でコンパイルして `Contents/Resources/Assets.car` を置き、`Info.plist` に
+`CFBundleIconName` を書く（`MacPostBuild` に足せる）。**やらない理由は
 `LSUIElement`** —— Dock にも ⌘Tab にも出ないので、Liquid Glass の見せ場が効く場所が
 このアプリにほぼ無い。Unity のビルドに Xcode のツールチェーンを挟む見返りが小さい。
 **Dock に出す日が来たら再検討する。**
@@ -617,7 +618,9 @@ UniVRM 型が漏れると、`ChatterMascot.Tests.asmdef`（`overrideReferences: 
 
 ## `IconSettings.FixAll` は毎回のセットアップでは要らない
 
-結果（`m_BuildTargetIcons`）は `ProjectSettings.asset` にコミット済みなので、新規クローンでは
-何もしなくてよい。再実行が要るのはアイコン画像
-（`Assets/ChatterMascot/Icon/AppIcon.png`）を差し替えたときだけ。
+結果は `ProjectSettings.asset` にコミット済みなので、新規クローンでは何もしなくてよい。
+Standalone の分は `m_BuildTargetIcons`、Android の Legacy（`m_Kind: 0`）と Adaptive
+（`m_Kind: 2`）は `m_BuildTargetPlatformIcons` の Android ブロックに入る。再実行が要るのは
+`AppIcon.png`・`AndroidIconForeground.png`・`AndroidIconBackground.png`（いずれも
+`Assets/ChatterMascot/Icon/`）のどれかを差し替えたときだけ。
 

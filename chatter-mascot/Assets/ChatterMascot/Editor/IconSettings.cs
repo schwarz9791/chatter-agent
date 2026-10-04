@@ -7,6 +7,8 @@ namespace ChatterMascot.EditorTools
 {
     /// <summary>
     /// <c>Assets/ChatterMascot/Icon/AppIcon.png</c> を Player Settings のアプリアイコンへ登録する（#93）。
+    /// Android は Legacy に加えて Adaptive（前景 <c>AndroidIconForeground.png</c> と背景
+    /// <c>AndroidIconBackground.png</c> の2層）も登録する。
     ///
     /// ★★ <b>なぜ手作業ではなくスクリプトか。</b> Player Settings の Icon は
     ///   <c>ProjectSettings.asset</c> に配列で書かれるが、要求されるサイズの数は
@@ -36,7 +38,8 @@ namespace ChatterMascot.EditorTools
     /// ★ <b>Android は Legacy に加えて Adaptive も登録すること。</b> Legacy しか無いと、
     ///   ランチャーは絵を縮めて白い下地に収めてしまう。Adaptive の層は 108dp のうちマスクが
     ///   見せるのは中央 72dp だけなので、前景はその内側に収まる構図（四方を透明で足した絵）、
-    ///   背景は全面に敷く。
+    ///   背景は全面に敷く。マスクが丸だと 72dp の正方形の四隅は削られるため、
+    ///   <b>欠けると困るものは直径 66dp の円（セーフゾーン）に入れる</b>。
     ///
     /// ★ <b>Android ではアイコンが無くても致命にしないこと。</b> ランチャーの見た目だけの
     ///   問題で、マスコット自体の動作には関わらない。Standalone の「無いと Dock /
@@ -124,6 +127,7 @@ namespace ChatterMascot.EditorTools
             PlayerSettings.SetIcons(NamedBuildTarget.Standalone, Fill(texture, sizes.Length), IconKind.Application);
 
             FixAndroid(texture);
+            FixAndroidAdaptive();
 
             AssetDatabase.SaveAssets();
             Debug.Log("[Icon] Player Settings のアプリアイコンを設定しました");
@@ -150,8 +154,6 @@ namespace ChatterMascot.EditorTools
             }
 
             PlayerSettings.SetIcons(NamedBuildTarget.Android, Fill(texture, sizes.Length), IconKind.Application);
-
-            FixAndroidAdaptive();
         }
 
         private static void FixAndroidAdaptive()
@@ -168,6 +170,13 @@ namespace ChatterMascot.EditorTools
 
             var icons = PlayerSettings.GetPlatformIcons(
                 NamedBuildTarget.Android, AndroidPlatformIconKind.Adaptive);
+            if (icons.Length == 0)
+            {
+                Debug.LogWarning(
+                    "[Icon] Android の Adaptive 枠が0件でした（Android Build Support 未インストールの疑い。見た目だけの問題なので続行します）");
+                return;
+            }
+
             foreach (var icon in icons) icon.SetTextures(background, foreground);
             PlayerSettings.SetPlatformIcons(NamedBuildTarget.Android, AndroidPlatformIconKind.Adaptive, icons);
 

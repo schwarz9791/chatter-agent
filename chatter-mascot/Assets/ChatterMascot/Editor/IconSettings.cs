@@ -1,4 +1,5 @@
 using UnityEditor;
+using UnityEditor.Android;
 using UnityEditor.Build;
 using UnityEngine;
 
@@ -6,6 +7,8 @@ namespace ChatterMascot.EditorTools
 {
     /// <summary>
     /// <c>Assets/ChatterMascot/Icon/AppIcon.png</c> を Player Settings のアプリアイコンへ登録する（#93）。
+    /// Android は Legacy に加えて Adaptive（前景 <c>AndroidIconForeground.png</c> と背景
+    /// <c>AndroidIconBackground.png</c> の2層）も登録する。
     ///
     /// ★★ <b>なぜ手作業ではなくスクリプトか。</b> Player Settings の Icon は
     ///   <c>ProjectSettings.asset</c> に配列で書かれるが、要求されるサイズの数は
@@ -27,10 +30,16 @@ namespace ChatterMascot.EditorTools
     ///   Player Settings が Inspector 上で「Legacy / Round / Adaptive」と表示する区分は、
     ///   このスクリプティング API（<c>GetIconSizes</c> / <c>SetIcons</c>）が受け取る
     ///   <see cref="IconKind"/> とは<b>別物</b>（<c>PlayerSettings.GetSupportedIconKinds</c> が
-    ///   返す <c>PlatformIconKind</c> の側の区分）。<c>Adaptive</c> / <c>Round</c> は
-    ///   前景・背景を別レイヤーで要求する区分で、ここでは扱わない。
+    ///   返す <c>PlatformIconKind</c> の側の区分）。<c>Adaptive</c> / <c>Round</c> はこの API では
+    ///   扱えず、<c>PlatformIconKind</c> の API で登録する（ここで登録するのは <c>Adaptive</c> だけ）。
     ///   <see cref="IconKind.Application"/> を渡すと Inspector の「Legacy」枠に入るので、
     ///   Standalone と同じ値をそのまま使う。
+    ///
+    /// ★ <b>Android は Legacy に加えて Adaptive も登録すること。</b> Legacy しか無いと、
+    ///   ランチャーは絵を縮めて白い下地に収めてしまう。Adaptive の層は 108dp のうちマスクが
+    ///   見せるのは中央 72dp だけなので、前景はその内側に収まる構図（四方を透明で足した絵）、
+    ///   背景は全面に敷く。マスクが丸だと 72dp の正方形の四隅は削られるため、
+    ///   <b>欠けると困るものは直径 66dp の円（セーフゾーン）に入れる</b>。
     ///
     /// ★ <b>Android ではアイコンが無くても致命にしないこと。</b> ランチャーの見た目だけの
     ///   問題で、マスコット自体の動作には関わらない。Standalone の「無いと Dock /
@@ -48,6 +57,8 @@ namespace ChatterMascot.EditorTools
     public static class IconSettings
     {
         private const string IconPath = "Assets/ChatterMascot/Icon/AppIcon.png";
+        private const string AndroidForegroundPath = "Assets/ChatterMascot/Icon/AndroidIconForeground.png";
+        private const string AndroidBackgroundPath = "Assets/ChatterMascot/Icon/AndroidIconBackground.png";
 
         public static void FixAll()
         {
@@ -116,6 +127,7 @@ namespace ChatterMascot.EditorTools
             PlayerSettings.SetIcons(NamedBuildTarget.Standalone, Fill(texture, sizes.Length), IconKind.Application);
 
             FixAndroid(texture);
+            FixAndroidAdaptive();
 
             AssetDatabase.SaveAssets();
             Debug.Log("[Icon] Player Settings のアプリアイコンを設定しました");
@@ -142,6 +154,33 @@ namespace ChatterMascot.EditorTools
             }
 
             PlayerSettings.SetIcons(NamedBuildTarget.Android, Fill(texture, sizes.Length), IconKind.Application);
+        }
+
+        private static void FixAndroidAdaptive()
+        {
+            var foreground = AssetDatabase.LoadAssetAtPath<Texture2D>(AndroidForegroundPath);
+            var background = AssetDatabase.LoadAssetAtPath<Texture2D>(AndroidBackgroundPath);
+            if (foreground == null || background == null)
+            {
+                Debug.LogWarning(
+                    $"[Icon] Adaptive の前景・背景が読めません（{AndroidForegroundPath} / {AndroidBackgroundPath}）。"
+                    + "Adaptive は飛ばして続行します");
+                return;
+            }
+
+            var icons = PlayerSettings.GetPlatformIcons(
+                NamedBuildTarget.Android, AndroidPlatformIconKind.Adaptive);
+            if (icons.Length == 0)
+            {
+                Debug.LogWarning(
+                    "[Icon] Android の Adaptive 枠が0件でした（Android Build Support 未インストールの疑い。見た目だけの問題なので続行します）");
+                return;
+            }
+
+            foreach (var icon in icons) icon.SetTextures(background, foreground);
+            PlayerSettings.SetPlatformIcons(NamedBuildTarget.Android, AndroidPlatformIconKind.Adaptive, icons);
+
+            Debug.Log($"[Icon] Android Adaptive を {icons.Length} 枠に登録しました");
         }
 
         /// <summary>

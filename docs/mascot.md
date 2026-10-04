@@ -109,7 +109,7 @@ Assets/ChatterMascot/
   Editor/
     SceneFixups.cs                  シーンとプロジェクトの修繕・検査
     MacPostBuild.cs                 Info.plist に LSUIElement を書く（Dock に出さない唯一の手段）
-    IconSettings.cs                 AppIcon.png を Player Settings の Icon に登録する
+    IconSettings.cs                 AppIcon.png と Android の Adaptive 層を Player Settings の Icon に登録する
     BuildScript.cs / VrmProbe.cs
   Tests/Editor/                     EditMode テスト（状態機械が主）
 ```

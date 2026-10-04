@@ -371,6 +371,13 @@ mDNS での広告（`_chatter-agent._tcp`。→ [`protocol.md`](./protocol.md)�
 広告が LAN に届いている証拠にはならない。確かめるには Mac で `dns-sd -B _chatter-agent._tcp local.` を引き、
 `if` 欄に Wi-Fi のインターフェース番号（`ifconfig -v en0` の `index`）が出ているかを見る。`1`（ループバック）だけなら届いていない。
 
+★ **許可は署名の識別子で引かれる。ChatterAgent はバンドルごと ad-hoc 署名する**（`tauri.conf.json` の
+`bundle.macOS.signingIdentity: "-"`）。こうすると識別子がバンドル ID（`tech.sukima.chatter-agent`）になり、
+ビルドし直しても置き場所を変えても同じ許可が効く。外すと識別子はリンカが付ける `chatter_agent_app-<ハッシュ>` になり、
+許可が最初に許可したビルドの**パス**に紐づく。別のパスのビルドは、一覧で「オン」に見えたまま黙って拒否され、
+ダイアログも出ない（→ [`knowledge/agent.md`](./knowledge/agent.md)）。識別子は `codesign -dv ChatterAgent.app` の
+`Identifier` で確かめる。
+
 ## 制約
 
 - ★ **ChatterAgent がメニューの「終了」やログアウト（quit の Apple Event）以外で終わると server と player が残る。**

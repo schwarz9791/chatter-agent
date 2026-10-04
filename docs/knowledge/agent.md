@@ -146,6 +146,31 @@ AppKit の内部で autorelease されたオブジェクトは、呼んだスレ
   - 8570 に繋がるクライアントは常に1台
 - 2026-10-03（macOS。画面のロックを外して手で操作）: メニューの表示切替・ミュート、⌃⌥H / ⌃⌥M、メニューの「終了」。
   全部通った。どの切り替えも、片方が止まってから、もう片方が起きた
+- 2026-10-04（macOS 27 / Android XR エミュレータ）: ad-hoc 署名のビルド（識別子 `tech.sukima.chatter-agent`）。
+  起動・server・マスコット・設定窓・ペアリング窓が動き、ダイアログ無しで mDNS の広告が en0 に出た。
+  中身の違うビルドに入れ替えても同じだった。手で ad-hoc 署名し直したビルドでは、エミュレータが mDNS で
+  server を見つけ、ペアリングして LAN のアドレスで繋がった
+
+## 「ローカルネットワーク」の許可は署名の識別子とパスで引かれる
+
+症状: システム設定の一覧では ChatterAgent がオンなのに、mDNS の広告がループバックにしか出ない
+（`dns-sd -B` の `if` が `1` だけ）。server を再起動しても、ChatterAgent を起こし直しても、ダイアログは出ない。
+
+- 規則は `/Library/Preferences/com.apple.networkextension.plist` にあり、`plutil -p` で読める（root は要らない）。
+  1つの規則が `SigningIdentifier` を持ち、識別子がバンドル ID でないビルドでは `Path` も持つ
+- ★ **Tauri は `signingIdentity` を指定しないとバンドルを署名しない。** 実行ファイルにリンカの ad-hoc 署名が
+  付くだけで、識別子は `chatter_agent_app-<ハッシュ>`（`codesign -dv` の `Identifier`）。ハッシュは crate から
+  決まるので、**ワークツリーが違っても同じ値**になる
+- ★★ **だから別のパスのビルドは、ダイアログも出ずに黙って拒否される。** 同じ識別子の規則がすでにあるので
+  macOS は聞き直さず、その規則は最初に許可したビルドのパスに紐づいているので当てはまらない。実際に踏んだのは、
+  issue のワークツリーで許可したあとに main のワークツリーでビルドしたとき
+- **手当ては `signingIdentity: "-"`。** バンドルごと ad-hoc 署名され、識別子がバンドル ID になる。バンドル ID の
+  規則はパスを持たず、ビルドし直しても置き場所を変えても効く
+- Tauri の ad-hoc 署名には Hardened Runtime も付く（`codesign -dv` の `flags=0x10002(adhoc,runtime)`）。
+  server・マスコット・設定窓・ペアリング窓は、これで動く
+- ★ **nehelper のログを見るときは `/usr/bin/log show` と書く。** zsh では `log` が組み込みコマンドで、
+  `log show` は黙って空振りする。`--predicate 'process == "nehelper"'` で引くと、`<n> UUIDs for <識別子> are
+  already in the cache` の行に、どの識別子で引かれたかが出る
 
 ## メニューバーのアイコンが出ないのに登録は成功しているとき
 

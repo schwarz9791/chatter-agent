@@ -42,7 +42,7 @@ VRM の読み込み直後、`VrmStage.Adopt` が `VrmMaterialCheck.Inspect` の�
 | minSdk | 30 | 動いている Android XR サンプルの値 |
 | `ForceInternetPermission` | オン | Unity が `INTERNET` を書く根拠 |
 | `insecureHttpOption` | `AlwaysAllowed` | ★ 下記 |
-| targetSdk | Automatic（触らない） | 6000.3 同梱の SDK が platforms 34 / 35 / 36 を持つので 36 に解決される。★ **37 から `ACCESS_LOCAL_NETWORK` がランタイム権限になる**が、このランタイム要求はコード化していない。37 に上がったら要る |
+| targetSdk | 36（固定） | Automatic は**エディタが同梱する最新の platform** に解決される（6000.3 は platforms 34 / 35 / 36 なので 36。6000.5 は 37 を同梱するので、エディタを上げただけで 37 になる）。★ **37 から `ACCESS_LOCAL_NETWORK` がランタイム権限になる**ので、37 以上には宣言とランタイム要求が要る（→ 下の「ネットワークまわりの根拠と未着手」）。`AndroidTargetSdkCheck`（`IPreprocessBuildWithReport`）が Automatic と 37 以上でビルド前に止める。後処理で止めても APK は書き出されるため（→ 下の「マニフェストは静的に置かず…」） |
 
 ★ **`insecureHttpOption` は Unity 自身の門で、Android の `usesCleartextTraffic` とは別物。**
 `UnityWebRequest` は既定で http を拒むが**ループバックだけは例外**。LAN のホストへ http で
@@ -342,7 +342,7 @@ Android のログは `adb logcat -s Unity`。★★ **Android では 401 と「�
 | `[Mascot] 接続エラー: Unable to connect to the remote server → mono-io-layer-error (111)` | 相手のポートが開いていない。サーバーが止まっている、または `host` がループバックのまま | Mac 側の起動ログに「LAN からは繋げません（host=127.0.0.1）」が出ていないか |
 | （未実測）Mac から `curl http://<LAN IP>:<port>/v1/health` は `401` が返るのに、端末からは届かない | macOS のローカルネットワーク許可が拒否されている | システム設定 → プライバシーとセキュリティ → ローカルネットワーク。**この許可は node ではなく起動元のターミナルアプリに紐づく** —— 過去に拒否していると 127.0.0.1 からは繋がるのに LAN からだけ症状が出る |
 | （未実測）WS は `接続しました` まで進むが、音声の取得だけ失敗する | `insecureHttpOption` が `AlwaysAllowed` になっていない（`UnityWebRequest` だけが掛かる門） | `Edit > Project Settings > Player` の `Configuration > Insecure HTTP Option`。出荷値は `AndroidPlayerSettings.FixAll` が書く |
-| （未実測）targetSdk 37 以上で全部繋がらない | `ACCESS_LOCAL_NETWORK` のランタイム許可が要る | 現状は Automatic 解決で 37 未満なので該当しない（→ 上の `AndroidPlayerSettings.FixAll` の表） |
+| （未実測）targetSdk 37 以上で全部繋がらない | `ACCESS_LOCAL_NETWORK` のランタイム許可が要る | targetSdk は 36 に固定で、37 以上はビルドで止めているので、今は起きない（→ 上の `AndroidPlayerSettings.FixAll` の表） |
 | `[Mascot] serverUrl: 既定を使います ("ws://127.0.0.1:8570")` | 設定が読まれていない。パス違い・JSON が壊れている・`connection.serverUrl` が不正（警告が出る） | `adb shell cat /sdcard/Android/data/tech.sukima.chattermascot/files/settings.json`。`adb reverse` が張られていると既定のままでも繋がってしまい気付かない |
 | `[Mascot] serverUrl: 設定ファイルに接続先が無いので LAN から探します…` のまま `LAN でサーバーが見つかりません`（端末にも通知）。logcat `ChatterMascot` タグの `ServerDiscovery:` に `見つけました` が出ない | サーバーがループバックで待ち受けていて広告されていない／別の Wi-Fi・VLAN／AP やクライアントの分離で mDNS が届かない | Mac 側の起動ログで host が `0.0.0.0` か。端末と Mac が同じネットワークか。届かないなら `configure-android.sh ws://<ip>:<port>` で明示する |
 | `ServerDiscovery: 見つけました` が出るが別の Mac に繋がる／繋がった後 `401` | 複数の Mac が広告していると最初に解決できた1台を使う。トークンはその Mac のものと一致している必要がある | ログの `LAN で見つけた <名前>` を見る。意図した Mac でなければ接続先を明示する |
@@ -1153,9 +1153,21 @@ Jetpack XR（Unity ではない）の動く Gradle 構成。Unity 採用なら�
 - **`ACCESS_LOCAL_NETWORK` はランタイム権限**で、**targetSdk 37 以降で必須**。ローカルアドレスへの
   TCP 接続・mDNS・`.local` 解決が対象で、**`UnityWebRequest` / `ClientWebSocket` のようなライブラリ経由の
   通信も含む** — [Local network permission](https://developer.android.com/privacy-and-security/local-network-permission)。
-  ★ 今の targetSdk は Automatic 解決で 37 未満なので該当しない。このランタイム要求はまだコード化していない
-  ——37 に上がったら要る（→ [`../mascot.md`](../mascot.md)「Player Settings は
-  `AndroidPlayerSettings.FixAll` が書く」）
+  ★ **止まるのは「端末の API が 37 以上」かつ「targetSdk が 37 以上」のときだけ。** XR エミュレータの
+  イメージは API 34（`system-images/android-34/google-xr`）なので、この権限自体が存在しない。
+  ★ Google は **targetSdk 36 以下ではマニフェストに宣言せず、ランタイムでも要求しないこと**としている
+  （ローカルネットワークへのアクセスは `INTERNET` で暗黙に許可される）。
+  ★ `NEARBY_DEVICES` 権限グループに属する。許可されていないとき TCP は**タイムアウト**として、UDP は
+  `EPERM` として見えるので、「サーバーに届かない」と区別がつかない。拒否には専用のログが要る。
+  ★ Unity の権限要求は `UnityPlayer.addPermissionRequest` が保留に積み、1件ずつ出す
+  （`triggerNextPermissionRequest`。6000.3.14f1 の `classes.jar` で確認）。`XrGrab` の
+  HAND_TRACKING / SCENE_UNDERSTANDING_COARSE の要求と同時に出しても衝突しない。
+  ★ `SpeechClient` は接続のタイムアウトが 15 秒、バックオフが最大 30 秒。許可ダイアログを出している間に
+  接続を試させると、許可した後も繋がるまで待たされる。**要求は接続・探索（`NsdManager` も許可が要る）・
+  アセット同期の前に済ませること。**
+  ★ targetSdk は 36 に固定。37 に上げるときに宣言とランタイム要求を入れる
+  （[#178](https://github.com/schwarz9791/chatter-agent/issues/178)。→ 上の
+  「Player Settings は `AndroidPlayerSettings.FixAll` が書く」）
 - **`ws://`（非TLS）を使うなら cleartext 許可が必要**。Android 9 以降デフォルト無効 —
   [Network Security Configuration](https://developer.android.com/privacy-and-security/security-config)。
   非 XR の Android（[#97](https://github.com/schwarz9791/chatter-agent/issues/97)）はすでに

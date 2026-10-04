@@ -41,8 +41,10 @@ namespace ChatterMascot.EditorTools
     ///   ★ <b>プラットフォーム別ではなくプロジェクト全体の設定なので、macOS のスタンドアロンにも
     ///   効く。</b>
     ///
-    /// ★ <b>targetSdk は触らない。</b> <c>Automatic</c>（既定）のままにして、
-    ///   Unity が対応する最新の SDK に追従させる。
+    /// ★ <b>targetSdk は固定する。</b> <c>Automatic</c> はエディタが同梱する最新の SDK に解決されるので、
+    ///   エディタを更新しただけで上がる。37 以上には <c>ACCESS_LOCAL_NETWORK</c> の対応
+    ///   （宣言とランタイム要求）が要るので、上げるのは意図して行う。
+    ///   ビルド時の検査は <see cref="AndroidTargetSdkCheck"/> にある。
     /// </summary>
     public static class AndroidPlayerSettings
     {
@@ -50,6 +52,8 @@ namespace ChatterMascot.EditorTools
         private const string ApplicationId = "tech.sukima.chattermascot";
 
         private const AndroidSdkVersions MinSdkVersion = (AndroidSdkVersions)30;
+
+        public const AndroidSdkVersions TargetSdkVersion = (AndroidSdkVersions)36;
 
         /// <summary><c>Packages/manifest.json</c> の <c>com.unity.xr.androidxr-openxr</c>（#99）。</summary>
         private const string OpenXrLoaderTypeName = "UnityEngine.XR.OpenXR.OpenXRLoader";
@@ -70,6 +74,12 @@ namespace ChatterMascot.EditorTools
             if (PlayerSettings.Android.minSdkVersion != MinSdkVersion)
             {
                 PlayerSettings.Android.minSdkVersion = MinSdkVersion;
+                changed = true;
+            }
+
+            if (PlayerSettings.Android.targetSdkVersion != TargetSdkVersion)
+            {
+                PlayerSettings.Android.targetSdkVersion = TargetSdkVersion;
                 changed = true;
             }
 

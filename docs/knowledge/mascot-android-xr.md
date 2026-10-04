@@ -42,7 +42,7 @@ VRM の読み込み直後、`VrmStage.Adopt` が `VrmMaterialCheck.Inspect` の�
 | minSdk | 30 | 動いている Android XR サンプルの値 |
 | `ForceInternetPermission` | オン | Unity が `INTERNET` を書く根拠 |
 | `insecureHttpOption` | `AlwaysAllowed` | ★ 下記 |
-| targetSdk | 36（固定） | Automatic は**エディタが同梱する最新の platform** に解決される（6000.3 は platforms 34 / 35 / 36 なので 36。6000.5 は 37 を同梱するので、エディタを上げただけで 37 になる）。★ **37 から `ACCESS_LOCAL_NETWORK` がランタイム権限になる**ので、37 以上には宣言とランタイム要求が要る（→ 下の「ネットワークまわりの根拠と未着手」）。`AndroidManifestPostProcessor` が Automatic と 37 以上でビルドを止める |
+| targetSdk | 36（固定） | Automatic は**エディタが同梱する最新の platform** に解決される（6000.3 は platforms 34 / 35 / 36 なので 36。6000.5 は 37 を同梱するので、エディタを上げただけで 37 になる）。★ **37 から `ACCESS_LOCAL_NETWORK` がランタイム権限になる**ので、37 以上には宣言とランタイム要求が要る（→ 下の「ネットワークまわりの根拠と未着手」）。`AndroidTargetSdkCheck`（`IPreprocessBuildWithReport`）が Automatic と 37 以上でビルド前に止める。後処理で止めても APK は書き出されるため（→ 下の「マニフェストは静的に置かず…」） |
 
 ★ **`insecureHttpOption` は Unity 自身の門で、Android の `usesCleartextTraffic` とは別物。**
 `UnityWebRequest` は既定で http を拒むが**ループバックだけは例外**。LAN のホストへ http で
@@ -55,7 +55,7 @@ VRM の読み込み直後、`VrmStage.Adopt` が `VrmMaterialCheck.Inspect` の�
 （`IPostGenerateGradleAndroidProject`。`path` は unityLibrary のルートで、
 `src/main/AndroidManifest.xml` を `XDocument` で編集する）が `INTERNET` と
 `<application android:usesCleartextTraffic="true">` を保証し、起動 Activity を自前のサブクラスへ
-差し替える（→ 下の「起動 Activity は…」）。targetSdk が Automatic または 37 以上のときもビルドを止める。冪等で、失敗したら
+差し替える（→ 下の「起動 Activity は…」）。冪等で、失敗したら
 `BuildFailedException` でビルドを止める（注入漏れを成功扱いにしないため）。★ **Unity は後処理が
 `BuildFailedException` を投げても APK を出力先へ書き出してから `Failed` を返す**（`usesCleartextTraffic` の
 無い APK が残ることを確かめた）ので、`build-android.sh` は失敗したら成果物を消す。静的な1枚を置かないのは、

@@ -44,7 +44,7 @@ namespace ChatterMascot.EditorTools
     /// ★ <b>targetSdk は固定する。</b> <c>Automatic</c> はエディタが同梱する最新の SDK に解決されるので、
     ///   エディタを更新しただけで上がる。37 以上には <c>ACCESS_LOCAL_NETWORK</c> の対応
     ///   （宣言とランタイム要求）が要るので、上げるのは意図して行う。
-    ///   ビルド時の検査は <see cref="AndroidManifestPostProcessor"/> にある。
+    ///   ビルド時の検査は <see cref="AndroidTargetSdkCheck"/> にある。
     /// </summary>
     public static class AndroidPlayerSettings
     {
@@ -53,7 +53,7 @@ namespace ChatterMascot.EditorTools
 
         private const AndroidSdkVersions MinSdkVersion = (AndroidSdkVersions)30;
 
-        private const AndroidSdkVersions TargetSdkVersion = (AndroidSdkVersions)36;
+        public const AndroidSdkVersions TargetSdkVersion = (AndroidSdkVersions)36;
 
         /// <summary><c>Packages/manifest.json</c> の <c>com.unity.xr.androidxr-openxr</c>（#99）。</summary>
         private const string OpenXrLoaderTypeName = "UnityEngine.XR.OpenXR.OpenXRLoader";

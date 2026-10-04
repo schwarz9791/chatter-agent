@@ -212,7 +212,7 @@ cd chatter-mascot
 ```bash
 # Android（C: LAN 越し）
 cd chatter-mascot
-./scripts/configure-android.sh          # LAN の IP を自動で組み立てます
+./scripts/configure-android.sh          # 端末が LAN の Mac を自動で探します（mDNS）
 ./scripts/run-android.sh                # install して起動、logcat を流します
 ```
 

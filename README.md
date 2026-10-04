@@ -215,7 +215,7 @@ cd chatter-mascot
 ```bash
 # Android (case C: over the LAN)
 cd chatter-mascot
-./scripts/configure-android.sh          # assembles the LAN IP automatically
+./scripts/configure-android.sh          # the device finds the Mac on the LAN (mDNS)
 ./scripts/run-android.sh                # installs, launches, and streams logcat
 ```
 

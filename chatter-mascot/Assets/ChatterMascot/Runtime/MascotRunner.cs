@@ -216,6 +216,8 @@ namespace ChatterMascot
         /// ★★ <b>その約束は <c>Awake</c> で上書きすることで守られている</b>
         ///   （→ <see cref="ResolveServerUrl"/>）。他コンポーネントの <c>Start</c> が読みうるので、
         ///   上書きを <c>Start</c> でやると<b>順序が未規定になる</b>。
+        /// ★ <b>LAN から探すとき（→ <see cref="ResolveServerUrl"/>）は、見つかるまで既定値のまま。</b>
+        ///   決まる前に読んでも既定値を焼くだけなので、読み手を足すときはセッションの開始後に読むこと。
         /// </summary>
         public string ServerUrl
         {
@@ -276,6 +278,18 @@ namespace ChatterMascot
         private AudioFetcher _fetcher;
         private ISpeechPlayer _player;
         private AudioIdleGate _idleGate;
+
+        /// <summary>LAN から接続先を探している間は <c>true</c>。セッション（<see cref="BeginSession"/>）はまだ始まっていない。</summary>
+        private bool _discovering;
+        private float _nextDiscoveryPollAt;
+        private float _discoveryStartedAt;
+        private bool _warnedDiscoveryNotFound;
+
+        /// <summary>探索結果を見に行く間隔。</summary>
+        private const float DiscoveryPollIntervalSeconds = 0.5f;
+
+        /// <summary>この間見つからなければ、確認すべきことを1回だけ知らせる。</summary>
+        private const float DiscoveryNotFoundNoticeSeconds = 10f;
 
         /// <summary>
         /// いま鳴っている発話。<b>フィールド初期化子で作ること</b> —— <c>VrmCharacter</c> は
@@ -425,6 +439,8 @@ namespace ChatterMascot
         public bool TryStartAssetSync(bool requested)
         {
             if (AssetSyncRunning) return false;
+            // ★ 接続先が決まる前は同期できない。決まったら Update が起こし直す
+            if (_discovering) return false;
 
             try
             {
@@ -477,7 +493,11 @@ namespace ChatterMascot
         /// <summary>
         /// <see cref="serverUrl"/> と <see cref="ServerToken"/> を決める。優先順位は
         /// <c>-serverUrl</c>（起動引数）＞ <c>settings.json</c> の <c>connection.serverUrl</c> ＞
-        /// <c>[SerializeField]</c> の既定。
+        /// 探索（Android でトークンがあるときだけ）＞ <c>[SerializeField]</c> の既定。
+        ///
+        /// ★ <b>探索のときは接続先が見つかるまで決まらない</b>——<see cref="_discovering"/> の間は
+        ///   <see cref="serverUrl"/> は既定のままで、<see cref="Update"/> が決めて
+        ///   <see cref="BeginSession"/> を呼ぶ。見つからない間もループバックへは倒さない。
         ///
         /// ★★ <b>起動引数で上書きしたときは <see cref="ServerToken"/> の doc を見ること</b>
         ///   —— ファイルのトークンは使わない。
@@ -531,7 +551,52 @@ namespace ChatterMascot
                 return;
             }
 
+            if (ServerDiscovery.ShouldDiscover(Application.platform, fromFile.ServerUrl, ServerToken)
+                && ServerDiscovery.Start())
+            {
+                _discovering = true;
+                _discoveryStartedAt = Time.realtimeSinceStartup;
+                Debug.Log("[Mascot] serverUrl: 設定ファイルに接続先が無いので LAN から探します（_chatter-agent._tcp）");
+                return;
+            }
+
             Debug.Log($"[Mascot] serverUrl: 既定を使います (\"{serverUrl}\")");
+        }
+
+        /// <summary>探索の結果を見て、見つかっていればセッションを始める。</summary>
+        private void PollDiscovery()
+        {
+            var now = Time.realtimeSinceStartup;
+            if (now < _nextDiscoveryPollAt) return;
+            _nextDiscoveryPollAt = now + DiscoveryPollIntervalSeconds;
+
+            string host, name;
+            int port;
+            if (ServerDiscovery.TryTake(out host, out port, out name))
+            {
+                var url = ChatterMascot.Net.ServerUrl.FromHostPort(host, port);
+                if (url == null)
+                {
+                    Debug.LogWarning($"[Mascot] 見つけた {name} の接続先を組めません (\"{host}\":{port})。探し続けます");
+                    return;
+                }
+
+                serverUrl = url;
+                _discovering = false;
+                ServerDiscovery.Stop();
+                Debug.Log($"[Mascot] serverUrl: LAN で見つけた {name} の {url} を使います");
+                BeginSession();
+                StartAssetSyncIfNeeded();
+                return;
+            }
+
+            if (!_warnedDiscoveryNotFound && now - _discoveryStartedAt >= DiscoveryNotFoundNoticeSeconds)
+            {
+                _warnedDiscoveryNotFound = true;
+                Debug.LogWarning("[Mascot] LAN でサーバーが見つかりません。探し続けます");
+                DeviceToast.Show("サーバーが見つかりません\nMac のサーバーが 0.0.0.0 で待ち受けているか、\n" +
+                                 "同じ Wi-Fi か、トークンを確認してください");
+            }
         }
 
         /// <summary>読めなければ（無い・壊れている）既定を返す。<c>SettingsJson</c> と同じ「throw しない」作法。</summary>
@@ -686,6 +751,18 @@ namespace ChatterMascot
 
         private void Start()
         {
+            // ★ 探索中は見つかってから（→ PollDiscovery）。_client などは null のまま
+            //   Update / Dispatch / OnWantsToQuit / OnDestroy を通るが、どれも null を許している
+            if (_discovering) return;
+            BeginSession();
+        }
+
+        /// <summary>
+        /// 接続先が決まった後の本体。<see cref="Start"/>（接続先が <c>Awake</c> で決まったとき）か
+        /// <see cref="PollDiscovery"/>（探索で決まったとき）から1回だけ呼ぶ。
+        /// </summary>
+        private void BeginSession()
+        {
             // ★ **ここで検査しないと「動いて見える死体」になる。**
             //   下の DeriveAudioBaseUrl は new Uri() を呼ぶので、Inspector に
             //   `127.0.0.1:8570`（スキーム無し）や空文字を入れただけで UriFormatException が
@@ -764,6 +841,8 @@ namespace ChatterMascot
 
             if (_shuttingDown) return;
 
+            if (_discovering) PollDiscovery();
+
             // ack の間引き送出と、無受信 watchdog
             _client?.Tick();
 
@@ -840,6 +919,11 @@ namespace ChatterMascot
         {
             Application.wantsToQuit -= OnWantsToQuit;
             _shuttingDown = true;
+            if (_discovering)
+            {
+                _discovering = false;
+                ServerDiscovery.Stop();
+            }
             _player?.StopAll();
             // ★ StopAll の直後に落とすこと。残すと VrmCharacter から「まだ喋っている」に見え、
             //   口が開いたままシーンが破棄される

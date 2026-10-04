@@ -7,17 +7,18 @@
 #   ./scripts/configure-android.sh ws://192.168.1.10:8570 --no-restart
 #   ./scripts/configure-android.sh --clear
 #
-# ★ 接続先を省略すると en0 → en1 の IP アドレスとポートから ws://<ip>:<port> を組み立てる。
-#   どちらの IF からも IP が取れなければ引数で指定すること。ポートの優先順位はサーバーと同じ
-#   `CHATTER_AGENT_PORT` ＞ config.json の `port` ＞ 既定の 8570（→ docs/core.md の「設定と環境変数」）。
+# ★ 接続先を省略すると connection.serverUrl を空にしてトークンだけを書く。端末は LAN の
+#   `_chatter-agent._tcp`（mDNS）から Mac のサーバーを探して繋ぐ。見つかるのはサーバーが
+#   非ループバック（0.0.0.0 など）で待ち受けているときだけ。AP / クライアント分離や別の
+#   Wi-Fi・VLAN では mDNS が届かないので、その場合は ws://<ip>:<port> を引数で指定すること。
 #
 # ★ トークンは ${XDG_CONFIG_HOME:-$HOME/.config}/chatter-agent/server.token から読む。
 #   chatter-agent-server の起動時に生成される共有シークレットなので、無ければ先にサーバーを
 #   起動する。値は標準出力に出さない。
 #
 # ★ --clear は connection セクションだけを消す。run-android.sh が張る adb reverse の経路
-#   （settings.json の connection が空のときだけ使われる）へ戻すためのもの。IP の組み立てと
-#   トークンの読み取りは行わないので、サーバーが止まっていても実行できる。接続先の引数とは
+#   （settings.json の connection が空のときだけ使われる）へ戻すためのもの。トークンの
+#   読み取りは行わないので、サーバーが止まっていても実行できる。接続先の引数とは
 #   同時に指定できない。
 #
 # ★ adb はここでは自動検出しない。 ADB 環境変数で上書きできるが、既定は
@@ -75,26 +76,6 @@ if [ -z "$CLEAR" ]; then
         exit 1
         ;;
     esac
-  else
-    IP="$(ipconfig getifaddr en0 2>/dev/null || true)"
-    if [ -z "$IP" ]; then
-      IP="$(ipconfig getifaddr en1 2>/dev/null || true)"
-    fi
-    if [ -z "$IP" ]; then
-      echo "IP アドレスを取得できませんでした（en0 / en1）。接続先を引数で指定してください" >&2
-      exit 1
-    fi
-
-    PORT="${CHATTER_AGENT_PORT:-}"
-    if [ -z "$PORT" ]; then
-      CONFIG_PATH="${CHATTER_AGENT_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/chatter-agent/config.json}"
-      CONFIG_PORT="$(plutil -extract port raw -o - "$CONFIG_PATH" 2>/dev/null || true)"
-      case "$CONFIG_PORT" in
-        ''|*[!0-9]*) PORT="8570" ;;
-        *) PORT="$CONFIG_PORT" ;;
-      esac
-    fi
-    SERVER_URL="ws://$IP:$PORT"
   fi
 
   TOKEN_PATH="${XDG_CONFIG_HOME:-$HOME/.config}/chatter-agent/server.token"
@@ -129,6 +110,7 @@ else
   # ★ -replace は途中の辞書を作らないので、connection が無いときだけ先に作る
   #   （あれば -insert は失敗するので無視する）。plutil は .json を JSON のまま書き戻す
   plutil -insert connection -json '{}' "$LOCAL_SETTINGS" >/dev/null 2>&1 || true
+  # 接続先を省略したときは空文字（＝端末が探す）。値があれば明示の接続先
   plutil -replace connection.serverUrl -string "$SERVER_URL" "$LOCAL_SETTINGS"
   plutil -replace connection.token -string "$TOKEN" "$LOCAL_SETTINGS"
 fi
@@ -140,7 +122,11 @@ if [ -n "$CLEAR" ]; then
   echo "connection を消しました: $REMOTE_SETTINGS"
 else
   echo "書き込みました: $REMOTE_SETTINGS"
-  echo "接続先: $SERVER_URL"
+  if [ -n "$SERVER_URL" ]; then
+    echo "接続先: $SERVER_URL"
+  else
+    echo "接続先: LAN から自動で探します（mDNS）"
+  fi
 fi
 
 if [ -n "$NO_RESTART" ]; then

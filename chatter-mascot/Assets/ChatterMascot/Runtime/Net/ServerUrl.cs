@@ -21,6 +21,19 @@ namespace ChatterMascot.Net
         }
 
         /// <summary>
+        /// 探索で得た <paramref name="host"/> と <paramref name="port"/> から <c>ws://host:port</c> を組む。
+        /// 組めない（ホストが空・ポートが範囲外・URL として不正）ときは <c>null</c>。
+        /// IPv6 リテラルは角括弧で包む。
+        /// </summary>
+        public static string FromHostPort(string host, int port)
+        {
+            if (string.IsNullOrEmpty(host) || port < 1 || port > 65535) return null;
+            var authority = host.Contains(":") && !host.StartsWith("[") ? "[" + host + "]" : host;
+            var url = "ws://" + authority + ":" + port;
+            return IsValid(url) ? url : null;
+        }
+
+        /// <summary>
         /// <c>ws://</c> / <c>wss://</c> の絶対 URL か。
         ///
         /// ★ スキームまで見ること。<c>Uri.TryCreate</c> は <c>http://…</c> も

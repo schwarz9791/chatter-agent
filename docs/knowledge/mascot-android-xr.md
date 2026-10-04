@@ -253,12 +253,20 @@ CHATTER_AGENT_PORT=8571 ./scripts/run-android.sh
 { "connection": { "serverUrl": "ws://192.168.1.10:8570", "token": "…" } }
 ```
 
-優先順位は **`-serverUrl`（起動引数）＞ `connection.serverUrl` ＞ `[SerializeField]` の既定**
-（`MascotRunner.ResolveServerUrl`）。トークンは `connection.token` からしか読まない
+優先順位は **`-serverUrl`（起動引数）＞ `connection.serverUrl` ＞ 探索（Android かつ
+`connection.token` が空でない）＞ `[SerializeField]` の既定**（`MascotRunner.ResolveServerUrl`）。
+探索は `NsdManager` で DNS-SD の `_chatter-agent._tcp` を探す（`ServerDiscovery.java`。サーバーは
+非ループバックで待ち受けているときだけ広告し、インスタンス名は Mac のホスト名）。
+トークンを条件にするのは、非ループバックの接続にトークンが要るため。トークンが無ければ従来どおり既定
+（`adb reverse` の経路は `connection` が空であることに頼る）。見つかるまで探し続け、ループバックへは
+倒さない。複数の Mac が見つかったら最初に解決できた1台に繋ぐ。パーミッションは足さない。
+
+トークンは `connection.token` からしか読まない
 （起動引数は無い）。**`-serverUrl` で接続先を上書きしたときは `connection.token` を使わない**
 （別のホストへトークンを送らないため）。トークンが要る接続先は `connection` で指定する。
 
-★★ **どちらも `Awake` で**、専用のストアを作らず**起動時に1回だけ**読む。ファイルを
+★★ **どちらも `Awake` で**、専用のストアを作らず**起動時に1回だけ**読む（探索のときだけ、
+接続先が決まるのが見つかった後になり、その時点で `BeginSession` が走る）。ファイルを
 書き換えても**次回の起動まで反映されない** —— 接続を1回きり捕まえる設計（`MascotRunner.ServerUrl`
 の doc）を保つため。採用した出どころ（起動引数 / 設定ファイル / 既定）とトークンの有無はログ（デスクトップは
 Player.log、Android は `adb logcat -s Unity`）に出る。
@@ -279,10 +287,13 @@ CHATTER_AGENT_HOST=0.0.0.0 npm run start:server
 #### `configure-android.sh`
 
 ```bash
-./scripts/configure-android.sh                          # en0/en1 の IP + CHATTER_AGENT_PORT（既定 8570）から自動組み立て
+./scripts/configure-android.sh                          # serverUrl を空・token を書く（端末が mDNS で探す）
 ./scripts/configure-android.sh ws://192.168.1.10:8570    # 接続先を明示
 ./scripts/configure-android.sh --no-restart              # 端末側のアプリを再起動しない
 ```
+
+接続先を省略すると `connection.serverUrl` は空になり、IP やポートは組み立てない。
+mDNS が通らない環境では接続先を明示する。
 
 トークンは `${XDG_CONFIG_HOME:-$HOME/.config}/chatter-agent/server.token` から読む
 （先にサーバーを起動しておくこと）。端末側の `settings.json` は `adb pull` → `connection` だけ
@@ -290,8 +301,8 @@ CHATTER_AGENT_HOST=0.0.0.0 npm run start:server
 
 ★ 別ルートの検証用サーバー（`XDG_CONFIG_HOME` / `CHATTER_AGENT_PORT` を変えて立てたもの）に
 繋ぐときは、`configure-android.sh` を呼ぶときにも**同じ** `XDG_CONFIG_HOME` / `CHATTER_AGENT_PORT`
-を渡すこと。揃えないとトークンファイルの場所と既定ポートがずれ、常用のサーバーの
-トークン・接続先を組み立ててしまう。
+を渡すこと。揃えないとトークンファイルの場所がずれ、常用のサーバーのトークンを
+書いてしまう（接続先を明示するときは既定ポートもずれる）。
 
 ★★ **`adb reverse`（`10.0.2.2` 経由を含む）は、サーバーから見るとループバック接続になる。**
 ループバックはトークンを免除されるので、トークン無し・誤りのどちらでも繋がってしまい、
@@ -312,7 +323,7 @@ Android で共通。1秒ポーリングで外部変更も拾う。
 | `xr.height` | 効く（XR が起動したときだけ）。他の `xr.*` と違い**設定パネルの「大きさ」からその場で変えられる**——起動時の読み込みだけに限らない |
 | `character.idleMotion` / `character.cursorGaze` / `character.blink` | 効く（視線は手を追跡できている間だけ追従し、それ以外は自律的な漂いになる） |
 | `character.walk`（既定 `true`） | 効く。設定パネルの「歩く」からその場で切り替えられる。デスクトップでは何もしない（歩かないため） |
-| `connection.serverUrl` / `connection.token` | 効く（起動時に1回だけ） |
+| `connection.serverUrl` / `connection.token` | 効く（起動時に1回だけ。`serverUrl` が空で `token` があれば LAN から探す） |
 | `connection.assetSync` | 効く（設定パネルの「モデルとモーションを同期」からも変えられるが、**次回の起動から**——読むのは起動時の1回だけ。パネルの「今すぐ同期」は設定のいまの値を見るので、ON にしたその場で押せる） |
 | `character.vrm` | **効かない。** VRM の探索は `AssetEnv.HasUserConfigDirectory` のときだけユーザー段を見るが、Android はこれが `false`（共有ファイルシステムが無い） |
 | `audio.muteHotKey` / `ui.hideHotKey` | **効かない。** グローバルショートカットを登録するのは ChatterAgent（macOS）だけで、マスコットは読み飛ばす |
@@ -332,6 +343,9 @@ Android のログは `adb logcat -s Unity`。★★ **Android では 401 と「�
 | （未実測）WS は `接続しました` まで進むが、音声の取得だけ失敗する | `insecureHttpOption` が `AlwaysAllowed` になっていない（`UnityWebRequest` だけが掛かる門） | `Edit > Project Settings > Player` の `Configuration > Insecure HTTP Option`。出荷値は `AndroidPlayerSettings.FixAll` が書く |
 | （未実測）targetSdk 37 以上で全部繋がらない | `ACCESS_LOCAL_NETWORK` のランタイム許可が要る | 現状は Automatic 解決で 37 未満なので該当しない（→ 上の `AndroidPlayerSettings.FixAll` の表） |
 | `[Mascot] serverUrl: 既定を使います ("ws://127.0.0.1:8570")` | 設定が読まれていない。パス違い・JSON が壊れている・`connection.serverUrl` が不正（警告が出る） | `adb shell cat /sdcard/Android/data/tech.sukima.chattermascot/files/settings.json`。`adb reverse` が張られていると既定のままでも繋がってしまい気付かない |
+| `[Mascot] serverUrl: 設定ファイルに接続先が無いので LAN から探します…` のまま `LAN でサーバーが見つかりません`（端末にも通知）。logcat `ChatterMascot` タグの `ServerDiscovery:` に `見つけました` が出ない | サーバーがループバックで待ち受けていて広告されていない／別の Wi-Fi・VLAN／AP やクライアントの分離で mDNS が届かない | Mac 側の起動ログで host が `0.0.0.0` か。端末と Mac が同じネットワークか。届かないなら `configure-android.sh ws://<ip>:<port>` で明示する |
+| `ServerDiscovery: 見つけました` が出るが別の Mac に繋がる／繋がった後 `401` | 複数の Mac が広告していると最初に解決できた1台を使う。トークンはその Mac のものと一致している必要がある | ログの `LAN で見つけた <名前>` を見る。意図した Mac でなければ接続先を明示する |
+| `ServerDiscovery: 解決できません: … error=…` | 見つけたが名前解決に失敗した（見つけた別の広告があれば、そちらを試す） | 同じネットワークか。Mac 側のサーバーを再起動する |
 | `[Mascot] serverUrl: 起動引数を使います (…)` | `-serverUrl` が設定より優先されている | 起動引数を外す |
 
 #### ★★ close フレーム無しで切れた後、Android では `Abort` しないと再接続が止まる
@@ -1147,8 +1161,12 @@ Jetpack XR（Unity ではない）の動く Gradle 構成。Unity 採用なら�
   `AndroidManifestPostProcessor` と `insecureHttpOption` で満たしている
 - 接続先の手動入力は**すでに入っている**（[#98](https://github.com/schwarz9791/chatter-agent/issues/98)。
   `settings.json` の `connection.serverUrl` / `configure-android.sh` — 手順は
-  [`../mascot.md`](../mascot.md)「接続」の C）。後から
-  `NsdManager`（`android.net.nsd`）で mDNS 検出を足すのは未着手
+  [`../mascot.md`](../mascot.md)「接続」の C）。接続先が空でトークンがあるときは
+  `NsdManager`（`android.net.nsd`）で mDNS 検出する。
+  ★ **エミュレータにも Mac の広告は届く**（NAT の内側だから届かない、と見込んでいたが外れた）。
+  `XR_Glasses`（API 34）で、トークンだけの設定から Mac の広告を見つけて `ws://<Mac の Wi-Fi の IP>:<port>`
+  に繋がった。探索中に server を起こし直しても、探し続けて繋がった（2026-10-04）。
+  届く仕組みは調べていない。実機（同じ Wi-Fi の端末）は未確認
 
 ★ **エンジンの `--host 0.0.0.0 --cors_policy_mode all` は不要になった**（#29）。
 叩くのは同じ Mac 上の `chatter-agent-server` だけ。

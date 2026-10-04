@@ -179,8 +179,20 @@ Transform しか持たない空オブジェクトで、初版は「空だから�
 ### アイコン
 
 `IconSettings.FixAll` は Android にも `IconKind.Application` で登録する。★ **`IconKind.Legacy` は
-存在しない** —— `Application` を渡すと Inspector の「Legacy」枠に入る。Adaptive / Round は別の API
-（`PlatformIconKind`）で、触っていない。Android 側はサイズ一覧が空でも落とさない。
+存在しない** —— `Application` を渡すと Inspector の「Legacy」枠に入る。Android 側はサイズ一覧が
+空でも落とさない。
+
+★★ **Adaptive も登録する。** Legacy しか無いと、ランチャーは絵を縮めて白い下地に収める
+（XR の丸いランチャーでは余白になって出る）。Adaptive は `PlatformIconKind`
+（`AndroidPlatformIconKind.Adaptive`）の API で、前景・背景の2層を各枠に渡す。
+
+- **前景**: 「アイコン全体」の構図の書き出しの四方に透明を足し、中央 72/108 に収める。層は 108dp で、
+  マスクが見せるのは中央 72dp だけ。
+- **背景**: 全面に敷く。
+
+★ **アイコンの変更は `adb install -r` では見えない。** XR のホーム（`com.android.systemui/.xr.home`）は
+上書きインストールの後も古いアイコンを出し続ける。確かめるときは一度アンインストールしてから入れる
+（アプリのデータ —— ペアリングのトークンや設定 —— も消える）。
 
 ### 音は Unity 内蔵オーディオのまま
 

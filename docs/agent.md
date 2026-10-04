@@ -346,6 +346,9 @@ macOS 限定。Windows は single-instance プラグインで同じ口にでき�
 許可は**server を起動したアプリ**に付く。ChatterAgent から起こしたときは ChatterAgent が対象になる
 （→ [`knowledge/mascot-android-xr.md`](./knowledge/mascot-android-xr.md)「繋がらないときの症状と切り分け」）。
 
+mDNS での広告（`_chatter-agent._tcp`。→ [`protocol.md`](./protocol.md)「発見（DNS-SD）」）も、同じ
+「ローカルネットワーク」の許可の対象になる。ChatterAgent から起こしたときに広告が通るかは未確認。
+
 ## 制約
 
 - ★ **ChatterAgent がメニューの「終了」やログアウト（quit の Apple Event）以外で終わると server と player が残る。**

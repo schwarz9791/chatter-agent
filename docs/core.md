@@ -231,9 +231,16 @@ hook → CLI → server → player の全経路を1本で見る。
 | エントリ | 出力 | 依存 |
 |---|---|---|
 | `src/cli/index.ts` | `plugin/bin/chatter-agent-speak.mjs`（**git にコミット**） | 全部バンドル。npm 依存ゼロ |
-| `src/server/index.ts` | `core/dist/chatter-agent-server.mjs`（gitignore） | `ws` は external |
+| `src/server/index.ts` | `core/dist/chatter-agent-server.mjs`（gitignore） | `ws` / `@homebridge/ciao` は external |
 | `src/player/index.ts` | `core/dist/chatter-agent-player.mjs`（gitignore） | `ws` は external |
 
+- **`@homebridge/ciao`（server のみ）は LAN での発見（DNS-SD / mDNS）のために入れている。** 純 JS なので
+  OS のコマンド（macOS の `dns-sd`、avahi）に依存せず、Windows への道も残る。RFC 6762/6763 に準拠
+  （Apple の Bonjour Conformance Test 通過）し、probing・名前衝突の付け替え・停止時の goodbye を持つ。
+  ネットワークインターフェースの変化に追従して再広告するので、DHCP でアドレスが変わっても古い A レコードが残らない
+  （bonjour-service を採らなかった理由）。副作用として、ロード時に `source-map-support/register` を
+  `require` する。server は source map を使わず、`uncaughtException` も自前で握っているので、スタックと
+  クラッシュ時の挙動は変わらない
 - ★ **`dist` に出すエントリのうち `clean: true` を持てるのは1つだけ。** 両方が true だと、
   実行順によって先に出た方の成果物が消える。今は server 側が持っている
 

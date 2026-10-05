@@ -20,9 +20,12 @@ namespace ChatterMascot.Ui
 
         /// <summary>
         /// 入力された文字列を返す。取り消し・出せなかったときは <c>null</c>。
+        /// <paramref name="closeWhen"/> が真になったらダイアログを閉じて <c>null</c> を返す
+        /// （入力が要らなくなったとき）。
         /// <b>失敗しても投げない</b>——ダイアログが出ないことより、本体が止まることの方が悪い。
         /// </summary>
-        public static async Task<string> AskAsync(string title, string message, string hint, string ok, string cancel)
+        public static async Task<string> AskAsync(string title, string message, string hint, string ok, string cancel,
+            Func<bool> closeWhen = null)
         {
             if (Application.platform != RuntimePlatform.Android) return null;
 
@@ -33,10 +36,17 @@ namespace ChatterMascot.Ui
                 using (var dialog = new AndroidJavaClass(JavaClass))
                 {
                     if (activity == null) return null;
-                    dialog.CallStatic("show", activity, title, message, hint, ok, cancel);
+                    dialog.CallStatic("show", activity, title, message, hint, ok, cancel,
+                        ChatterMascot.Settings.SettingsSchema.PinLength);
 
-                    while (!dialog.CallStatic<bool>("isDone"))
+                    while (true)
                     {
+                        if (closeWhen?.Invoke() == true)
+                        {
+                            dialog.CallStatic("dismiss");
+                            return null;
+                        }
+                        if (dialog.CallStatic<bool>("isDone")) break;
                         await Task.Delay(PollIntervalMs);
                     }
                     return dialog.CallStatic<string>("take");

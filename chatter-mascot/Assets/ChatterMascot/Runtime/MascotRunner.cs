@@ -969,6 +969,9 @@ namespace ChatterMascot
         /// </summary>
         public Action PairingPrompt { get; set; }
 
+        /// <summary>このセッションで一度でも繋がったか。一度 <c>true</c> になれば戻らない。</summary>
+        public bool ConnectedOnce => _connectedOnce;
+
         private void Update()
         {
             // ★ **_shuttingDown の早期 return より手前に置くこと。** 後始末が終わってから
@@ -989,19 +992,17 @@ namespace ChatterMascot
                 _warnedUnreachable = true;
                 Debug.LogWarning("[Mascot] サーバーに繋がりません。サーバーが止まっている・接続先が変わった・" +
                                  "トークンが合っていない（Android では 401 と見分けられない）のどれか");
-                // ★ トークンが無いなら、再起動ではなくペアリングが打てる手。ただし一度繋がっていれば
-                //   接続先は合っている（adb reverse の経路を含む）ので、ペアリングしても直らない
-                if (ServerToken.Length > 0 || _connectedOnce)
+                switch (UnreachableNotices.Decide(ServerToken.Length > 0, _connectedOnce, PairingPrompt != null))
                 {
-                    DeviceToast.Show("サーバーに繋がりません\nサーバーの起動状態を確認し、\nアプリを再起動してください");
-                }
-                else if (PairingPrompt != null)
-                {
-                    PairingPrompt();
-                }
-                else
-                {
-                    DeviceToast.Show(UiText.For(Application.systemLanguage).PairingNeededToast);
+                    case UnreachableNotice.ServerDown:
+                        DeviceToast.Show(UiText.For(Application.systemLanguage).ServerUnreachableToast);
+                        break;
+                    case UnreachableNotice.PairingPrompt:
+                        PairingPrompt();
+                        break;
+                    default:
+                        DeviceToast.Show(UiText.For(Application.systemLanguage).PairingNeededToast);
+                        break;
                 }
             }
 

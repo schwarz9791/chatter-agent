@@ -4,6 +4,8 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.text.InputFilter;
 import android.text.InputType;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import android.view.WindowManager;
 import android.widget.EditText;
@@ -16,11 +18,13 @@ import android.widget.EditText;
  */
 public final class PinDialog {
     private static final String TAG = "ChatterMascot";
-    private static final int PIN_LENGTH = 4;
 
     private static boolean done;
     /** 入力された文字列。取り消しは null のまま done だけが立つ。 */
     private static String text;
+
+    /** 開いているダイアログ。UI スレッドでだけ読み書きする。 */
+    private static AlertDialog current;
 
     private PinDialog() {}
 
@@ -35,23 +39,34 @@ public final class PinDialog {
     }
 
     public static void show(final Activity activity, final String title, final String message,
-                            final String hint, final String ok, final String cancel) {
+                            final String hint, final String ok, final String cancel,
+                            final int maxLength) {
         reset();
         activity.runOnUiThread(() -> {
             try {
                 final EditText input = new EditText(activity);
                 input.setInputType(InputType.TYPE_CLASS_NUMBER);
-                input.setFilters(new InputFilter[] {new InputFilter.LengthFilter(PIN_LENGTH)});
+                input.setFilters(new InputFilter[] {new InputFilter.LengthFilter(maxLength)});
                 input.setHint(hint);
 
                 AlertDialog dialog = new AlertDialog.Builder(activity)
                     .setTitle(title)
                     .setMessage(message)
                     .setView(input)
-                    .setPositiveButton(ok, (d, which) -> finish(input.getText().toString()))
-                    .setNegativeButton(cancel, (d, which) -> finish(null))
-                    .setOnCancelListener(d -> finish(null))
+                    .setPositiveButton(ok, (d, which) -> {
+                        current = null;
+                        finish(input.getText().toString());
+                    })
+                    .setNegativeButton(cancel, (d, which) -> {
+                        current = null;
+                        finish(null);
+                    })
+                    .setOnCancelListener(d -> {
+                        current = null;
+                        finish(null);
+                    })
                     .create();
+                current = dialog;
                 // 外を触っただけで終わらせない
                 dialog.setCanceledOnTouchOutside(false);
                 dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
@@ -61,6 +76,17 @@ public final class PinDialog {
                 Log.w(TAG, "PinDialog: ダイアログを出せません: " + e);
                 finish(null);
             }
+        });
+    }
+
+    /** 呼び手が待つのをやめるとき（入力が要らなくなったとき）に閉じる。 */
+    public static void dismiss() {
+        new Handler(Looper.getMainLooper()).post(() -> {
+            if (current != null) {
+                current.dismiss();
+                current = null;
+            }
+            finish(null);
         });
     }
 

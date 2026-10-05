@@ -52,24 +52,28 @@ namespace ChatterMascot.Xr
         /// <summary>
         /// 設定パネルの無い端末で、ダイアログから PIN を受けてペアリングする。
         /// 取り消されるまで、失敗の理由を添えて出し直す。
+        /// 開いている間に繋がったら閉じて終える（一度繋がれば接続先は合っているので、ペアリングは要らない）。
         /// </summary>
         public static async Task PromptAsync(MascotRunner runner)
         {
             try
             {
                 var text = UiText.For(Application.systemLanguage);
-                var message = text.PairingDialogMessage;
+                var reason = text.XrPairUnreachable;
 
                 while (true)
                 {
+                    if (runner == null || runner.ConnectedOnce) return;
+
                     var typed = await PinDialog.AskAsync(
-                        text.XrPairUnreachable, message, text.XrPairingPin, text.XrPair, text.Cancel);
+                        text.XrPair, reason + "\n\n" + text.PairingDialogMessage, text.XrPairingPin, text.XrPair,
+                        text.Cancel, () => runner == null || runner.ConnectedOnce);
                     if (typed == null) return;
 
                     var pin = SettingsSchema.ParseTypedPin(typed);
                     if (pin == null)
                     {
-                        message = text.XrPairKeyboardInvalid + "\n\n" + text.PairingDialogMessage;
+                        reason = text.XrPairKeyboardInvalid;
                         continue;
                     }
 
@@ -86,7 +90,7 @@ namespace ChatterMascot.Xr
                     }
                     if (runner == null || host == null) return;
 
-                    message = PairingClient.Describe(result, text) + "\n\n" + text.PairingDialogMessage;
+                    reason = PairingClient.Describe(result, text);
                 }
             }
             catch (Exception e)

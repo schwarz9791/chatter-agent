@@ -68,6 +68,8 @@ namespace ChatterMascot.Ui
         public override string XrPairOldServer => "このサーバーはペアリングに対応していません。更新してください";
         public override string XrPairBadResponse => "サーバーの応答を読めませんでした";
         public override string XrBack => "戻る";
+        public override string ServerUnreachableToast =>
+            "サーバーに繋がりません\nサーバーの起動状態を確認し、\nアプリを再起動してください";
         public override string PairingNeededToast =>
             "サーバーに繋がりません\nMac の ChatterAgent のメニュー「Android とペアリング…」で PIN を表示し、\n" +
             "設定パネルの「ペアリング…」で入力してください";

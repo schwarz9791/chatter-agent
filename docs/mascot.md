@@ -536,7 +536,7 @@ $ADB shell chmod -R 777 $D/animations
 - トークン無しで繋がらないときの通知は、ペアリングを案内する（一度繋がった後は、接続先は合っているので server の停止を案内する）
 - ★ **`ServerDiscovery` を呼ぶのは `MascotRunner` だけ。** ペアリングの探索もここを通す
 - 設定パネルの無い Android（XR なし）は、ペアリングの案内の代わりにネイティブのダイアログ（`PinDialog`）が開き、4桁の PIN を受けて同じペアリング（`PairingFlow`）を行う。
-  取り消すとアプリを起動し直すまで出ない。失敗すると理由を添えて出し直す
+  取り消すとアプリを起動し直すまで出ない。失敗すると理由を添えて出し直す。開いている間に繋がったら閉じる
 
 ### 置き場所と大きさ（`xr`）
 
@@ -596,6 +596,7 @@ $ADB shell am force-stop tech.sukima.chattermascot   # 起動時に1回だけ読
 `run-android.sh` が `adb reverse tcp:8570 tcp:${CHATTER_AGENT_PORT:-8570}` を張るので、端末の
 `settings.json` に `connection` が無ければ `MascotRunner` の既定 `ws://127.0.0.1:8570` のまま
 Mac のサーバーに届く。サーバーから見るとループバック接続なので、トークンも LAN への公開も要らない。
+`adb reverse` を張っていても server より先にアプリを起動すると（トークンが無ければ）PIN のダイアログが開くが、server が上がって繋がれば閉じる。
 
 #### C: LAN 越し
 

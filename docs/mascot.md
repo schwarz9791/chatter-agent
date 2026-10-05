@@ -533,9 +533,10 @@ $ADB shell chmod -R 777 $D/animations
   反映は従来どおり次回の起動から）
 - 失敗は端末に文言で出る: PIN 違い（あと N 回）/ 出し直しを促す（期限切れ・ロック・未発行）/
   サーバーが見つからない / 繋がらない / ペアリング非対応の古い server（401・404）/ 応答を読めない
-- トークン無しで繋がらないときの通知は、ペアリングを案内する
+- トークン無しで繋がらないときの通知は、ペアリングを案内する（一度繋がった後は、接続先は合っているので server の停止を案内する）
 - ★ **`ServerDiscovery` を呼ぶのは `MascotRunner` だけ。** ペアリングの探索もここを通す
-- 非 XR の Android にはこの入力 UI が無い。`configure-android.sh`（adb）のまま（→ [#180](https://github.com/schwarz9791/chatter-agent/issues/180)）
+- 設定パネルの無い Android（XR なし）は、ペアリングの案内の代わりにネイティブのダイアログ（`PinDialog`）が開き、4桁の PIN を受けて同じペアリング（`PairingFlow`）を行う。
+  取り消すとアプリを起動し直すまで出ない。失敗すると理由を添えて出し直す。開いている間に繋がったら閉じる
 
 ### 置き場所と大きさ（`xr`）
 
@@ -587,7 +588,7 @@ $ADB shell am force-stop tech.sukima.chattermascot   # 起動時に1回だけ読
 |---|---|---|
 | A. Mac だけ | `npm run start:server` | macOS アプリ / CLI プレーヤー |
 | B. エミュレータ・USB 接続の実機を Mac のサーバーへ | 既定のまま（127.0.0.1 で listen） | `./scripts/run-android.sh`。`adb reverse` 経由 |
-| C. LAN 越し（Wi-Fi の実機） | `CHATTER_AGENT_HOST=0.0.0.0 npm run start:server` | XR: 設定パネルの「ペアリング…」（ChatterAgent の PIN）。非 XR・mDNS が届かないとき: `./scripts/configure-android.sh` → `./scripts/run-android.sh` |
+| C. LAN 越し（Wi-Fi の実機） | `CHATTER_AGENT_HOST=0.0.0.0 npm run start:server` | XR: 設定パネルの「ペアリング…」、XR なし: 繋がらないときに開くダイアログ（どちらも ChatterAgent の PIN）。mDNS が届かないとき: `./scripts/configure-android.sh` → `./scripts/run-android.sh` |
 | D. Mac と Android を同時に動かす | 別のランタイムルート・別ポートでもう1本 | B か C をそのポートで |
 
 #### B: ループバック（`adb reverse`）
@@ -595,6 +596,7 @@ $ADB shell am force-stop tech.sukima.chattermascot   # 起動時に1回だけ読
 `run-android.sh` が `adb reverse tcp:8570 tcp:${CHATTER_AGENT_PORT:-8570}` を張るので、端末の
 `settings.json` に `connection` が無ければ `MascotRunner` の既定 `ws://127.0.0.1:8570` のまま
 Mac のサーバーに届く。サーバーから見るとループバック接続なので、トークンも LAN への公開も要らない。
+`adb reverse` を張っていても server より先にアプリを起動すると（トークンが無ければ）PIN のダイアログが開くが、server が上がって繋がれば閉じる。
 
 #### C: LAN 越し
 
@@ -605,16 +607,16 @@ Mac のサーバーに届く。サーバーから見るとループバック接�
 { "connection": { "serverUrl": "ws://192.168.1.10:8570", "token": "…" } }
 ```
 
-**既定の手順はペアリング（XR 端末）。** 前提は、server が `0.0.0.0` で LAN に出ていることと、端末と Mac が
+**既定の手順はペアリング。** 前提は、server が `0.0.0.0` で LAN に出ていることと、端末と Mac が
 同じ Wi-Fi にいること。
 
 1. ChatterAgent のメニュー「Android とペアリング…」を開く（4桁の PIN が出る。有効 5 分）
-2. 端末の設定パネルで「ペアリング…」を開き、PIN を入れて「ペアリング」
+2. 端末の設定パネルで「ペアリング…」を開き、PIN を入れて「ペアリング」（XR なしの端末は、繋がらないときに開くダイアログに PIN を入れる）
 3. 成功するとトークンが `settings.json` に入り、その場で繋ぎ直す（再起動は要らない）
 
 ペアリングの口の契約と守りは [`protocol.md`](./protocol.md)「ペアリング」。
 
-**`configure-android.sh` は代替。** 非 XR の Android（入力 UI が無い）や、mDNS が届かなくて接続先を明示したいときに使う。
+**`configure-android.sh` は代替。** mDNS が届かなくて接続先を明示したいときや、adb で済ませたいときに使う。
 adb の手順に戻すなら、ペアリングで入ったトークンを `./scripts/configure-android.sh --clear` で消してから書き直す
 （`connection` ごと消える）。
 
@@ -693,7 +695,7 @@ B・C どちらの経路でもこのポートへ向ける。C（`configure-andro
 - `<uses-feature android:name="android.software.xr.api.openxr" android:required="true" android:version="0x00010001" />`
 
 接続先の手動入力（`settings.json` の `connection.serverUrl` / `configure-android.sh`）と、
-ペアリング（4桁 PIN。XR のみ）はすでに入っている。mDNS によるサーバー自動検出（`NsdManager`）は接続先が空でトークンがあるときに働き、
+ペアリング（4桁 PIN。XR は設定パネル、XR なしはダイアログ）はすでに入っている。mDNS によるサーバー自動検出（`NsdManager`）は接続先が空でトークンがあるときに働き、
 追加のパーミッションは要らない。
 
 [公式のプロジェクトセットアップ手順](https://developer.android.com/develop/xr/unity/setup)に従うこと。

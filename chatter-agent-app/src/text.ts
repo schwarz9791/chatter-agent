@@ -191,7 +191,7 @@ export const JA: Text = {
   errorTooManyRequests: "続けて押しすぎです。少し待ってください",
 
   pairingTitle: "Android とペアリング",
-  pairingGuide: "グラスの設定パネル →「ペアリング…」でこの数字を入力してください",
+  pairingGuide: "この数字を端末に入力してください（XR: 設定パネル →「ペアリング…」／XR なし: 繋がらないときに開く入力欄）",
   pairingRemaining: (time) => `残り ${time}`,
   pairingPaired: "ペアリングしました",
   pairingExpired: "有効期限が切れました",
@@ -292,7 +292,7 @@ export const EN: Text = {
   errorTooManyRequests: "Too many requests. Please wait a moment.",
 
   pairingTitle: "Pair with Android",
-  pairingGuide: 'On the glasses, open Settings → "Pair…" and enter these digits.',
+  pairingGuide: 'Enter these digits on the device — in Settings → "Pair…" on XR, or in the box that opens when a device without XR can\'t connect.',
   pairingRemaining: (time) => `${time} left`,
   pairingPaired: "Paired.",
   pairingExpired: "This PIN has expired.",

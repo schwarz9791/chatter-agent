@@ -22,6 +22,9 @@ namespace ChatterMascot.Net
         /// <summary>ペアリングの口が無いサーバー</summary>
         OldServer,
 
+        /// <summary>接続先が見つからない</summary>
+        NotFound,
+
         /// <summary>接続できない・タイムアウト</summary>
         Unreachable,
 
@@ -150,6 +153,7 @@ namespace ChatterMascot.Net
                 case PairingKind.WrongPin: return text.XrPairWrongPin(result.Remaining);
                 case PairingKind.Reissue: return text.XrPairReissue;
                 case PairingKind.OldServer: return text.XrPairOldServer;
+                case PairingKind.NotFound: return text.XrPairNotFound;
                 case PairingKind.Unreachable: return text.XrPairUnreachable;
                 default: return text.XrPairBadResponse;
             }

@@ -68,8 +68,13 @@ namespace ChatterMascot.Ui
         public override string XrPairOldServer => "This server doesn't support pairing. Please update it.";
         public override string XrPairBadResponse => "Couldn't read the server's response.";
         public override string XrBack => "Back";
+        public override string ServerUnreachableToast =>
+            "Can't reach the server\nCheck that the server is running,\nthen restart the app.";
         public override string PairingNeededToast =>
             "Can't reach the server\nShow a PIN from \"Pair with Android…\" in the ChatterAgent menu on your Mac,\n" +
             "then enter it from \"Pair…\" in the settings panel.";
+        public override string PairingDialogMessage =>
+            "Enter the 4-digit PIN shown from \"Pair with Android…\" in the ChatterAgent menu on your Mac.";
+        public override string Cancel => "Cancel";
     }
 }

@@ -160,7 +160,8 @@ namespace ChatterMascot.Tests
             var results = new[]
             {
                 PairingResult.Paired("tok"), PairingResult.WrongPin(2), PairingResult.Of(PairingKind.Reissue),
-                PairingResult.Of(PairingKind.OldServer), PairingResult.Of(PairingKind.Unreachable),
+                PairingResult.Of(PairingKind.OldServer), PairingResult.Of(PairingKind.NotFound),
+                PairingResult.Of(PairingKind.Unreachable),
                 PairingResult.Of(PairingKind.BadResponse),
             };
             foreach (var r in results)

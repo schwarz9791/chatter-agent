@@ -299,7 +299,7 @@ jobs:
           fi
 
   unity-macos-identity-settings:
-    name: Unity のアイコン / カテゴリ設定が出荷値
+    name: Unity の一度きりの設定が出荷値
     runs-on: ubuntu-latest
 
     # ここで守る設定は、どれも「二度と自動で再表明されない」種類の設定で、
@@ -313,6 +313,9 @@ jobs:
     #     アイコンを指すのに実体が無い .app が出荷される
     #   - m_BuildTargetPlatformIcons（Android の Adaptive）も IconSettings.FixAll だけが書く。
     #     空に戻ると、ランチャーで白い丸に縮んだアイコンに黙って戻る
+    #   - OpenXR の Offscreen Rendering Only を切るのも AndroidPlayerSettings.FixAll だけ。
+    #     アセットを作り直すとパッケージの既定（有効）に戻り、XR の無い Android で画面が真っ黒になる。
+    #     パッケージの Project Validation はローダーが1つなら合格を返すので捕まらない
     # どれもテストにも通常の CI にも引っかからず、実機で気づくまで気づけない
     steps:
       - name: Checkout repository
@@ -356,5 +359,15 @@ jobs:
           ' "$asset")
           if [ "${result% *}" -eq 0 ] || [ "${result#* }" -gt 0 ]; then
             echo "::error file=$asset::Android の Adaptive アイコンが無い、または空です（total empty = ${result}）。./scripts/run.sh ChatterMascot.EditorTools.IconSettings.FixAll を実行し直してコミットしてください（ランチャーで白い丸に縮んだアイコンになります）"
+            exit 1
+          fi
+
+      - name: OpenXR の Offscreen Rendering Only が無効であること
+        working-directory: .
+        run: |
+          asset="chatter-mascot/Assets/XR/Settings/OpenXR Editor Settings.asset"
+          if ! grep -qx "  m_vulkanOffscreenSwapchainNoMainDisplay: 0" "$asset"; then
+            echo "::error file=$asset::Offscreen Rendering Only (Vulkan) が無効になっていません。./scripts/run.sh ChatterMascot.EditorTools.AndroidPlayerSettings.FixAll を実行し直してコミットしてください（XR の無い Android で画面が真っ黒になります）"
+            grep -n "m_vulkanOffscreenSwapchainNoMainDisplay" "$asset" || true
             exit 1
           fi

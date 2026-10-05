@@ -38,6 +38,9 @@ namespace ChatterMascot.Xr
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bind()
         {
+            // Release のプレイヤーはグラフィックス API を出さないので、端末ごとの描画の差を切り分けるために出す
+            Debug.Log($"[Mascot] graphics: {SystemInfo.graphicsDeviceType} / {SystemInfo.graphicsDeviceName} / {SystemInfo.graphicsDeviceVersion}");
+
             if (XRGeneralSettings.Instance?.Manager?.activeLoader == null)
             {
                 // 設定パネルが無いので、ペアリングは端末のダイアログで受ける

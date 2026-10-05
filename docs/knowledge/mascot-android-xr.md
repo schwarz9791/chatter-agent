@@ -414,7 +414,7 @@ Android のログは `adb logcat -s Unity`。★★ **Android では 401 と「�
 対応は UniUnlit への差し替え（→ 上の「Android では MToon10 を UniUnlit に差し替える」）。
 
 ★ Unity 6 の Release プレイヤーは logcat にグラフィックス API 名を出さない。そのため起動時に
-`MascotRunner` が `[Mascot] graphics: <API> / <GPU> / <版>` を出す。
+`XrStage.Bind` が `[Mascot] graphics: <API> / <GPU> / <版>` を出す。
 
 ★ **`XR_Glasses` AVD の Home Space パネルは、カメラを不透明の黒でクリアしても部屋が透けて見える。**
 フレームバッファの alpha に関わらず**黒は見えない**（光学シースルーの模擬。黒 = 光が無い）。
@@ -1130,6 +1130,11 @@ OpenXR パッケージの Editor 設定「Offscreen Rendering Only (Vulkan)」�
 XR が起動したかどうかに関わらず効くので、XR の無い端末（平面表示）では何も映らない。パッケージ自身も
 「handheld では無効にすべき」と説明している。型（`OpenXREditorSettings`）が internal なので、
 `FixAll` は `SerializedObject` でフィールド名を引いて切る。
+
+★ **Project Validation では検出されない。** パッケージの検査（`VulkanOffscreenSwapchainAndroidValidationRule`）は
+有効なローダーが1つなら合格を返すので、OpenXR だけを割り当てるこのプロジェクトでは値が有効でも素通りする。
+`BuildAndroid` は `FixAll` を呼ばず、アセットを作り直すと既定（有効）に戻るので、`validate.yml` の
+`unity-macos-identity-settings` が grep で守っている。
 
 - **症状**: スクリプト・音・モーション・VRM の読み込みは正常で、エラーも出ない。画面だけ黒い
 - **XR エミュレータでは気づけない。** XR が起動すると OpenXR のスワップチェーンへ描くので、画面用のバッファを使わない

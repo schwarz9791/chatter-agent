@@ -413,7 +413,8 @@ Android のログは `adb logcat -s Unity`。★★ **Android では 401 と「�
 [#110](https://github.com/schwarz9791/chatter-agent/issues/110)。
 対応は UniUnlit への差し替え（→ 上の「Android では MToon10 を UniUnlit に差し替える」）。
 
-★ Unity 6 の Release プレイヤーは logcat にグラフィックス API 名を出さない。
+★ Unity 6 の Release プレイヤーは logcat にグラフィックス API 名を出さない。そのため起動時に
+`XrStage.Bind` が `[Mascot] graphics: <API> / <GPU> / <版>` を出す。
 
 ★ **`XR_Glasses` AVD の Home Space パネルは、カメラを不透明の黒でクリアしても部屋が透けて見える。**
 フレームバッファの alpha に関わらず**黒は見えない**（光学シースルーの模擬。黒 = 光が無い）。
@@ -1055,6 +1056,7 @@ Android XR は Vulkan 必須なので、この機能を切って回避するこ�
 | XR Plug-in Management | **Android にだけ** OpenXR ローダー。feature は Android XR Support / Hand Interaction Profile / Android XR: Session / Android XR: Planes と、自前の Chatter Mascot: See-Through Blend の5つ | Standalone に割り当てないので macOS ビルドは変わらない。Session は Planes の Project Validation が要求するので有効化する（有効にすると、パッケージが `OpenXRLifeCycleFeature` も連動して有効にする） |
 | Graphics API（Android） | **Vulkan 単独** | URP で Android XR を使うときの必須設定 |
 | `Mobile_Renderer` の Post Processing | **無効**（`postProcessData` を外す） | Project Validation の error。`PC_Renderer` は触らない |
+| OpenXR の Offscreen Rendering Only (Vulkan) | **無効**（`OpenXR Editor Settings.asset` の `m_vulkanOffscreenSwapchainNoMainDisplay`） | パッケージの既定は有効。有効だと XR が起動しない端末が真っ黒になる（→ 下の「OpenXR の Offscreen Rendering Only を切る」） |
 
 ★ **`Android Mouse Interaction Profile` も `FixOpenXrFeature` で有効化する**（`XrGrab` の
 `AndroidMouseInteraction` バインドが要る）。無効のままだとマウスの入力が来ないだけでエラーは出ない。
@@ -1118,6 +1120,40 @@ Hand Interaction Profile からの `android.hardware.xr.input.hand_tracking` の
 
 ★ **Project Validation の残りは `FixAll` が `[Build]` で出す。** 公開 API が無いので
 `BuildValidator.GetCurrentValidationIssues` を reflection で呼んでいる。
+
+### ★★ OpenXR の Offscreen Rendering Only を切る（[#184](https://github.com/schwarz9791/chatter-agent/issues/184)）
+
+OpenXR パッケージの Editor 設定「Offscreen Rendering Only (Vulkan)」（`Assets/XR/Settings/OpenXR Editor Settings.asset`
+の `m_vulkanOffscreenSwapchainNoMainDisplay`）は**既定で有効**。有効のまま Android に OpenXR ローダーを
+割り当てると、ビルド処理（パッケージの `OpenXRBuildProcessor`）が `boot.config` に
+`xr-use-vulkan-offscreen-swapchain-no-main-display-buffer=1` を書き、**Unity は画面用のバッファを作らない。**
+XR が起動したかどうかに関わらず効くので、XR の無い端末（平面表示）では何も映らない。パッケージ自身も
+「handheld では無効にすべき」と説明している。型（`OpenXREditorSettings`）が internal なので、
+`FixAll` は `SerializedObject` でフィールド名を引いて切る。
+
+★ **Project Validation では検出されない。** パッケージの検査（`VulkanOffscreenSwapchainAndroidValidationRule`）は
+有効なローダーが1つなら合格を返すので、OpenXR だけを割り当てるこのプロジェクトでは値が有効でも素通りする。
+`BuildAndroid` は `FixAll` を呼ばず、アセットを作り直すと既定（有効）に戻るので、`validate.yml` の
+`unity-macos-identity-settings` が grep で守っている。
+
+- **症状**: スクリプト・音・モーション・VRM の読み込みは正常で、エラーも出ない。画面だけ黒い
+- **XR エミュレータでは気づけない。** XR が起動すると OpenXR のスワップチェーンへ描くので、画面用のバッファを使わない
+- 無効にしても `XR_Glasses` は従来どおり `FOCUSED` まで進み、空間固定して描ける（2026-10-05）
+
+見分け方:
+
+- `adb shell dumpsys SurfaceFlinger` で、アプリの `SurfaceView[…](BLAST)` レイヤーの `geomLayerBounds` を見る。
+  `0×0` ならフレームが一度も届いていない（届いていれば窓の大きさになる）。`screencap` で撮れない端末でも読める
+- APK の `assets/bin/Data/boot.config` を `unzip -p` で読む
+
+効かなかった切り分け（INAIR Pod / Android 14 / Adreno 643 / 2026-10-05）:
+
+| 変えたもの | 結果 |
+|---|---|
+| Graphics API を GLES3 単独にする | 黒いまま（`boot.config` には同じ値が入る） |
+| XR の起動時の初期化を止める（`m_InitManagerOnStart: 0`） | 黒いまま |
+| マニフェストの XR 宣言（`uses-feature` と `PROPERTY_XR_ACTIVITY_START_MODE`）を外す | 黒いまま |
+| OpenXR ローダーごと外す | **映る**（ビルド処理がこの値を書かなくなるため） |
 
 ## Android の必須設定はなぜその形か
 

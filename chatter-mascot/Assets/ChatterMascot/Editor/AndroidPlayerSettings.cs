@@ -61,6 +61,9 @@ namespace ChatterMascot.EditorTools
         /// <summary>Android の既定品質レベル（"Mobile"）が使う URP Renderer。</summary>
         private const string MobileRendererPath = "Assets/Settings/Mobile_Renderer.asset";
 
+        /// <summary>OpenXR パッケージの Editor 設定。</summary>
+        private const string OpenXrEditorSettingsPath = "Assets/XR/Settings/OpenXR Editor Settings.asset";
+
         public static void FixAll()
         {
             var changed = false;
@@ -99,6 +102,7 @@ namespace ChatterMascot.EditorTools
             if (FixXrLoader()) changed = true;
             if (FixOpenXrFeature()) changed = true;
             if (FixPostProcessing()) changed = true;
+            if (FixOffscreenRenderingOnly()) changed = true;
             CheckApplicationEntryPoint();
 
             if (changed)
@@ -276,6 +280,36 @@ namespace ChatterMascot.EditorTools
             property.objectReferenceValue = null;
             serialized.ApplyModifiedPropertiesWithoutUndo();
             Debug.Log($"[Build] {MobileRendererPath} の Post Processing を無効化しました（Android XR の必須設定）");
+            return true;
+        }
+
+        /// <summary>
+        /// OpenXR の「Offscreen Rendering Only (Vulkan)」を切る。入れたままだと、OpenXR ローダーを割り当てた
+        /// Android ビルドは画面用のバッファを作らないので、XR が起動しない端末（平面表示）が真っ黒になる。
+        /// ★ <c>OpenXREditorSettings</c> は internal なので、<see cref="FixPostProcessing"/> と同じく
+        ///   <c>SerializedObject</c> でフィールド名を直接引く。
+        /// </summary>
+        private static bool FixOffscreenRenderingOnly()
+        {
+            var asset = AssetDatabase.LoadMainAssetAtPath(OpenXrEditorSettingsPath);
+            if (asset == null)
+            {
+                Debug.LogWarning($"[Build] {OpenXrEditorSettingsPath} が見つかりません");
+                return false;
+            }
+
+            var serialized = new SerializedObject(asset);
+            var property = serialized.FindProperty("m_vulkanOffscreenSwapchainNoMainDisplay");
+            if (property == null)
+            {
+                Debug.LogWarning($"[Build] {OpenXrEditorSettingsPath} に m_vulkanOffscreenSwapchainNoMainDisplay がありません");
+                return false;
+            }
+            if (!property.boolValue) return false;
+
+            property.boolValue = false;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+            Debug.Log("[Build] OpenXR の Offscreen Rendering Only (Vulkan) を無効化しました（XR の無い Android で画面に描くため）");
             return true;
         }
 

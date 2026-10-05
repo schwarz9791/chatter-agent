@@ -408,6 +408,9 @@ namespace ChatterMascot
             //   保存して復元し、**上限が恒久的に消える**（→ FrameRateBudget）
             FrameRateBudget.SetBaseline(targetFrameRate);
 
+            // Release のプレイヤーはグラフィックス API を出さないので、端末ごとの描画の差を切り分けるために出す
+            Debug.Log($"[Mascot] graphics: {SystemInfo.graphicsDeviceType} / {SystemInfo.graphicsDeviceName} / {SystemInfo.graphicsDeviceVersion}");
+
             if (audioSource == null) audioSource = GetComponent<AudioSource>();
             if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
             audioSource.playOnAwake = false;

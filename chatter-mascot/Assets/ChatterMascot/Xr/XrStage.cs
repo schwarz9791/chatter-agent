@@ -40,6 +40,9 @@ namespace ChatterMascot.Xr
         {
             if (XRGeneralSettings.Instance?.Manager?.activeLoader == null)
             {
+                // 設定パネルが無いので、ペアリングは端末のダイアログで受ける
+                var pairingRunner = UnityEngine.Object.FindFirstObjectByType<MascotRunner>();
+                if (pairingRunner != null) pairingRunner.PairingPrompt = () => _ = PairingFlow.PromptAsync(pairingRunner);
                 Debug.Log("[Mascot] XR: 起動していないので平面表示のまま");
                 return;
             }

@@ -493,16 +493,9 @@ namespace ChatterMascot.Xr
             }
         }
 
-        /// <summary>サーバーを LAN から探す待ち時間（秒）。</summary>
-        private const float PairingDiscoverySeconds = 10f;
-
-        /// <summary>ペアリングの要求 1 回の上限（ミリ秒）。</summary>
-        private const int PairingTimeoutMs = 10000;
-
         /// <summary>
-        /// 「ペアリング」。PIN をサーバーへ送り、受け取ったトークンを保存してその場で繋ぎ直す。
+        /// 「ペアリング」。本体は <see cref="PairingFlow.RunAsync"/>。
         ///
-        /// ★ <b>接続先（<c>serverUrl</c>）は保存しない。</b> 設定に無ければ次回の起動も探索で見つける。
         /// ★ await のたびに <c>this == null</c> を見る。パネルごと破棄された後に進めない。
         /// </summary>
         private async Task PairAsync()
@@ -540,40 +533,15 @@ namespace ChatterMascot.Xr
             _context.PairingRunning = true;
             Refresh();
 
-            var url = host.Current.ServerUrl;
-            if (string.IsNullOrEmpty(url))
-            {
-                url = await runner.FindServerForPairingAsync(PairingDiscoverySeconds);
-                if (this == null) return;
-            }
-            if (string.IsNullOrEmpty(url))
-            {
-                Notice(SettingKeys.PairingClaim, text.XrPairNotFound);
-                return;
-            }
-
-            var result = await PairingClient.ClaimAsync(ServerUrl.ToHttpBase(url), _context.PairingPin, PairingTimeoutMs);
+            var result = await PairingFlow.RunAsync(host, runner, _context.PairingPin);
             if (this == null) return;
 
-            if (result.Kind != PairingKind.Paired)
-            {
-                Notice(SettingKeys.PairingClaim, PairingClient.Describe(result, text));
-                return;
-            }
-
-            // ★ トークンだけ保存する。値そのものはログに出さない
-            host.Apply(host.Current.WithToken(result.Token));
-            if (!runner.Reconnect(url, result.Token))
-            {
-                Notice(SettingKeys.PairingClaim, text.XrPairBadResponse);
-                return;
-            }
-            if (host.Current.AssetSync != SettingsMapping.AssetSyncOff) runner.TryStartAssetSync(requested: false);
-
             var done = PairingClient.Describe(result, text);
+            Notice(SettingKeys.PairingClaim, done);
+            if (result.Kind != PairingKind.Paired) return;
+
             Debug.Log("[Mascot] XR settings: ペアリングして繋ぎ直しました");
             DeviceToast.Show(done);
-            Notice(SettingKeys.PairingClaim, done);
         }
 
         /// <summary>

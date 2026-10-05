@@ -8,7 +8,7 @@ namespace ChatterMascot.Vrm
     /// <summary>
     /// 「<c>settings.json</c> → シーン」の反映。デスクトップでも Android でも同じものが動く。
     /// デスクトップでは ChatterAgent が書いた値を読んで反映するだけで、書き戻さない。
-    /// 書き込みを伴う <see cref="Apply"/> を使うのは XR の設定パネルだけ。
+    /// 書き込みを伴う <see cref="Apply"/> を使うのは、ペアリングで受け取ったトークンの保存と XR の設定パネルだけ。
     /// プラットフォーム固有の見た目の更新は <see cref="ChangedExternally"/> を購読して担う。
     ///
     /// ★ <b>置き場所が Vrm asmdef なのは、<see cref="MascotRunner"/> と <see cref="VrmCharacter"/>
@@ -94,7 +94,7 @@ namespace ChatterMascot.Vrm
             ApplySettingsToScene();
 
             // ★ 外から書き換えられた接続先は起動時にしか読まれない（→ MascotRunner.ResolveServerUrl）。
-            //   起動中に繋ぎ直すのは XR のペアリング（MascotRunner.Reconnect）だけで、ここは通らない
+            //   起動中に繋ぎ直すのはペアリング（MascotRunner.Reconnect）だけで、ここは通らない
             if (!string.Equals(previous.ServerUrl, Current.ServerUrl, StringComparison.Ordinal) ||
                 !string.Equals(previous.Token, Current.Token, StringComparison.Ordinal))
             {
@@ -107,7 +107,7 @@ namespace ChatterMascot.Vrm
         /// <summary>
         /// 反映（シーンへ適用）+ 保存。<b>このプロセスからの settings.json への唯一の書き込み口</b>。
         ///
-        /// ★ ストアを2つ作らないための境界でもある——呼び手（XR の設定パネル）は
+        /// ★ ストアを2つ作らないための境界でもある——呼び手（XR の設定パネル・ペアリング）は
         ///   ここを経由するだけで、自分では read-modify-write しない。
         /// </summary>
         public void Apply(MascotSettings next)

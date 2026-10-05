@@ -287,6 +287,7 @@ namespace ChatterMascot
         private float _discoveryStartedAt;
         private float _discoveryRestartedAt;
         private bool _warnedUnreachable;
+        private bool _connectedOnce;
         private bool _warnedDiscoveryNotFound;
 
         /// <summary>探索結果を見に行く間隔。</summary>
@@ -961,6 +962,13 @@ namespace ChatterMascot
             }
         }
 
+        /// <summary>
+        /// トークンが無く、まだ一度も繋がっていないまま繋がらないときに、ペアリングを促す手段。
+        /// 無ければ <see cref="UiText.PairingNeededToast"/>（設定パネルへの案内）を出す。
+        /// 設定パネルの無い端末が差し込む。
+        /// </summary>
+        public Action PairingPrompt { get; set; }
+
         private void Update()
         {
             // ★ **_shuttingDown の早期 return より手前に置くこと。** 後始末が終わってから
@@ -981,10 +989,20 @@ namespace ChatterMascot
                 _warnedUnreachable = true;
                 Debug.LogWarning("[Mascot] サーバーに繋がりません。サーバーが止まっている・接続先が変わった・" +
                                  "トークンが合っていない（Android では 401 と見分けられない）のどれか");
-                // ★ トークンが無いなら、再起動ではなくペアリングが打てる手
-                DeviceToast.Show(ServerToken.Length == 0
-                    ? UiText.For(Application.systemLanguage).PairingNeededToast
-                    : "サーバーに繋がりません\nサーバーの起動状態を確認し、\nアプリを再起動してください");
+                // ★ トークンが無いなら、再起動ではなくペアリングが打てる手。ただし一度繋がっていれば
+                //   接続先は合っている（adb reverse の経路を含む）ので、ペアリングしても直らない
+                if (ServerToken.Length > 0 || _connectedOnce)
+                {
+                    DeviceToast.Show("サーバーに繋がりません\nサーバーの起動状態を確認し、\nアプリを再起動してください");
+                }
+                else if (PairingPrompt != null)
+                {
+                    PairingPrompt();
+                }
+                else
+                {
+                    DeviceToast.Show(UiText.For(Application.systemLanguage).PairingNeededToast);
+                }
             }
 
             // ack の間引き送出と、無受信 watchdog
@@ -1091,6 +1109,7 @@ namespace ChatterMascot
 
         private void OnConnected()
         {
+            _connectedOnce = true;
             _warnedBadFrame = false;
             _warnedUnreachable = false;
             _audioDeclarationChecked = false;

@@ -89,5 +89,7 @@ namespace ChatterMascot.Ui
         public abstract string XrPairBadResponse { get; }
         public abstract string XrBack { get; }
         public abstract string PairingNeededToast { get; }
+        public abstract string PairingDialogMessage { get; }
+        public abstract string Cancel { get; }
     }
 }

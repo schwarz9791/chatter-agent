@@ -203,6 +203,8 @@ struct St {
     applied: Option<Want>,
     stamp: Option<String>,
     hotkeys: Option<Pair>,
+    /// マスコットが見えなかった tick の連続数。
+    missed: u8,
 }
 
 struct Inner {
@@ -238,6 +240,7 @@ impl Clients {
                 applied: None,
                 stamp: None,
                 hotkeys: None,
+                missed: 0,
             }),
             shutting_down: AtomicBool::new(false),
             serial: Arc::default(),
@@ -578,8 +581,14 @@ impl Clients {
         // `applied` と実態を比べる。`visible` とは比べない（env の解決前に誤判定しないため）。
         let applied = lock(&self.0.st).applied;
         let running = !running_pids().is_empty();
+        let gone = {
+            let mut st = lock(&self.0.st);
+            let (gone, missed) = mascot_gone(applied, running, st.missed);
+            st.missed = missed;
+            gone
+        };
         match applied {
-            Some(Want::Mascot) if !running => {
+            Some(Want::Mascot) if gone => {
                 self.follow_outside(false, "マスコットが外で終了された");
             }
             Some(Want::Player | Want::Nothing) if running => {
@@ -636,6 +645,19 @@ impl Clients {
     }
 }
 
+/// 外で終了されたと判断するか。一度の読みでは決めない。動いているマスコットを一瞬取りこぼすことがあり、
+/// 外での終了と取ると自分で畳んでしまう。戻り値は（判断するか, 次の連続数）。
+fn mascot_gone(applied: Option<Want>, running: bool, missed: u8) -> (bool, u8) {
+    if applied != Some(Want::Mascot) || running {
+        return (false, 0);
+    }
+    if missed + 1 >= 2 {
+        (true, 0)
+    } else {
+        (false, missed + 1)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -647,6 +669,15 @@ mod tests {
         assert_eq!(want(true, true), Want::Mascot);
         assert_eq!(want(false, false), Want::Player);
         assert_eq!(want(false, true), Want::Nothing);
+    }
+
+    #[test]
+    fn mascot_is_gone_only_after_two_misses_in_a_row() {
+        let m = Some(Want::Mascot);
+        assert_eq!(mascot_gone(m, false, 0), (false, 1));
+        assert_eq!(mascot_gone(m, false, 1), (true, 0));
+        assert_eq!(mascot_gone(m, true, 1), (false, 0));
+        assert_eq!(mascot_gone(Some(Want::Player), false, 1), (false, 0));
     }
 
     #[test]

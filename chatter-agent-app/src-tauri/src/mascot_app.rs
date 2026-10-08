@@ -2,6 +2,10 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "macos")]
+use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
+#[cfg(target_os = "macos")]
+use std::sync::Mutex;
 
 #[cfg(target_os = "macos")]
 use std::process::{Command, Stdio};
@@ -9,11 +13,18 @@ use std::process::{Command, Stdio};
 #[cfg(target_os = "macos")]
 use crate::clients::BACKLOG_MAX_AGE_MS;
 #[cfg(target_os = "macos")]
-use crate::server::Env;
+use crate::server::{lock, pid_alive, Env};
 
 #[cfg(target_os = "macos")]
 const BUNDLE_ID: &str = "tech.sukima.chatter-mascot";
 const APP_NAME: &str = "ChatterMascot.app";
+
+/// 前回の `running_pids()` が返した pid。
+#[cfg(target_os = "macos")]
+static SEEN: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+/// 一覧が空だったのに pid は生きていた回数。
+#[cfg(target_os = "macos")]
+static RECHECKED: AtomicU32 = AtomicU32::new(0);
 
 /// `.app` の探す場所を優先順に並べる。
 pub fn candidates(core: Option<&Path>, home: &Path) -> Vec<PathBuf> {
@@ -37,13 +48,14 @@ fn first_dir(paths: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
 
 /// 動いているマスコットの pid。別のワークツリーのビルドも同じ bundle id なので全部拾う
 /// （どれが繋がっても二重に鳴る）。
+/// 一覧は動いているマスコットを一瞬取りこぼすことがあるので、空のときは直前に見えた pid を直接確かめる。
 #[cfg(target_os = "macos")]
 pub fn running_pids() -> Vec<u32> {
     use objc2::rc::autoreleasepool;
     use objc2_app_kit::NSRunningApplication;
     use objc2_foundation::NSString;
     // 終わらないスレッド（監視）からも呼ぶので、AppKit の autorelease をここで掃除する。
-    autoreleasepool(|_| {
+    let listed: Vec<u32> = autoreleasepool(|_| {
         NSRunningApplication::runningApplicationsWithBundleIdentifier(&NSString::from_str(
             BUNDLE_ID,
         ))
@@ -51,7 +63,30 @@ pub fn running_pids() -> Vec<u32> {
         .filter(|a| !a.isTerminated())
         .filter_map(|a| u32::try_from(a.processIdentifier()).ok())
         .collect()
-    })
+    });
+    let was_empty = listed.is_empty();
+    let mut seen = lock(&SEEN);
+    let pids = recheck(listed, &seen, pid_alive);
+    if was_empty && !pids.is_empty() {
+        RECHECKED.fetch_add(1, Relaxed);
+    }
+    seen.clone_from(&pids);
+    pids
+}
+
+/// 一覧が空のときだけ、前回見えた pid のうち生きているものを返す。消えた直後に確かめるので pid の再利用は気にしない。
+#[cfg(any(target_os = "macos", test))]
+fn recheck(listed: Vec<u32>, seen: &[u32], alive: impl Fn(u32) -> bool) -> Vec<u32> {
+    if !listed.is_empty() {
+        return listed;
+    }
+    seen.iter().copied().filter(|&p| alive(p)).collect()
+}
+
+/// 一覧が空なのに pid が生きていた回数を取り出して 0 に戻す。
+#[cfg(target_os = "macos")]
+pub fn take_rechecked() -> u32 {
+    RECHECKED.swap(0, Relaxed)
 }
 
 /// 通常の quit を要求する。★ 強制終了はしない（Unity は未送信の ack を投げ切ってから自分で終わる）。
@@ -109,6 +144,11 @@ pub fn running_pids() -> Vec<u32> {
 }
 
 #[cfg(not(target_os = "macos"))]
+pub fn take_rechecked() -> u32 {
+    0
+}
+
+#[cfg(not(target_os = "macos"))]
 pub fn request_quit(_pid: u32) {}
 
 #[cfg(not(target_os = "macos"))]
@@ -135,6 +175,13 @@ mod tests {
             app_bundle_of(Path::new("/w/target/debug/chatter-agent-app")),
             None
         );
+    }
+
+    #[test]
+    fn empty_list_falls_back_to_seen_pids_that_are_alive() {
+        assert_eq!(recheck(vec![3], &[7], |_| panic!("呼ばない")), [3]);
+        assert_eq!(recheck(vec![], &[7], |_| true), [7]);
+        assert!(recheck(vec![], &[7], |_| false).is_empty());
     }
 
     #[test]

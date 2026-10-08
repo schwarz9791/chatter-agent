@@ -21,7 +21,7 @@ use tauri_plugin_global_shortcut::{
 };
 
 use crate::mascot::{read_settings, set_mute, settings_path};
-use crate::mascot_app::{candidates, find_app, launch, request_quit, running_pids};
+use crate::mascot_app::{candidates, find_app, launch, request_quit, running_pids, take_rechecked};
 use crate::server::{exit_info, exit_label, lock, runtime_root, stop_child, Env, Manager, Serial};
 use crate::text;
 
@@ -578,6 +578,12 @@ impl Clients {
         // `applied` と実態を比べる。`visible` とは比べない（env の解決前に誤判定しないため）。
         let applied = lock(&self.0.st).applied;
         let running = !running_pids().is_empty();
+        let rechecked = take_rechecked();
+        if rechecked > 0 {
+            self.log(&format!(
+                "マスコットが一覧に出なかったが pid は生きていた: {rechecked}回"
+            ));
+        }
         match applied {
             Some(Want::Mascot) if !running => {
                 self.follow_outside(false, "マスコットが外で終了された");

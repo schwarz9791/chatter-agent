@@ -9,6 +9,10 @@
 #   ビルド中だけ Disable Unity Audio を ON にすることの後始末だが、BuildAndroid は
 #   その切り替えを一切行わない（Android は m_DisableAudio: 0 の出荷値のまま鳴らす）ので、
 #   戻す対象がそもそも無い。
+#
+#   trap があるのは release のときだけ。BuildScript は release の版と署名を PlayerSettings へ
+#   入れて戻さないので、ProjectSettings.asset を git から戻す。Unity がビルドのキャッシュ
+#   （Library/Bee。Gradle の書き出し先もここ）へ平文で書く署名のパスワードも、ビルドの前後で消す。
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/unity.sh"
 
@@ -19,6 +23,7 @@ assert_notice_in_sync
 
 # release は APK とコミットを1対1にするため、作業ツリーがきれいで HEAD にタグが1つだけ付いているときだけ通す。
 # 版の規則の検証は BuildScript 側に任せる（規則を2か所に書かない）。
+# Unity を起動してからでは遅い失敗（タグ・keystore）は、ここで先に止める。
 if [[ -n "${CHATTER_MASCOT_KEYSTORE:-}" ]]; then
   if [[ -n "$(git -C "$PROJECT_PATH" status --porcelain)" ]]; then
     echo "作業ツリーに未コミットの変更があります。release ビルドはコミット済みの状態でだけ行います。" >&2
@@ -34,15 +39,42 @@ if [[ -n "${CHATTER_MASCOT_KEYSTORE:-}" ]]; then
     echo "$tags" >&2
     exit 1
   fi
+
+  # 前回より小さい版を配ると、端末が上書きを拒んでアンインストール（再ペアリング）になる。
+  # パイプで先頭だけ取ると pipefail 下で SIGPIPE になりうるので、変数展開で取る。
+  all_tags="$(git -C "$PROJECT_PATH" tag --list 'mascot-v*' --sort=-v:refname)"
+  latest_tag="${all_tags%%$'\n'*}"
+  if [[ "$tags" != "$latest_tag" ]]; then
+    echo "$tags は最新の版ではありません。$latest_tag より大きい版のタグにしてください。" >&2
+    exit 1
+  fi
+
+  if [[ ! -f "$CHATTER_MASCOT_KEYSTORE" ]]; then
+    echo "keystore が見つかりません: $CHATTER_MASCOT_KEYSTORE" >&2
+    exit 1
+  fi
+  CHATTER_MASCOT_KEYSTORE="$(/bin/realpath "$CHATTER_MASCOT_KEYSTORE")"
+  export CHATTER_MASCOT_KEYSTORE
   export CHATTER_MASCOT_RELEASE_TAG="$tags"
+
+  # 作業ツリーがきれいなことを確かめた後なので、手元の変更は消さない。何度呼ばれても同じ結果になる。
+  # パスワードは Gradle の書き出しだけでなく Bee の入力データやログにも入るので、Library/Bee ごと消す
+  # （次のビルドはキャッシュ無しになる）。
+  restore_release_settings() {
+    git -C "$PROJECT_PATH" checkout -- ProjectSettings/ProjectSettings.asset 2>/dev/null || true
+    /bin/rm -rf "$PROJECT_PATH/Library/Bee"
+  }
+  trap restore_release_settings EXIT INT TERM
+  # 複製元などに残った古い Gradle の出力を混ぜないため、release はキャッシュ無しでビルドする
+  restore_release_settings
 fi
 
 # release 署名のパスワードは argv に出さず、環境変数として Unity へ継承させるだけにする。
 # 未指定ならキーチェーンから読む（→ docs/mascot.md「署名と版」）。
 if [[ -n "${CHATTER_MASCOT_KEYSTORE:-}" && -z "${CHATTER_MASCOT_KEYSTORE_PASS:-}" ]]; then
-  if ! keystore_pass="$(security find-generic-password -a "$USER" -s chatter-mascot-keystore -w 2>/dev/null)"; then
-    echo "キーチェーンに chatter-mascot-keystore の項目がありません。" \
-         "CHATTER_MASCOT_KEYSTORE_PASS を設定するか、docs/mascot.md の「署名と版」で登録してください。" >&2
+  if ! keystore_pass="$(security find-generic-password -a "$USER" -s chatter-mascot-keystore -w)"; then
+    echo "キーチェーンから chatter-mascot-keystore のパスワードを読めませんでした。" \
+         "項目が無ければ docs/mascot.md の「署名と版」で登録するか、CHATTER_MASCOT_KEYSTORE_PASS を設定してください。" >&2
     exit 1
   fi
   export CHATTER_MASCOT_KEYSTORE_PASS="$keystore_pass"

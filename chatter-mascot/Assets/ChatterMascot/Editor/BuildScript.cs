@@ -210,10 +210,9 @@ namespace ChatterMascot.EditorTools
 
             // ★ **署名や版が決まらなければ debug keystore・手元の版へ落とさず止める。** 配るつもりの
             //   ビルドが debug 鍵で出ると、端末では上書きできない別アプリになる。
-            //   **EditorApplication.Exit を try の中に置かないこと**（finally が走らず、
-            //   署名と版の設定が ProjectSettings.asset に残る）
-            Action restoreRelease = null;
-            if (release && !TryUseReleaseSettings(keystorePath, releaseTag, out restoreRelease))
+            //   入れた設定はこのプロセスでは戻さない。ProjectSettings.asset は
+            //   build-android.sh が git から戻す（中断でも戻る）。
+            if (release && !TryUseReleaseSettings(keystorePath, releaseTag))
             {
                 EditorApplication.Exit(1);
                 return;
@@ -224,15 +223,7 @@ namespace ChatterMascot.EditorTools
                       $"signing={(release ? "release" : "debug")}" +
                       (release ? $" tag={releaseTag} keystore={keystorePath}" : ""));
 
-            BuildSummary summary;
-            try
-            {
-                summary = BuildPipeline.BuildPlayer(options).summary;
-            }
-            finally
-            {
-                restoreRelease?.Invoke();
-            }
+            var summary = BuildPipeline.BuildPlayer(options).summary;
 
             Debug.Log($"[Build] result={summary.result} errors={summary.totalErrors} " +
                       $"time={(int)summary.totalTime.TotalSeconds}s size={summary.totalSize}");
@@ -245,7 +236,6 @@ namespace ChatterMascot.EditorTools
             EditorApplication.Exit(0);
         }
 
-        private const string ProjectSettingsPath = "ProjectSettings/ProjectSettings.asset";
         private const string KeystoreEnv = "CHATTER_MASCOT_KEYSTORE";
         private const string KeystorePassEnv = "CHATTER_MASCOT_KEYSTORE_PASS";
         private const string KeyAlias = "chattermascot";
@@ -282,12 +272,11 @@ namespace ChatterMascot.EditorTools
         /// release タグから決める。パスワードは argv に出さないため環境変数から読む。PKCS12 は
         /// ストアと鍵のパスワードが同一なので、同じ値を両方に入れる。
         ///
-        /// 検証はすべて設定に触る前に行う。入れた値は ProjectSettings.asset に永続化されうるので、
-        /// <paramref name="restore"/> でビルド前の値へ戻す。呼び出し側は必ず finally で呼ぶこと。
+        /// 検証はすべて設定に触る前に行う。入れた値は ProjectSettings.asset に永続化されるが、
+        /// ここでは戻さない（build-android.sh が git から戻す）。
         /// </summary>
-        private static bool TryUseReleaseSettings(string keystorePath, string tag, out Action restore)
+        private static bool TryUseReleaseSettings(string keystorePath, string tag)
         {
-            restore = null;
             if (!TryParseReleaseTag(tag, out var version, out var versionCode))
             {
                 Debug.LogError($"[Build] release タグ {ReleaseTagEnv}='{tag}' が " +
@@ -307,33 +296,6 @@ namespace ChatterMascot.EditorTools
                                "debug keystore には切り替えず中止します");
                 return false;
             }
-
-            var previousVersion = PlayerSettings.bundleVersion;
-            var previousVersionCode = PlayerSettings.Android.bundleVersionCode;
-
-            restore = () =>
-            {
-                try
-                {
-                    PlayerSettings.bundleVersion = previousVersion;
-                    PlayerSettings.Android.bundleVersionCode = previousVersionCode;
-                    PlayerSettings.Android.useCustomKeystore = false;
-                    PlayerSettings.Android.keyaliasName = "";
-                    PlayerSettings.Android.keystorePass = "";
-                    PlayerSettings.Android.keyaliasPass = "";
-
-                    // ★ keystoreName の setter は空文字を '{inproject}: ' に変えて保存するので、
-                    //   コミットされている空へはシリアライズされた値を直接書いて戻す
-                    var serialized = new SerializedObject(AssetDatabase.LoadAllAssetsAtPath(ProjectSettingsPath)[0]);
-                    serialized.FindProperty("AndroidKeystoreName").stringValue = "";
-                    serialized.ApplyModifiedPropertiesWithoutUndo();
-                    AssetDatabase.SaveAssets();
-                }
-                catch (Exception e)
-                {
-                    Debug.LogWarning("[Build] 署名設定を元に戻せませんでした: " + e.Message);
-                }
-            };
 
             PlayerSettings.bundleVersion = version;
             PlayerSettings.Android.bundleVersionCode = versionCode;

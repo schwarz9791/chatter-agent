@@ -584,6 +584,15 @@ setter 経由ではコミットされた値に戻せない。
 ビルドの前後に `Library/Bee` ごと消す（前に消すのは、複製元の古い Gradle の出力を混ぜないためでもある）。
 引き換えに、release とその次のビルドはキャッシュ無しになる。
 
+★ **`Library` の外、Gradle のキャッシュにも残る。** Gradle は `launcher/build.gradle` をコンパイルして
+`GRADLE_USER_HOME`（既定は `~/.gradle`）の下に置き、`signingConfigs` のクロージャのクラスにはパスワードが
+文字列の定数として入る（`caches/<Gradle の版>/groovy-dsl/` と `caches/jars-9/`）。Unity は Gradle を
+`-g` 無しで起動するので、環境変数の `GRADLE_USER_HOME` がそのまま効く。release では使い捨ての
+一時ディレクトリを `GRADLE_USER_HOME` にして、ビルドの後に消す。キャッシュの中の置き場所を追わずに済み、
+`~/.gradle` に何も残らない。引き換えに、Gradle の依存（Android Gradle Plugin など）を release のたびに
+ダウンロードし直す。Unity はビルドの最後に `--stop` でデーモンを止めるので、デーモンも残らない。
+`.class` の中の定数を探すときは、バイナリを飛ばさない grep（`LC_ALL=C /usr/bin/grep -rlaF`）を使う。
+
 `configure-android.sh` / `run-android.sh` は Unity を起動しないので、
 Unity CLI へ寄せる対象ではない。
 

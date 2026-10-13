@@ -7,6 +7,7 @@
 - release keystore がリポジトリの外にあり、パスワードがキーチェーン（サービス名 `chatter-mascot-keystore`）に
   入っていること。作り方とバックアップは [`mascot.md`](./mascot.md)「署名と版」
 - Unity のビルド環境（[`mascot.md`](./mascot.md)「環境」）
+- ネットワーク。release は Gradle の依存を毎回ダウンロードし直す（→ [`mascot.md`](./mascot.md)「署名と版」）
 
 ## 版を決める
 

@@ -702,9 +702,11 @@ CHATTER_MASCOT_KEYSTORE=<keystore の絶対パス> ./scripts/build-android.sh
 落とさずビルドを止める。keystore のパスは相対でもよい（スクリプトが絶対パスにする）。alias は
 `chattermascot` 固定。
 
-ビルドの間は、Unity がビルドのキャッシュ（`Library/Bee`）へパスワードを平文で書く。`build-android.sh` が
-release ビルドの前後で `Library/Bee` ごと消すので、ビルドの後には残らない（release とその次のビルドは
-キャッシュ無しになる）。
+ビルドの間は、Unity と Gradle がパスワードを平文で書き残す。書く先はビルドのキャッシュ（`Library/Bee`）と、
+Gradle がビルドスクリプトをコンパイルしたキャッシュ（`GRADLE_USER_HOME`。既定は `~/.gradle`）。
+`build-android.sh` は release のとき、`Library/Bee` をビルドの前後で丸ごと消し、Gradle には使い捨ての
+`GRADLE_USER_HOME` を使わせて後で消すので、ビルドの後には残らない。引き換えに、release とその次のビルドは
+キャッシュ無しになり、release のたびに Gradle の依存をダウンロードし直す（ネットワークが要る）。
 
 **鍵の作り方（一度だけ）。** keytool は Unity 同梱のもの
 （`/Applications/Unity/Hub/Editor/<版>/PlaybackEngines/AndroidPlayer/OpenJDK/bin/keytool`）。

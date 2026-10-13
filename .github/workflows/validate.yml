@@ -316,6 +316,9 @@ jobs:
     #   - OpenXR の Offscreen Rendering Only を切るのも AndroidPlayerSettings.FixAll だけ。
     #     アセットを作り直すとパッケージの既定（有効）に戻り、XR の無い Android で画面が真っ黒になる。
     #     パッケージの Project Validation はローダーが1つなら合格を返すので捕まらない
+    #   - 手元ビルドの版（bundleVersion / versionCode）と署名は ./scripts/build-android.sh の
+    #     release ビルドがビルドの間だけ書き換えて戻す。中断すると配布用の値や署名設定が
+    #     追跡ファイルに残り、以後の手元ビルドが配布した版を名乗るか、署名で失敗する
     # どれもテストにも通常の CI にも引っかからず、実機で気づくまで気づけない
     steps:
       - name: Checkout repository
@@ -371,3 +374,15 @@ jobs:
             grep -n "m_vulkanOffscreenSwapchainNoMainDisplay" "$asset" || true
             exit 1
           fi
+
+      - name: 手元ビルドの版と署名が出荷値であること
+        working-directory: .
+        run: |
+          asset=chatter-mascot/ProjectSettings/ProjectSettings.asset
+          for line in "  bundleVersion: 0.0.0-dev" "  AndroidBundleVersionCode: 1" "  androidUseCustomKeystore: 0" "  AndroidKeystoreName: "; do
+            if ! grep -qxF -- "$line" "$asset"; then
+              echo "::error file=$asset::「${line}」が出荷値のままではありません。release ビルドが中断して版や署名が残ったか、版を手で書き換えた可能性があります。元に戻してコミットしてください（版はタグから決まります）"
+              grep -n "${line%%:*}:" "$asset" || true
+              exit 1
+            fi
+          done

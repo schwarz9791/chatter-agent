@@ -691,6 +691,7 @@ B・C どちらの経路でもこのポートへ向ける。C（`configure-andro
 端末の `settings.json` = ペアリングのトークンごと消える）。**配る APK は release keystore で署名する。**
 
 ```bash
+git tag mascot-v0.2.0        # 配るコミットで。版はこのタグから決まる（下の「版」）
 CHATTER_MASCOT_KEYSTORE=<keystore の絶対パス> ./scripts/build-android.sh
 ```
 
@@ -719,15 +720,37 @@ unset CHATTER_MASCOT_KEYSTORE_PASS
 配れなくなる**（以後は全員アンインストール → 再ペアリング）。keystore はリポジトリの外に置き、
 パスワードは keystore と同じ場所に置かない。
 
-**版の上げ方。** 配るたびに、同じコミットで `bundleVersion` と `AndroidBundleVersionCode`
-（`ProjectSettings.asset`。Player Settings の Version / Bundle Version Code）を上げる。versionCode は
-配るたびに 1 ずつ上げる整数（下がると上書きインストールが拒まれる）。`bundleVersion` はマスコットが
-表示する、人が読む版。**ビルドでは採番しない。** ビルドが追跡ファイル（`ProjectSettings.asset`）を
-書き換える経路を作ると、中断で食い違ったまま残る（`scripts/unity.sh` の `assert_notice_in_sync` と
-同じ考え）。
+**版はタグから決める。** タグは `mascot-v<MAJOR>.<MINOR>.<PATCH>`（各数は 0〜99・先頭ゼロ不可、
+プレリリース接尾辞は不可）。`bundleVersion`（マスコットが表示する、人が読む版）は
+`MAJOR.MINOR.PATCH`、versionCode は `MAJOR*10000 + MINOR*100 + PATCH`（下がると上書きインストールが
+拒まれるので、版は単調に上げる。`mascot-v0.0.0` は versionCode が 0 になるので不可）。規則は
+`BuildScript.TryParseReleaseTag` にある。`mascot-` を付けるのは、コンポーネントごとに版が別で、
+素の `v` ではリポジトリ全体の版に見えるため。
+
+版の付け方はセマンティックバージョニング。互換を壊す変更は MAJOR、機能の追加は MINOR、修正だけなら
+PATCH を上げる。**1.0.0 になるまでは、互換を壊す変更も MINOR で上げる。**
+
+release ビルドは、作業ツリーがきれいで HEAD に `mascot-v*` タグがちょうど1つ付いているときだけ通る。
+版はビルドの間だけ `PlayerSettings` に入れ、終わると戻す。コミットされている
+`bundleVersion: 0.0.0-dev` / versionCode `1` は手元ビルドの印なので、**`ProjectSettings.asset` の版を
+手で書き換えない**（CI が止める）。
+
+手順:
+
+1. 配るコミットをチェックアウトする
+2. `git tag mascot-v0.2.0`
+3. `CHATTER_MASCOT_KEYSTORE=… ./scripts/build-android.sh`
+4. APK を確かめてから `git push origin mascot-v0.2.0`
+
+★ **push したタグを別のコミットへ付け直さない。** 同じ versionCode で中身の違う APK ができる。
+push 前に直すなら、ローカルのタグを消して付け直す。
+
+タグ駆動にしたのは、版を上げるためだけのコミットが要らず上げ忘れが起きないこと、APK・コミット・
+タグが1対1になること、CI のチェックアウトでもそのまま動くことのため。
 
 **確かめ方。** Unity 同梱 SDK の `build-tools/<版>/apksigner verify --print-certs <apk>` で証明書の
-DN を見る。release 鍵なら `CN=ChatterMascot`、debug 鍵なら `CN=Android Debug`。
+DN を見る。release 鍵なら `CN=ChatterMascot`、debug 鍵なら `CN=Android Debug`。版は同じ
+build-tools の `aapt2 dump badging <apk>` が出す `versionName` / `versionCode` で見る。
 
 ### Android 側の必須設定
 

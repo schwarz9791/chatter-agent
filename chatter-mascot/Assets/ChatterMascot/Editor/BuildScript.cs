@@ -206,21 +206,23 @@ namespace ChatterMascot.EditorTools
 
             var keystorePath = Environment.GetEnvironmentVariable(KeystoreEnv);
             var release = !string.IsNullOrEmpty(keystorePath);
-            Debug.Log($"[Build] version={PlayerSettings.bundleVersion} " +
-                      $"versionCode={PlayerSettings.Android.bundleVersionCode} " +
-                      $"signing={(release ? "release" : "debug")}" +
-                      (release ? $" keystore={keystorePath}" : ""));
+            var releaseTag = Environment.GetEnvironmentVariable(ReleaseTagEnv);
 
-            // ★ **署名に失敗したら debug keystore へ落とさず止める。** 配るつもりのビルドが
-            //   debug 鍵で出ると、端末では上書きできない別アプリになる。
+            // ★ **署名や版が決まらなければ debug keystore・手元の版へ落とさず止める。** 配るつもりの
+            //   ビルドが debug 鍵で出ると、端末では上書きできない別アプリになる。
             //   **EditorApplication.Exit を try の中に置かないこと**（finally が走らず、
-            //   署名設定が ProjectSettings.asset に残る）
-            Action restoreSigning = null;
-            if (release && !TryUseReleaseKeystore(keystorePath, out restoreSigning))
+            //   署名と版の設定が ProjectSettings.asset に残る）
+            Action restoreRelease = null;
+            if (release && !TryUseReleaseSettings(keystorePath, releaseTag, out restoreRelease))
             {
                 EditorApplication.Exit(1);
                 return;
             }
+
+            Debug.Log($"[Build] version={PlayerSettings.bundleVersion} " +
+                      $"versionCode={PlayerSettings.Android.bundleVersionCode} " +
+                      $"signing={(release ? "release" : "debug")}" +
+                      (release ? $" tag={releaseTag} keystore={keystorePath}" : ""));
 
             BuildSummary summary;
             try
@@ -229,7 +231,7 @@ namespace ChatterMascot.EditorTools
             }
             finally
             {
-                restoreSigning?.Invoke();
+                restoreRelease?.Invoke();
             }
 
             Debug.Log($"[Build] result={summary.result} errors={summary.totalErrors} " +
@@ -247,18 +249,51 @@ namespace ChatterMascot.EditorTools
         private const string KeystoreEnv = "CHATTER_MASCOT_KEYSTORE";
         private const string KeystorePassEnv = "CHATTER_MASCOT_KEYSTORE_PASS";
         private const string KeyAlias = "chattermascot";
+        private const string ReleaseTagEnv = "CHATTER_MASCOT_RELEASE_TAG";
 
         /// <summary>
-        /// 環境変数の release keystore で署名するよう PlayerSettings を切り替える。
-        /// パスワードは argv に出さないため環境変数から読む。PKCS12 はストアと鍵の
-        /// パスワードが同一なので、同じ値を両方に入れる。
-        ///
-        /// 切り替えは ProjectSettings.asset に永続化されうるので、<paramref name="restore"/> で
-        /// コミットされている値（debug 署名・空）へ戻す。呼び出し側は必ず finally で呼ぶこと。
+        /// release タグ <c>mascot-v&lt;MAJOR&gt;.&lt;MINOR&gt;.&lt;PATCH&gt;</c> から版を決める。
+        /// 各数は 0〜99・先頭ゼロ不可で、プレリリース接尾辞は持たない。
+        /// <c>versionCode = MAJOR*10000 + MINOR*100 + PATCH</c> で、Android が要る 1 以上に
+        /// ならない 0.0.0 は受けない。版の規則はここ1か所にだけ置く。
         /// </summary>
-        private static bool TryUseReleaseKeystore(string keystorePath, out Action restore)
+        public static bool TryParseReleaseTag(string tag, out string version, out int versionCode)
+        {
+            version = null;
+            versionCode = 0;
+            if (tag == null) return false;
+
+            var match = System.Text.RegularExpressions.Regex.Match(
+                tag, @"\Amascot-v(0|[1-9][0-9]?)\.(0|[1-9][0-9]?)\.(0|[1-9][0-9]?)\z");
+            if (!match.Success) return false;
+
+            var major = int.Parse(match.Groups[1].Value);
+            var minor = int.Parse(match.Groups[2].Value);
+            var patch = int.Parse(match.Groups[3].Value);
+            versionCode = major * 10000 + minor * 100 + patch;
+            if (versionCode == 0) return false;
+
+            version = $"{major}.{minor}.{patch}";
+            return true;
+        }
+
+        /// <summary>
+        /// release 用に署名と版を PlayerSettings へ入れる。署名は環境変数の keystore、版は
+        /// release タグから決める。パスワードは argv に出さないため環境変数から読む。PKCS12 は
+        /// ストアと鍵のパスワードが同一なので、同じ値を両方に入れる。
+        ///
+        /// 検証はすべて設定に触る前に行う。入れた値は ProjectSettings.asset に永続化されうるので、
+        /// <paramref name="restore"/> でビルド前の値へ戻す。呼び出し側は必ず finally で呼ぶこと。
+        /// </summary>
+        private static bool TryUseReleaseSettings(string keystorePath, string tag, out Action restore)
         {
             restore = null;
+            if (!TryParseReleaseTag(tag, out var version, out var versionCode))
+            {
+                Debug.LogError($"[Build] release タグ {ReleaseTagEnv}='{tag}' が " +
+                               "mascot-v<MAJOR>.<MINOR>.<PATCH> の形ではありません。中止します");
+                return false;
+            }
             var password = Environment.GetEnvironmentVariable(KeystorePassEnv);
             if (string.IsNullOrEmpty(password))
             {
@@ -273,10 +308,15 @@ namespace ChatterMascot.EditorTools
                 return false;
             }
 
+            var previousVersion = PlayerSettings.bundleVersion;
+            var previousVersionCode = PlayerSettings.Android.bundleVersionCode;
+
             restore = () =>
             {
                 try
                 {
+                    PlayerSettings.bundleVersion = previousVersion;
+                    PlayerSettings.Android.bundleVersionCode = previousVersionCode;
                     PlayerSettings.Android.useCustomKeystore = false;
                     PlayerSettings.Android.keyaliasName = "";
                     PlayerSettings.Android.keystorePass = "";
@@ -295,6 +335,8 @@ namespace ChatterMascot.EditorTools
                 }
             };
 
+            PlayerSettings.bundleVersion = version;
+            PlayerSettings.Android.bundleVersionCode = versionCode;
             PlayerSettings.Android.useCustomKeystore = true;
             PlayerSettings.Android.keystoreName = keystorePath;
             PlayerSettings.Android.keyaliasName = KeyAlias;

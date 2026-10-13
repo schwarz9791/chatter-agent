@@ -3,7 +3,7 @@
 #
 #   ./scripts/build-android.sh
 #   ./scripts/build-android.sh Assets/Scenes/Mascot.unity Build/ChatterMascot.apk
-#   CHATTER_MASCOT_KEYSTORE=<keystore の絶対パス> ./scripts/build-android.sh   # release 署名
+#   CHATTER_MASCOT_KEYSTORE=<keystore の絶対パス> ./scripts/build-android.sh   # release 署名。HEAD に mascot-v<版> タグが要る
 #
 # ★ AudioManager.asset の trap は無い。 build.sh の trap は BuildScript.BuildMacOS が
 #   ビルド中だけ Disable Unity Audio を ON にすることの後始末だが、BuildAndroid は
@@ -16,6 +16,26 @@ SCENE="${1:-Assets/Scenes/Mascot.unity}"
 OUTPUT="${2:-Build/ChatterMascot.apk}"
 
 assert_notice_in_sync
+
+# release は APK とコミットを1対1にするため、作業ツリーがきれいで HEAD にタグが1つだけ付いているときだけ通す。
+# 版の規則の検証は BuildScript 側に任せる（規則を2か所に書かない）。
+if [[ -n "${CHATTER_MASCOT_KEYSTORE:-}" ]]; then
+  if [[ -n "$(git -C "$PROJECT_PATH" status --porcelain)" ]]; then
+    echo "作業ツリーに未コミットの変更があります。release ビルドはコミット済みの状態でだけ行います。" >&2
+    exit 1
+  fi
+  tags="$(git -C "$PROJECT_PATH" tag --points-at HEAD --list 'mascot-v*')"
+  if [[ -z "$tags" ]]; then
+    echo "HEAD に mascot-v* タグがありません。git tag mascot-v<MAJOR>.<MINOR>.<PATCH> を付けてから実行してください（docs/mascot.md「署名と版」）。" >&2
+    exit 1
+  fi
+  if [[ "$tags" == *$'\n'* ]]; then
+    echo "HEAD に mascot-v* タグが複数付いています。1つにしてください:" >&2
+    echo "$tags" >&2
+    exit 1
+  fi
+  export CHATTER_MASCOT_RELEASE_TAG="$tags"
+fi
 
 # release 署名のパスワードは argv に出さず、環境変数として Unity へ継承させるだけにする。
 # 未指定ならキーチェーンから読む（→ docs/mascot.md「署名と版」）。

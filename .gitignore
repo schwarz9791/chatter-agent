@@ -34,3 +34,7 @@ spool/
 chatter-agent-app/src-tauri/target/
 chatter-agent-app/build/
 chatter-agent-app/src-tauri/gen/
+
+# 署名鍵（うっかりコミットしない保険）
+*.keystore
+*.jks

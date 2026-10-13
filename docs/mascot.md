@@ -684,6 +684,51 @@ B・C どちらの経路でもこのポートへ向ける。C（`configure-andro
   接続先を明示するならポートは URL に書く）。自動検出は最初に見つかった1台に繋ぐので、サーバーを複数立てているときは
   接続先を明示する
 
+### 署名と版
+
+環境変数なしのビルドは Unity 既定の debug keystore で署名する。手元の確認用で、debug 鍵は
+マシンごとに違うので、別のマシンでビルドした APK は上書きインストールできない（アンインストールが要り、
+端末の `settings.json` = ペアリングのトークンごと消える）。**配る APK は release keystore で署名する。**
+
+```bash
+CHATTER_MASCOT_KEYSTORE=<keystore の絶対パス> ./scripts/build-android.sh
+```
+
+パスワードは `CHATTER_MASCOT_KEYSTORE_PASS`、無ければキーチェーン（サービス名
+`chatter-mascot-keystore`）から読む。キーチェーンなら平文がシェルの履歴や rc に残らない。
+`CHATTER_MASCOT_KEYSTORE` を指定したのにパスワードが無い／ファイルが無いときは、debug 鍵には
+落とさずビルドを止める。alias は `chattermascot` 固定。
+
+**鍵の作り方（一度だけ）。** keytool は Unity 同梱のもの
+（`/Applications/Unity/Hub/Editor/<版>/PlaybackEngines/AndroidPlayer/OpenJDK/bin/keytool`）。
+パスワードを argv に出さないため `-storepass:env` / `-keypass:env` を使う。
+
+```bash
+read -rs CHATTER_MASCOT_KEYSTORE_PASS && export CHATTER_MASCOT_KEYSTORE_PASS
+keytool -genkeypair -keystore <path> -storetype PKCS12 -alias chattermascot \
+  -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=ChatterMascot" \
+  -storepass:env CHATTER_MASCOT_KEYSTORE_PASS -keypass:env CHATTER_MASCOT_KEYSTORE_PASS
+
+# キーチェーンへ登録（security -i は標準入力からコマンドを読むので、値が argv に出ない。
+# 値を " で括って渡すので、パスワードに " と \ を使わない）
+echo "add-generic-password -a \"$USER\" -s chatter-mascot-keystore -w \"$CHATTER_MASCOT_KEYSTORE_PASS\" -U" | security -i
+unset CHATTER_MASCOT_KEYSTORE_PASS
+```
+
+★ **keystore とパスワードの両方をバックアップする。どちらか一方を失っても、同じアプリとして更新を
+配れなくなる**（以後は全員アンインストール → 再ペアリング）。keystore はリポジトリの外に置き、
+パスワードは keystore と同じ場所に置かない。
+
+**版の上げ方。** 配るたびに、同じコミットで `bundleVersion` と `AndroidBundleVersionCode`
+（`ProjectSettings.asset`。Player Settings の Version / Bundle Version Code）を上げる。versionCode は
+配るたびに 1 ずつ上げる整数（下がると上書きインストールが拒まれる）。`bundleVersion` はマスコットが
+表示する、人が読む版。**ビルドでは採番しない。** ビルドが追跡ファイル（`ProjectSettings.asset`）を
+書き換える経路を作ると、中断で食い違ったまま残る（`scripts/unity.sh` の `assert_notice_in_sync` と
+同じ考え）。
+
+**確かめ方。** Unity 同梱 SDK の `build-tools/<版>/apksigner verify --print-certs <apk>` で証明書の
+DN を見る。release 鍵なら `CN=ChatterMascot`、debug 鍵なら `CN=Android Debug`。
+
 ### Android 側の必須設定
 
 `AndroidManifest.xml` に最終的に要るもの（`INTERNET` / `usesCleartextTraffic` 以外はビルド時に

@@ -565,8 +565,16 @@ Unity 本体の作り（「`-runTests` に `-quit` を付けない」「`-execut
 `--android-target-sdk-version` / `--android-symbol-type` / `--android-version-code`）は使わない。**
 `--execute-method` と併用すると CLI は `BuildPlayerOptions` を握らないので、これらが honor される
 保証が無い。出力形式の書き手を2つに持つと、honor されなかったときに黙って壊れた成果物ができる。
-targetSdk / symbol / versionCode は `ProjectSettings` が持ち、署名は値が argv に出るのでここでは
-行わない。
+targetSdk / symbol / versionCode は `ProjectSettings` が持ち、署名は値が argv に出るので CLI には
+渡さず、`BuildScript.BuildAndroid` が環境変数から読んで行う（→ [`mascot.md`](../mascot.md)「署名と版」）。
+
+★ **`PlayerSettings.Android.keystoreName` の setter に空文字を渡すと `'{inproject}: '` が保存される。**
+release 署名の後に「コミットされている空へ戻す」つもりで `""` を入れると、`ProjectSettings.asset` の
+`AndroidKeystoreName` が `'{inproject}: '` に書き換わって残る。`useCustomKeystore` が false なので
+署名には効かないが、release ビルドのたびに追跡ファイルが汚れる。batchmode のビルドは終わるまでに
+`ProjectSettings.asset` を保存するので、ビルドの間だけ PlayerSettings を書き換えるなら、戻す値は
+シリアライズされた形で揃える必要がある。`BuildScript.TryUseReleaseKeystore` は `AndroidKeystoreName`
+だけを `SerializedObject` で直接 `""` に戻している（ほかの項目は setter で元の値に戻る）。
 
 `configure-android.sh` / `run-android.sh` は Unity を起動しないので、
 Unity CLI へ寄せる対象ではない。

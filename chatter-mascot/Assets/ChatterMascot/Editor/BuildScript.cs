@@ -204,7 +204,33 @@ namespace ChatterMascot.EditorTools
             //   潰した無音ビルドができあがる。
             ExcludeDesktopWindowPluginsFromBuild();
 
-            var summary = BuildPipeline.BuildPlayer(options).summary;
+            var keystorePath = Environment.GetEnvironmentVariable(KeystoreEnv);
+            var release = !string.IsNullOrEmpty(keystorePath);
+            Debug.Log($"[Build] version={PlayerSettings.bundleVersion} " +
+                      $"versionCode={PlayerSettings.Android.bundleVersionCode} " +
+                      $"signing={(release ? "release" : "debug")}" +
+                      (release ? $" keystore={keystorePath}" : ""));
+
+            // ★ **署名に失敗したら debug keystore へ落とさず止める。** 配るつもりのビルドが
+            //   debug 鍵で出ると、端末では上書きできない別アプリになる。
+            //   **EditorApplication.Exit を try の中に置かないこと**（finally が走らず、
+            //   署名設定が ProjectSettings.asset に残る）
+            Action restoreSigning = null;
+            if (release && !TryUseReleaseKeystore(keystorePath, out restoreSigning))
+            {
+                EditorApplication.Exit(1);
+                return;
+            }
+
+            BuildSummary summary;
+            try
+            {
+                summary = BuildPipeline.BuildPlayer(options).summary;
+            }
+            finally
+            {
+                restoreSigning?.Invoke();
+            }
 
             Debug.Log($"[Build] result={summary.result} errors={summary.totalErrors} " +
                       $"time={(int)summary.totalTime.TotalSeconds}s size={summary.totalSize}");
@@ -215,6 +241,66 @@ namespace ChatterMascot.EditorTools
                 return;
             }
             EditorApplication.Exit(0);
+        }
+
+        private const string ProjectSettingsPath = "ProjectSettings/ProjectSettings.asset";
+        private const string KeystoreEnv = "CHATTER_MASCOT_KEYSTORE";
+        private const string KeystorePassEnv = "CHATTER_MASCOT_KEYSTORE_PASS";
+        private const string KeyAlias = "chattermascot";
+
+        /// <summary>
+        /// 環境変数の release keystore で署名するよう PlayerSettings を切り替える。
+        /// パスワードは argv に出さないため環境変数から読む。PKCS12 はストアと鍵の
+        /// パスワードが同一なので、同じ値を両方に入れる。
+        ///
+        /// 切り替えは ProjectSettings.asset に永続化されうるので、<paramref name="restore"/> で
+        /// コミットされている値（debug 署名・空）へ戻す。呼び出し側は必ず finally で呼ぶこと。
+        /// </summary>
+        private static bool TryUseReleaseKeystore(string keystorePath, out Action restore)
+        {
+            restore = null;
+            var password = Environment.GetEnvironmentVariable(KeystorePassEnv);
+            if (string.IsNullOrEmpty(password))
+            {
+                Debug.LogError($"[Build] {KeystoreEnv} が設定されていますが {KeystorePassEnv} が空です。" +
+                               "debug keystore には切り替えず中止します");
+                return false;
+            }
+            if (!File.Exists(keystorePath))
+            {
+                Debug.LogError($"[Build] keystore が見つかりません: {keystorePath}。" +
+                               "debug keystore には切り替えず中止します");
+                return false;
+            }
+
+            restore = () =>
+            {
+                try
+                {
+                    PlayerSettings.Android.useCustomKeystore = false;
+                    PlayerSettings.Android.keyaliasName = "";
+                    PlayerSettings.Android.keystorePass = "";
+                    PlayerSettings.Android.keyaliasPass = "";
+
+                    // ★ keystoreName の setter は空文字を '{inproject}: ' に変えて保存するので、
+                    //   コミットされている空へはシリアライズされた値を直接書いて戻す
+                    var serialized = new SerializedObject(AssetDatabase.LoadAllAssetsAtPath(ProjectSettingsPath)[0]);
+                    serialized.FindProperty("AndroidKeystoreName").stringValue = "";
+                    serialized.ApplyModifiedPropertiesWithoutUndo();
+                    AssetDatabase.SaveAssets();
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning("[Build] 署名設定を元に戻せませんでした: " + e.Message);
+                }
+            };
+
+            PlayerSettings.Android.useCustomKeystore = true;
+            PlayerSettings.Android.keystoreName = keystorePath;
+            PlayerSettings.Android.keyaliasName = KeyAlias;
+            PlayerSettings.Android.keystorePass = password;
+            PlayerSettings.Android.keyaliasPass = password;
+            return true;
         }
 
         /// <summary>

@@ -727,23 +727,11 @@ unset CHATTER_MASCOT_KEYSTORE_PASS
 `BuildScript.TryParseReleaseTag` にある。`mascot-` を付けるのは、コンポーネントごとに版が別で、
 素の `v` ではリポジトリ全体の版に見えるため。
 
-版の付け方はセマンティックバージョニング。互換を壊す変更は MAJOR、機能の追加は MINOR、修正だけなら
-PATCH を上げる。**1.0.0 になるまでは、互換を壊す変更も MINOR で上げる。**
-
 release ビルドは、作業ツリーがきれいで HEAD に `mascot-v*` タグがちょうど1つ付いているときだけ通る。
 版はビルドの間だけ `PlayerSettings` に入れ、終わると戻す。コミットされている
 `bundleVersion: 0.0.0-dev` / versionCode `1` は手元ビルドの印なので、**`ProjectSettings.asset` の版を
-手で書き換えない**（CI が止める）。
-
-手順:
-
-1. 配るコミットをチェックアウトする
-2. `git tag mascot-v0.2.0`
-3. `CHATTER_MASCOT_KEYSTORE=… ./scripts/build-android.sh`
-4. APK を確かめてから `git push origin mascot-v0.2.0`
-
-★ **push したタグを別のコミットへ付け直さない。** 同じ versionCode で中身の違う APK ができる。
-push 前に直すなら、ローカルのタグを消して付け直す。
+手で書き換えない**（CI が止める）。版の付け方と、タグを付けて配るまでの手順は
+[`release.md`](./release.md)。
 
 タグ駆動にしたのは、版を上げるためだけのコミットが要らず上げ忘れが起きないこと、APK・コミット・
 タグが1対1になること、CI のチェックアウトでもそのまま動くことのため。

@@ -22,6 +22,7 @@ namespace ChatterMascot.Ui
 
         // ── リセット ──────────────────────────────────
         public override string SectionReset => "Reset";
+        public override string SectionAbout => "About Chatter Mascot";
 
         // ── 注記・通知 ──────────────────────────────────
         public override string AppliesFromNextLaunch => "Takes effect on next launch.";
@@ -37,6 +38,7 @@ namespace ChatterMascot.Ui
         // ── XR ──────────────────────────────────
         public override string XrLoadingModel => "Loading model…";
         public override string XrActualSize(string cm) => $"Life-size ({cm} cm)";
+        public override string XrVersion(string version) => $"Version {version}";
         public override string XrSyncAssets => "Sync model & motions";
         public override string XrSyncNow => "Sync Now";
         public override string XrSyncing => "Syncing…";

@@ -12,8 +12,9 @@ use std::process::{Command, Stdio};
 
 #[cfg(target_os = "macos")]
 use crate::clients::BACKLOG_MAX_AGE_MS;
+use crate::server::Env;
 #[cfg(target_os = "macos")]
-use crate::server::{lock, pid_alive, Env};
+use crate::server::{lock, pid_alive};
 
 #[cfg(target_os = "macos")]
 const BUNDLE_ID: &str = "tech.sukima.chatter-mascot";
@@ -40,6 +41,23 @@ pub fn candidates(core: Option<&Path>, home: &Path) -> Vec<PathBuf> {
 
 pub fn find_app(core: Option<&Path>, home: &Path) -> Option<PathBuf> {
     first_dir(candidates(core, home))
+}
+
+/// `.app` の `Info.plist` にある版。読めなければ `None`。
+pub fn bundle_version(app: &Path) -> Option<String> {
+    let info = plist::Value::from_file(app.join("Contents/Info.plist")).ok()?;
+    info.as_dictionary()?
+        .get("CFBundleShortVersionString")?
+        .as_string()
+        .map(str::to_string)
+}
+
+/// `env` の `HOME`、なければこのプロセスの `HOME`。
+pub fn home_of(env: &Env) -> PathBuf {
+    env.get("HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+        .unwrap_or_default()
 }
 
 fn first_dir(paths: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
@@ -197,6 +215,27 @@ mod tests {
             .map(PathBuf::from)
         );
         assert_eq!(candidates(None, Path::new("/h")).len(), 2);
+    }
+
+    #[test]
+    fn bundle_version_reads_short_version_string() {
+        let d =
+            std::env::temp_dir().join(format!("chatter-agent-app-plist-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let app = d.join("ChatterMascot.app");
+        assert_eq!(bundle_version(&app), None);
+        std::fs::create_dir_all(app.join("Contents")).unwrap();
+        assert_eq!(bundle_version(&app), None);
+        std::fs::write(
+            app.join("Contents/Info.plist"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>CFBundleShortVersionString</key><string>0.2.0</string>
+</dict></plist>"#,
+        )
+        .unwrap();
+        assert_eq!(bundle_version(&app), Some("0.2.0".to_string()));
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

@@ -157,6 +157,7 @@ fn main() {
             mascot::confirm,
             mascot::mascot_reset,
             mascot::mascot_state,
+            mascot::mascot_version,
             mascot::mascot_request,
             text::lang,
             about,

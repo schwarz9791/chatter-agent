@@ -41,6 +41,7 @@ namespace ChatterMascot.Ui
 
         // ── リセット ──────────────────────────────────
         public abstract string SectionReset { get; }
+        public abstract string SectionAbout { get; }
 
         // ── 注記・通知 ──────────────────────────────────
         public abstract string AppliesFromNextLaunch { get; }
@@ -56,6 +57,7 @@ namespace ChatterMascot.Ui
         // ── XR ──────────────────────────────────
         public abstract string XrLoadingModel { get; }
         public abstract string XrActualSize(string cm);
+        public abstract string XrVersion(string version);
         public abstract string XrSyncAssets { get; }
         public abstract string XrSyncNow { get; }
         public abstract string XrSyncing { get; }

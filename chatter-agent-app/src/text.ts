@@ -73,6 +73,7 @@ export type Text = {
 
   sectionAbout: string;
   aboutVersion: string;
+  aboutMascot: string;
   aboutLicense: string;
 
   settingsUnreadable(reason: string): string;
@@ -174,6 +175,7 @@ export const JA: Text = {
 
   sectionAbout: "Chatter Agent について",
   aboutVersion: "バージョン",
+  aboutMascot: "マスコット",
   aboutLicense: "ライセンス",
 
   settingsUnreadable: (reason) => `settings.json を読めません（${reason}）`,
@@ -275,6 +277,7 @@ export const EN: Text = {
 
   sectionAbout: "About Chatter Agent",
   aboutVersion: "Version",
+  aboutMascot: "Mascot",
   aboutLicense: "License",
 
   settingsUnreadable: (reason) => `Couldn't read settings.json (${reason}).`,

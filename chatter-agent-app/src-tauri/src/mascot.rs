@@ -11,6 +11,7 @@ use serde_json::{Map, Value};
 use tauri::State;
 use tauri_plugin_dialog::{DialogExt as _, MessageDialogButtons, MessageDialogKind};
 
+use crate::mascot_app::{bundle_version, find_app, home_of};
 use crate::server::{runtime_root, Manager};
 
 /// ChatterAgent が書いてよいキー。Unity は知らないキーを捨てるので、余計なキーを書かせない意味もある。
@@ -346,6 +347,14 @@ pub async fn mascot_reset(manager: State<'_, Manager>) -> Result<ResetOutcome, S
 pub struct MascotState {
     running: bool,
     motions: Option<Vec<String>>,
+}
+
+/// ChatterAgent が起動する `.app` の版。見つからない・読めないときは `None`。
+#[tauri::command]
+pub async fn mascot_version(manager: State<'_, Manager>) -> Result<Option<String>, String> {
+    let core = manager.core_dir();
+    let home = home_of(&manager.env());
+    blocking(move || Ok(find_app(core.as_deref(), &home).and_then(|a| bundle_version(&a)))).await
 }
 
 #[tauri::command]

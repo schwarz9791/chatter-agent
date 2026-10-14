@@ -265,10 +265,6 @@ macOS 限定。Windows は single-instance プラグインで同じ口にでき�
 | 位置と大きさをリセット（「キャラクター」節） | `character.scale` を消してから依頼 `resetWindow` を置く。マスコットは依頼の直前に設定を読み直し、既定の大きさ・既定の位置（`window.json` を消す）に戻す |
 | モーションを確認（「モーション」節） | select と「再生」。依頼 `playMotion`（→「マスコットとのやり取り」） |
 
-「Chatter Agent について」節（末尾）は server にもマスコットにも依存せず、常に出る。バージョン（Tauri の
-`package_info()`）と、リポジトリ直下の `NOTICE` の全文（`include_str!` でビルド時に埋め込む。コピーを持たないので
-食い違わない。Rust の `about()`）を出す。全文は長いので「ライセンス」の下に畳んでおく。
-
 - 窓は縦だけリサイズできる（幅は 520 で固定）
 - 環境変数で固定されたキー（`origins` が `env`）は押せず、`CHATTER_AGENT_*` で固定されている旨を注記する
 - server に繋がらないと、サーバーの項目は押せず注記が出る。**3秒ごとに取り直す**
@@ -276,6 +272,16 @@ macOS 限定。Windows は single-instance プラグインで同じ口にでき�
   エンジンの起動待ちで 503 になる）
 - 設定の書き込みに失敗したら、項目の下に理由を出して値を読み直す
 - **テスト音声は ChatterAgent が自分で鳴らす**（マスコットの再生経路は使わない）。音量は `audio.volume`、ミュート中（`audio.mute`）は鳴らさない
+
+「Chatter Agent について」節（末尾）は server に依存せず、常に出る。
+
+- バージョン: Tauri の `package_info()`
+- マスコット: ChatterAgent が起動する ChatterMascot.app（探し方は起動と同じ）の `Info.plist` の
+  `CFBundleShortVersionString`。見つからない・読めないときは「—」。窓を開いたときとフォーカスを得たときに読み直す。
+  マスコットのビルドが版を入れるのは Android の release ビルドだけなので、macOS の手元ビルドは `0.0.0-dev` になる
+  （→ [`mascot.md`](./mascot.md)「署名と版」）。XR 版の版はここには出ない（XR の設定パネルと起動ログで確かめる）
+- ライセンス: リポジトリ直下の `NOTICE` の全文。`include_str!` でビルド時に埋め込む（コピーを持たないので
+  食い違わない。Rust の `about()`）。全文は長いので畳んでおく
 
 ### server とのやり取り（`control.rs`）
 

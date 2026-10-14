@@ -121,6 +121,9 @@ namespace ChatterMascot.Settings
             items.Add(SettingSpec.Button(
                 SettingKeys.ResetAll, text.XrResetAll, note: text.XrResetAllNote));
 
+            // ── について ─────────────────────────────────────
+            items.Add(SettingSpec.Section(text.SectionAbout, note: text.XrVersion(c.AppVersion)));
+
             return items;
         }
 

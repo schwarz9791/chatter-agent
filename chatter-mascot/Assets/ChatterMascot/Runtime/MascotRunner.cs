@@ -408,6 +408,9 @@ namespace ChatterMascot
             //   保存して復元し、**上限が恒久的に消える**（→ FrameRateBudget）
             FrameRateBudget.SetBaseline(targetFrameRate);
 
+            // 報告がどのビルドのものか分かるように
+            Debug.Log($"[Mascot] version: {Application.version}");
+
             if (audioSource == null) audioSource = GetComponent<AudioSource>();
             if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
             audioSource.playOnAwake = false;

@@ -21,7 +21,9 @@ use tauri_plugin_global_shortcut::{
 };
 
 use crate::mascot::{read_settings, set_mute, settings_path};
-use crate::mascot_app::{candidates, find_app, launch, request_quit, running_pids, take_rechecked};
+use crate::mascot_app::{
+    candidates, find_app, home_of, launch, request_quit, running_pids, take_rechecked,
+};
 use crate::server::{exit_info, exit_label, lock, runtime_root, stop_child, Env, Manager, Serial};
 use crate::text;
 
@@ -430,11 +432,7 @@ impl Clients {
 
     fn start_mascot(&self, env: &Env, core: &Path, backlog: bool) -> Result<(), StartFail> {
         let t = text::current();
-        let home = env
-            .get("HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
-            .unwrap_or_default();
+        let home = home_of(env);
         let Some(app) = find_app(Some(core), &home) else {
             let places: Vec<_> = candidates(Some(core), &home)
                 .iter()

@@ -25,6 +25,7 @@ import {
   mascotSettingsGet,
   mascotSettingsSet,
   mascotState,
+  mascotVersion,
   pickVrm,
   serverJson,
   serverRequest,
@@ -225,8 +226,12 @@ function watchMascotState(): void {
   }, RETRY_MS);
 }
 
+async function loadMascotVersion(): Promise<void> {
+  ui.mascotVer.textContent = (await mascotVersion().catch(() => null)) ?? "—";
+}
+
 async function reloadAll(): Promise<void> {
-  await Promise.all([loadConfig(), loadMascot(), loadMascotState()]);
+  await Promise.all([loadConfig(), loadMascot(), loadMascotState(), loadMascotVersion()]);
   render();
 }
 
@@ -414,10 +419,13 @@ function build(): void {
   reset.addEventListener("click", () => void resetAll());
   row(s, "reset", () => "", [reset], { staticNote: () => t.resetAllNote });
 
-  // について。server にもマスコットにも依存しないので、常に出る。
+  // について。節は常に出る。マスコットの行は .app が見つからなければ「—」。
   s = section(() => t.sectionAbout);
   const version = el("span", "val");
   row(s, "aboutVersion", () => t.aboutVersion, [version]);
+  const mascotVer = el("span", "val");
+  ui.mascotVer = mascotVer;
+  row(s, "aboutMascot", () => t.aboutMascot, [mascotVer]);
   // 全文は長いので、ふだんは畳んでおく
   const license = el("details", "row");
   const summary = el("summary");

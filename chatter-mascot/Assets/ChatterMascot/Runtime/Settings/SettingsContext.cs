@@ -39,6 +39,9 @@ namespace ChatterMascot.Settings
         /// </summary>
         public IReadOnlyList<SettingChoice> XrHeightChoices { get; set; }
 
+        /// <summary>ビルドの版。<c>Application.version</c> は Runtime では読まないので、呼び出し側が渡す。</summary>
+        public string AppVersion { get; set; } = "";
+
         /// <summary>モデルとモーションの同期が走っているか。XR だけが使う。</summary>
         public bool AssetSyncRunning { get; set; }
 

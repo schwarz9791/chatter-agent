@@ -82,6 +82,7 @@ namespace ChatterMascot.Xr
             _walk = walk;
             // ★ XR で端末の言語を読むのはここだけ（→ UiText.For）
             _context.Text = UiText.For(Application.systemLanguage);
+            _context.AppVersion = Application.version;
 
             var panelGo = new GameObject("XR Settings Panel");
             // ★ Canvas は RequireComponent で即座に付くので、組み上がるまで（EnsureBuilt/Open の

@@ -41,7 +41,6 @@ namespace ChatterMascot.Ui
 
         // ── リセット ──────────────────────────────────
         public abstract string SectionReset { get; }
-        public abstract string SectionAbout { get; }
 
         // ── 注記・通知 ──────────────────────────────────
         public abstract string AppliesFromNextLaunch { get; }

@@ -396,10 +396,10 @@ cd chatter-mascot
 端末の `settings.json` に `connection` が無いときだけ（サーバーから見るとループバック接続。
 LAN 越しの接続やトークンの検証は下の「接続」の C を使う）。
 
-logcat に出るはずの行（macOS では `Player.log` に同じ行が出る）:
+logcat に出るはずの行:
 
 ```
-[Mascot] version: 1.2.3                                                              ← 起動直後。報告がどのビルドのものかを見る
+[Mascot] version: 1.2.3                                                              ← 起動直後。macOS では `Player.log` にも出る。報告がどのビルドのものかを見る
 [Mascot] server: ws://127.0.0.1:8570 / audio: http://127.0.0.1:8570/audio/
 [Mascot] … から 19,259,304 バイト読みました: jar:file:///…/base.apk!/assets/vita.vrm   ← 同梱モデル
 [Mascot] XR: 空間固定 headLocalPosition=… → originPosition=… originYaw=…              ← XR 未起動なら「XR: 起動していないので平面表示のまま」
@@ -512,7 +512,7 @@ $ADB shell chmod -R 777 $D/animations
 | まばたき | |
 | 位置をリセット | `ModelAnchor` を起動時の位置・向きへ戻し、歩行範囲の半径も既定（身長 25cm のとき 20cm）へ戻す |
 | すべての設定をリセット | 接続先は残し、同期済みのモデルファイルも消さない（`ResetKeepingConnection`）。位置と大きさも既定へ戻る。**もう一度押すと確定**——XR にはネイティブの確認ダイアログが無いため |
-| Chatter Mascot について | 節の注記にビルドの版（`Application.version`）を出す。操作する行は無い |
+| 版（末尾） | ビルドの版（`Application.version`）を見出しの形で出す。操作する行は無い |
 
 出さない項目: 音声スタイル・話す速さ・AI要約（core の書き込み口はループバック限定なので XR からは
 変えられない）、音量（端末の音量で足りる）、接続先（手入力の欄は無い。ペアリングか `settings.json`）、
@@ -751,7 +751,7 @@ release ビルドは、作業ツリーがきれいで HEAD に `mascot-v*` タ�
 **確かめ方。** Unity 同梱 SDK の `build-tools/<版>/apksigner verify --print-certs <apk>` で証明書の
 DN を見る。release 鍵なら `CN=ChatterMascot`、debug 鍵なら `CN=Android Debug`。版は同じ
 build-tools の `aapt2 dump badging <apk>` が出す `versionName` / `versionCode` で見る。版は起動ログの
-`[Mascot] version:` と、XR の設定パネルの末尾（「Chatter Mascot について」）でも確かめられる。
+`[Mascot] version:` と、XR の設定パネルの末尾でも確かめられる。
 
 ### Android 側の必須設定
 

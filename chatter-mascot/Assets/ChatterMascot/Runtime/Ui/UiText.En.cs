@@ -22,7 +22,6 @@ namespace ChatterMascot.Ui
 
         // ── リセット ──────────────────────────────────
         public override string SectionReset => "Reset";
-        public override string SectionAbout => "About Chatter Mascot";
 
         // ── 注記・通知 ──────────────────────────────────
         public override string AppliesFromNextLaunch => "Takes effect on next launch.";

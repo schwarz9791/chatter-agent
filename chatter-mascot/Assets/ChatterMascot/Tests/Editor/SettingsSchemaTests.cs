@@ -95,7 +95,7 @@ namespace ChatterMascot.Tests
             var last = SettingsSchema.BuildXr(new SettingsContext { AppVersion = "1.2.3" }).Last();
 
             Assert.That(last.Kind, Is.EqualTo(SettingKind.Section));
-            Assert.That(last.Note, Does.Contain("1.2.3"));
+            Assert.That(last.Label, Does.Contain("1.2.3"));
         }
 
         /// <summary>★ null を渡されても落ちないこと（起動直後に呼ばれうる）</summary>

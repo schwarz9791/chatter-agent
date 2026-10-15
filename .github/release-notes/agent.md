@@ -12,7 +12,7 @@ ChatterAgent is a macOS menu bar app that starts and stops chatter-agent-server 
 The app is ad-hoc signed and not notarized, so Gatekeeper blocks it after download. Move `ChatterAgent.app` to `/Applications`, then do one of the following:
 
 - Run `xattr -dr com.apple.quarantine /Applications/ChatterAgent.app`
-- Open it once, then go to System Settings → Privacy & Security and click "Open Anyway"
+- Open it once, then go to System Settings → Privacy & Security and click "Open Anyway". Click "Open Anyway" again in the dialog that follows, then authenticate with Touch ID or an administrator password
 
 ## Set up core
 

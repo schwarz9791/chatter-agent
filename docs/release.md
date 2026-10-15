@@ -79,8 +79,9 @@ gh release create agent-v0.2.0 --draft --verify-tag --title "ChatterAgent 0.2.0"
 ```
 
 - draft に今回の変更点を書き足してから publish する
-- ★ **ChatterAgent は publish の前に、別の Mac でブラウザから draft の zip をダウンロードして**
-  （quarantine が付く経路で）、ノートの開き方で開けることを確かめる。確かめたら publish
+- ★ **ChatterAgent は publish の前に、別の Mac（無ければ同じ Mac の別ユーザー）でブラウザから draft の zip を
+  ダウンロードして**（quarantine が付く経路で）、ノートの開き方で開けることを確かめる。確かめたら publish
+  （→ [`knowledge/agent.md`](./knowledge/agent.md)「配った zip は Gatekeeper の「このまま開く」で開ける」）
 - core（`dist/` と `node_modules`）は添付しない
 
 ## やり直すとき

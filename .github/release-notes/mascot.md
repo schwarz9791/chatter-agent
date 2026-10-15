@@ -22,7 +22,7 @@ You need ChatterAgent on a Mac. Get it from the `agent-v*` releases on the [Rele
 
 ## Connect
 
-1. On the Mac, expose the server to the LAN: set `"host": "0.0.0.0"` in `~/.config/chatter-agent/config.json`, then choose "Restart Server" in the ChatterAgent menu.
+1. On the Mac, expose the server to the LAN: set `"host": "0.0.0.0"` in `~/.config/chatter-agent/config.json`, then choose "Restart Server" in the ChatterAgent menu. When macOS asks for Local Network access, allow it and choose "Restart Server" once more.
 2. Put the Mac and the device on the same Wi-Fi.
 3. Choose "Pair with Android…" in the ChatterAgent menu to show a 4-digit PIN.
 4. Enter the PIN on the device. On XR, open "Connection" in the settings panel and choose "Pair…". Without XR, a dialog asks for the PIN when the app can't reach the server.

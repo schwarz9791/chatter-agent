@@ -26,5 +26,5 @@ Then choose "Choose Core Folder…" in the menu and select the `core/` folder.
 
 ## Notes
 
-- When the server is exposed to the LAN, macOS asks for Local Network access for ChatterAgent. Allow it, or headsets can't find the Mac.
+- When the server is exposed to the LAN, macOS asks for Local Network access for ChatterAgent. Allow it, then choose "Restart Server" in the menu. Headsets can't find a server that was started before you allowed it. If you chose "Don't Allow", turn ChatterAgent on in System Settings → Privacy & Security → Local Network, then restart the server.
 - The macOS mascot is not bundled. If ChatterAgent cannot find it, it shows a warning and plays the voice on the Mac through the CLI player. If you only want to listen on the headset, turn on "Mute" in the menu.

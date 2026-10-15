@@ -8,6 +8,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 # 配るものとコミットを1対1にするため、作業ツリーがきれいで HEAD にタグが1つだけ付いているときだけ通す。
+# chatter-mascot/scripts/build-android.sh の release 分岐と同じ形。直すときは両方を揃える。
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "作業ツリーに未コミットの変更があります。release ビルドはコミット済みの状態でだけ行います。" >&2
   exit 1
@@ -44,6 +45,6 @@ npm run tauri -- build --config "{\"version\":\"$version\"}"
 rm -rf build/ChatterAgent.app build/ChatterAgent.zip
 mkdir -p build
 cp -R src-tauri/target/release/bundle/macos/ChatterAgent.app build/
-# .app の署名と属性をそのまま保って固めるため ditto を使う。
-ditto -c -k --keepParent build/ChatterAgent.app build/ChatterAgent.zip
+# 拡張属性は zip に入れない。入れると AppleDouble（._*）がバンドルの中に並び、ditto 以外で展開すると署名の封が壊れる。
+ditto -c -k --norsrc --keepParent build/ChatterAgent.app build/ChatterAgent.zip
 echo "[Build] version=$version → build/ChatterAgent.zip"

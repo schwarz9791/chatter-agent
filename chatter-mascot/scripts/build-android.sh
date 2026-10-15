@@ -24,6 +24,7 @@ assert_notice_in_sync
 # release は APK とコミットを1対1にするため、作業ツリーがきれいで HEAD にタグが1つだけ付いているときだけ通す。
 # 版の規則の検証は BuildScript 側に任せる（規則を2か所に書かない）。
 # Unity を起動してからでは遅い失敗（タグ・keystore）は、ここで先に止める。
+# タグの確かめ方は chatter-agent-app/scripts/build-release.sh と同じ形。直すときは両方を揃える。
 if [[ -n "${CHATTER_MASCOT_KEYSTORE:-}" ]]; then
   if [[ -n "$(git -C "$PROJECT_PATH" status --porcelain)" ]]; then
     echo "作業ツリーに未コミットの変更があります。release ビルドはコミット済みの状態でだけ行います。" >&2

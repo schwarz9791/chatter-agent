@@ -51,7 +51,7 @@ git push origin mascot-v0.2.0        # 確かめてから
 
 ```bash
 git tag agent-v0.2.0                 # まだ push しない
-cd chatter-agent-app && npm install
+cd chatter-agent-app && npm ci
 npm run build:release                # → build/ChatterAgent.zip
 git push origin agent-v0.2.0         # 版を確かめてから（下）
 ```
@@ -68,6 +68,7 @@ git push origin agent-v0.2.0         # 版を確かめてから（下）
 タグを push してから、draft で作る。ノートの雛形は `.github/release-notes/` にあり、版番号を含まないのでそのまま渡せる。
 
 ```bash
+cd "$(git rev-parse --show-toplevel)"   # 上の節で chatter-mascot/ や chatter-agent-app/ に居るので戻る
 gh release create mascot-v0.2.0 --draft --verify-tag --title "ChatterMascot 0.2.0" \
   --notes-file .github/release-notes/mascot.md chatter-mascot/Build/ChatterMascot.apk
 gh release create agent-v0.2.0 --draft --verify-tag --title "ChatterAgent 0.2.0" \

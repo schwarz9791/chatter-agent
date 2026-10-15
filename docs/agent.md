@@ -44,6 +44,7 @@ npm test           # 設定窓の純粋な判定（node --test）
 - Tauri は `.app` を `src-tauri/target/release/bundle/macos/` に作る。`npm run build` はそれを `build/` へ
   写す（マスコットの `chatter-mascot/Build/` と同じく、成果物の場所を1段で分かるようにするため）。
   `.app` は macOS でしかできないので、Windows に持っていくときは写す元と写し方を書き直す
+- 配る版は `npm run build:release`（版は `agent-v*` タグから決まる）。手順は [`release.md`](./release.md)
 - `devUrl` を持つので、`cargo clippy` / `cargo test` は `dist/` が無くても通る
 
 Dock にも ⌘Tab にも出ない。操作はメニューバーのアイコンから行う。

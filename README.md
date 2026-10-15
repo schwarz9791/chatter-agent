@@ -66,6 +66,8 @@ There are four deliverables.
 
 ## Building
 
+Prebuilt APKs and ChatterAgent (macOS) are on the [Releases page](https://github.com/schwarz9791/chatter-agent/releases).
+
 **Run every command from the repository root.**
 
 ### Prerequisites

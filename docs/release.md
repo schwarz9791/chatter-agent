@@ -1,6 +1,6 @@
 # リリース手順
 
-配るもの（今はマスコットの APK）を作って版を確定させる手順。
+配るもの（マスコットの APK と ChatterAgent）を作って版を確定させ、GitHub Release に載せる手順。
 
 ## 前提（この Mac に一度だけ）
 
@@ -14,9 +14,15 @@
 セマンティックバージョニング。互換を壊す変更は MAJOR、機能の追加は MINOR、修正だけなら PATCH を上げる。
 **1.0.0 になるまでは、互換を壊す変更も MINOR で上げる。**
 
+タグは `mascot-v*`（マスコット）と `agent-v*`（ChatterAgent）の2系統で、版はそれぞれ独立に上げる。
+
 版は前回より必ず上げる（versionCode が下がると上書きインストールが拒まれる）。タグが `mascot-v*` の
 最大でなければ `build-android.sh` が止まる。タグの形と、版・versionCode の
 決まり方は [`mascot.md`](./mascot.md)「署名と版」。
+
+`agent-v*` は `agent-v<MAJOR>.<MINOR>.<PATCH>`（先頭ゼロ不可、接尾辞不可、`agent-v0.0.0` 不可）。
+最大の `agent-v*` でなければ `build-release.sh` が止まる。コミットされている版（`tauri.conf.json` /
+`Cargo.toml` / `package.json`）は手元ビルドの印 `0.0.0-dev` で、配る版はタグからビルド時に与える。
 
 ## マスコット（APK）
 
@@ -41,8 +47,42 @@ git push origin mascot-v0.2.0        # 確かめてから
 - 未追跡ファイルも「汚れ」として止まる（`Build/` や `Library/` は `.gitignore` 済みなので数えない）
 - 版と署名は `apksigner verify --print-certs` / `aapt2 dump badging` でも確かめられる（→ [`mascot.md`](./mascot.md)「署名と版」の「確かめ方」）
 
+## ChatterAgent
+
+```bash
+git tag agent-v0.2.0                 # まだ push しない
+cd chatter-agent-app && npm install
+npm run build:release                # → build/ChatterAgent.zip
+git push origin agent-v0.2.0         # 版を確かめてから（下）
+```
+
+- `build-release.sh` は作業ツリーがきれいで HEAD に `agent-v*` タグがちょうど1つ、かつ最大のときだけ通る。
+  マスコットと同じく、タグが origin の main に入っているコミットにあることは自分で確かめる
+- 版は `defaults read "$PWD/build/ChatterAgent.app/Contents/Info.plist" CFBundleShortVersionString` か、
+  起動して設定窓の情報欄で確かめる
+- arm64 だけのビルドになる（Intel Mac 向けは作らない）
+- 署名は ad-hoc で、公証しない。開き方は Release ノート（`.github/release-notes/agent.md`）に書いてある
+
+## GitHub Release
+
+タグを push してから、draft で作る。ノートの雛形は `.github/release-notes/` にあり、版番号を含まないのでそのまま渡せる。
+
+```bash
+gh release create mascot-v0.2.0 --draft --verify-tag --title "ChatterMascot 0.2.0" \
+  --notes-file .github/release-notes/mascot.md chatter-mascot/Build/ChatterMascot.apk
+gh release create agent-v0.2.0 --draft --verify-tag --title "ChatterAgent 0.2.0" \
+  --notes-file .github/release-notes/agent.md chatter-agent-app/build/ChatterAgent.zip
+```
+
+- draft に今回の変更点を書き足してから publish する
+- ★ **ChatterAgent は publish の前に、別の Mac でブラウザから draft の zip をダウンロードして**
+  （quarantine が付く経路で）、ノートの開き方で開けることを確かめる。確かめたら publish
+- core（`dist/` と `node_modules`）は添付しない
+
 ## やり直すとき
 
-- **push 前**: `git tag -d mascot-v0.2.0` でタグを消し、直す変更を main に入れてから、pull してタグを付け直す
+- **push 前**: `git tag -d mascot-v0.2.0` でタグを消し（`agent-v*` も同じ）、直す変更を main に入れてから、pull してタグを付け直す
 - ★ **push した後**: タグを付け直さない。同じ versionCode で中身の違う APK ができる。直したものは次の版
-  （例: `mascot-v0.2.1`）として出す
+  （例: `mascot-v0.2.1`）として出す。`agent-v*` も同じ考え方
+- ★ **publish した後は添付を差し替えない。** 同じ版で中身の違うものができる。次の版で出す
+- draft のうちは `gh release delete <tag>` で消して、同じタグで作り直せる（タグは消えない。消さない）

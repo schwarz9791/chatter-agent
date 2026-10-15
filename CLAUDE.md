@@ -227,7 +227,7 @@ npm run build            # → ChatterAgent.app
 | [`docs/plugin.md`](./docs/plugin.md) | `plugin/` を触るとき。bash hook の制約、spool 命名、`hooks.json` の3種 |
 | [`docs/mascot.md`](./docs/mascot.md) | `chatter-mascot/` を触るとき。セットアップ、構成、探索順、ビルドと実行 |
 | [`docs/agent.md`](./docs/agent.md) | `chatter-agent-app/` を触るとき。server に渡す環境、停止の仕組み、ログ、制約 |
-| [`docs/release.md`](./docs/release.md) | 配るものを作るとき。版の付け方、タグ、release ビルドの手順 |
+| [`docs/release.md`](./docs/release.md) | 配るものを作るとき。版の付け方、タグ、release ビルド、GitHub Release の手順 |
 | [`docs/origin.md`](./docs/origin.md) | cc-mascot 由来のコードを触るとき。移植の対応表、フォーク点、ライセンス義務 |
 | [`docs/kokoro.md`](./docs/kokoro.md) | Kokoro-FastAPI（`ttsEngine: "openai"`。日本語以外向けの TTS）を使うとき |
 | [`docs/knowledge/`](./docs/knowledge) | **踏んだこと・なぜそうしたか・実測値。** 同じ罠に2度目で刺されないため |

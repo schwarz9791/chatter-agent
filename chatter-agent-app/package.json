@@ -1,6 +1,6 @@
 {
   "name": "chatter-agent-app",
-  "version": "0.1.0",
+  "version": "0.0.0-dev",
   "private": true,
   "type": "module",
   "engines": {
@@ -10,6 +10,7 @@
     "tauri": "tauri",
     "dev": "tauri dev",
     "build": "tauri build && rm -rf build/ChatterAgent.app && mkdir -p build && cp -R src-tauri/target/release/bundle/macos/ChatterAgent.app build/",
+    "build:release": "./scripts/build-release.sh",
     "dev:web": "vite",
     "build:web": "tsc --noEmit && vite build",
     "test": "node --test \"src/**/*.test.ts\""

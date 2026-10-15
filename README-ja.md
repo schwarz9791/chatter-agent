@@ -66,6 +66,8 @@ Claude Code
 
 ## ビルド
 
+ビルド済みの APK と ChatterAgent（macOS）は [Releases](https://github.com/schwarz9791/chatter-agent/releases) にあります。
+
 **コマンドはリポジトリのルートから実行します。**
 
 ### 前提

@@ -50,6 +50,9 @@ git push origin mascot-v0.2.0        # 確かめてから
 ## ChatterAgent
 
 ```bash
+cd "$(git rev-parse --show-toplevel)"   # マスコットの節から続けると chatter-mascot/ に居るので戻る
+git switch main && git pull          # origin と同じ main にする
+git status                           # 未追跡ファイルも含めて空であること
 git tag agent-v0.2.0                 # まだ push しない
 cd chatter-agent-app && npm ci
 npm run build:release                # → build/ChatterAgent.zip
@@ -57,7 +60,7 @@ git push origin agent-v0.2.0         # 版を確かめてから（下）
 ```
 
 - `build-release.sh` は作業ツリーがきれいで HEAD に `agent-v*` タグがちょうど1つ、かつ最大のときだけ通る。
-  マスコットと同じく、タグが origin の main に入っているコミットにあることは自分で確かめる
+  main かどうかは見ないので、マスコットと同じく origin と同じ main でタグを付ける
 - 版は `defaults read "$PWD/build/ChatterAgent.app/Contents/Info.plist" CFBundleShortVersionString` か、
   起動して設定窓の情報欄で確かめる
 - arm64 だけのビルドになる（Intel Mac 向けは作らない）

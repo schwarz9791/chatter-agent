@@ -62,7 +62,113 @@ Claude Code
 | **サーバー**（`chatter-agent-server`） | 動きます |
 | **CLI プレーヤー**（`chatter-agent-player`） | 動きます。プロトコルの参照実装も兼ねています |
 | **macOS クライアント**（`chatter-mascot`） | 動きます。透過ウィンドウで常駐し、VRM が表情・モーション・リップシンク付きで読み上げます。設定はアプリから変えられます |
-| **Android XR クライアント**（同じ Unity プロジェクト。XREAL Aura / Galaxy XR 想定） | エミュレータまで。OpenXR の Full Space で空間に立ち、グラスでもヘッドセットでも背景に部屋が透けます。LAN 越しにサーバーへ繋がります。**実機は未確認** |
+| **Android XR クライアント**（同じ Unity プロジェクト。XREAL Aura / Galaxy XR 想定） | エミュレータまで。OpenXR の Full Space で空間に立ち、グラスでもヘッドセットでも背景に部屋が透けます。LAN 越しにサーバーへ繋がります。**実機は未確認**。[XREAL Aura で試す](#xreal-aura-で試すandroid-xr)を見てください |
+
+## XREAL Aura で試す（Android XR）
+
+XR 版はまだエミュレータでしか動かしていません。**実機に繋ぐのはこれが初めてなので、不具合の報告を歓迎します。** 上から順に進めてください。
+
+要るものは次のとおりです。
+
+- Apple Silicon の Mac と Claude Code
+- Node 24.11 以上と `adb`
+- XREAL Aura
+- 同じ Wi-Fi に置いた Mac と Aura
+
+**Unity と Rust は要りません。**
+
+### 1. インストール
+
+1. **Aura に入れるアプリ。** [Releases](https://github.com/schwarz9791/chatter-agent/releases) の `mascot-v*` から `ChatterMascot.apk` を取り、入れます。更新は `adb install -r` です。
+
+   ```bash
+   adb install ChatterMascot.apk
+   ```
+
+2. **Mac に入れる ChatterAgent。** `agent-v*` から `ChatterAgent.zip` を取って展開し、`ChatterAgent.app` を `/Applications` へ移します。ad-hoc 署名で公証していないので、ダウンロードすると Gatekeeper に止められます。次のどちらかで開けます。
+   - `xattr -dr com.apple.quarantine /Applications/ChatterAgent.app` を実行する
+   - 一度開いてから、システム設定 → プライバシーとセキュリティで「このまま開く」を押す。続くダイアログでもう一度「このまま開く」を押し、Touch ID か管理者パスワードで認証する
+
+3. **core（サーバーと CLI）。** 同梱されていないので、clone してビルドします。そのあと ChatterAgent のメニュー「core の場所を選ぶ…」で `core/` を選びます。
+
+   ```bash
+   git clone https://github.com/schwarz9791/chatter-agent.git
+   cd chatter-agent/core && npm install && npm run build
+   ```
+
+4. **Claude Code プラグイン。** [Claude Code プラグインの導入](#claude-code-プラグインの導入)に従って入れ、Claude Code のセッションを再起動します。
+
+### 2. 英語の声を選ぶ
+
+既定の合成エンジン AivisSpeech は日本語の声です。**AivisSpeech が入っていないまま既定で使うと、テキストは Aura に届きますが音は鳴りません。**
+
+英語の声には [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) を使います。導入は [`docs/kokoro.md`](./docs/kokoro.md)（英語）にあります。入れたら `~/.config/chatter-agent/config.json` で向けます。このファイルはサーバーが作らないので、無ければ自分で作ってください。
+
+```json
+{
+  "ttsEngine": "openai",
+  "kokoroDir": "/absolute/path/to/Kokoro-FastAPI"
+}
+```
+
+声は `kokoroVoiceId`（既定 `af_heart`）で変えられます。
+
+### 3. サーバーを LAN に公開する
+
+サーバーは既定で `127.0.0.1` しか listen しないので、Aura から繋げません。同じ `config.json` に `"host": "0.0.0.0"` を足し、ChatterAgent のメニュー「サーバーを再起動」を選びます。
+
+```json
+{
+  "ttsEngine": "openai",
+  "kokoroDir": "/absolute/path/to/Kokoro-FastAPI",
+  "host": "0.0.0.0"
+}
+```
+
+- **macOS がローカルネットワークの許可を求めたら許可し、もう一度「サーバーを再起動」を選びます。** 許可より前に起動したサーバーは、Aura から見つかりません。
+- ターミナルから起動するなら `cd core && CHATTER_AGENT_HOST=0.0.0.0 npm run start:server` です。環境変数は `config.json` より優先されます。**この場合、許可が付くのはターミナルのアプリです。**
+- **ChatterAgent のメニューで「ミュート」を ON にします**（macOS のマスコットが出ていれば「マスコットを隠す」も）。同時に繋げるクライアントは1つだけです。両方繋ぐと Mac と Aura が文を取り合い、Aura が文を飛ばします。
+
+### 4. ペアリング
+
+1. Aura で「Chatter Mascot」を起動します。
+2. ChatterAgent のメニュー「Android とペアリング…」を開きます。4桁の PIN が出ます。有効 5 分、間違えられるのは 5 回までです。窓の「発行し直す」で出し直せます。
+3. Aura で設定パネルを開きます。視線の正面に浮かぶパネルで、開き方は2通りあります。
+   - キャラクターをつまんで離す。頭上に歯車が少しの間出るので、それをつまむ
+   - 手のひらを自分の頭の方へ向ける。手のひらの上にボタンが出るので、もう片方の手でつまむ
+4. パネルで「接続」→「ペアリング…」を開き、PIN を入れて「ペアリング」を押します。
+
+成功するとトークンが Aura に保存され、その場で繋ぎ直します。再起動は要りません。Aura は mDNS で Mac を探します。
+
+ChatterAgent を使わない場合は、PIN を自分で発行できます。Mac 自身から（ループバックから）叩きます。`Content-Type` ヘッダが無いと `415` が返ります。
+
+```bash
+curl -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8570/v1/pairing
+# {"pin":"2458","expiresAt":1792136026504}
+```
+
+### 5. 繋がらないとき
+
+次の順に確かめます。
+
+1. **`host` が `127.0.0.1` のまま。** ペアリング窓に「サーバーが LAN に公開されていません。config.json の host か環境変数 CHATTER_AGENT_HOST を 0.0.0.0 にして、サーバーを再起動してください」と出ます。curl なら `409` `{"error":"not_lan"}` です。3 をやり直します。
+2. **macOS のローカルネットワークの許可が拒否されている。** 許可が付くのは、サーバーを起動したアプリ（ChatterAgent か、ターミナルのアプリ）です。一度「許可しない」を選んでいると、ダイアログは二度と出ず、Mac 自身からは繋がるのに LAN からだけ繋がらなくなります。システム設定 → プライバシーとセキュリティ → ローカルネットワークでそのアプリをオンにし、「サーバーを再起動」を選びます。
+3. **mDNS が Aura に届かない。** AP のクライアント分離や、Mac と Aura が別の Wi-Fi・VLAN にいるときに起きます。設定パネルには「サーバーが見つかりません」と出ます。clone から、接続先を明示して Aura に書き込みます。
+
+   ```bash
+   ADB="$(command -v adb)" ./chatter-mascot/scripts/configure-android.sh ws://<mac-ip>:8570
+   ```
+
+   - スクリプトは `adb` を自動では探しません（既定は Android Studio の SDK のパス）。`ADB=` で渡します。
+   - トークンを読むので、サーバーが動いている必要があります。トークンも書き込むので、ペアリングは要りません。
+   - 繋ぐ先の候補は、サーバーのログ（「ログを開く」）に `ws://<ip>:<port>` の行で出ます。Aura と同じネットワークのものを使います。
+   - 書き込んだあと、スクリプトがアプリを再起動します。
+
+### 6. 不具合報告のためのログ
+
+- **Aura:** `adb logcat -s Unity ChatterMascot > aura.log`。アプリを起動する前に始め、症状を再現してから Ctrl-C で止めます。`ChatterMascot` は Java 側のタグで、mDNS の探索はこちらに出るので、両方要ります。
+- **Mac:** ChatterAgent のメニュー「ログを開く」（サーバーのログ）。
+- **どのビルドか:** 起動ログの `[Mascot] version:` の行、または XR 設定パネルの末尾。
 
 ## ビルド
 
@@ -213,18 +319,7 @@ cd chatter-mascot
 ./scripts/run-android.sh
 ```
 
-Android の C は、アプリを入れたあと adb なしで繋げます。サーバーを `0.0.0.0` で起動し、端末と Mac を同じ Wi-Fi に置いて、次の順に進めます。
-
-1. ChatterAgent のメニュー「Android とペアリング…」を開く（4桁の PIN が出ます。有効 5 分、間違えられるのは 5 回まで）
-2. 端末の設定パネルで「ペアリング…」を開き、PIN を入れて「ペアリング」（XR なしの端末は、繋がらないときに開くダイアログに PIN を入れます）
-3. 成功するとトークンが端末に保存され、その場で繋ぎ直します（再起動は要りません。端末は mDNS で Mac を探します）
-
-```bash
-# Android（C: LAN 越し。adb で済ませたいとき、または mDNS が届かないとき）
-cd chatter-mascot
-./scripts/configure-android.sh          # 端末が LAN の Mac を自動で探します（mDNS）
-./scripts/run-android.sh                # install して起動、logcat を流します
-```
+Android の C は、[XREAL Aura で試す](#xreal-aura-で試すandroid-xr)に手順をまとめています。
 
 ## モデルとモーション
 

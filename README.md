@@ -62,7 +62,113 @@ There are four deliverables.
 | **Server** (`chatter-agent-server`) | Works |
 | **CLI player** (`chatter-agent-player`) | Works. Also doubles as the reference implementation of the protocol |
 | **macOS client** (`chatter-mascot`) | Works. Sits resident in a transparent window, and the VRM reads speech aloud with facial expressions, motion, and lip sync. Settings can be changed from the app |
-| **Android XR client** (same Unity project. Targets XREAL Aura / Galaxy XR) | Emulator only. Stands in space in OpenXR's Full Space, and the room shows through the background on both glasses and headsets. Connects to the server over LAN. **Not yet verified on real hardware** |
+| **Android XR client** (same Unity project. Targets XREAL Aura / Galaxy XR) | Emulator only. Stands in space in OpenXR's Full Space, and the room shows through the background on both glasses and headsets. Connects to the server over LAN. **Not yet verified on real hardware**. See [Try it on XREAL Aura](#try-it-on-xreal-aura-android-xr). |
+
+## Try it on XREAL Aura (Android XR)
+
+The XR build has only run on an emulator so far. **This is the first time it meets real hardware, so bug reports are very welcome.** Follow the steps below from the top.
+
+You need:
+
+- A Mac with Apple Silicon, running Claude Code
+- Node 24.11 or later, and `adb`
+- An XREAL Aura
+- The Mac and the Aura on the same Wi-Fi
+
+**You don't need Unity or Rust.**
+
+### 1. Install
+
+1. **The app for the Aura.** Download `ChatterMascot.apk` from a `mascot-v*` release on the [Releases page](https://github.com/schwarz9791/chatter-agent/releases), then install it. To update, use `adb install -r`.
+
+   ```bash
+   adb install ChatterMascot.apk
+   ```
+
+2. **ChatterAgent on the Mac.** Download `ChatterAgent.zip` from an `agent-v*` release, unzip it, and move `ChatterAgent.app` to `/Applications`. The app is ad-hoc signed and not notarized, so Gatekeeper blocks it after download. Do one of the following:
+   - Run `xattr -dr com.apple.quarantine /Applications/ChatterAgent.app`
+   - Open it once, then go to System Settings → Privacy & Security and click "Open Anyway". Click "Open Anyway" again in the dialog that follows, then authenticate with Touch ID or an administrator password
+
+3. **The core (server and CLIs).** It is not bundled, so clone and build it. Then choose "Choose Core Folder…" in ChatterAgent's menu and select the `core/` folder.
+
+   ```bash
+   git clone https://github.com/schwarz9791/chatter-agent.git
+   cd chatter-agent/core && npm install && npm run build
+   ```
+
+4. **The Claude Code plugin.** Follow [Installing the Claude Code plugin](#installing-the-claude-code-plugin), then restart your Claude Code session.
+
+### 2. Pick an English voice
+
+The default synthesis engine, AivisSpeech, speaks Japanese. **If AivisSpeech isn't installed and you leave the default, the text reaches the Aura but no sound plays.**
+
+For an English voice, use [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI). Set it up with [`docs/kokoro.md`](./docs/kokoro.md), then point the server at it in `~/.config/chatter-agent/config.json`. The server never creates this file, so create it if it doesn't exist.
+
+```json
+{
+  "ttsEngine": "openai",
+  "kokoroDir": "/absolute/path/to/Kokoro-FastAPI"
+}
+```
+
+The voice is `kokoroVoiceId` (default `af_heart`).
+
+### 3. Expose the server to the LAN
+
+By default the server listens on `127.0.0.1` only, which the Aura can't reach. Add `"host": "0.0.0.0"` to the same `config.json`, then choose "Restart Server" in ChatterAgent's menu.
+
+```json
+{
+  "ttsEngine": "openai",
+  "kokoroDir": "/absolute/path/to/Kokoro-FastAPI",
+  "host": "0.0.0.0"
+}
+```
+
+- **If macOS asks for Local Network access, allow it, then choose "Restart Server" once more.** A server started before you allowed it can't be found by the Aura.
+- If you start the server from a terminal instead, run `cd core && CHATTER_AGENT_HOST=0.0.0.0 npm run start:server`. The environment variable takes priority over `config.json`. **In that case the Local Network permission belongs to the terminal app.**
+- **Turn on "Mute" in ChatterAgent's menu** (and choose "Hide Mascot" if the macOS mascot is showing). Only one client can be connected at a time. If both are connected, the Mac and the Aura take sentences from each other, and the Aura skips some.
+
+### 4. Pair
+
+1. Launch "Chatter Mascot" on the Aura.
+2. Choose "Pair with Android…" in ChatterAgent's menu. A 4-digit PIN appears. It is valid for 5 minutes and allows 5 wrong tries. Press "Get a new PIN" in the window to get another.
+3. On the Aura, open the settings panel. It floats in front of you. There are two ways to open it:
+   - Pinch the character and let go. A gear appears above the head for a short while. Pinch the gear.
+   - Turn your palm toward your head. A button appears over your palm. Pinch it with your other hand.
+4. In the panel, open "Connection" → "Pair…", enter the PIN, and press "Pair".
+
+On success the token is saved on the Aura and it connects right away. You don't need to restart anything. The Aura finds the Mac over mDNS.
+
+Without ChatterAgent, you can issue a PIN yourself. Run this on the Mac itself (the request has to come from loopback). Without the `Content-Type` header the server answers `415`.
+
+```bash
+curl -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8570/v1/pairing
+# {"pin":"2458","expiresAt":1792136026504}
+```
+
+### 5. If it doesn't connect
+
+Check these in order.
+
+1. **`host` is still `127.0.0.1`.** The pairing window says "The server isn't exposed to the LAN. …". With curl, you get `409` `{"error":"not_lan"}`. Redo step 3.
+2. **macOS denied the Local Network permission.** The permission belongs to the app that started the server (ChatterAgent, or your terminal app). If you chose "Don't Allow" once, the dialog never appears again, and the Mac can reach its own server while the LAN can't. Turn that app on in System Settings → Privacy & Security → Local Network, then choose "Restart Server".
+3. **mDNS doesn't reach the Aura.** This happens with AP client isolation, or when the Mac and the Aura are on different Wi-Fi networks or VLANs. The panel says "Couldn't find the server." From your clone, write the server address to the Aura directly:
+
+   ```bash
+   ADB="$(command -v adb)" ./chatter-mascot/scripts/configure-android.sh ws://<mac-ip>:8570
+   ```
+
+   - The script doesn't look for `adb` on its own (its default is Android Studio's SDK path), so pass it with `ADB=`.
+   - The server must be running, because the script reads its token. The token is written too, so you don't need to pair.
+   - The server log ("Open Log") lists the addresses to try as `ws://<ip>:<port>` lines. Use the one on the Aura's network.
+   - The script restarts the app after writing.
+
+### 6. Logs for a bug report
+
+- **Aura:** `adb logcat -s Unity ChatterMascot > aura.log`. Start it before launching the app, reproduce the problem, then stop it with Ctrl-C. `ChatterMascot` is the Java-side tag, and the mDNS discovery logs under it, so you need both.
+- **Mac:** choose "Open Log" in ChatterAgent's menu (the server log).
+- **Which build:** the `[Mascot] version:` line in the startup log, or the end of the XR settings panel.
 
 ## Building
 
@@ -216,18 +322,7 @@ cd chatter-mascot
 ./scripts/run-android.sh
 ```
 
-On Android, case C works without adb once the app is installed. Start the server with `0.0.0.0`, put the device and the Mac on the same Wi-Fi, then:
-
-1. Open "Pair with Android…" from ChatterAgent's menu (a 4-digit PIN appears; valid for 5 minutes, 5 wrong tries allowed)
-2. In the device's settings panel, open "Pair…", enter the PIN, and press "Pair" (without XR, enter the PIN in the dialog that opens when the device can't connect)
-3. On success the token is saved on the device and it reconnects on the spot (no restart; the device finds the Mac over mDNS)
-
-```bash
-# Android (case C: over the LAN. When you'd rather use adb, or when mDNS doesn't reach)
-cd chatter-mascot
-./scripts/configure-android.sh          # the device finds the Mac on the LAN (mDNS)
-./scripts/run-android.sh                # installs, launches, and streams logcat
-```
+On Android, case C is covered step by step in [Try it on XREAL Aura](#try-it-on-xreal-aura-android-xr).
 
 ## Models and motion
 

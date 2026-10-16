@@ -243,8 +243,12 @@ Gatekeeper に止められる。マスコットの macOS 版も同じ。開き�
   - 「このまま開く」で許可すると macOS がマスコットを起こし、ChatterAgent は「外で起動された」として受け入れる。
     以後の表示の切り替えでは何も聞かれない
   - マスコットは `/Applications` ではなく AppTranslocation の下（`/private/var/folders/…/AppTranslocation/…`）から
-    動いた。Finder を通さずに置いたからかは確かめていない。それでも表示の切り替えと「Chatter Agent について」の版
-    （`/Applications` の `Info.plist` を読む）は普段どおりだった
+    動いた。それでも表示の切り替えと「Chatter Agent について」の版（`/Applications` の `Info.plist` を読む）は
+    普段どおりだった
+- 2026-10-16（macOS 27.0.1。同じユーザー。`mascot-v0.1.1` の draft からブラウザでダウンロードし、Finder で展開して
+  `/Applications` へドラッグした）: 上と同じ流れで開けた。★ **Finder で移したコピーは AppTranslocation を通らず、
+  `/Applications` から直接動いた。** 上との違いは、置き方（Finder か `ditto` か）と quarantine の付け方
+  （ブラウザか手か）の2つで、どちらが効いたかは切り分けていない
 - ★ **管理者の認証が要る。** 一般ユーザーは管理者の名前とパスワードを入れる
 - ★ **ビルドした Mac でも確かめられる。** 止めるかどうかは quarantine と署名で決まり、どの Mac でビルドしたかは
   関係しない。ブラウザでダウンロードし直したものは、ビルドした Mac でも止められた。開発用のビルドや設定が

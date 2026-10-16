@@ -9,8 +9,9 @@
 #
 # ★ 接続先を省略すると connection.serverUrl を空にしてトークンだけを書く。端末は LAN の
 #   `_chatter-agent._tcp`（mDNS）から Mac のサーバーを探して繋ぐ。見つかるのはサーバーが
-#   非ループバック（0.0.0.0 など）で待ち受けているときだけ。AP / クライアント分離や別の
-#   Wi-Fi・VLAN では mDNS が届かないので、その場合は ws://<ip>:<port> を引数で指定すること。
+#   非ループバック（0.0.0.0 など）で待ち受けているときだけ。ルーターがマルチキャストを通さない、
+#   別のサブネット・VLAN といった環境では mDNS が届かないので、その場合は ws://<ip>:<port> を
+#   引数で指定すること。
 #
 # ★ トークンは ${XDG_CONFIG_HOME:-$HOME/.config}/chatter-agent/server.token から読む。
 #   chatter-agent-server の起動時に生成される共有シークレットなので、無ければ先にサーバーを

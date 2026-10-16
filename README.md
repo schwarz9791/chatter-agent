@@ -81,6 +81,8 @@ You need:
 
 1. **The app for the Aura.** Download `ChatterMascot.apk` from a `mascot-v*` release on the [Releases page](https://github.com/schwarz9791/chatter-agent/releases), then install it. To update, use `adb install -r`.
 
+   Before installing, turn on Developer options and USB debugging on the Aura, and check that `adb devices` on the Mac lists it. If you have an APK you built yourself installed, the signature differs, so run `adb uninstall tech.sukima.chattermascot` first.
+
    ```bash
    adb install ChatterMascot.apk
    ```
@@ -93,8 +95,11 @@ You need:
 
    ```bash
    git clone https://github.com/schwarz9791/chatter-agent.git
-   cd chatter-agent/core && npm install && npm run build
+   cd chatter-agent
+   (cd core && npm install && npm run build)
    ```
+
+   Run the commands in the rest of this section from this `chatter-agent` folder. Right after you choose the core folder, ChatterAgent shows a "Cannot Show the Mascot" warning. That is expected, because these steps don't install the macOS mascot. The CLI player on the Mac then starts speaking; you mute it in step 3.
 
 4. **The Claude Code plugin.** Follow [Installing the Claude Code plugin](#installing-the-claude-code-plugin), then restart your Claude Code session.
 
@@ -102,7 +107,7 @@ You need:
 
 The default synthesis engine, AivisSpeech, speaks Japanese. **If AivisSpeech isn't installed and you leave the default, the text reaches the Aura but no sound plays.**
 
-For an English voice, use [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI). Set it up with [`docs/kokoro.md`](./docs/kokoro.md), then point the server at it in `~/.config/chatter-agent/config.json`. The server never creates this file, so create it if it doesn't exist.
+For an English voice, use [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI). Set it up with [`docs/kokoro.md`](./docs/kokoro.md), then point the server at it in `~/.config/chatter-agent/config.json`. Create it if it doesn't exist.
 
 ```json
 {
@@ -126,17 +131,17 @@ By default the server listens on `127.0.0.1` only, which the Aura can't reach. A
 ```
 
 - **If macOS asks for Local Network access, allow it, then choose "Restart Server" once more.** A server started before you allowed it can't be found by the Aura.
-- If you start the server from a terminal instead, run `cd core && CHATTER_AGENT_HOST=0.0.0.0 npm run start:server`. The environment variable takes priority over `config.json`. **In that case the Local Network permission belongs to the terminal app.**
+- If you start the server from a terminal instead, first choose "Quit" in ChatterAgent's menu (only one server can run at a time), then run `cd core && CHATTER_AGENT_HOST=0.0.0.0 npm run start:server`. The environment variable takes priority over `config.json`. **In that case the Local Network permission belongs to the terminal app, and you restart the server in the terminal too** (ChatterAgent's "Restart Server" doesn't affect a server running outside it).
 - **Turn on "Mute" in ChatterAgent's menu** (and choose "Hide Mascot" if the macOS mascot is showing). Only one client can be connected at a time. If both are connected, the Mac and the Aura take sentences from each other, and the Aura skips some.
 
 ### 4. Pair
 
 1. Launch "Chatter Mascot" on the Aura.
-2. Choose "Pair with Android…" in ChatterAgent's menu. A 4-digit PIN appears. It is valid for 5 minutes and allows 5 wrong tries. Press "Get a new PIN" in the window to get another.
+2. Choose "Pair with Android…" in ChatterAgent's menu. A 4-digit PIN appears. It is valid for 5 minutes and allows 5 wrong tries. If it expires or you get it wrong 5 times, press "Get a new PIN" in the window.
 3. On the Aura, open the settings panel. It floats in front of you. There are two ways to open it:
    - Pinch the character and let go. A gear appears above the head for a short while. Pinch the gear.
    - Turn your palm toward your head. A button appears over your palm. Pinch it with your other hand.
-4. In the panel, open "Connection" → "Pair…", enter the PIN, and press "Pair".
+4. In the panel, press "Pair…" under "Connection", enter the PIN, and press "Pair".
 
 On success the token is saved on the Aura and it connects right away. You don't need to restart anything. The Aura finds the Mac over mDNS.
 
@@ -152,8 +157,8 @@ curl -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8570/v1/pairin
 Check these in order.
 
 1. **`host` is still `127.0.0.1`.** The pairing window says "The server isn't exposed to the LAN. …". With curl, you get `409` `{"error":"not_lan"}`. Redo step 3.
-2. **macOS denied the Local Network permission.** The permission belongs to the app that started the server (ChatterAgent, or your terminal app). If you chose "Don't Allow" once, the dialog never appears again, and the Mac can reach its own server while the LAN can't. Turn that app on in System Settings → Privacy & Security → Local Network, then choose "Restart Server".
-3. **mDNS doesn't reach the Aura.** This happens with AP client isolation, or when the Mac and the Aura are on different Wi-Fi networks or VLANs. The panel says "Couldn't find the server." From your clone, write the server address to the Aura directly:
+2. **macOS denied the Local Network permission.** The permission belongs to the app that started the server (ChatterAgent, or your terminal app). If you chose "Don't Allow" once, the dialog never appears again, and the Mac can reach its own server while the LAN can't. Turn that app on in System Settings → Privacy & Security → Local Network, then choose "Restart Server" (or restart it in the terminal if you started it there).
+3. **mDNS doesn't reach the Aura.** This happens when the router doesn't pass multicast (mDNS), or when the Mac and the Aura are on different subnets or VLANs. The panel says "Couldn't find the server." From your clone, write the server address to the Aura directly:
 
    ```bash
    ADB="$(command -v adb)" ./chatter-mascot/scripts/configure-android.sh ws://<mac-ip>:8570
@@ -163,6 +168,8 @@ Check these in order.
    - The server must be running, because the script reads its token. The token is written too, so you don't need to pair.
    - The server log ("Open Log") lists the addresses to try as `ws://<ip>:<port>` lines. Use the one on the Aura's network.
    - The script restarts the app after writing.
+
+   If it still doesn't connect, the Wi-Fi may be isolating clients (common on guest networks). Isolation blocks all traffic between devices, so naming the address doesn't help. Use a network without isolation.
 
 ### 6. Logs for a bug report
 
@@ -303,7 +310,7 @@ How the server and client pair up depends on the case. See
 |---|---|---|
 | A. Mac only | `cd core && npm run start:server` | macOS app / CLI player |
 | B. Emulator or a USB-connected device, against the Mac's server | Start it as-is (listens on loopback only by default) | `./scripts/run-android.sh` (goes over `adb reverse`, so it needs neither a token nor exposing the server to the LAN. Keep the device's `connection` empty — `./scripts/configure-android.sh --clear`) |
-| C. Over the LAN (a Wi-Fi device) | `CHATTER_AGENT_HOST=0.0.0.0 npm run start:server` | enter the 4-digit PIN shown by ChatterAgent's "Pair with Android…" into the device's settings panel ("Pair…") on XR, or into the dialog that opens when it can't connect without XR. When mDNS doesn't reach: `./scripts/configure-android.sh` → `./scripts/run-android.sh` |
+| C. Over the LAN (a Wi-Fi device) | `CHATTER_AGENT_HOST=0.0.0.0 npm run start:server` | enter the 4-digit PIN shown by ChatterAgent's "Pair with Android…" into the device's settings panel ("Pair…") on XR, or into the dialog that opens when it can't connect without XR. When mDNS doesn't reach: see [If it doesn't connect](#5-if-it-doesnt-connect) |
 | D. Running Mac and Android at once | A second server on its own runtime root and port | Case B or C, pointed at that port |
 
 ```bash

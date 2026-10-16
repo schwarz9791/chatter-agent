@@ -150,6 +150,24 @@ namespace ChatterMascot.EditorTools
 
             Debug.Log($"[Build] scene={scene} output={absolute}");
 
+            // ★ 版を決められなければ手元の版で配らず止める。入れた設定はこのプロセスでは戻さない
+            //   （ProjectSettings.asset は build.sh が git から戻す）。
+            //   Exit は下の try の外に置くこと（理由は下の ★）。
+            var releaseTag = Environment.GetEnvironmentVariable(ReleaseTagEnv);
+            var release = !string.IsNullOrEmpty(releaseTag);
+            if (release)
+            {
+                if (!TryParseReleaseTag(releaseTag, out var releaseVersion, out _))
+                {
+                    Debug.LogError($"[Build] release タグ {ReleaseTagEnv}='{releaseTag}' が " +
+                                   "mascot-v<MAJOR>.<MINOR>.<PATCH> の形ではありません。中止します");
+                    EditorApplication.Exit(1);
+                    return;
+                }
+                PlayerSettings.bundleVersion = releaseVersion;
+            }
+            Debug.Log($"[Build] version={PlayerSettings.bundleVersion}" + (release ? $" tag={releaseTag}" : ""));
+
             // ★ **EditorApplication.Exit を try の中に置かないこと。** 即座にプロセスが落ちるので
             //   finally が走らず、Disable Unity Audio を ON にしたままリポジトリに残る
             var restoreAudioSetting = DisableUnityAudioDuringBuild();
@@ -168,7 +186,7 @@ namespace ChatterMascot.EditorTools
 
             // ★ batchmode では終了コードで結果を伝える。-quit だけだと常に 0 になり、
             //   CI からもシェルからも失敗に気づけない
-            if (summary.result != BuildResult.Succeeded)
+            if (Failed(summary, release))
             {
                 EditorApplication.Exit(1);
                 return;
@@ -228,12 +246,25 @@ namespace ChatterMascot.EditorTools
             Debug.Log($"[Build] result={summary.result} errors={summary.totalErrors} " +
                       $"time={(int)summary.totalTime.TotalSeconds}s size={summary.totalSize}");
 
-            if (summary.result != BuildResult.Succeeded)
+            if (Failed(summary, release))
             {
                 EditorApplication.Exit(1);
                 return;
             }
             EditorApplication.Exit(0);
+        }
+
+        /// <summary>
+        /// ビルドを失敗として扱うか。配るビルドはエラーが1つでもあれば失敗にする ——
+        /// シェーダーのコンパイルに失敗しても <c>BuildPipeline</c> は <c>Succeeded</c> を返すので、
+        /// 結果だけを見ると、見た目の欠けたビルドを配りうる。
+        /// </summary>
+        private static bool Failed(BuildSummary summary, bool release)
+        {
+            if (summary.result != BuildResult.Succeeded) return true;
+            if (!release || summary.totalErrors == 0) return false;
+            Debug.LogError($"[Build] エラーが {summary.totalErrors} 件あるので、配るビルドにはしません");
+            return true;
         }
 
         private const string KeystoreEnv = "CHATTER_MASCOT_KEYSTORE";

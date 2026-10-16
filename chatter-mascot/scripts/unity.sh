@@ -126,3 +126,38 @@ unity_build_player() {
 
   echo "できました: $output"
 }
+
+# release ビルドの関門。成果物とコミットを1対1にするため、作業ツリーがきれいで、
+# HEAD に mascot-v* タグが1つだけ付いていて、それが最新の版のときだけ通す。
+# 版の形式の検証は BuildScript 側に任せる（規則を1か所にだけ置く）。
+# 通ったら CHATTER_MASCOT_RELEASE_TAG に入れて export する。Unity を起動してからでは遅い失敗はここで先に止める。
+# タグの確かめ方は chatter-agent-app/scripts/build-release.sh と同じ形。直すときは両方を揃える。
+require_release_tag() {
+  if [[ -n "$(git -C "$PROJECT_PATH" status --porcelain)" ]]; then
+    echo "作業ツリーに未コミットの変更があります。release ビルドはコミット済みの状態でだけ行います。" >&2
+    exit 1
+  fi
+  local tags
+  tags="$(git -C "$PROJECT_PATH" tag --points-at HEAD --list 'mascot-v*')"
+  if [[ -z "$tags" ]]; then
+    echo "HEAD に mascot-v* タグがありません。git tag mascot-v<MAJOR>.<MINOR>.<PATCH> を付けてから実行してください（docs/mascot.md「署名と版」）。" >&2
+    exit 1
+  fi
+  if [[ "$tags" == *$'\n'* ]]; then
+    echo "HEAD に mascot-v* タグが複数付いています。1つにしてください:" >&2
+    echo "$tags" >&2
+    exit 1
+  fi
+
+  # 前回より小さい版を配ると、端末が上書きを拒んでアンインストール（再ペアリング）になる。
+  # パイプで先頭だけ取ると pipefail 下で SIGPIPE になりうるので、変数展開で取る。
+  local all_tags latest_tag
+  all_tags="$(git -C "$PROJECT_PATH" tag --list 'mascot-v*' --sort=-v:refname)"
+  latest_tag="${all_tags%%$'\n'*}"
+  if [[ "$tags" != "$latest_tag" ]]; then
+    echo "$tags は最新の版ではありません。$latest_tag より大きい版のタグにしてください。" >&2
+    exit 1
+  fi
+
+  export CHATTER_MASCOT_RELEASE_TAG="$tags"
+}

@@ -8,7 +8,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 # 配るものとコミットを1対1にするため、作業ツリーがきれいで HEAD にタグが1つだけ付いているときだけ通す。
-# chatter-mascot/scripts/build-android.sh の release 分岐と同じ形。直すときは両方を揃える。
+# chatter-mascot/scripts/unity.sh の require_release_tag と同じ形。直すときは両方を揃える。
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "作業ツリーに未コミットの変更があります。release ビルドはコミット済みの状態でだけ行います。" >&2
   exit 1

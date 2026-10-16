@@ -12,6 +12,7 @@ namespace ChatterMascot.EditorTools
     /// <summary>
     /// ビルドした <c>.app</c> の <c>Info.plist</c> に <c>LSUIElement</c> を書き、
     /// <b>Dock にアイコンを出さない</b>（#75）。
+    /// <c>Info.plist</c> を書くと Unity が付けた署名の封印が壊れるので、書いた後に ad-hoc 署名し直す。
     ///
     /// ★ <b><c>UnityEditor.iOS.Xcode.PlistDocument</c> を使わないこと。</b>
     ///   あれは iOS Build Support に入っているので、<b>モジュールを入れていない環境では
@@ -37,6 +38,7 @@ namespace ChatterMascot.EditorTools
     public sealed class MacPostBuild : IPostprocessBuildWithReport
     {
         private const string PlistBuddy = "/usr/libexec/PlistBuddy";
+        private const string Codesign = "/usr/bin/codesign";
 
         public int callbackOrder
         {
@@ -59,8 +61,8 @@ namespace ChatterMascot.EditorTools
 
                 // ★ Set を先に試すこと。 既にあるキーを Add すると失敗する（逆も同じ）ので、
                 //   2つで1組にして「あってもなくても同じ結果」にする
-                var message = Run("Set :LSUIElement true", plistPath);
-                if (message != null) message = Run("Add :LSUIElement bool true", plistPath);
+                var message = Run(PlistBuddy, "-c", "Set :LSUIElement true", plistPath);
+                if (message != null) message = Run(PlistBuddy, "-c", "Add :LSUIElement bool true", plistPath);
 
                 if (message != null)
                 {
@@ -68,6 +70,17 @@ namespace ChatterMascot.EditorTools
                     return;
                 }
                 Debug.Log("[Native] LSUIElement を書きました（Dock に出ません）");
+
+                // ★ 書いた後に署名し直すこと。Info.plist が変わると封印が壊れ、ダウンロードした
+                //   コピーは Gatekeeper に「壊れている」と扱われる。失敗してもビルドは落とさない
+                //   （配布時の検証は release スクリプトが行う）
+                var sealMessage = Run(Codesign, "--force", "--sign", "-", report.summary.outputPath);
+                if (sealMessage != null)
+                {
+                    Debug.LogWarning("[Native] ad-hoc 署名し直せませんでした。配ると壊れていると扱われます: " + sealMessage);
+                    return;
+                }
+                Debug.Log("[Native] ad-hoc 署名し直しました");
             }
             catch (Exception e)
             {
@@ -76,23 +89,21 @@ namespace ChatterMascot.EditorTools
         }
 
         /// <summary>成功したら <c>null</c>、失敗したら理由（1行）。</summary>
-        private static string Run(string command, string plistPath)
+        private static string Run(string tool, params string[] arguments)
         {
             var info = new ProcessStartInfo
             {
-                FileName = PlistBuddy,
+                FileName = tool,
                 // ★ shell を噛ませないこと（出力先のパスに空白が入る）
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
             };
-            info.ArgumentList.Add("-c");
-            info.ArgumentList.Add(command);
-            info.ArgumentList.Add(plistPath);
+            foreach (var argument in arguments) info.ArgumentList.Add(argument);
 
             using (var process = Process.Start(info))
             {
-                if (process == null) return PlistBuddy + " を起動できませんでした";
+                if (process == null) return tool + " を起動できませんでした";
 
                 // ★★ 両方を ReadToEnd() で順に読まないこと。 片方の EOF を待っている間に
                 //   子がもう片方のパイプを埋めると（OS のバッファは約 64KB）、

@@ -740,10 +740,16 @@ unset CHATTER_MASCOT_KEYSTORE_PASS
 
 release ビルドは、作業ツリーがきれいで HEAD に `mascot-v*` タグがちょうど1つ付いているときだけ通る。
 タグは `mascot-v*` の中で最大でなければならない。版はビルドの間だけ `PlayerSettings` に入れ、
-終わると（中断しても）`build-android.sh` が `ProjectSettings.asset` を git から戻す。コミットされている
+終わると（中断しても）`build-android.sh` / `build.sh` が `ProjectSettings.asset` を git から戻す。コミットされている
 `bundleVersion: 0.0.0-dev` / versionCode `1` は手元ビルドの印なので、**`ProjectSettings.asset` の版を
 手で書き換えない**（CI が止める）。版の付け方と、タグを付けて配るまでの手順は
 [`release.md`](./release.md)。
+
+macOS 版も同じ規則で、`CHATTER_MASCOT_RELEASE=1 ./scripts/build.sh` が同じタグから `bundleVersion`
+（`CFBundleShortVersionString`）を決める。条件の確かめは `unity.sh` の `require_release_tag` で、
+`build-android.sh` と共有する。署名は ad-hoc（鍵は要らない）で、`codesign --verify --deep --strict` が通らなければ
+止まり、通れば `Build/ChatterMascot-macOS.zip` を作る。zip は `ditto -c -k --norsrc --keepParent` で、拡張属性を含めない。
+版は `defaults read "$PWD/Build/ChatterMascot.app/Contents/Info.plist" CFBundleShortVersionString` で確かめる。
 
 タグ駆動にしたのは、版を上げるためだけのコミットが要らず上げ忘れが起きないこと、APK・コミット・
 タグが1対1になること、CI のチェックアウトでもそのまま動くことのため。

@@ -3,6 +3,7 @@
 #
 #   ./scripts/build.sh                                        # 本番シーン
 #   ./scripts/build.sh Assets/Scenes/TransparencyProbe.unity Build/TransparencyProbe.app
+#   CHATTER_MASCOT_RELEASE=1 ./scripts/build.sh               # release。HEAD に mascot-v<版> タグが要る → Build/ChatterMascot-macOS.zip
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/unity.sh"
 
@@ -28,7 +29,44 @@ restore_audio_manager() {
     echo "中断を検出したので Disable Unity Audio を出荷値に戻しました" >&2
   fi
 }
-trap restore_audio_manager EXIT INT TERM
+
+# macOS には署名鍵が無く、Android のように keystore の有無で release を見分けられないので、明示のフラグで切り替える。
+# ★ 関門は trap を張る前に通すこと。後にすると、汚れた作業ツリーで止まったときに trap が手元の変更を消す。
+RELEASE="${CHATTER_MASCOT_RELEASE:-}"
+zip="$PROJECT_PATH/Build/ChatterMascot-macOS.zip"
+if [[ -n "$RELEASE" ]]; then
+  require_release_tag
+  # 失敗したときに前回の zip が残っていると、それを配ってしまう
+  /bin/rm -f "$zip"
+fi
+
+# release は ProjectSettings.asset に入れた版を残さないため、git から戻す（作業ツリーがきれいなことは確かめ済み）。
+# trap は1シグナルに1つしか効かないので、まとめて1つにする。
+cleanup() {
+  restore_audio_manager
+  if [[ -n "$RELEASE" ]]; then
+    git -C "$PROJECT_PATH" checkout -- ProjectSettings/ProjectSettings.asset 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT INT TERM
 
 unity_build_player StandaloneOSX ChatterMascot.EditorTools.BuildScript.BuildMacOS \
   "$OUTPUT" Logs/build-macos.log "$SCENE"
+
+if [[ -n "$RELEASE" ]]; then
+  case "$OUTPUT" in
+    /*) app="$OUTPUT" ;;
+    *)  app="$PROJECT_PATH/$OUTPUT" ;;
+  esac
+
+  # 配る前に封印が生きていることを確かめる。壊れていると、ダウンロードしたコピーは「壊れている」と扱われる。
+  if ! codesign --verify --deep --strict "$app"; then
+    echo "署名の封印が壊れています: $app" >&2
+    exit 1
+  fi
+
+  # ★ 拡張属性を zip に入れない（--norsrc）。AppleDouble の ._* がバンドルの中に入ると、
+  #   ditto 以外で展開したときに封印が壊れる。chatter-agent-app/scripts/build-release.sh と同じ。
+  ditto -c -k --norsrc --keepParent "$app" "$zip"
+  echo "[Build] version=${CHATTER_MASCOT_RELEASE_TAG#mascot-v} → Build/ChatterMascot-macOS.zip"
+fi

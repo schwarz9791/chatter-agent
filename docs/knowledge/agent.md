@@ -226,7 +226,8 @@ frame を測ると **x が負**（画面の左外）で `screen` も取れない
 ## 配った zip は Gatekeeper の「このまま開く」で開ける
 
 ad-hoc 署名で公証していないので、ブラウザでダウンロードした zip（quarantine が付く）から出した `.app` は
-Gatekeeper に止められる。開き方は Release ノート（`.github/release-notes/agent.md`）に書いてある。
+Gatekeeper に止められる。マスコットの macOS 版も同じ。開き方は Release ノート（`.github/release-notes/agent.md` /
+`mascot.md`）に書いてある。
 
 - 2026-10-15（macOS 27.0.1。ビルドした Mac の別ユーザー。`agent-v0.1.0` の draft からブラウザでダウンロード）:
   「このまま開く」の経路で開けた。`xattr` の経路は試していない
@@ -235,6 +236,15 @@ Gatekeeper に止められる。開き方は Release ノート（`.github/releas
   2. 「完了」→ システム設定の「プライバシーとセキュリティ」に、ブロックした旨と「このまま開く」が出る
   3. 押すと「"ChatterAgent" を開きますか?」がもう一度出る。ここでも「このまま開く」
   4. Touch ID か管理者の名前とパスワードを求められ、通すと起動する
+- 2026-10-16（macOS 27.0.1。同じユーザー。clone でビルドした `mascot-v0.1.1` の `ChatterMascot.app` を `ditto` で
+  `/Applications` に置き、`com.apple.quarantine` を手で付けた）: ★ **ChatterAgent が `open -a` で起こしても、
+  ダブルクリックと同じく Gatekeeper に止められ、黙っては失敗しない。** ChatterAgent の警告は出ない
+  - ログは「マスコットを起動した」の後に「マスコットが外で終了された」。止めたのは Gatekeeper
+  - 「このまま開く」で許可すると macOS がマスコットを起こし、ChatterAgent は「外で起動された」として受け入れる。
+    以後の表示の切り替えでは何も聞かれない
+  - マスコットは `/Applications` ではなく AppTranslocation の下（`/private/var/folders/…/AppTranslocation/…`）から
+    動いた。Finder を通さずに置いたからかは確かめていない。それでも表示の切り替えと「Chatter Agent について」の版
+    （`/Applications` の `Info.plist` を読む）は普段どおりだった
 - ★ **管理者の認証が要る。** 一般ユーザーは管理者の名前とパスワードを入れる
 - ★ **ビルドした Mac でも確かめられる。** 止めるかどうかは quarantine と署名で決まり、どの Mac でビルドしたかは
   関係しない。ブラウザでダウンロードし直したものは、ビルドした Mac でも止められた。開発用のビルドや設定が

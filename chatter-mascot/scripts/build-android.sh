@@ -21,34 +21,10 @@ OUTPUT="${2:-Build/ChatterMascot.apk}"
 
 assert_notice_in_sync
 
-# release は APK とコミットを1対1にするため、作業ツリーがきれいで HEAD にタグが1つだけ付いているときだけ通す。
-# 版の規則の検証は BuildScript 側に任せる（規則を2か所に書かない）。
-# Unity を起動してからでは遅い失敗（タグ・keystore）は、ここで先に止める。
-# タグの確かめ方は chatter-agent-app/scripts/build-release.sh と同じ形。直すときは両方を揃える。
+# release は keystore を指定したときだけ。タグの関門は unity.sh の require_release_tag。
+# keystore とパスワードの不足も、Unity を起動する前にここで止める。
 if [[ -n "${CHATTER_MASCOT_KEYSTORE:-}" ]]; then
-  if [[ -n "$(git -C "$PROJECT_PATH" status --porcelain)" ]]; then
-    echo "作業ツリーに未コミットの変更があります。release ビルドはコミット済みの状態でだけ行います。" >&2
-    exit 1
-  fi
-  tags="$(git -C "$PROJECT_PATH" tag --points-at HEAD --list 'mascot-v*')"
-  if [[ -z "$tags" ]]; then
-    echo "HEAD に mascot-v* タグがありません。git tag mascot-v<MAJOR>.<MINOR>.<PATCH> を付けてから実行してください（docs/mascot.md「署名と版」）。" >&2
-    exit 1
-  fi
-  if [[ "$tags" == *$'\n'* ]]; then
-    echo "HEAD に mascot-v* タグが複数付いています。1つにしてください:" >&2
-    echo "$tags" >&2
-    exit 1
-  fi
-
-  # 前回より小さい版を配ると、端末が上書きを拒んでアンインストール（再ペアリング）になる。
-  # パイプで先頭だけ取ると pipefail 下で SIGPIPE になりうるので、変数展開で取る。
-  all_tags="$(git -C "$PROJECT_PATH" tag --list 'mascot-v*' --sort=-v:refname)"
-  latest_tag="${all_tags%%$'\n'*}"
-  if [[ "$tags" != "$latest_tag" ]]; then
-    echo "$tags は最新の版ではありません。$latest_tag より大きい版のタグにしてください。" >&2
-    exit 1
-  fi
+  require_release_tag
 
   if [[ ! -f "$CHATTER_MASCOT_KEYSTORE" ]]; then
     echo "keystore が見つかりません: $CHATTER_MASCOT_KEYSTORE" >&2
@@ -56,7 +32,6 @@ if [[ -n "${CHATTER_MASCOT_KEYSTORE:-}" ]]; then
   fi
   CHATTER_MASCOT_KEYSTORE="$(/bin/realpath "$CHATTER_MASCOT_KEYSTORE")"
   export CHATTER_MASCOT_KEYSTORE
-  export CHATTER_MASCOT_RELEASE_TAG="$tags"
 
   # パスワードは argv に出さず、環境変数として Unity へ継承させるだけにする。未指定ならキーチェーンから
   # 読む（→ docs/mascot.md「署名と版」）。読めなければ、下でキャッシュを消す前に止める。

@@ -1,6 +1,6 @@
 # リリース手順
 
-配るもの（マスコットの APK と ChatterAgent）を作って版を確定させ、GitHub Release に載せる手順。
+配るもの（マスコットの APK と macOS 版、ChatterAgent）を作って版を確定させ、GitHub Release に載せる手順。
 
 ## 前提（この Mac に一度だけ）
 
@@ -17,14 +17,14 @@
 タグは `mascot-v*`（マスコット）と `agent-v*`（ChatterAgent）の2系統で、版はそれぞれ独立に上げる。
 
 版は前回より必ず上げる（versionCode が下がると上書きインストールが拒まれる）。タグが `mascot-v*` の
-最大でなければ `build-android.sh` が止まる。タグの形と、版・versionCode の
+最大でなければ `build-android.sh` と `build.sh`（release）が止まる。タグの形と、版・versionCode の
 決まり方は [`mascot.md`](./mascot.md)「署名と版」。
 
 `agent-v*` は `agent-v<MAJOR>.<MINOR>.<PATCH>`（先頭ゼロ不可、接尾辞不可、`agent-v0.0.0` 不可）。
 最大の `agent-v*` でなければ `build-release.sh` が止まる。コミットされている版（`tauri.conf.json` /
 `Cargo.toml` / `package.json`）は手元ビルドの印 `0.0.0-dev` で、配る版はタグからビルド時に与える。
 
-## マスコット（APK）
+## マスコット（APK と macOS 版）
 
 ```bash
 git switch main && git pull          # origin と同じ main にする
@@ -35,16 +35,21 @@ CHATTER_MASCOT_KEYSTORE=<keystore の絶対パス> ./scripts/build-android.sh
 #   → [Build] version=0.2.0 versionCode=200 signing=release … が出る
 #   → Build/ChatterMascot.apk
 adb install -r Build/ChatterMascot.apk   # 端末で確かめる（手元ビルドが入っているなら先に下の注記）
+CHATTER_MASCOT_RELEASE=1 ./scripts/build.sh   # → Build/ChatterMascot-macOS.zip
+defaults read "$PWD/Build/ChatterMascot.app/Contents/Info.plist" CFBundleShortVersionString   # 版を確かめる
 git push origin mascot-v0.2.0        # 確かめてから
 ```
 
-- ★ **タグは origin の main に入っているコミットに付ける。** `build-android.sh` が確かめるのは
+- ★ **タグは origin の main に入っているコミットに付ける。** `build-android.sh` と `build.sh`（release）が確かめるのは
   「作業ツリーがきれいで、HEAD に `mascot-v*` タグがちょうど1つ」だけで、main かどうかは見ない。
   push していないコミットに付けたタグを push すると、main に無いコミットの版ができる
 - 端末に手元ビルド（debug 鍵）が入っていると、release の APK は鍵が違うので `adb install -r` が通らない。
   先に `adb uninstall tech.sukima.chattermascot` を行う（ペアリングはやり直し）
 - Unity Editor でこのプロジェクトを開いているとビルドは失敗する。閉じてから走らせる
 - 未追跡ファイルも「汚れ」として止まる（`Build/` や `Library/` は `.gitignore` 済みなので数えない）
+- macOS 版は ad-hoc 署名で、公証しない。署名が検証（`codesign --verify --deep --strict`）を通らないと release ビルドは止まる
+- release ビルドは、Unity のビルドにエラーが1つでもあれば止まる（`[Build] result=Succeeded errors=0` で通る）。
+  シェーダーのコンパイルに失敗しても Unity は成功を返すので、結果だけでは見た目の欠けたビルドに気づけない
 - 版と署名は `apksigner verify --print-certs` / `aapt2 dump badging` でも確かめられる（→ [`mascot.md`](./mascot.md)「署名と版」の「確かめ方」）
 
 ## ChatterAgent
@@ -73,14 +78,16 @@ git push origin agent-v0.2.0         # 版を確かめてから（下）
 ```bash
 cd "$(git rev-parse --show-toplevel)"   # 上の節で chatter-mascot/ や chatter-agent-app/ に居るので戻る
 gh release create mascot-v0.2.0 --draft --verify-tag --title "ChatterMascot 0.2.0" \
-  --notes-file .github/release-notes/mascot.md chatter-mascot/Build/ChatterMascot.apk
+  --notes-file .github/release-notes/mascot.md \
+  chatter-mascot/Build/ChatterMascot.apk chatter-mascot/Build/ChatterMascot-macOS.zip
 gh release create agent-v0.2.0 --draft --verify-tag --title "ChatterAgent 0.2.0" \
   --notes-file .github/release-notes/agent.md chatter-agent-app/build/ChatterAgent.zip
 ```
 
 - draft に今回の変更点を書き足してから publish する
-- ★ **ChatterAgent は publish の前に、別の Mac（無ければ同じ Mac の別ユーザー）でブラウザから draft の zip を
-  ダウンロードして**（quarantine が付く経路で）、ノートの開き方で開けることを確かめる。確かめたら publish
+- ★ **ChatterAgent とマスコットの macOS 版は publish の前に、別の Mac（無ければ同じ Mac の別ユーザー）でブラウザから
+  draft の zip をダウンロードして**（quarantine が付く経路で）、ノートの開き方で開けることを確かめる。マスコットは
+  開いたあと、ChatterAgent から表示できることも確かめる。確かめたら publish
   （→ [`knowledge/agent.md`](./knowledge/agent.md)「配った zip は Gatekeeper の「このまま開く」で開ける」）
 - core（`dist/` と `node_modules`）は添付しない
 

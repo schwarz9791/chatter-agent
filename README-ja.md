@@ -66,7 +66,7 @@ Claude Code
 
 ## ビルド
 
-ビルド済みの APK と ChatterAgent（macOS）は [Releases](https://github.com/schwarz9791/chatter-agent/releases) にあります。
+ビルド済みの APK・macOS 版マスコット・ChatterAgent（macOS）は [Releases](https://github.com/schwarz9791/chatter-agent/releases) にあります。
 
 **コマンドはリポジトリのルートから実行します。**
 
@@ -107,6 +107,8 @@ npm run build      # → build/ChatterAgent.app
 cd chatter-mascot
 ./scripts/build.sh           # → Build/ChatterMascot.app
 ```
+
+ビルド済みのものは [Releases](https://github.com/schwarz9791/chatter-agent/releases) にあります。
 
 **クローンした直後は Unity を開く前に [`docs/mascot.md`](./docs/mascot.md) のセットアップを済ませてください。**
 マスコットは描画と再生だけで、設定パネル・メニューバー・ショートカットは持ちません（Dock にも出ません）。

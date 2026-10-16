@@ -374,6 +374,13 @@ Unity だけでは作れないので、マスコットは持たない（→ Chat
 `LSUIElement` は起動前から accessory なので同じ罠は踏まない。起動後に activation policy を
 呼び直す保険は持たず、`LSUIElement` だけに頼る。
 
+★ **`Info.plist` を書くと ad-hoc 署名の封印が壊れる。** Unity はビルド後処理の前に .app へ ad-hoc 署名を
+済ませているので、`LSUIElement` を足すと `codesign --verify --deep --strict` が
+`invalid Info.plist (plist or signature have been modified)` で落ちる。`spctl -a -t exec` も同じ理由で落ちる
+（正しく署名された未公証のアプリは `rejected` になるだけで、理由が違う）。手元では動くが、ダウンロードした
+（quarantine の付いた）コピーは「壊れている」と扱われるおそれがある。そのため `MacPostBuild` は書いたあとに
+ad-hoc で署名し直す。
+
 ## ★★ `Info.plist` を `System.Xml.Linq` で書き換えると壊れる
 
 plist は普通の XML に見えるので `XDocument` で読んで保存したくなるが、**2箇所壊れた**（実測）:

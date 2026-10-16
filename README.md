@@ -66,7 +66,7 @@ There are four deliverables.
 
 ## Building
 
-Prebuilt APKs and ChatterAgent (macOS) are on the [Releases page](https://github.com/schwarz9791/chatter-agent/releases).
+Prebuilt APKs, the macOS mascot, and ChatterAgent (macOS) are on the [Releases page](https://github.com/schwarz9791/chatter-agent/releases).
 
 **Run every command from the repository root.**
 
@@ -107,6 +107,8 @@ The menu bar app that starts and stops the server and hosts the settings panel. 
 cd chatter-mascot
 ./scripts/build.sh           # → Build/ChatterMascot.app
 ```
+
+A prebuilt one is on the [Releases page](https://github.com/schwarz9791/chatter-agent/releases).
 
 **Right after cloning, finish the setup in [`docs/mascot.md`](./docs/mascot.md) before opening Unity.**
 The mascot only renders and plays: it has no settings panel, menu bar item, or shortcuts (and no Dock icon).

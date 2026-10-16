@@ -279,7 +279,7 @@ macOS 限定。Windows は single-instance プラグインで同じ口にでき�
 - バージョン: Tauri の `package_info()`
 - マスコット: ChatterAgent が起動する ChatterMascot.app（探し方は起動と同じ）の `Info.plist` の
   `CFBundleShortVersionString`。見つからない・読めないときは「—」。窓を開いたときとフォーカスを得たときに読み直す。
-  マスコットのビルドが版を入れるのは Android の release ビルドだけなので、macOS の手元ビルドは `0.0.0-dev` になる
+  マスコットの release ビルド（Android と macOS）はタグの版を入れ、手元ビルドは `0.0.0-dev` になる
   （→ [`mascot.md`](./mascot.md)「署名と版」）。XR 版の版はここには出ない（XR の設定パネルと起動ログで確かめる）
 - ライセンス: リポジトリ直下の `NOTICE` の全文。`include_str!` でビルド時に埋め込む（コピーを持たないので
   食い違わない。Rust の `about()`）。全文は長いので畳んでおく

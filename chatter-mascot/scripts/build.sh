@@ -33,6 +33,8 @@ restore_audio_manager() {
 # macOS には署名鍵が無く、Android のように keystore の有無で release を見分けられないので、明示のフラグで切り替える。
 # ★ 関門は trap を張る前に通すこと。後にすると、汚れた作業ツリーで止まったときに trap が手元の変更を消す。
 RELEASE="${CHATTER_MASCOT_RELEASE:-}"
+# 版は require_release_tag が通したときだけ BuildScript に渡す（環境に残っていても手元ビルドに配る版を入れない）
+unset CHATTER_MASCOT_RELEASE_TAG
 zip="$PROJECT_PATH/Build/ChatterMascot-macOS.zip"
 if [[ -n "$RELEASE" ]]; then
   require_release_tag
@@ -65,8 +67,20 @@ if [[ -n "$RELEASE" ]]; then
     exit 1
   fi
 
+  # 版と LSUIElement は .app から読んで確かめる。Unity が入れ損ねても、配る前にここで止める。
+  plist="$app/Contents/Info.plist"
+  version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"
+  if [[ "$version" != "${CHATTER_MASCOT_RELEASE_TAG#mascot-v}" ]]; then
+    echo "版がタグと合いません: Info.plist=$version tag=$CHATTER_MASCOT_RELEASE_TAG" >&2
+    exit 1
+  fi
+  if [[ "$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' "$plist" 2>/dev/null)" != "true" ]]; then
+    echo "LSUIElement がありません（Dock に出ます）: $plist" >&2
+    exit 1
+  fi
+
   # ★ 拡張属性を zip に入れない（--norsrc）。AppleDouble の ._* がバンドルの中に入ると、
   #   ditto 以外で展開したときに封印が壊れる。chatter-agent-app/scripts/build-release.sh と同じ。
   ditto -c -k --norsrc --keepParent "$app" "$zip"
-  echo "[Build] version=${CHATTER_MASCOT_RELEASE_TAG#mascot-v} → Build/ChatterMascot-macOS.zip"
+  echo "[Build] version=$version → Build/ChatterMascot-macOS.zip"
 fi

@@ -747,9 +747,9 @@ release ビルドは、作業ツリーがきれいで HEAD に `mascot-v*` タ�
 
 macOS 版も同じ規則で、`CHATTER_MASCOT_RELEASE=1 ./scripts/build.sh` が同じタグから `bundleVersion`
 （`CFBundleShortVersionString`）を決める。条件の確かめは `unity.sh` の `require_release_tag` で、
-`build-android.sh` と共有する。署名は ad-hoc（鍵は要らない）で、`codesign --verify --deep --strict` が通らなければ
-止まり、通れば `Build/ChatterMascot-macOS.zip` を作る。zip は `ditto -c -k --norsrc --keepParent` で、拡張属性を含めない。
-版は `defaults read "$PWD/Build/ChatterMascot.app/Contents/Info.plist" CFBundleShortVersionString` で確かめる。
+`build-android.sh` と共有する。署名は ad-hoc（鍵は要らない）で、`codesign --verify --deep --strict` が通らないとき、
+`.app` の `Info.plist` の版（`CFBundleShortVersionString`）がタグと合わないとき、`LSUIElement` が無いときは止まり、
+通れば `Build/ChatterMascot-macOS.zip` を作る。zip は `ditto -c -k --norsrc --keepParent` で、拡張属性を含めない。
 
 タグ駆動にしたのは、版を上げるためだけのコミットが要らず上げ忘れが起きないこと、APK・コミット・
 タグが1対1になること、CI のチェックアウトでもそのまま動くことのため。

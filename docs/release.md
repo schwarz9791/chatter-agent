@@ -35,8 +35,8 @@ CHATTER_MASCOT_KEYSTORE=<keystore の絶対パス> ./scripts/build-android.sh
 #   → [Build] version=0.2.0 versionCode=200 signing=release … が出る
 #   → Build/ChatterMascot.apk
 adb install -r Build/ChatterMascot.apk   # 端末で確かめる（手元ビルドが入っているなら先に下の注記）
-CHATTER_MASCOT_RELEASE=1 ./scripts/build.sh   # → Build/ChatterMascot-macOS.zip
-defaults read "$PWD/Build/ChatterMascot.app/Contents/Info.plist" CFBundleShortVersionString   # 版を確かめる
+CHATTER_MASCOT_RELEASE=1 ./scripts/build.sh
+#   → [Build] version=0.2.0 → Build/ChatterMascot-macOS.zip が出る（版は .app から読んでタグと比べてある）
 git push origin mascot-v0.2.0        # 確かめてから
 ```
 
@@ -47,7 +47,8 @@ git push origin mascot-v0.2.0        # 確かめてから
   先に `adb uninstall tech.sukima.chattermascot` を行う（ペアリングはやり直し）
 - Unity Editor でこのプロジェクトを開いているとビルドは失敗する。閉じてから走らせる
 - 未追跡ファイルも「汚れ」として止まる（`Build/` や `Library/` は `.gitignore` 済みなので数えない）
-- macOS 版は ad-hoc 署名で、公証しない。署名が検証（`codesign --verify --deep --strict`）を通らないと release ビルドは止まる
+- macOS 版は ad-hoc 署名で、公証しない。署名が検証（`codesign --verify --deep --strict`）を通らないとき、
+  `.app` の版がタグと合わないとき、`LSUIElement` が無いときは release ビルドが止まる
 - release ビルドは、Unity のビルドにエラーが1つでもあれば止まる（`[Build] result=Succeeded errors=0` で通る）。
   シェーダーのコンパイルに失敗しても Unity は成功を返すので、結果だけでは見た目の欠けたビルドに気づけない
 - 版と署名は `apksigner verify --print-certs` / `aapt2 dump badging` でも確かめられる（→ [`mascot.md`](./mascot.md)「署名と版」の「確かめ方」）

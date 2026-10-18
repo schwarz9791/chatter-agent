@@ -3,12 +3,10 @@ import { defineConfig } from "tsdown";
 /**
  * 配布物に載せる帰属表示と改変告知。
  *
- * ★ バンドラはソースのヘッダコメントを落とす。`/plugin install` が実際に配るのは
- *   `plugin/bin/*.mjs` なので、そこに残っていないと Apache-2.0 §4(b)（改変の告知）と
- *   §4(d)（帰属表示）を満たさない。`ruleBasedEmotionClassifier` は丸ごとインライン展開
- *   されているのに、ヘッダだけが消えている状態だった。
+ * ★ バンドラはソースのヘッダコメントを落とす。ビルドした成果物にも残っていないと
+ *   Apache-2.0 §4(b)（改変の告知）と §4(d)（帰属表示）を満たさない。
  *
- * 内容は `plugin/NOTICE` と揃えること。対象ファイルの一覧は docs/origin.md。
+ * 内容はルートの `NOTICE` と揃えること。対象ファイルの一覧は docs/origin.md。
  */
 const LICENSE_BANNER = `/**
  * chatter-agent
@@ -37,22 +35,16 @@ const shared = {
 
 export default defineConfig([
   /**
-   * CLI は hook から**毎 delta 呼ばれる**ので `tsx`（起動 ~300ms）では使えない。バンドルする。
-   *
-   * 出力先が `plugin/bin/` なのは、`/plugin install` でプラグインが複製されるため
-   * `${CLAUDE_PLUGIN_ROOT}` から `core/dist` が見える保証がないから（docs/core.md）。
-   * 成果物は git にコミットし、CI でソースとの一致を検証して腐敗を防ぐ。
-   *
-   * ★ 拡張子は `.mjs` でなければならない。`plugin/bin/` に package.json を置かないので、
-   *   `.js` だと Node が CJS として読んで壊れる。
+   * CLI を node で動かすのは `CHATTER_AGENT_CLI` の経路（開発と、ChatterAgent を使わない運用）。
+   * hook から**毎 delta 起こされる**ので `tsx`（起動 ~300ms）では使えない。バンドルする。
    */
   {
     ...shared,
     entry: "src/cli/index.ts",
-    outDir: "../plugin/bin",
+    outDir: "dist",
     // CLI は npm 依存を持たない。万一入り込んだらバンドルに含めて実行時解決を発生させない
     deps: { alwaysBundle: [/.*/] },
-    // plugin/bin/ は git 管理下。他のファイルを消しに行かせない
+    // dist の clean は server のエントリだけが持つ
     clean: false,
     outputOptions: { ...shared.outputOptions, entryFileNames: "chatter-agent-speak.mjs" },
   },

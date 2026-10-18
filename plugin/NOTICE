@@ -1,22 +1,2 @@
 chatter-agent (plugin)
 Copyright 2026 Masaki Matsumura
-
-This product includes software developed as part of CC Mascot
-(https://github.com/kazakago/cc-mascot), Copyright 2026 kazakago,
-licensed under the Apache License, Version 2.0.
-
-bin/chatter-agent-speak.mjs is a pre-built bundled artifact that incorporates
-the following from cc-mascot. Each has been modified for chatter-agent.
-
-  - electron/filters/textFilter.ts @ 46f7def
-  - electron/services/ruleBasedEmotionClassifier.ts @ 46f7def
-      The keyword-dictionary portion is split out as
-      core/src/emotion/defaultEmotionKeywords.ts.
-
-The details of the modifications and the list of affected files are in the repository's
-docs/origin.md.
-
-* This file is an excerpt of the NOTICE at the repository root. Because /plugin install
-   duplicates only this directory, the same content is bundled here as part of the
-   distributed artifact (Apache-2.0 §4(a)/(d)). If entries are added or removed, keep both
-   in sync.

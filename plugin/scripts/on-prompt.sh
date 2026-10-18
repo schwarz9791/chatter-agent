@@ -11,8 +11,6 @@
 # shellcheck source=./_lib.sh
 . "${BASH_SOURCE[0]%/*}/_lib.sh"
 
-PLUGIN_ROOT=${BASH_SOURCE[0]%/*}/..
-
 # ★ 順序が重要。stdin を読み切る前に exit すると Claude Code 側が EPIPE になる
 #   （`_lib.sh` の chatter_read_payload 参照）。無効化判定は読み切った後に置くこと。
 chatter_read_payload || exit 0
@@ -40,6 +38,6 @@ NAME=prompt-$(date +%s)-$$-$RANDOM
 # ★ tmp は `*.json.tmp` になる。`*.tmp.json` だと prompt として拾われる（spool.ts）。
 chatter_write_atomic "$CHATTER_SPOOL_DIR/$NAME.json" "$CHATTER_PAYLOAD"
 
-chatter_spawn_cli "$PLUGIN_ROOT"
+chatter_spawn_cli
 
 exit 0

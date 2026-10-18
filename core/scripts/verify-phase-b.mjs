@@ -28,8 +28,7 @@ import {
 } from "./lib/harness.mjs";
 
 const CORE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const REPO = path.resolve(CORE, "..");
-const CLI = path.join(REPO, "plugin", "bin", "chatter-agent-speak.mjs");
+const CLI = path.join(CORE, "dist", "chatter-agent-speak.mjs");
 const SERVER = path.join(CORE, "dist", "chatter-agent-server.mjs");
 
 const PORT = 18570;

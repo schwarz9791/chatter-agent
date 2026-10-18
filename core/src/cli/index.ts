@@ -2,7 +2,7 @@
 /**
  * `chatter-agent-speak` — hook から**毎 delta 起動される** CLI。
  *
- * バンドルして `plugin/bin/chatter-agent-speak.mjs` に出す（docs/core.md）。
+ * 同梱の実行ファイルの `speak` か、バンドルした `core/dist/chatter-agent-speak.mjs` として動く（docs/core.md）。
  * npm 依存を持たないこと。ここから到達する範囲は Node 標準だけで閉じている。
  *
  * やることは短い:

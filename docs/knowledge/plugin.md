@@ -288,10 +288,10 @@ claude plugin uninstall chatter-agent@chatter-agent --scope local
 claude plugin install   chatter-agent@chatter-agent --scope local -y
 
 # CLI だけ差し替えたいなら（hook script の変更は反映されない）
-export CHATTER_AGENT_CLI=<repo>/plugin/bin/chatter-agent-speak.mjs
+export CHATTER_AGENT_CLI=<repo>/core/dist/chatter-agent-speak.mjs
 ```
 
-**`bin/` の差し替えはセッション再起動が要らない。** hook が毎回 spawn し直すため。
+**CLI の差し替えはセッション再起動が要らない。** hook が毎回 spawn し直すため。
 `scripts/` と `hooks.json` を直したときだけ再起動する。
 
 ★ **差し替え先を間違えないこと。** キャッシュではなく `installLocation` が走ることがある

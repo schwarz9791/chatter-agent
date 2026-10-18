@@ -10,7 +10,6 @@ logs
 npm-debug.log*
 
 # 依存とビルド成果物
-# 例外: plugin/bin/ は /plugin install だけで完結させるため意図的にコミットする（docs/core.md 参照）
 node_modules
 coverage
 dist

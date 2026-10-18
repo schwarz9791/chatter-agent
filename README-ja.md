@@ -71,7 +71,7 @@ XR 版はまだエミュレータでしか動かしていません。**実機に
 要るものは次のとおりです。
 
 - Apple Silicon の Mac と Claude Code
-- Node 24.11 以上（Claude Code プラグインの hook が使います）と `adb`
+- `adb`
 - XREAL Aura
 - 同じ Wi-Fi に置いた Mac と Aura
 
@@ -196,7 +196,7 @@ npm install
 npm run build
 ```
 
-`plugin/bin/chatter-agent-speak.mjs`（プラグイン同梱の CLI）と `core/dist/` にサーバー・プレーヤーが出ます。
+`core/dist/` に CLI・サーバー・プレーヤーが出ます。
 
 ### ChatterAgent（macOS）
 
@@ -236,7 +236,7 @@ cd chatter-mascot
 ### 前提
 
 - **Claude Code**
-- **Node 24.11 以上** —— プラグインの hook が CLI を動かすのに使います
+- **Node 24.11 以上** —— clone からビルド・実行するときだけ要ります（プラグイン自体は Node を使いません）
 - **[AivisSpeech](https://aivis-project.com/)** —— **インストールだけしておけば十分です。** 合成エンジンが動いていなければサーバーが起こし、サーバーを止めれば一緒に落ちます。手で起こすのは、別ホストのエンジンに繋ぐときと、**話者を増やすとき**（音声モデルの追加には GUI が要ります）。自動起動そのものを止めるなら `CHATTER_AGENT_TTS_SPAWN=0`
 - **音声合成エンジンは差し替え可能です**（`ttsEngine`）。既定は AivisSpeech（VOICEVOX 互換）ですが、日本語以外の言語には **[Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI)**（OpenAI 互換）も使えます。導入手順は [`docs/kokoro.md`](./docs/kokoro.md)
 - **macOS** —— 表示側アプリは macOS と Android XR 向けで、再生コマンドの既定は `afplay`、合成エンジンの自動探索も macOS のパスしか見ません。Linux / Windows では、CLI プレーヤーに `CHATTER_AGENT_PLAYER_COMMAND` で再生コマンドを指定してください
@@ -252,8 +252,12 @@ claude plugin marketplace add schwarz9791/chatter-agent --sparse .claude-plugin 
 claude plugin install chatter-agent@chatter-agent
 ```
 
+プラグインの hook は ChatterAgent に同梱した実行ファイルを起こすので、**ChatterAgent を1度起動してから**喋り始めます（起動のたびに実行ファイルのパスを記録します）。
+
+ChatterAgent を使わない場合（Linux・サーバーを手で起動する運用）は、clone の `core/` で `npm install && npm run build` し、Claude Code の環境に `CHATTER_AGENT_CLI=<clone>/core/dist/chatter-agent-speak.mjs` を設定します。この経路は Node 24.11 以上が要ります。
+
 更新するときは、marketplace を読み直してからプラグインを更新します。更新が届くのは、プラグインの
-`version` が上がったときです。
+`version` が上がったとき（hook、つまり `plugin/` の中身を変えたとき）だけです。
 
 ```bash
 claude plugin marketplace update chatter-agent

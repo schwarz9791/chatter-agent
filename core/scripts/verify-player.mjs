@@ -40,10 +40,9 @@ import {
 } from "./lib/harness.mjs";
 
 const CORE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const REPO = path.resolve(CORE, "..");
 const PLAYER = path.join(CORE, "dist", "chatter-agent-player.mjs");
 const SERVER = path.join(CORE, "dist", "chatter-agent-server.mjs");
-const CLI = path.join(REPO, "plugin", "bin", "chatter-agent-speak.mjs");
+const CLI = path.join(CORE, "dist", "chatter-agent-speak.mjs");
 const FAKE_PLAYER = path.join(CORE, "scripts", "fake-player.mjs");
 
 const SPEAKER_ID = 888753760;

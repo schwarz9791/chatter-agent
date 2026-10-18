@@ -130,11 +130,22 @@ tmp の名前は対象パスに `.tmp` を足しただけ。
 
 `/plugin install` は、プラグインディレクトリを
 `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` へ **完全コピー**する（symlink ではない）。
-`diff -r plugin <cache>` で差分なし、`bin/` も **実行権限ごと**入る。
+`diff -r plugin <cache>` で差分なし、`scripts/` も **実行権限ごと**入る。
 
-→ **バンドル済み CLI を `plugin/bin/` に同梱する前提（→ [`core.md`](./core.md)）は成立している。**
-`core/dist` は見えないので、CLI の解決経路は `${CHATTER_AGENT_CLI:-$PLUGIN_ROOT/bin/chatter-agent-speak.mjs}`
-の1本だけにする。
+→ **プラグインの外にある `core/dist` は見えない。** CLI は `${CLAUDE_PLUGIN_ROOT}` から探さない。
+
+### CLI の解決順（`_lib.sh` の `chatter_spawn_cli`）
+
+1. **`CHATTER_AGENT_CLI` が空でなければ**、`nohup node "$CHATTER_AGENT_CLI"` で起こす。開発時と、ChatterAgent を
+   使わない運用（Linux・手動の `npm run start:server`）向け。指す先は `core/` で `npm run build` した
+   `core/dist/chatter-agent-speak.mjs`。ファイルが無い・`node` が PATH に無いときは `hook-debug.log` に診断を
+   残して抜ける。★ **`bin-path` へは落ちない**
+2. **そうでなければ** `{root}/bin-path` を bash の `read` で読み（fork しない）、実行できるファイルなら
+   `nohup "$bin" speak` で起こす。無い・実行できないときは `hook-debug.log` に `SpawnCli` / `bin not found` を残して抜ける
+
+`bin-path` は ChatterAgent が起動のたびに、同梱の実行ファイルの絶対パスを1行で書く（tmp + rename）。
+開発モード（`devCoreDir`）では消す。**ChatterAgent を1度起動するまで喋らない。** 終了しても `bin-path` は残る。
+プラグイン自体は bash だけで、利用者の node は要らない。
 
 hook script は `${CLAUDE_PLUGIN_ROOT}` を**環境変数としては使っていない**（script 内で見えるか未確認のため）。
 `${BASH_SOURCE[0]%/*}/..` で自分の位置から辿る。`hooks.json` 側の `${CLAUDE_PLUGIN_ROOT}` は
@@ -152,24 +163,15 @@ Claude Code が置換するので、そちらは確実に効く。
 > | `known_marketplaces.json` | `installLocation` | `/Users/schwarz/dev/chatter-agent` | **走る** |
 >
 > `${BASH_SOURCE[0]%/*}/..` は「実行された script の位置」なので、hook script 側の実装は
-> どちらでも正しく動く。問題になるのは**人間がバンドルを差し替えるとき**だけ。
+> どちらでも正しく動く。問題になるのは**人間が `scripts/` を差し替えるとき**だけ。
 >
-> ★ **実機確認でバンドルを差し替えるなら `installLocation` を見ること。** キャッシュ側だけを
+> ★ **実機確認で `scripts/` を差し替えるなら `installLocation` を見ること。** キャッシュ側だけを
 > 差し替えて誤診しやすい（→ [`knowledge/plugin.md`](./knowledge/plugin.md)「検証時の落とし穴」）。
-> **迷うなら両方に置くのが速い。**
->
-> ```bash
-> # どちらが走るか分からないときは両方に置く
-> /bin/cp -f plugin/bin/chatter-agent-speak.mjs "$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.env.HOME+"/.claude/plugins/known_marketplaces.json","utf8"))["chatter-agent"].installLocation)')/plugin/bin/"
-> /bin/cp -f plugin/bin/chatter-agent-speak.mjs ~/.claude/plugins/cache/chatter-agent/chatter-agent/*/bin/
-> ```
->
-> ★ `cp` が `-i` の alias になっている環境では確認プロンプトで**黙って上書きされない**。
-> `/bin/cp -f` のように alias を迂回すること（これも1回踏んだ）。
+> CLI だけ差し替えるなら `CHATTER_AGENT_CLI` で足りる。
 
 ## バージョン
 
-**`plugin/` の中身（`bin/` のバンドル・`scripts/`・`hooks/hooks.json`）が変わったら `version` を上げる。**
+**`plugin/` の中身（`scripts/`・`hooks/hooks.json`）が変わったら `version` を上げる。** CLI は ChatterAgent の側にあるので、CLI だけを直したときは上げない。
 `plugin/.claude-plugin/plugin.json` と `.claude-plugin/marketplace.json` の2箇所を同じ値にする。
 0.x の間は、機能の追加や挙動の変更なら minor、不具合の修正だけなら patch を上げる。
 
@@ -201,7 +203,9 @@ hook 側のガードとして見ているもの:
 - `CHATTER_AGENT_DISABLE=1` の間でも stdin を読み切り、300KB 相当の payload で EPIPE にならない（`on-message.sh` / `on-prompt.sh` の両方）
 - `message_id` の無い64KB payload の処理が閾値（1秒）以内で終わる（`CHATTER_HEAD_WINDOW` の窓が効いている）
 - 全角スペース付きの `CHATTER_AGENT_DISABLE` で bash 側と Node 側の判定が揃う
-- CLI / `node` が見つからないとき、それぞれの理由が診断ログ（`hook-debug.log`）に残る
+- `CHATTER_AGENT_CLI` の経路で、CLI が無いとき・`node` が無いときの理由が診断ログ（`hook-debug.log`）に残る
+- `bin-path` が無いとき、`bin not found` が診断ログに残る
+- `bin-path` が指す実行ファイルが、node の無い PATH でも `speak` 付きで起動される
 
-検証中は `CHATTER_AGENT_CLI` を存在しないパスに向けて**デタッチ起動を止めている**。
+検証中は `CHATTER_AGENT_CLI` を存在しないパスに向けて**デタッチ起動を止めている**（`bin-path` の検査だけは上書きを外し、引数を記録するだけの偽の実行ファイルを指して起動を見る）。
 `nohup` で走らせたままだと CLI がいつドレインしたか分からず、検証が非決定的になる。

@@ -1,6 +1,6 @@
 # `core/` — chatter-agent-core の開発規約
 
-`chatter-agent-core` は `chatter-agent-speak`（CLI）、`chatter-agent-server`（WebSocket 配信）、`chatter-agent-player`（発話 CLI）を含む Node パッケージ。
+`chatter-agent-core` は `chatter-agent-speak`（CLI。hook が起こす）、`chatter-agent-server`（WebSocket 配信）、`chatter-agent-player`（発話 CLI）を含む Node パッケージ。
 
 ここに書いてあるのは**ツールチェーン固有の地雷**で、設計判断ではない。設計の根拠は `_workspace/chatter-agent-design.md` を見ること。
 
@@ -126,16 +126,15 @@ esbuild 系のツールは型を消すだけなので、enum / parameter propert
 
 **ここが前身 cc-mascot-xr からの変更点。** cc-mascot-xr のブリッジは常駐プロセス1本だったので `tsx` で直接実行していたが、chatter-agent の CLI は **hook から毎 delta 呼ばれる**。`tsx` の起動コストは乗せられない（詳細は [`knowledge/core.md`](./knowledge/core.md)）。
 
-tsdown 等でバンドルし、成果物を `plugin/bin/chatter-agent-speak.mjs` に出す。
+tsdown 等でバンドルし、成果物を `core/dist/chatter-agent-speak.mjs` に出す。
 
-### 5. バンドル成果物を git にコミットする
+### 5. ビルド成果物を git にコミットしない
 
-`/plugin install` するとプラグインは複製されるため、`${CLAUDE_PLUGIN_ROOT}` から `core/dist` が見える保証がない。そこで**バンドル済み CLI を `plugin/bin/chatter-agent-speak.mjs` としてコミットし、hook script はそれを直接呼ぶ**。解決順の分岐を作らない。
+`/plugin install` するとプラグインは複製されるため、`${CLAUDE_PLUGIN_ROOT}` から `core/dist` が見える保証がない。そこで**hook は ChatterAgent に同梱した実行ファイル（`chatter-agent speak`）を起こす**。パスはランタイムルートの `bin-path` に ChatterAgent が書く。プラグインは bash だけで、利用者の node は要らない。
 
-- ★ **`plugin/bin/` の中身を手で編集しないこと。** `core/` で `npm run build` して生成する
-- ビルド成果物を git に入れるのは本意ではないが、`/plugin install` だけで完結する導入体験と引き換える
-- **CI で「コミット済みバンドルがソースと一致するか」を検証**して腐敗を防ぐ
-- 開発時にソースから直接動かせるよう、`CHATTER_AGENT_CLI` 環境変数による上書きだけ残す。**それ以外の解決経路を足さない**
+- 解決順は `CHATTER_AGENT_CLI`（開発時・ChatterAgent を使わない運用。`node` で `core/dist/chatter-agent-speak.mjs` を起こす）→ `bin-path`（→ [`plugin.md`](./plugin.md)「CLI の解決順」）の2段だけ。**これ以外の解決経路を足さない**
+- `CHATTER_AGENT_CLI` が空でないときは `bin-path` へ落ちない。開発中の CLI と同梱版を混ぜないため
+- `core/dist/` は gitignore。`src/cli/` を直しても、コミットするものは増えない
 
 ### 6. 常駐プロセス（server / player）から `execFileSync` を呼ばない
 
@@ -225,7 +224,7 @@ hook → CLI → server → player の全経路を1本で見る。
 **実機での確認（ターミナル表示と体感で同時か）は耳で行う。** 自動の検証が見ているのは形と順序だけ。
 
 **CI の `verify` ジョブでも回している**（`.github/workflows/validate.yml`）。いずれも
-バンドル（`plugin/bin/` と `core/dist/`）を実行するので `npm run build` が先に要る。
+バンドル（`core/dist/`）を実行するので `npm run build` が先に要る。
 手元でも同じコマンドで回せる。
 
 **`CHATTER_AGENT_BIN` に compile した実行ファイル（→「バンドル」）を渡すと、4本は server・player・CLI を
@@ -236,13 +235,13 @@ hook → CLI → server → player の全経路を1本で見る。
 
 | エントリ | 出力 | 依存 |
 |---|---|---|
-| `src/cli/index.ts` | `plugin/bin/chatter-agent-speak.mjs`（**git にコミット**） | 全部バンドル。npm 依存ゼロ |
+| `src/cli/index.ts` | `core/dist/chatter-agent-speak.mjs`（gitignore） | 全部バンドル。npm 依存ゼロ |
 | `src/server/index.ts` | `core/dist/chatter-agent-server.mjs`（gitignore） | `ws` / `@homebridge/ciao` は external |
 | `src/player/index.ts` | `core/dist/chatter-agent-player.mjs`（gitignore） | `ws` は external |
 | `src/main.ts` | `chatter-agent-app/src-tauri/binaries/chatter-agent-aarch64-apple-darwin`（`npm run build:bin`。gitignore） | Bun で compile。全部入り（`ws` は Bun 組み込みの実装に差し替わる） |
 
 - **`build:bin` は server / player / CLI を1本にした実行ファイル**で、サブコマンド `server` / `player` / `speak` で
-  振り分ける。ChatterAgent が `.app` に同梱する（→ [`agent.md`](./agent.md)「ビルドと起動」）。
+  振り分ける（`ollaya-child` は感情判定の子を自分自身で起こすための隠しサブコマンド。node のバンドルでも同じ名前で受ける）。ChatterAgent が `.app` に同梱する（→ [`agent.md`](./agent.md)「ビルドと起動」）。
   3本に分けないのは、1本ごとに Bun のランタイムを丸ごと抱えるため
   - サブコマンドは dynamic import で読む。`speak` の起動で server 側（`ws` / `@homebridge/ciao`）を評価しないため
   - ★ **`.env` と `bunfig.toml` の自動読み込みを切っている。** `speak` は hook の cwd（利用者のプロジェクト）で
@@ -259,12 +258,10 @@ hook → CLI → server → player の全経路を1本で見る。
 - ★ **`dist` に出すエントリのうち `clean: true` を持てるのは1つだけ。** 両方が true だと、
   実行順によって先に出た方の成果物が消える。今は server 側が持っている
 
-- **拡張子は `.mjs` でなければならない。** `plugin/bin/` に `package.json` を置かないので、`.js` だと Node が CJS として読んで壊れる
 - **CLI に npm 依存を持たせない。** `src/cli/` から到達する範囲は Node 標準だけで閉じる。ビルド後に
-  `grep '^import' plugin/bin/chatter-agent-speak.mjs` を見ると確認できる。`summarizer/` を取り込んでから
+  `grep '^import' core/dist/chatter-agent-speak.mjs` を見ると確認できる。`summarizer/` を取り込んでから
   `fs` / `os` / `path` に加えて `crypto`（`randomUUID`）と `child_process`（`execFileSync`）が増えたが、
   いずれも Node 標準モジュールで npm 依存ではない
-- 出力は決定的なので、CI の `bundle` ジョブが `npm run build` 後の `git diff --exit-code` で腐敗を検出する
 
 ### ツールチェーン
 
@@ -298,6 +295,7 @@ cc-mascot から移植したコードを oxfmt で整形すると、上流との
 | 設定 | `{root}/config.json` | 人間 |
 | 感情キーワード辞書 | `{root}/emotion-keywords.json` | ★ CLI（無いときだけ既定を書き出す）→ 以後は人間 |
 | spool | `{root}/spool/` | hook が書き、CLI が消す |
+| 同梱の実行ファイルのパス | `{root}/bin-path` | **ChatterAgent**（起動のたびに1行で書く。`devCoreDir` では消す）。hook が読む |
 | 発話の記録 | `{root}/speech.jsonl`（退避は `speech.1.jsonl` の1世代だけ） | CLI |
 | 配信キュー | `{root}/speech/<seq>.json` | CLI が書く。上限超過は CLI が切り、ack と起動時の掃除は server が行う |
 | seq の state | `{root}/speech.state.json`（`{nextSeq, epoch}`） | CLI |

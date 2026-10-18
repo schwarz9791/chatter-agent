@@ -71,7 +71,7 @@ The XR build has only run on an emulator so far. **This is the first time it mee
 You need:
 
 - A Mac with Apple Silicon, running Claude Code
-- Node 24.11 or later (the Claude Code plugin's hook runs on it), and `adb`
+- `adb`
 - An XREAL Aura
 - The Mac and the Aura on the same Wi-Fi
 
@@ -196,7 +196,7 @@ npm install
 npm run build
 ```
 
-This produces `plugin/bin/chatter-agent-speak.mjs` (the CLI bundled with the plugin) and the server / player under `core/dist/`.
+This produces the CLI, the server and the player under `core/dist/`.
 
 ### ChatterAgent (macOS)
 
@@ -236,7 +236,7 @@ cd chatter-mascot
 ### Prerequisites
 
 - **Claude Code**
-- **Node 24.11 or later** — the plugin's hook runs the CLI with it
+- **Node 24.11 or later** — only to build and run from a clone (the plugin itself doesn't need Node)
 - **[AivisSpeech](https://aivis-project.com/)** — **just having it installed is enough.** If the synthesis engine isn't running, the server wakes it up, and stopping the server takes it down too. You only need to start it by hand to connect to an engine on a different host, or **to add a speaker** (adding a voice model needs the GUI). To turn the auto-start off entirely, set `CHATTER_AGENT_TTS_SPAWN=0`
 - **The synthesis engine is swappable** (`ttsEngine`). The default is AivisSpeech (VOICEVOX-compatible); for languages other than Japanese, **[Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI)** (OpenAI-compatible) is also supported. Setup steps are in [`docs/kokoro.md`](./docs/kokoro.md)
 - **macOS** — the display apps target macOS and Android XR, the playback command defaults to `afplay`, and the engine is auto-discovered only at macOS paths. On Linux / Windows, point the CLI player at a playback command with `CHATTER_AGENT_PLAYER_COMMAND`
@@ -252,8 +252,12 @@ claude plugin marketplace add schwarz9791/chatter-agent --sparse .claude-plugin 
 claude plugin install chatter-agent@chatter-agent
 ```
 
+The plugin's hook runs the executable bundled in ChatterAgent, so **speech starts after you have opened ChatterAgent once** (it records the executable's path each time it launches).
+
+Without ChatterAgent (Linux, or running the server by hand), build the core in a clone (`cd core && npm install && npm run build`) and set `CHATTER_AGENT_CLI=<clone>/core/dist/chatter-agent-speak.mjs` in Claude Code's environment. This path needs Node 24.11 or later.
+
 To update, refresh the marketplace and then update the plugin. Updates arrive when the plugin's
-`version` goes up.
+`version` goes up, which happens only when the hook (the contents of `plugin/`) changes.
 
 ```bash
 claude plugin marketplace update chatter-agent

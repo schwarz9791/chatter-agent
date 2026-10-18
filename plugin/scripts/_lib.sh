@@ -38,6 +38,9 @@ LC_ALL=C
 #   （このため Windows の %APPDATA% は hook 側では見ていない。→ docs/plugin.md）
 CHATTER_RUNTIME_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/chatter-agent
 CHATTER_SPOOL_DIR=$CHATTER_RUNTIME_DIR/spool
+# 同梱の実行ファイルの絶対パスを1行で持つ。書き手は ChatterAgent
+# （chatter-agent-app/src-tauri/src/server.rs の write_bin_path）
+CHATTER_BIN_PATH_FILE=$CHATTER_RUNTIME_DIR/bin-path
 
 # 読み取った payload（1行の JSON）。chatter_read_payload が入れる
 CHATTER_PAYLOAD=
@@ -255,27 +258,41 @@ chatter_write_atomic() { # target_path payload
 #   Claude Code が hook のパイプの EOF を待って止まりうる。さらに `MessageDisplay` の
 #   stdout は「delta の差し替え」として解釈されるので、CLI の出力が混ざると表示まで壊れる。
 #
-# ★ setsid は macOS に無い。nohup + & で足りる（nohup は exec で node に化けるので常駐しない）。
+# ★ setsid は macOS に無い。nohup + & で足りる（nohup は exec で対象に化けるので常駐しない）。
 #
-# CLI の解決経路は1本だけにする。開発時の差し替えは CHATTER_AGENT_CLI のみ。→ docs/core.md
+# CLI の解決は2段。CHATTER_AGENT_CLI（node で動かすスクリプト。開発と、ChatterAgent を使わない
+# 運用向けの上書き）→ ChatterAgent が書いた bin-path の実行ファイル（`speak`）。
+# 上書きが設定されていれば、そのファイルが無くても bin-path へは落ちない。→ docs/plugin.md
 #
-# ★ 2つの早期 return は診断を残すこと。spool をドレインする経路も孤児掃除（既定6時間）を
+# ★ 早期 return は診断を残すこと。spool をドレインする経路も孤児掃除（既定6時間）を
 #   走らせる経路もここ以外に無いので、無言で return すると「診断情報ゼロのまま恒久的に沈黙する」
-#   プラグインになる。本リポジトリは mise で Node を固定していて、shim が PATH に載るのは
-#   対話 rc 経由のみ — **Finder / Dock から起動した Claude Code はその PATH を継承しない**ため、
-#   `command -v node` が失敗する状況は現実に起きる。`chatter_debug` は既定 OFF のログなので、
-#   ここに書いても普段のコストは増えない。
-chatter_spawn_cli() { # plugin_root
-  local cli=${CHATTER_AGENT_CLI:-$1/bin/chatter-agent-speak.mjs}
-  if [ ! -f "$cli" ]; then
-    chatter_debug SpawnCli "cli not found: $cli"
+#   プラグインになる。`chatter_debug` は既定 OFF のログなので、ここに書いても普段のコストは
+#   増えない。
+#
+#   CHATTER_AGENT_CLI の経路で node を確かめるのは、mise の shim が PATH に載るのが対話 rc
+#   経由のみで、**Finder / Dock から起動した Claude Code はその PATH を継承しない**ため。
+#   bin-path の経路は node を使わない。
+chatter_spawn_cli() {
+  if [ -n "$CHATTER_AGENT_CLI" ]; then
+    if [ ! -f "$CHATTER_AGENT_CLI" ]; then
+      chatter_debug SpawnCli "cli not found: $CHATTER_AGENT_CLI"
+      return 0
+    fi
+    if ! command -v node >/dev/null 2>&1; then
+      chatter_debug SpawnCli "node not found in PATH: $PATH"
+      return 0
+    fi
+    nohup node "$CHATTER_AGENT_CLI" >/dev/null 2>&1 </dev/null &
     return 0
   fi
-  if ! command -v node >/dev/null 2>&1; then
-    chatter_debug SpawnCli "node not found in PATH: $PATH"
+  local bin=
+  [ -f "$CHATTER_BIN_PATH_FILE" ] && IFS= read -r bin <"$CHATTER_BIN_PATH_FILE"
+  # ディレクトリでも -x は真になるので -f と両方見る
+  if [ ! -f "$bin" ] || [ ! -x "$bin" ]; then
+    chatter_debug SpawnCli "bin not found: ${bin:-no $CHATTER_BIN_PATH_FILE}"
     return 0
   fi
-  nohup node "$cli" >/dev/null 2>&1 </dev/null &
+  nohup "$bin" speak >/dev/null 2>&1 </dev/null &
 }
 
 # 診断ログ。CHATTER_AGENT_HOOK_DEBUG が有効なときだけ書く。

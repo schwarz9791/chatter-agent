@@ -14,7 +14,6 @@ Android XR）が鳴らして VRM に反映する。macOS では ChatterAgent が
 | ディレクトリ | 内容 |
 |---|---|
 | `plugin/` | Claude Code プラグイン。bash hook が payload を spool に置いて即 `exit 0` する |
-| `plugin/bin/` | `chatter-agent-speak` のバンドル。**git にコミットする成果物**（`core/` からビルドされる） |
 | `core/src/cli/` | `chatter-agent-speak`。spool を読む単一ワーカー |
 | `core/src/server/` | `chatter-agent-server`。WebSocket 配信 + 音声の HTTP 配布 + 制御 API |
 | `core/src/player/` | `chatter-agent-player`。発話 CLI。**プロトコルの参照実装。捨てない** |
@@ -32,9 +31,9 @@ Claude Code
   │ hooks: MessageDisplay / PreToolUse(AskUserQuestion|ExitPlanMode) / Notification(permission_prompt)
   ▼
 plugin/scripts/*.sh          bash。payload を spool/<message_id>.<index>.json に置くだけ。即 exit 0
-  │ 毎 delta で CLI をデタッチ起動
+  │ 毎 delta で CLI をデタッチ起動（`bin-path` が指す同梱の `chatter-agent speak`）
   ▼
-chatter-agent-speak (CLI)    ロックを取れた1プロセスだけが spool を順に処理
+chatter-agent speak (CLI)    ロックを取れた1プロセスだけが spool を順に処理
   │                          final:true を待つ（非 final では何もせず終わる）
   │                          delta 結合 → Markdown除去 → 文分割 → 要約（既定ON） → 感情判定 → epoch/seq 採番
   ├──▶ speech.jsonl          記録。1文1行で残す。配信は読まない
@@ -54,6 +53,7 @@ chatter-agent-server         キューを読んで WebSocket 配信（テキス�
 chatter-mascot               表示側アプリ（Unity）。再生 → VRM描画 / 表情 / モーション / リップシンク
 
 ChatterAgent（macOS 常駐）──▶ chatter-agent-server を起動・停止する（配信の経路には入らない）
+                          ├─▶ `bin-path` に同梱の実行ファイルのパスを書く（hook が CLI を起こす先）
                           └─▶ 設定パネル: /v1/*（Rust から）と mascot/settings.json を書く
 ```
 
@@ -171,9 +171,6 @@ spool を見る（走査直後に到着した分の取りこぼし防止）。
 自分の著作物）。判定手順は [`docs/origin.md`](./docs/origin.md)。cc-mascot 由来のコードを増減させたら
 `NOTICE` が実態と合っているか確認する。
 
-**`plugin/bin/chatter-agent-speak.mjs` はコミットする成果物。** `core/src/` を直したら
-`npm run build` してコミットする（CI の `bundle` ジョブが一致を検証する）。
-
 **`plugin/` の中身が変わったら `version` を上げる。** `plugin/.claude-plugin/plugin.json` と
 `.claude-plugin/marketplace.json` の2箇所を揃える。上げ忘れると、git の marketplace から入れた
 環境に変更が届かない（→ [`docs/plugin.md`](./docs/plugin.md)「バージョン」）。
@@ -188,7 +185,7 @@ EditMode だけでテストできているのは、この層が描画に依存�
 ```bash
 cd core
 npm run typecheck && npm run lint && npm run format && npm run test:run
-npm run build            # CLI → plugin/bin/、server と player → dist/
+npm run build            # CLI・server・player → dist/
 npm run build:bin        # 3つを Bun で1本に（ChatterAgent が同梱する）。verify は CHATTER_AGENT_BIN でこれを起こせる
 
 npm run verify:phase-a   # hook → 記録 + 配信キュー
@@ -226,8 +223,7 @@ npm run build            # → ChatterAgent.app
 - [ ] **ドキュメント更新の検討** —— `docs/` / `docs/knowledge/` / `README.md` に追記するものがないか検討し、あればユーザーに提案する
 - [ ] `npm run typecheck` / `npm run lint` / `npm run format` / `npm run test:run` が通ること
 - [ ] `chatter-agent-app/` を触ったら `cargo fmt --check` / `cargo clippy --all-targets -- -D warnings` / `cargo test` と、`npm run build:web` / `npm test` が通ること
-- [ ] `src/cli/` を触ったら `npm run build` してバンドルもコミットする
-- [ ] `plugin/` の中身（バンドルを含む）が変わったら、`plugin.json` と `marketplace.json` の `version` を上げる
+- [ ] `plugin/` の中身が変わったら、`plugin.json` と `marketplace.json` の `version` を上げる
 
 ## ドキュメント索引
 

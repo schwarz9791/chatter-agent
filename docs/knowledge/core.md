@@ -504,7 +504,7 @@ config に載せない環境変数:
 - `CHATTER_AGENT_CONFIG` — `config.json` の場所そのもの
 - `CHATTER_AGENT_EMOTION_KEYWORDS` — `emotion-keywords.json` の場所そのもの
 - `CHATTER_AGENT_DISABLE` — hook と CLI を無効化（無限ループ防止の第1層）
-- `CHATTER_AGENT_CLI` — 開発時にバンドルを差し替える
+- `CHATTER_AGENT_CLI` — hook が起こす CLI を `node` で指定する（開発時・ChatterAgent を使わない運用。空でなければ `bin-path` より優先）
 - `CHATTER_AGENT_HOOK_DEBUG` — hook が受けた payload を `{root}/hook-debug.log` に落とす（hook 側だけ。→ [`plugin.md`](./plugin.md)「検証時の落とし穴」）
 
 `CHATTER_AGENT_DISABLE` は `config.ts` の `isSpeakDisabled()` が判定する。**`1/true/yes/on` で無効、

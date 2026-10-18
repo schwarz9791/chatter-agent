@@ -84,55 +84,16 @@ jobs:
       - name: Check formatting
         run: npm run format:check
 
-  bundle:
-    name: Bundle is up to date
+  notice:
+    name: NOTICE is consistent
     runs-on: ubuntu-latest
 
-    # plugin/bin/ のバンドルは git にコミットしている（/plugin install だけで完結させるため）。
-    # ソースだけ直してビルドし忘れると、hook が古いコードを実行し続けて気づきにくい。
     steps:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "24"
-          cache: "npm"
-          cache-dependency-path: core/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build
-        run: npm run build
-
-      - name: Verify committed bundle matches source
+      - name: Verify plugin license files exist
         run: |
-          if ! git diff --exit-code -- ../plugin/bin; then
-            echo "::error::plugin/bin/ のバンドルがソースと一致しません。core/ で npm run build を実行してコミットしてください。"
-            exit 1
-          fi
-          # git diff は未追跡ファイルを見ない。clean: false なので、将来チャンクや
-          # sourcemap が増えても無検査で紛れ込む。porcelain で追跡外も拾う
-          untracked="$(git status --porcelain -- ../plugin/bin)"
-          if [ -n "$untracked" ]; then
-            echo "::error::plugin/bin/ に未コミットのファイルがあります:"
-            echo "$untracked"
-            exit 1
-          fi
-
-      # バンドラがヘッダを落としていても上の検証は通ってしまう（ソースとは一致するため）。
-      # 配布物そのものに帰属表示と改変告知があることを直接確かめる（Apache-2.0 §4(b)/(d)）
-      - name: Verify attribution survives bundling
-        run: |
-          bundle=../plugin/bin/chatter-agent-speak.mjs
-          for needle in "kazakago" "Modified for chatter-agent" "Apache License"; do
-            if ! grep -qF "$needle" "$bundle"; then
-              echo "::error::配布バンドルに \"$needle\" がありません。tsdown.config.ts の banner を確認してください。"
-              exit 1
-            fi
-          done
           for f in ../plugin/LICENSE ../plugin/NOTICE; do
             if [ ! -f "$f" ]; then
               echo "::error::$f がありません。/plugin install の配布物に含める必要があります。"
@@ -177,7 +138,7 @@ jobs:
     name: Verify (phase A / B)
     runs-on: ubuntu-latest
 
-    # phase-a / phase-b はどちらもバンドル（plugin/bin/ と core/dist/）を実行するので
+    # phase-a / phase-b はどちらもバンドル（core/dist/）を実行するので
     # npm run build が先に要る。phase-b は 127.0.0.1:18570 に bind するだけなので CI でも動く
     steps:
       - name: Checkout repository
@@ -195,6 +156,16 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      # Ollaya の感情判定の子は同じバンドルの隠しサブコマンドで起こされる。
+      # 接続できない先でも、失敗を `[null]` で返して終わること
+      - name: Verify Ollaya child starts from the bundle
+        run: |
+          out="$(printf '%s' '{"texts":["x"],"baseUrl":"http://127.0.0.1:9","model":"m"}' | node dist/chatter-agent-speak.mjs ollaya-child)"
+          if [ "$out" != "[null]" ]; then
+            echo "::error::バンドルから Ollaya の子が起動できません: $out"
+            exit 1
+          fi
 
       - name: Verify phase A (spool → speech.jsonl)
         run: npm run verify:phase-a
@@ -292,6 +263,14 @@ jobs:
       # 単一バイナリ（chatter-agent）にして、同じ verify を通す
       - name: Compile single binary
         run: npm run compile -- --outfile "$RUNNER_TEMP/chatter-agent"
+
+      - name: Verify Ollaya child starts from binary
+        run: |
+          out="$(printf '%s' '{"texts":["x"],"baseUrl":"http://127.0.0.1:9","model":"m"}' | "$RUNNER_TEMP/chatter-agent" ollaya-child)"
+          if [ "$out" != "[null]" ]; then
+            echo "::error::単一バイナリから Ollaya の子が起動できません: $out"
+            exit 1
+          fi
 
       - name: Verify phase B on binary
         run: CHATTER_AGENT_BIN="$RUNNER_TEMP/chatter-agent" bun --bun run verify:phase-b

@@ -13,7 +13,7 @@
 set -euo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-CLI="$REPO/plugin/bin/chatter-agent-speak.mjs"
+CLI="$REPO/core/dist/chatter-agent-speak.mjs"
 ON_MESSAGE="$REPO/plugin/scripts/on-message.sh"
 ON_PROMPT="$REPO/plugin/scripts/on-prompt.sh"
 
@@ -394,7 +394,7 @@ node -e '
 ' "$LOG" "$SPOOL/m-nbsp.0.json"
 rm -f "$SPOOL"/m-nbsp.*
 
-show "⑫ node / CLI 不在を診断できる（R7）"
+show "⑫ CLI / node / 実行ファイル不在を診断でき、node 無しでも実行ファイルを起こせる（R7）"
 
 # ★ CHATTER_AGENT_CLI は検証全体でわざと存在しないパスを指している（このスクリプト冒頭で
 #   デタッチ起動を抑止するために設定）。つまり chatter_spawn_cli の「CLI が無い」早期 return は
@@ -449,6 +449,51 @@ node -e '
   process.exit(ok1 && ok2 ? 0 : 1);
 ' "$RUNTIME/hook-debug.log"
 rm -f "$SPOOL"/m-r7-cli.* "$SPOOL"/m-r7-node.*
+
+# CHATTER_AGENT_CLI を外すと bin-path の経路になる。ここもデタッチ起動を伴うので、
+# 実行ファイルは引数を記録するだけの偽物に差し替える。
+PAYLOAD_BIN=$(node -e '
+  console.log(JSON.stringify({
+    session_id: "sess-1", transcript_path: "/tmp/x.jsonl", cwd: "/tmp", prompt_id: "p1",
+    hook_event_name: "MessageDisplay", turn_id: "turn-1",
+    message_id: "m-r7-bin", index: 0, final: true, delta: "bin-path経路の診断確認用です。",
+  }));
+')
+
+# bin-path が無い
+rm -f "$RUNTIME/hook-debug.log" "$RUNTIME/bin-path"
+printf '%s' "$PAYLOAD_BIN" | CHATTER_AGENT_CLI= CHATTER_AGENT_HOOK_DEBUG=1 "$ON_MESSAGE"
+node -e '
+  const fs = require("fs");
+  let log = "";
+  try { log = fs.readFileSync(process.argv[1], "utf8"); } catch {}
+  const ok = log.includes("SpawnCli") && log.includes("bin not found");
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  bin-path 不在が診断ログに残る（chatter_spawn_cli）`);
+  process.exit(ok ? 0 : 1);
+' "$RUNTIME/hook-debug.log"
+
+# bin-path が偽の実行ファイルを指す。node を PATH から外しても `speak` を渡して起こせる
+FAKE_BIN_DIR=$(mktemp -d)
+FAKE_BIN="$FAKE_BIN_DIR/chatter-agent"
+FAKE_BIN_ARGS="$FAKE_BIN_DIR/args"
+printf '#!/bin/bash\nprintf "%%s\\n" "$@" > "%s"\n' "$FAKE_BIN_ARGS" > "$FAKE_BIN"
+chmod +x "$FAKE_BIN"
+printf '%s\n' "$FAKE_BIN" > "$RUNTIME/bin-path"
+printf '%s' "$PAYLOAD_BIN" | CHATTER_AGENT_CLI= PATH="$FILTERED_PATH" "$ON_MESSAGE" 2>/dev/null
+for _ in $(seq 1 50); do
+  [ -s "$FAKE_BIN_ARGS" ] && break
+  sleep 0.1
+done
+node -e '
+  const fs = require("fs");
+  let args = "";
+  try { args = fs.readFileSync(process.argv[1], "utf8"); } catch {}
+  const ok = args === "speak\n";
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  node が PATH に無くても bin-path の実行ファイルが speak で起動される${ok ? "" : ` (args=${JSON.stringify(args)})`}`);
+  process.exit(ok ? 0 : 1);
+' "$FAKE_BIN_ARGS"
+rm -f "$RUNTIME/bin-path" "$SPOOL"/m-r7-bin.*
+rm -rf "$FAKE_BIN_DIR"
 
 show "⑬ 孤児カスケード: 救済されたメッセージの遅延 final が、ストリーミング中の次のメッセージを打ち切らない"
 

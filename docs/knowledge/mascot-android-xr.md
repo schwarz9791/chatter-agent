@@ -242,7 +242,7 @@ CHATTER_AGENT_PORT=8571 ./scripts/run-android.sh
 ```
 
 発話を流すには hook と同じ形の payload を `<runtime>/spool/<message_id>.0.json` に置き、
-同じ環境変数で `plugin/bin/chatter-agent-speak.mjs` を走らせる:
+同じ環境変数で `core/dist/chatter-agent-speak.mjs`（`core/` で `npm run build`）を走らせる:
 
 ```json
 {"session_id":"…","hook_event_name":"MessageDisplay","turn_id":"…","message_id":"…","index":0,"final":true,"delta":"…"}

@@ -137,6 +137,23 @@ pub fn runtime_root(env: &Env) -> Option<PathBuf> {
     Some(base.join("chatter-agent"))
 }
 
+/// hook が起こす実行ファイルの絶対パスを、ランタイムルートの `bin-path` に1行で置く
+/// （読み手は `plugin/scripts/_lib.sh` の `chatter_spawn_cli`）。`None` は消す。
+/// 開発用の core を使うときに、同梱版の CLI が hook から呼ばれて混ざるのを避ける。
+pub fn write_bin_path(root: &Path, bin: Option<&Path>) -> std::io::Result<()> {
+    let path = root.join("bin-path");
+    let Some(bin) = bin else {
+        return match fs::remove_file(&path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        };
+    };
+    fs::create_dir_all(root)?;
+    let tmp = root.join("bin-path.tmp");
+    fs::write(&tmp, format!("{}\n", bin.display()))?;
+    fs::rename(tmp, path)
+}
+
 /// pid が生きているか。権限が無くて確認できない場合は「生きている」に倒す
 /// （`core/src/core/lock.ts` の判定と同じ）。
 #[cfg(unix)]
@@ -500,7 +517,18 @@ impl Manager {
             Status::Cannot(Fail::Env)
         })?;
         *lock(&self.0.env) = Some(env.clone());
-        if let Some(pid) = runtime_root(&env).and_then(|r| external_server_pid(&r)) {
+        let root = runtime_root(&env);
+        // 外部の server が動いていても、hook は実行ファイルを要る。
+        if let Some(root) = &root {
+            let bin = match &core {
+                Core::Bundled(bin) => Some(bin.as_path()),
+                Core::Dir(_) => None,
+            };
+            if let Err(e) = write_bin_path(root, bin) {
+                self.log(&format!("bin-path を更新できない: {e}"));
+            }
+        }
+        if let Some(pid) = root.and_then(|r| external_server_pid(&r)) {
             return Err(Status::External(pid));
         }
         Ok(Prepared { core, env })
@@ -657,6 +685,21 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn bin_path_is_one_line_and_replaced_atomically() {
+        let root = tmp("bin-path");
+        write_bin_path(&root, Some(Path::new("/a/chatter-agent"))).unwrap();
+        write_bin_path(&root, Some(Path::new("/b/chatter-agent"))).unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join("bin-path")).unwrap(),
+            "/b/chatter-agent\n"
+        );
+        assert!(!root.join("bin-path.tmp").exists());
+        write_bin_path(&root, None).unwrap();
+        assert!(!root.join("bin-path").exists());
+        write_bin_path(&root, None).unwrap();
     }
 
     #[test]

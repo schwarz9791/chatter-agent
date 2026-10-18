@@ -59,6 +59,9 @@ Dock にも ⌘Tab にも出ない。操作はメニューバーのアイコン�
 
 アプリを起動すると、同梱の `chatter-agent` で server を起こす。初回の設定は要らない。
 
+起動のたびに、ランタイムルートの `bin-path` へ同梱の実行ファイルの絶対パスを1行で書く（hook がこれを読んで `speak` を起こす）。
+外部の server が動いていても書く。`devCoreDir` のときは消す。書けなくても server の起動は止めない（ログに残す）。
+
 ### 開発用の上書き（`devCoreDir`）
 
 ブランチの core を動かすときは、`~/Library/Application Support/tech.sukima.chatter-agent/settings.json` に

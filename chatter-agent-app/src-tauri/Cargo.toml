@@ -4,6 +4,7 @@ version = "0.0.0-dev"
 description = "chatter-agent-server をメニューバーから面倒を見る親アプリ"
 license = "Apache-2.0"
 edition = "2021"
+publish = false
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

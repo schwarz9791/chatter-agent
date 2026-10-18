@@ -270,11 +270,12 @@ jobs:
         run: bun --bun run verify:assets
 
       # 単一バイナリに入る npm パッケージは、配布物に NOTICE で表記する義務がある。
-      # 依存が増えて NOTICE に載せ忘れるのをここで止める
+      # 依存が増えて NOTICE に載せ忘れるのをここで止める。
+      # パッケージ名はパスの最後の node_modules/ の後ろから取る（入れ子に置かれた別の版を親の名前で数えないため）
       - name: Verify bundled packages are in NOTICE
         run: |
           notice=../NOTICE
-          packages="$(bun build src/main.ts --target=bun | grep -oE '^// node_modules/[^ ]+' | sed -E 's#^// node_modules/((@[^/]+/)?[^/]+).*#\1#' | sort -u)"
+          packages="$(bun build src/main.ts --target=bun | grep -oE '^// node_modules/[^ ]+' | sed -E 's#^.*node_modules/((@[^/]+/)?[^/]+).*#\1#' | sort -u)"
           if [ -z "$packages" ]; then
             echo "::error::バンドルから npm パッケージを拾えませんでした。このステップの抽出を確認してください。"
             exit 1

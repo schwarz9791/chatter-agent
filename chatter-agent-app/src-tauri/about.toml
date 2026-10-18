@@ -1,6 +1,8 @@
 targets = ["aarch64-apple-darwin"]
 ignore-build-dependencies = true
 ignore-dev-dependencies = true
+# 自分のクレート（publish = false）は載せない
+private = { ignore = true }
 
 # 選択式（OR）のライセンスは、ここで先に並べたものが選ばれる。
 # MIT を先頭にして、Apache-2.0 を選んだときの NOTICE ファイルの扱いを増やさない

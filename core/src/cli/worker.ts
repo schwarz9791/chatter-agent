@@ -15,6 +15,7 @@
 
 import {
   formatPromptEvent,
+  type PromptLanguage,
   getEventHookName,
   getEventPromptId,
   getEventSessionId,
@@ -214,6 +215,8 @@ export interface DrainDeps {
   summarizerSessionsPath: string;
   /** 応答待ち通知（kind: "prompt"）を読み上げるか */
   speakPrompts: boolean;
+  /** 応答待ち通知の定型文の言語 */
+  promptLanguage: PromptLanguage;
   /** これより無活動な spool は孤児として掃除する */
   spoolMaxAgeMs: number;
   /**
@@ -470,7 +473,7 @@ export function drainSpool(deps: DrainDeps): DrainResult {
 function needsBodyWait(item: Extract<Loaded, { payload: unknown }>, ordered: Loaded[], deps: DrainDeps): boolean {
   if (!deps.speakPrompts) return false;
   if (item.payload === null) return false;
-  if (formatPromptEvent(item.payload).length === 0) return false;
+  if (formatPromptEvent(item.payload, deps.promptLanguage).length === 0) return false;
 
   const promptId = promptIdOf(item);
   const sessionId = sessionIdOf(item);
@@ -859,7 +862,7 @@ function processPrompt(
     return { ...NOTHING, changed: true };
   }
 
-  const messages = formatPromptEvent(payload);
+  const messages = formatPromptEvent(payload, deps.promptLanguage);
   if (messages.length === 0) {
     tryRemoveEntry(entry);
     return { ...NOTHING, changed: true };

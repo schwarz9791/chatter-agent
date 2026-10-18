@@ -72,6 +72,7 @@ function drain(overrides: Partial<DrainDeps> = {}) {
     workerStatePath: path.join(dir, "speak.state.json"),
     summarizerSessionsPath: path.join(dir, "summarizer-sessions.json"),
     speakPrompts: true,
+    promptLanguage: "ja",
     spoolMaxAgeMs: 6 * HOUR,
     classify: (texts) => texts.map(() => "neutral"),
     // 既定は補完あり（辞書式・fm 相当）。補完を止める挙動そのものを見るテストだけ個別に差し替える
@@ -494,6 +495,12 @@ describe("応答待ち通知", () => {
     drain();
     expect(texts()).toEqual(["次は何をしますか？", "選択肢は、進める、やめる。"]);
     expect(records()[0]?.kind).toBe("prompt");
+  });
+
+  it("promptLanguage が en なら英語の定型文を書く", () => {
+    writePrompt("q", question);
+    drain({ promptLanguage: "en" });
+    expect(texts()).toEqual(["次は何をしますか？", "The options are 進める, やめる."]);
   });
 
   it("PreToolUse に付随する同一 prompt_id の Notification は捨てる", () => {

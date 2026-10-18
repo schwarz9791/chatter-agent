@@ -121,6 +121,8 @@ function main(): void {
       workerStatePath: getWorkerStatePath(),
       summarizerSessionsPath: getSummarizerSessionsPath(),
       speakPrompts: config.get("speakPrompts"),
+      // 定型文は声が読める言語にする。英語の声に日本語を渡すと文字の名前を読み上げる
+      promptLanguage: config.get("ttsEngine") === "openai" ? "en" : "ja",
       spoolMaxAgeMs: config.get("spoolMaxAgeHours") * 60 * 60 * 1000,
       classify,
       // Ollaya は neutral を「感情が乗っていない」という判定そのものとして返すので、

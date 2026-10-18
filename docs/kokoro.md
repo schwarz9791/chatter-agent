@@ -9,6 +9,8 @@ via `resolveKokoroSpawn` in `core/src/server/engineProcess.ts`
 ## When to use it
 
 **For Japanese, AivisSpeech (the default) is recommended.** Kokoro is meant for other languages.
+With `ttsEngine: "openai"`, the fixed phrases spoken while Claude Code waits for your answer
+(AskUserQuestion / ExitPlanMode / permission prompts) are in English.
 
 `ttsEngine` can be switched at runtime with `PATCH /v1/config {"ttsEngine": "openai"}` (loopback
 only); the server re-runs its engine launch decision and stops only an engine it launched itself.

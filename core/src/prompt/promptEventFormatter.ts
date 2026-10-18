@@ -13,11 +13,25 @@
 // （対象が Claude Code のみでログ形式の抽象化が不要）ため、契約側から取り込む。
 import type { SpeakMessage } from "../core/types";
 
-/** ExitPlanMode の読み上げ文の定型部分（計画の見出しが取れない場合はこれだけを話す） */
-const PLAN_APPROVAL_TEXT = "計画がまとまりました。確認をお願いします。";
+/** 定型文の言語。読み上げる声が読める言語に合わせる */
+export type PromptLanguage = "ja" | "en";
 
-/** 許可プロンプトの読み上げ文（通知本文が取れない場合のフォールバック） */
-const PERMISSION_PROMPT_TEXT = "許可を求めています。確認をお願いします。";
+const TEMPLATES = {
+  ja: {
+    options: (question: string, labels: string[]) => `${question} 選択肢は、${labels.join("、")}。`,
+    // 計画の見出しが取れない場合はこれだけを話す
+    planApproval: "計画がまとまりました。確認をお願いします。",
+    planApprovalWithHeading: (heading: string) => `「${heading}」の計画がまとまりました。確認をお願いします。`,
+    // 通知本文が取れない場合のフォールバック
+    permissionPrompt: "許可を求めています。確認をお願いします。",
+  },
+  en: {
+    options: (question: string, labels: string[]) => `${question} The options are ${labels.join(", ")}.`,
+    planApproval: "The plan is ready. Please take a look.",
+    planApprovalWithHeading: (heading: string) => `The plan "${heading}" is ready. Please take a look.`,
+    permissionPrompt: "I need your permission. Please take a look.",
+  },
+} satisfies Record<PromptLanguage, unknown>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -28,7 +42,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * 例: 「どちらにしますか？ 選択肢は、そのまま進める、やり直す。」
  * 選択肢の description は長くなりすぎるため読み上げない
  */
-function buildQuestionTexts(input: unknown): string[] {
+function buildQuestionTexts(input: unknown, language: PromptLanguage): string[] {
   if (!isRecord(input) || !Array.isArray(input.questions)) return [];
 
   const texts: string[] = [];
@@ -45,7 +59,7 @@ function buildQuestionTexts(input: unknown): string[] {
           .filter((label) => label.length > 0)
       : [];
 
-    texts.push(labels.length > 0 ? `${questionText} 選択肢は、${labels.join("、")}。` : questionText);
+    texts.push(labels.length > 0 ? TEMPLATES[language].options(questionText, labels) : questionText);
   }
   return texts;
 }
@@ -54,10 +68,11 @@ function buildQuestionTexts(input: unknown): string[] {
  * ExitPlanMode の入力から承認依頼の読み上げ文を組み立てる
  * plan は計画の全文マークダウン（数千字）なので、先頭の見出しだけを使う
  */
-function buildPlanApprovalText(input: unknown): string {
+function buildPlanApprovalText(input: unknown, language: PromptLanguage): string {
   const plan = isRecord(input) && typeof input.plan === "string" ? input.plan : "";
   const heading = plan.match(/^#{1,6}\s+(.+)$/m)?.[1].trim();
-  return heading ? `「${heading}」の${PLAN_APPROVAL_TEXT}` : PLAN_APPROVAL_TEXT;
+  const templates = TEMPLATES[language];
+  return heading ? templates.planApprovalWithHeading(heading) : templates.planApproval;
 }
 
 /** フックの payload に含まれるセッションIDを取り出す（取れなければ null） */
@@ -88,28 +103,32 @@ function getStringField(payload: unknown, key: string): string | null {
  * フックの payload を読み上げメッセージに変換する
  * 対象外のイベントや壊れた payload の場合は空配列を返す
  */
-export function formatPromptEvent(payload: unknown): SpeakMessage[] {
+export function formatPromptEvent(payload: unknown, language: PromptLanguage): SpeakMessage[] {
   if (!isRecord(payload)) return [];
 
-  const texts = buildTexts(payload);
+  const texts = buildTexts(payload, language);
   return texts
     .map((text) => text.trim())
     .filter((text) => text.length > 0)
     .map((text) => ({ type: "speak" as const, text, kind: "prompt" as const }));
 }
 
-function buildTexts(payload: Record<string, unknown>): string[] {
+function buildTexts(payload: Record<string, unknown>, language: PromptLanguage): string[] {
   switch (payload.hook_event_name) {
     case "PreToolUse":
       // 応答待ちで止まるツールのみが対象（フック側の matcher でも絞っている）
-      if (payload.tool_name === "AskUserQuestion") return buildQuestionTexts(payload.tool_input);
-      if (payload.tool_name === "ExitPlanMode") return [buildPlanApprovalText(payload.tool_input)];
+      if (payload.tool_name === "AskUserQuestion") return buildQuestionTexts(payload.tool_input, language);
+      if (payload.tool_name === "ExitPlanMode") return [buildPlanApprovalText(payload.tool_input, language)];
       return [];
 
     case "Notification":
       // matcher で permission_prompt に絞っているため、届いた時点で許可プロンプト。
       // event 固有フィールドは公式ドキュメントに記載がないため message の有無に依存しない
-      return [typeof payload.message === "string" && payload.message.trim() ? payload.message : PERMISSION_PROMPT_TEXT];
+      return [
+        typeof payload.message === "string" && payload.message.trim()
+          ? payload.message
+          : TEMPLATES[language].permissionPrompt,
+      ];
 
     default:
       return [];

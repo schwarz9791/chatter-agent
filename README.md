@@ -71,7 +71,7 @@ The XR build has only run on an emulator so far. **This is the first time it mee
 You need:
 
 - A Mac with Apple Silicon, running Claude Code
-- Node (the Claude Code plugin's hook runs on it), and `adb`
+- Node 24.11 or later (the Claude Code plugin's hook runs on it), and `adb`
 - An XREAL Aura
 - The Mac and the Aura on the same Wi-Fi
 
@@ -91,7 +91,7 @@ You need:
    - Run `xattr -dr com.apple.quarantine /Applications/ChatterAgent.app`
    - Open it once, then go to System Settings → Privacy & Security and click "Open Anyway". Click "Open Anyway" again in the dialog that follows, then authenticate with Touch ID or an administrator password
 
-   The server is bundled, and ChatterAgent starts it when it opens. Right after that, ChatterAgent shows a "Cannot Show the Mascot" warning. That is expected, because these steps don't install the macOS mascot. The CLI player on the Mac then starts speaking; you mute it in step 3.
+   The server is bundled, and ChatterAgent starts it when it opens. Right after that, ChatterAgent shows a "Cannot Show the Mascot" warning. That is expected, because these steps don't install the macOS mascot. The CLI player on the Mac then starts speaking; you mute it in "3. Expose the server to the LAN".
 
 3. **The Claude Code plugin.** Follow [Installing the Claude Code plugin](#installing-the-claude-code-plugin), then restart your Claude Code session.
 
@@ -236,7 +236,7 @@ cd chatter-mascot
 ### Prerequisites
 
 - **Claude Code**
-- **Node** — the plugin's hook runs the CLI with it
+- **Node 24.11 or later** — the plugin's hook runs the CLI with it
 - **[AivisSpeech](https://aivis-project.com/)** — **just having it installed is enough.** If the synthesis engine isn't running, the server wakes it up, and stopping the server takes it down too. You only need to start it by hand to connect to an engine on a different host, or **to add a speaker** (adding a voice model needs the GUI). To turn the auto-start off entirely, set `CHATTER_AGENT_TTS_SPAWN=0`
 - **The synthesis engine is swappable** (`ttsEngine`). The default is AivisSpeech (VOICEVOX-compatible); for languages other than Japanese, **[Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI)** (OpenAI-compatible) is also supported. Setup steps are in [`docs/kokoro.md`](./docs/kokoro.md)
 - **macOS** — the display apps target macOS and Android XR, the playback command defaults to `afplay`, and the engine is auto-discovered only at macOS paths. On Linux / Windows, point the CLI player at a playback command with `CHATTER_AGENT_PLAYER_COMMAND`

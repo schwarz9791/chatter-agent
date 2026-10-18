@@ -13,7 +13,8 @@ pub struct Text {
     crashed_unknown: &'static str,
     external: fn(u32) -> String,
     cannot_prefix: &'static str,
-    no_core_dir: &'static str,
+    no_core: &'static str,
+    pub dev_core_dir: &'static str,
     no_dist: &'static str,
     no_node_modules: &'static str,
     env: &'static str,
@@ -47,7 +48,8 @@ pub const JA: Text = Text {
     crashed_unknown: "異常終了",
     external: |pid| format!("外で動いている（pid {pid}）"),
     cannot_prefix: "起動できません: ",
-    no_core_dir: "同梱の chatter-agent が無い（開発時は devCoreDir を設定）",
+    no_core: "同梱の chatter-agent が無い（開発時は devCoreDir を設定）",
+    dev_core_dir: "（devCoreDir）",
     no_dist: "dist が無い（core で npm run build）",
     no_node_modules: "node_modules が無い（core で npm install）",
     env: "ログインシェルから環境を取得できません",
@@ -85,7 +87,8 @@ pub const EN: Text = Text {
     crashed_unknown: "Crashed",
     external: |pid| format!("Running outside Chatter Agent (pid {pid})"),
     cannot_prefix: "Cannot start: ",
-    no_core_dir: "the bundled chatter-agent is missing (set devCoreDir for development)",
+    no_core: "the bundled chatter-agent is missing (set devCoreDir for development)",
+    dev_core_dir: " (devCoreDir)",
     no_dist: "dist is missing (run npm run build in core)",
     no_node_modules: "node_modules is missing (run npm install in core)",
     env: "could not get the environment from the login shell",
@@ -139,7 +142,7 @@ impl Text {
     /// 起動できない理由（「起動できません: …」）。
     pub fn cannot(&self, f: &Fail) -> String {
         let reason = match f {
-            Fail::NoCoreDir => self.no_core_dir.into(),
+            Fail::NoCore => self.no_core.into(),
             Fail::NoDist => self.no_dist.into(),
             Fail::NoNodeModules => self.no_node_modules.into(),
             Fail::Env => self.env.into(),

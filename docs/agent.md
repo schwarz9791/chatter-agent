@@ -44,7 +44,8 @@ npm test           # 設定窓の純粋な判定（node --test）
 - `npm run dev` は Vite（`dev:web`、ポート 1420）も起こす。`npm run build` は先に `build:web`
   （`tsc --noEmit && vite build`）を走らせ、`dist/` を `.app` に取り込む
 - ★ **同梱は `src-tauri/tauri.bundle.conf.json` を `--config` で渡したときだけ**（`npm run build` と `build:release`）。
-  `externalBin` を `tauri.conf.json` に書くと、`cargo test` / `cargo clippy` / `tauri dev` でも実行ファイルの実在が要るため
+  `externalBin` を `tauri.conf.json` に書くと、`cargo test` / `cargo clippy` / `tauri dev` でも実行ファイルの実在が要るため。
+  同じ設定で `Contents/Resources/` に `LICENSE` と `NOTICE` も入れる（同梱物に cc-mascot 由来のコードとサードパーティのコードが入るため）
 - Tauri は `.app` を `src-tauri/target/release/bundle/macos/` に作る。`npm run build` はそれを `build/` へ
   写す（マスコットの `chatter-mascot/Build/` と同じく、成果物の場所を1段で分かるようにするため）。
   `.app` は macOS でしかできないので、Windows に持っていくときは写す元と写し方を書き直す
@@ -61,9 +62,12 @@ Dock にも ⌘Tab にも出ない。操作はメニューバーのアイコン�
 `"devCoreDir": "<core の絶対パス>"` を書いて ChatterAgent を起動し直す。あれば同梱より優先し、
 `node dist/chatter-agent-{server,player}.mjs`（cwd は core）で起こす。消せば同梱に戻る。メニューからは変えられない。
 
+- 効いている間は、状態欄の末尾に「（devCoreDir）」が付く。release 版を確かめるときに、開発用の core が動いていることに気づけるように
 - `dist/chatter-agent-server.mjs`・`dist/chatter-agent-player.mjs`・`node_modules` のどれかが無ければ起動しない（状態欄に理由）
 - `tauri dev` には同梱の実行ファイルが無いので、`devCoreDir` が要る
 - 以前の版のキー `coreDir` は読まない。以前の版で core を選んだ利用者を、更新だけで同梱へ移すため
+- ★ **`settings.json` が JSON として読めないときは、既定値で動かし、ファイルは書き換えない**（`[Agent]` ログに出す）。
+  手で書いた内容を、表示状態の保存などで上書きして消さないため
 
 ## メニューと状態
 
@@ -96,7 +100,7 @@ Dock にも ⌘Tab にも出ない。操作はメニューバーのアイコン�
 | 表示 | ミュート | 繋ぐもの |
 |---|---|---|
 | 表示 | しない / する | Chatter Mascot（ミュートはマスコット自身が `audio.mute` を1秒ごとに読んで無音にする） |
-| 非表示 | しない | `chatter-agent player`（`devCoreDir` のときは `node dist/chatter-agent-player.mjs`。cwd は core） |
+| 非表示 | しない | `chatter-agent player`（`devCoreDir` のときは `node dist/chatter-agent-player.mjs`。cwd は「server に渡す環境」と同じ） |
 | 非表示 | する | 何も繋がない |
 
 ★ **マスコットと player を同時に繋がない。** server はフレームを全員に配り、誰か1台が ack すればキューを
@@ -210,6 +214,7 @@ macOS 限定。Windows は single-instance プラグインで同じ口にでき�
 （`XDG_CONFIG_HOME`、`CHATTER_AGENT_*`、`claude` や合成エンジンを探す PATH、`devCoreDir` のときは mise が選ぶ node）。
 Finder から起動したアプリは薄い環境しか持たないので、同梱の実行ファイルで起こすときもこれが要る。
 
+- server と player も同じ cwd で起こす。ログインシェルの `PWD` と実際の cwd を揃え、相対パスの設定（`kokoroDir` など）の基準をぶらさないため
 - ★ **ログインシェルが10秒で終わらなければ起動しない。** 状態欄に理由を出し、シェルの stderr の末尾を
   ログへ書く。既知のディレクトリへのフォールバックはしない
 - `devCoreDir` のときの node は、解決した環境の PATH で探す。版は確かめない

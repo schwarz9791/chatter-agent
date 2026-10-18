@@ -42,9 +42,11 @@ Changes from cc-mascot beyond the above:
 
 ## Third-party libraries included in build artifacts
 
+**These are not part of the repository, but they are part of the built
+`.app` / `.apk`.**
+
 `chatter-mascot/` fetches the following libraries through the Unity
-Package Manager. **They are not part of the repository, but they are part of
-the built `.app` / `.apk`.**
+Package Manager.
 
   - UniWindowController (https://github.com/kirurobo/UniWindowController)
       Copyright (c) 2020 Kirurobo, licensed under the MIT License.
@@ -134,6 +136,132 @@ the built `.app` / `.apk`.**
 
 Unity itself and the packages Unity provides (URP / Input System / Test
 Framework and so on) are governed by the Unity Software License.
+
+ChatterAgent's `.app` bundles `Contents/MacOS/chatter-agent`: `core/`
+compiled by Bun into one executable (`npm run build:bin`). **It contains the
+Bun runtime and the npm packages below, so the following notices apply to
+the `.app` as well.** The `.app` carries this NOTICE as a resource.
+
+  - Bun (https://github.com/oven-sh/bun), licensed under the MIT License.
+      The runtime embedded in the executable. Bun statically links further
+      libraries; the ones it links, and their licenses, are listed in the
+      LICENSE.md at the tag of the Bun version pinned in `mise.toml`
+      (https://github.com/oven-sh/bun/blob/bun-v<version>/LICENSE.md).
+      ★ **Bun statically links JavaScriptCore (and parts of WebKit), which
+        is licensed under the LGPL-2.** So that it can be modified and
+        relinked, the sources are available here:
+          - Bun: https://github.com/oven-sh/bun (the tag of the version
+            pinned in `mise.toml`)
+          - The WebKit used by Bun: https://github.com/oven-sh/WebKit (the
+            revision is pinned by Bun's sources)
+          - The JavaScript inside the executable: `core/` of this
+            repository. Run `npm run build:bin` in `core/` to assemble it
+            with Bun.
+
+  - @homebridge/ciao (https://github.com/homebridge/ciao)
+      Copyright (c) 2020 Andreas Bauer, licensed under the MIT License.
+  - buffer-from (https://github.com/LinusU/buffer-from)
+      Copyright (c) 2016, 2018 Linus Unnebäck, licensed under the MIT License.
+  - debug (https://github.com/debug-js/debug)
+      Copyright (c) 2014-2017 TJ Holowaychuk <tj@vision-media.ca>
+      Copyright (c) 2018-2021 Josh Junon
+      licensed under the MIT License.
+  - fast-deep-equal (https://github.com/epoberezkin/fast-deep-equal)
+      Copyright (c) 2017 Evgeny Poberezkin, licensed under the MIT License.
+  - has-flag (https://github.com/sindresorhus/has-flag)
+      Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com),
+      licensed under the MIT License.
+  - ms (https://github.com/vercel/ms)
+      Copyright (c) 2020 Vercel, Inc., licensed under the MIT License.
+  - source-map-support (https://github.com/evanw/node-source-map-support)
+      Copyright (c) 2014 Evan Wallace, licensed under the MIT License.
+  - supports-color (https://github.com/chalk/supports-color)
+      Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com),
+      licensed under the MIT License.
+      ★ **The MIT license text below covers the eight packages above.** The
+        copyright line of each is the one stated beside it.
+
+      --- Full text of the MIT license ---
+
+      MIT License
+
+      Copyright (c) <the copyright holders stated beside each package above>
+
+      Permission is hereby granted, free of charge, to any person obtaining a copy
+      of this software and associated documentation files (the "Software"), to deal
+      in the Software without restriction, including without limitation the rights
+      to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+      copies of the Software, and to permit persons to whom the Software is
+      furnished to do so, subject to the following conditions:
+
+      The above copyright notice and this permission notice shall be included in all
+      copies or substantial portions of the Software.
+
+      THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+      IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+      FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+      AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+      LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+      OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+      SOFTWARE.
+
+      --- end ---
+
+  - source-map (https://github.com/mozilla/source-map)
+      Copyright (c) 2009-2011, Mozilla Foundation and contributors,
+      licensed under the BSD-3-Clause License.
+
+      --- Full text of the source-map BSD-3-Clause license ---
+
+      Copyright (c) 2009-2011, Mozilla Foundation and contributors
+      All rights reserved.
+
+      Redistribution and use in source and binary forms, with or without
+      modification, are permitted provided that the following conditions are met:
+
+      * Redistributions of source code must retain the above copyright notice, this
+        list of conditions and the following disclaimer.
+
+      * Redistributions in binary form must reproduce the above copyright notice,
+        this list of conditions and the following disclaimer in the documentation
+        and/or other materials provided with the distribution.
+
+      * Neither the names of the Mozilla Foundation nor the names of project
+        contributors may be used to endorse or promote products derived from this
+        software without specific prior written permission.
+
+      THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+      ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+      WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+      DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+      FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+      DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+      SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+      CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+      OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+      OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+      --- end ---
+
+  - tslib (https://github.com/Microsoft/tslib)
+      Copyright (c) Microsoft Corporation, licensed under the 0BSD License.
+
+      --- Full text of the tslib 0BSD license ---
+
+      Copyright (c) Microsoft Corporation.
+
+      Permission to use, copy, modify, and/or distribute this software for any
+      purpose with or without fee is hereby granted.
+
+      THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+      REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+      AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+      INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+      LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+      OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+      PERFORMANCE OF THIS SOFTWARE.
+
+      --- end ---
 
 ---
 

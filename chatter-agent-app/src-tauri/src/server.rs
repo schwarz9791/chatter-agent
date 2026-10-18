@@ -20,7 +20,7 @@ const ENV_MARKER: &[u8] = b"\0__CHATTER_AGENT_ENV__\0";
 /// 起動できない理由。
 #[derive(Clone, Debug, PartialEq)]
 pub enum Fail {
-    NoCoreDir,
+    NoCore,
     NoDist,
     NoNodeModules,
     Env,
@@ -74,17 +74,30 @@ pub enum Core {
 
 impl Core {
     pub fn command(&self, role: &str) -> Command {
-        match self {
+        let mut c = match self {
             Core::Bundled(bin) => {
                 let mut c = Command::new(bin);
                 c.arg(role);
                 c
             }
-            Core::Dir(dir) => {
+            Core::Dir(_) => {
                 let mut c = Command::new("node");
-                c.arg(format!("dist/chatter-agent-{role}.mjs"))
-                    .current_dir(dir);
+                c.arg(format!("dist/chatter-agent-{role}.mjs"));
                 c
+            }
+        };
+        // 継がせると ChatterAgent の cwd（Finder 起動では `/`）になり、ログインシェルの `PWD` と食い違って、
+        // 相対パスの設定の基準がずれる。
+        c.current_dir(self.cwd());
+        c
+    }
+
+    /// server を動かす作業ディレクトリ。環境の解決（ログインシェル）と同じ場所に揃える。
+    pub fn cwd(&self) -> PathBuf {
+        match self {
+            Core::Dir(d) => d.clone(),
+            Core::Bundled(_) => {
+                std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from)
             }
         }
     }
@@ -98,12 +111,12 @@ impl Core {
 }
 
 /// `devCoreDir` があれば同梱より優先する。
-fn pick_core(dev_dir: Option<PathBuf>, bundled: Option<PathBuf>) -> Option<Core> {
+pub fn pick_core(dev_dir: Option<PathBuf>, bundled: Option<PathBuf>) -> Option<Core> {
     dev_dir.map(Core::Dir).or(bundled.map(Core::Bundled))
 }
 
 /// `.app` の `Contents/MacOS` には実行ファイルと並んで置かれる（開発ビルドでは `target/<profile>/`）。
-fn bundled_bin() -> Option<PathBuf> {
+pub fn bundled_bin() -> Option<PathBuf> {
     let bin = std::env::current_exe()
         .ok()?
         .parent()?
@@ -384,7 +397,7 @@ struct Inner {
     child: Mutex<Option<Child>>,
     status: Mutex<Status>,
     serial: Arc<Serial>,
-    core_dir: Mutex<Option<PathBuf>>,
+    core: Option<Core>,
     /// 直近に解決した環境。外部 server の検知でランタイムルートを求めるのに使う。
     env: Mutex<Option<Env>>,
     log_path: PathBuf,
@@ -398,14 +411,14 @@ pub struct Manager(Arc<Inner>);
 impl Manager {
     pub fn new(
         log_path: PathBuf,
-        core_dir: Option<PathBuf>,
+        core: Option<Core>,
         on_change: impl Fn(&Status) + Send + Sync + 'static,
     ) -> Self {
         Manager(Arc::new(Inner {
             child: Mutex::new(None),
             status: Mutex::new(Status::Stopped),
             serial: Arc::default(),
-            core_dir: Mutex::new(core_dir),
+            core,
             env: Mutex::new(None),
             log_path,
             on_change: Box::new(on_change),
@@ -478,14 +491,11 @@ impl Manager {
     }
 
     fn prepare(&self) -> Result<Prepared, Status> {
-        let core = self.core().ok_or(Status::Cannot(Fail::NoCoreDir))?;
+        let core = self.core().ok_or(Status::Cannot(Fail::NoCore))?;
         if let Core::Dir(dir) = &core {
             check_core(dir).map_err(Status::Cannot)?;
         }
-        let cwd = core.dir().map(Path::to_path_buf).unwrap_or_else(|| {
-            std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from)
-        });
-        let env = resolve_login_env(&cwd).map_err(|detail| {
+        let env = resolve_login_env(&core.cwd()).map_err(|detail| {
             self.log(&format!("ログインシェルから環境を取得できない: {detail}"));
             Status::Cannot(Fail::Env)
         })?;
@@ -574,13 +584,9 @@ impl Manager {
         lock(&self.0.env).clone()
     }
 
-    /// `devCoreDir`。
-    pub fn core_dir(&self) -> Option<PathBuf> {
-        lock(&self.0.core_dir).clone()
-    }
-
+    /// 起動時に決めた core。
     pub fn core(&self) -> Option<Core> {
-        pick_core(self.core_dir(), bundled_bin())
+        self.0.core.clone()
     }
 
     /// server に渡している環境。まだ解決していなければ ChatterAgent 自身の環境。
@@ -757,6 +763,18 @@ mod tests {
         let started = Instant::now();
         assert_eq!(drain.take(Duration::from_millis(300)), b"abc");
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn command_runs_in_cwd() {
+        let dir = PathBuf::from("/some/core");
+        assert_eq!(Core::Dir(dir.clone()).cwd(), dir);
+        let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from);
+        assert_eq!(Core::Bundled("/bin/x".into()).cwd(), home);
+        for core in [Core::Dir(dir), Core::Bundled("/bin/x".into())] {
+            let c = core.command("server");
+            assert_eq!(c.get_current_dir(), Some(core.cwd().as_path()));
+        }
     }
 
     #[test]

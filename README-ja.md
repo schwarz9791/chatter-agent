@@ -71,7 +71,7 @@ XR 版はまだエミュレータでしか動かしていません。**実機に
 要るものは次のとおりです。
 
 - Apple Silicon の Mac と Claude Code
-- Node（Claude Code プラグインの hook が使います）と `adb`
+- Node 24.11 以上（Claude Code プラグインの hook が使います）と `adb`
 - XREAL Aura
 - 同じ Wi-Fi に置いた Mac と Aura
 
@@ -91,7 +91,7 @@ XR 版はまだエミュレータでしか動かしていません。**実機に
    - `xattr -dr com.apple.quarantine /Applications/ChatterAgent.app` を実行する
    - 一度開いてから、システム設定 → プライバシーとセキュリティで「このまま開く」を押す。続くダイアログでもう一度「このまま開く」を押し、Touch ID か管理者パスワードで認証する
 
-   サーバーは同梱されていて、ChatterAgent を開くと起動します。その直後、ChatterAgent が「マスコットを表示できません」という警告を出しますが、この手順では macOS のマスコットを入れないので想定どおりです。そのあと Mac の CLI プレーヤーが声を出し始めますが、3 でミュートします。
+   サーバーは同梱されていて、ChatterAgent を開くと起動します。その直後、ChatterAgent が「マスコットを表示できません」という警告を出しますが、この手順では macOS のマスコットを入れないので想定どおりです。そのあと Mac の CLI プレーヤーが声を出し始めますが、「3. サーバーを LAN に公開する」でミュートします。
 
 3. **Claude Code プラグイン。** [Claude Code プラグインの導入](#claude-code-プラグインの導入)に従って入れ、Claude Code のセッションを再起動します。
 
@@ -236,7 +236,7 @@ cd chatter-mascot
 ### 前提
 
 - **Claude Code**
-- **Node** —— プラグインの hook が CLI を動かすのに使います
+- **Node 24.11 以上** —— プラグインの hook が CLI を動かすのに使います
 - **[AivisSpeech](https://aivis-project.com/)** —— **インストールだけしておけば十分です。** 合成エンジンが動いていなければサーバーが起こし、サーバーを止めれば一緒に落ちます。手で起こすのは、別ホストのエンジンに繋ぐときと、**話者を増やすとき**（音声モデルの追加には GUI が要ります）。自動起動そのものを止めるなら `CHATTER_AGENT_TTS_SPAWN=0`
 - **音声合成エンジンは差し替え可能です**（`ttsEngine`）。既定は AivisSpeech（VOICEVOX 互換）ですが、日本語以外の言語には **[Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI)**（OpenAI 互換）も使えます。導入手順は [`docs/kokoro.md`](./docs/kokoro.md)
 - **macOS** —— 表示側アプリは macOS と Android XR 向けで、再生コマンドの既定は `afplay`、合成エンジンの自動探索も macOS のパスしか見ません。Linux / Windows では、CLI プレーヤーに `CHATTER_AGENT_PLAYER_COMMAND` で再生コマンドを指定してください

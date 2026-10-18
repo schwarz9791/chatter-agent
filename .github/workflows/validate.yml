@@ -269,9 +269,28 @@ jobs:
       - name: Verify assets on Bun
         run: bun --bun run verify:assets
 
+      # 単一バイナリに入る npm パッケージは、配布物に NOTICE で表記する義務がある。
+      # 依存が増えて NOTICE に載せ忘れるのをここで止める
+      - name: Verify bundled packages are in NOTICE
+        run: |
+          notice=../NOTICE
+          packages="$(bun build src/main.ts --target=bun | grep -oE '^// node_modules/[^ ]+' | sed -E 's#^// node_modules/((@[^/]+/)?[^/]+).*#\1#' | sort -u)"
+          if [ -z "$packages" ]; then
+            echo "::error::バンドルから npm パッケージを拾えませんでした。このステップの抽出を確認してください。"
+            exit 1
+          fi
+          status=0
+          for pkg in $packages; do
+            if ! grep -qF -- "- $pkg (" "$notice"; then
+              echo "::error::$pkg が NOTICE にありません。単一バイナリに入るので、著作権表示とライセンス全文を足してください。"
+              status=1
+            fi
+          done
+          exit $status
+
       # 単一バイナリ（chatter-agent）にして、同じ verify を通す
       - name: Compile single binary
-        run: bun build --compile --no-compile-autoload-dotenv --no-compile-autoload-bunfig src/main.ts --outfile "$RUNNER_TEMP/chatter-agent"
+        run: npm run compile -- --outfile "$RUNNER_TEMP/chatter-agent"
 
       - name: Verify phase B on binary
         run: CHATTER_AGENT_BIN="$RUNNER_TEMP/chatter-agent" bun --bun run verify:phase-b

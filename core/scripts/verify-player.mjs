@@ -23,6 +23,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import {
+  BIN,
   check,
   disposableRoot,
   entryArgv,
@@ -686,12 +687,15 @@ try {
     // ★ ログ（`[Player] engine: …`）を見るアサートは #49 で行ごと消えたので常に真だった。
     //   バンドルの中身を見る。**`/audio_query` のような URL 断片は使えない** —
     //   `config.ts` の docstring がその語を含み、`minify: false` なのでコメントごと載る
-    const playerBundle = fs.readFileSync(PLAYER, "utf-8");
-    check(
-      "★ player のバンドルに合成エンジンのクライアントが入っていない",
-      !playerBundle.includes("createVoicevoxEngine") && !playerBundle.includes("createOpenAiEngine"),
-      "合成エンジンのクライアントがバンドルに含まれています",
-    );
+    //   単一バイナリのときは player のバンドルを実行していないので当てはまらない
+    if (!BIN) {
+      const playerBundle = fs.readFileSync(PLAYER, "utf-8");
+      check(
+        "★ player のバンドルに合成エンジンのクライアントが入っていない",
+        !playerBundle.includes("createVoicevoxEngine") && !playerBundle.includes("createOpenAiEngine"),
+        "合成エンジンのクライアントがバンドルに含まれています",
+      );
+    }
 
     await stopPlayer(player);
     await server.stop();

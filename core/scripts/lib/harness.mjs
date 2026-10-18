@@ -99,9 +99,9 @@ export function disposableRoot(prefix) {
 
 /**
  * 単一バイナリ（`chatter-agent`）で検証するときの実行ファイル。
- * 未設定なら従来どおりビルド済みバンドルを Node / Bun で起こす。
+ * 未設定ならビルド済みバンドルを Node / Bun で起こす。
  */
-const BIN = process.env.CHATTER_AGENT_BIN;
+export const BIN = process.env.CHATTER_AGENT_BIN;
 
 /**
  * 役割（`server` / `player` / `speak`）を起動する `[command, ...args]`。

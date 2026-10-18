@@ -100,6 +100,12 @@ Tauri の `externalBin` で `.app` に入れた。
   - Identifier は `chatter-agent-<ハッシュ>` になる。
   - `.app` の `codesign --verify --deep --strict` は通り、署名し直した後も実行ファイルは動く。
   - hardened runtime は付かないので、JIT の entitlements は要らない。
+- **quarantine が残ったままでも、同梱の実行ファイルは起動できる。** ダウンロード相当（zip に `com.apple.quarantine` を付けて
+  Archive Utility で展開。中の `chatter-agent` にも付く）の `.app` を、`xattr` を外さずに「このまま開く」で承認した:
+  - 承認でフラグが `0081` → `00c1` に変わる。バンドルにも、中の `chatter-agent` にも
+  - ChatterAgent が spawn した `chatter-agent server` / `player` は Gatekeeper に止められず、`[Server] Ready` まで上がった
+  - Finder ではなく `mv` で `/Applications` へ移すと App Translocation で読み取り専用の別パスから動くが、
+    同梱の実行ファイルは `current_exe()` の隣で見つかる
 
 - **実 LAN 経由のトークン検査**（同梱の server に、同じ Mac から自分の LAN の IP 宛てで `GET /v1/health`）:
   - トークン無しは 401 になり、ログに `Rejected unauthorized request from <LAN の IP>` が出る。Bun でも `req.socket.remoteAddress` に実際の相手が入る

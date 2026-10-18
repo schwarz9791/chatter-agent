@@ -3,7 +3,7 @@ ChatterAgent is a macOS menu bar app that starts and stops chatter-agent-server 
 ## Requirements
 
 - A Mac with Apple Silicon (arm64 build)
-- Node, for the Claude Code plugin's hook
+- Node 24.11 or later, for the Claude Code plugin's hook
 - Claude Code with the chatter-agent plugin (see the [README](https://github.com/schwarz9791/chatter-agent#readme))
 - [AivisSpeech](https://aivis-project.com/) for the voice. Installing it is enough; the server starts it when needed
 

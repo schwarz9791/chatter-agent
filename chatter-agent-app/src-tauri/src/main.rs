@@ -52,17 +52,24 @@ pub(crate) fn update_settings(
     change: impl FnOnce(&mut Settings),
 ) -> std::io::Result<()> {
     let _guard = SETTINGS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut settings = Settings::load(path);
+    let mut settings = Settings::read(path)?;
     change(&mut settings);
     settings.save(path)
 }
 
 impl Settings {
+    /// 無ければ既定値。あっても JSON として読めなければ `Err`（書き直して壊さないため）。
+    fn read(path: &std::path::Path) -> std::io::Result<Self> {
+        match std::fs::read_to_string(path) {
+            Ok(s) => serde_json::from_str(&s)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Settings::default()),
+            Err(e) => Err(e),
+        }
+    }
+
     fn load(path: &std::path::Path) -> Self {
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+        Self::read(path).unwrap_or_default()
     }
 
     /// tmp に書いてから rename し、書きかけを残さない。
@@ -209,7 +216,12 @@ fn main() {
 
             let log_path = app.path().app_log_dir()?.join("server.log");
             let (si, ri) = (status_item.clone(), restart_item.clone());
-            let dev_core_dir = Settings::load(&settings_path).dev_core_dir;
+            let (settings, settings_err) = match Settings::read(&settings_path) {
+                Ok(s) => (s, None),
+                Err(e) => (Settings::default(), Some(e)),
+            };
+            let core = server::pick_core(settings.dev_core_dir, server::bundled_bin());
+            let dev = matches!(core, Some(server::Core::Dir(_)));
             let (mi, vi) = (mute_item.clone(), visible_item.clone());
             let clients = Clients::new(
                 app.handle().clone(),
@@ -225,8 +237,12 @@ fn main() {
                 },
             );
             let c = clients.clone();
-            let manager = Manager::new(log_path.clone(), dev_core_dir, move |s| {
-                let _ = si.set_text(t.status(s));
+            let manager = Manager::new(log_path.clone(), core, move |s| {
+                let _ = si.set_text(if dev {
+                    format!("{}{}", t.status(s), t.dev_core_dir)
+                } else {
+                    t.status(s)
+                });
                 let _ = ri.set_text(if matches!(s, Status::Running(_)) {
                     t.restart
                 } else {
@@ -240,6 +256,11 @@ fn main() {
                 // 環境が解決したあとに、繋ぐクライアントを決め直す。
                 c.request();
             });
+            if let Some(e) = settings_err {
+                manager.log(&format!(
+                    "settings.json を読めない（既定値で動かし、書き換えない）: {e}"
+                ));
+            }
             clients.attach(manager.clone());
             app.manage(manager.clone());
             app.manage(clients.clone());
@@ -361,6 +382,11 @@ mod tests {
         // 旧キーは読まない。
         std::fs::write(&path, r#"{"coreDir":"/c"}"#).unwrap();
         assert_eq!(Settings::load(&path).dev_core_dir, None);
+        // 壊れたファイルは書き直さない。
+        let broken = r#"{"devCoreDir":"/c",}"#;
+        std::fs::write(&path, broken).unwrap();
+        assert!(update_settings(&path, |s| s.mascot_visible = false).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), broken);
         let _ = std::fs::remove_dir_all(&d);
     }
 }

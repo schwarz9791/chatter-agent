@@ -352,7 +352,7 @@ pub struct MascotState {
 /// ChatterAgent が起動する `.app` の版。見つからない・読めないときは `None`。
 #[tauri::command]
 pub async fn mascot_version(manager: State<'_, Manager>) -> Result<Option<String>, String> {
-    let core = manager.core_dir();
+    let core = manager.core().and_then(|c| c.dir().map(Path::to_path_buf));
     let home = home_of(&manager.env());
     blocking(move || Ok(find_app(core.as_deref(), &home).and_then(|a| bundle_version(&a)))).await
 }

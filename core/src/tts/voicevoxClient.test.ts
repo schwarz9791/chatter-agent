@@ -109,7 +109,7 @@ describe("synthesize", () => {
   it("繋がらない相手も例外になる", async () => {
     // 誰も listen していないポート
     const dead = createVoicevoxEngine({ baseUrl: "http://127.0.0.1:1", voiceId: "0", timeoutMs: 1000 });
-    await expect(dead.synthesize("だれもいない。")).rejects.toThrow("audio_query に失敗しました");
+    await expect(dead.synthesize("だれもいない。")).rejects.toThrow("audio_query (127.0.0.1:1) に失敗しました");
   });
 
   it("JSON でない audio_query の応答も例外になる", async () => {

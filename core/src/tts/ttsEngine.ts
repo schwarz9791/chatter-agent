@@ -83,6 +83,7 @@ export const DETAIL_MAX_CHARS = 512;
  *   `ECONNREFUSED` / アドレス / ポートは `err.cause` にしか入っていない。
  *   ここを `String(err)` で潰すと、ログが「fetch failed」だけになり
  *   **どこへ繋ごうとして何が起きたのかが1文字も出ない**。
+ *   Bun の fetch は接続エラーに `cause` を持たせないので、接続先は `createRequester` が `op` に添える。
  */
 export function describe(op: string, err: unknown): TtsTransportError {
   if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
@@ -148,7 +149,7 @@ export function createRequester(timeoutMs: number) {
     try {
       res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
     } catch (err) {
-      throw describe(op, err);
+      throw describe(`${op} (${new URL(url).host})`, err);
     }
     if (!res.ok) {
       const detail = await res

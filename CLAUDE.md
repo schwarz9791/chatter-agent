@@ -196,6 +196,16 @@ npm run verify:tts       # 合成と GET /audio/（エンジン不要。CI で�
 npm run verify:player    # WebSocket → 音声取得 → 再生 → ack（エンジンも音も不要。CI で回る）
 ```
 
+**Bun でも同じに動くこと**（bun も `mise.toml` で固定。CI の `bun` ジョブも同じ回し方）。
+
+```bash
+cd core                  # 依存の解決とビルドは上の npm のまま
+bunx --bun vitest run
+bun --bun run verify:phase-b   # tts / player / assets も同じ
+# phase-a だけは `exec bun "$@"` だけの node を PATH の先頭に置いて bash scripts/verify-phase-a.sh
+#（→ docs/knowledge/bun.md）
+```
+
 ```bash
 cd chatter-mascot
 ./scripts/test.sh        # EditMode テスト

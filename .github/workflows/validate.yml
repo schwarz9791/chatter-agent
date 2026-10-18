@@ -215,6 +215,60 @@ jobs:
       - name: Verify assets (マニフェスト → GET /v1/assets/ → Range で再開)
         run: npm run verify:assets
 
+  bun:
+    name: Bun（単体テスト / verify）
+    runs-on: ubuntu-latest
+
+    # 依存の解決とビルドは Node、テストと verify だけ Bun で回す。
+    # phase-a は hook と検証スクリプトが PATH の `node` を呼ぶので、`bun` を exec する `node` を
+    # PATH の先頭に置いて Bun で動かす（`bun --bun run` が差し替える `node` は、`node -e` の後ろの
+    # 1つ目の引数を落とす）。
+    # 他の verify は harness が process.execPath で子を起こすので、server / CLI / player も Bun になる
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: core/package-lock.json
+
+      # mise.toml の bun と揃えること
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.3"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run tests on Bun
+        run: bunx --bun vitest run
+
+      - name: Verify phase A on Bun
+        run: |
+          mkdir -p "$RUNNER_TEMP/node-shim"
+          printf '#!/bin/sh\nexec bun "$@"\n' > "$RUNNER_TEMP/node-shim/node"
+          chmod +x "$RUNNER_TEMP/node-shim/node"
+          PATH="$RUNNER_TEMP/node-shim:$PATH" bash scripts/verify-phase-a.sh
+
+      - name: Verify phase B on Bun
+        run: bun --bun run verify:phase-b
+
+      - name: Verify TTS on Bun
+        run: bun --bun run verify:tts
+
+      - name: Verify player on Bun
+        run: bun --bun run verify:player
+
+      - name: Verify assets on Bun
+        run: bun --bun run verify:assets
+
   agent-app:
     name: ChatterAgent
     runs-on: macos-latest

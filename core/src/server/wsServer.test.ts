@@ -61,7 +61,8 @@ function connect(server: WsServer, options: { headers?: Record<string, string> }
 
   return new Promise((resolve, reject) => {
     socket.once("open", () => resolve(client));
-    socket.once("error", reject);
+    // Bun のクライアントは拒否された upgrade の後にもう一度 error を出すので、once にしない
+    socket.on("error", reject);
   });
 }
 
@@ -353,6 +354,20 @@ describe("maxPayload（4KB超）", () => {
 
     client.socket.send("a".repeat(5 * 1024));
     expect(await closeCode).toBe(1009);
+  });
+
+  it("★ 形の正しい ack でも 4KB を超えていれば切って、onAck は呼ばない", async () => {
+    const onAck = vi.fn();
+    const server = await start({ onAck });
+    const client = await connect(server);
+
+    const closeCode = new Promise<number>((resolve) => {
+      client.socket.once("close", (code) => resolve(code));
+    });
+
+    client.socket.send(JSON.stringify({ type: "spoken", seq: 1, pad: "a".repeat(5 * 1024) }));
+    expect(await closeCode).toBe(1009);
+    expect(onAck).not.toHaveBeenCalled();
   });
 });
 

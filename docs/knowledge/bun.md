@@ -29,20 +29,22 @@ core を `bun build --compile` で1本の実行ファイルにし、ChatterAgent
   - Node は 1009 で切る。
   - Bun はそのまま `message` に渡す。
   - クライアントが Node か Bun かは関係ない。
-- `wsServer.ts` は「超過したフレームは `message` に来ない」ことを前提にしている。
-  → Bun で動かすなら、上限は `message` ハンドラで自分で見る（#211）。
+- `wsServer.ts` は「超過したフレームは `message` に来ない」ことを前提にしていた。
+  → `message` ハンドラでも同じ上限を見て 1009 で切る（#211）。`maxPayload` は残す（Node ではフレームを溜め込む前に切れる）。
 
 ## Bun の fetch の接続エラーには `cause` が無い
 
 - ECONNREFUSED は `TypeError { code: "ECONNREFUSED" }` で届き、`cause` を持たない。
   - Node では `cause` に `connect ECONNREFUSED 127.0.0.1:<port>` が載る。
-- そのため、`tts/voicevoxClient.ts` の診断メッセージから接続先が消える。判定は `code` で取れる。
+- そのため、TTS の診断メッセージ（`tts/ttsEngine.ts` の `explain`）から接続先が消える。判定は `code` で取れる。
+  → 接続先は `createRequester` が `op` に添える（`audio_query (127.0.0.1:10101) に失敗しました: …`）。
 
 ## Bun の WebSocket クライアントは、拒否された upgrade の後に `error` を出す
 
 - 401 で拒否された後に、`error`（`Expected 101 status code`）と close 1002 が来る。Node の ws ではこれが来ない。
 - `wsServer.test.ts` の Origin 拒否のテストでは、リスナーを外した後に `error` が来て unhandled error になり、
   vitest が exit 1 で終わる。テスト自体は通っている。
+  → テストの `connect()` は `error` を `once` ではなく `on` で受ける。
 
 ## vitest は Bun でほぼ回る
 
@@ -51,6 +53,16 @@ core を `bun build --compile` で1本の実行ファイルにし、ChatterAgent
 - unhandled error 2件
 
 モックやタイマーなど、vitest を Bun で動かすこと自体が原因の失敗は無かった。
+上の手当てで、どれも Node と同じに通るようになった（CI の `bun` ジョブで回している）。
+
+## `bun --bun run` が差し替える `node` は、`node -e` の後ろの1つ目の引数を落とす
+
+- `node -e '<code>' a b` の `process.argv.slice(1)`:
+  - node と `bun -e`: `["a","b"]`
+  - `bun --bun run` の script の中の `node`: `["b"]`
+- `verify-phase-a.sh` はこの形で引数を渡すので、`bun --bun run verify:phase-a` は落ちる。
+  → phase-a だけは、`exec bun "$@"` だけの `node` を PATH の先頭に置いて `bash scripts/verify-phase-a.sh` で回す。
+  他の `verify:*` は `bun --bun run` で足りる。
 
 ## 大きさ・起動・署名
 

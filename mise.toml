@@ -4,3 +4,4 @@ _.file = ".env"
 # ~/.npmrc に engine-strict=true があると、これを満たさない Node では npm install が通らない。
 [tools]
 node = "24.19.0"
+bun = "1.4.3"

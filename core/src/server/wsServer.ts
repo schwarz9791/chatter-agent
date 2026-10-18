@@ -11,11 +11,12 @@
  * - `bufferedAmount` 超過はその接続を切る（フレームだけ捨てて繋ぎっぱなしにしない。詳細は sendTo 参照）
  * - `boundAddress` を保持（`wss.address()` は close 後に null を返す）
  * - socket に error ハンドラを必ず付ける（付けないと uncaught でプロセスごと落ちる）
+ * - 受信サイズの上限は `message` でも見る（Bun は `ws` を組み込みの実装に差し替え、`maxPayload` を見ない）
  */
 
 import type * as http from "http";
 import { WebSocketServer } from "ws";
-import type { WebSocket } from "ws";
+import type { RawData, WebSocket } from "ws";
 import { isValidEpoch, type SpeechEpoch } from "../core/types";
 import { isAuthorized } from "./auth";
 import { createThrottledWarn } from "./throttledWarn";
@@ -84,14 +85,15 @@ const CLOSE_GRACE_MS = 2_000;
  *
  * ★ 上限を絞ること。ここが開いた時点で、繋げる相手はサーバーにデータを送れるようになる。
  *
- * ★ 超過したフレームは「黙って捨てられる」のではなく、接続そのものが 1009 で切られる
- *   （ws@8.21.3: receiver.js が statusCode 1009 を載せた RangeError を投げ、
- *   websocket.js の receiverOnError が websocket.close() を呼ぶ）。message イベント自体が
- *   発火しないので、下の `if (seq === null) return` は無関係（あちらはパースに失敗した
- *   *正常なサイズの* メッセージを捨てているだけ）。送信側（broadcast）の上限には効かない
- *   — これは受信専用の制限
+ * ★ 超過したフレームは黙って捨てず、接続ごと 1009 で切る。Bun は `ws` を組み込みの実装に
+ *   差し替えて `maxPayload` を見ないので、`message` でも同じ上限を見る。`maxPayload` も外さないこと
+ *   （Node ではフレームを溜め込む前に切れる）。
+ *   送信側（broadcast）の上限には効かない — これは受信専用の制限
  */
 const MAX_PAYLOAD_BYTES = 4 * 1024;
+
+const byteLengthOf = (data: RawData): number =>
+  Array.isArray(data) ? data.reduce((sum, chunk) => sum + chunk.byteLength, 0) : data.byteLength;
 
 /**
  * `{"type":"spoken","seq":N,"epoch":"…"}` から `seq` と `epoch` を読む。読めなければ null。
@@ -231,32 +233,37 @@ export function createWsServer(options: WsServerOptions): Promise<WsServer> {
       socket.on("error", (err) => console.error(`[WS] Client error (${peer}):`, err));
       socket.on("close", (code) => console.log(`[WS] Disconnected: ${peer} code=${code}`));
 
-      if (options.onAck) {
-        // ★ 読めない ack を**無言で捨てないこと。** 捨てられた ack はキューを減らさないので、
-        //   症状は「上限まで溜まって古い方から捨てられ続ける」になり、
-        //   契約どおりのつもりのクライアントが弾かれても原因に辿り着く手がかりが残らない。
-        //   ただし1接続につき1回で足りる（壊れたクライアントは同じ形を送り続ける）
-        let warnedBadAck = false;
+      // ★ 読めない ack を**無言で捨てないこと。** 捨てられた ack はキューを減らさないので、
+      //   症状は「上限まで溜まって古い方から捨てられ続ける」になり、
+      //   契約どおりのつもりのクライアントが弾かれても原因に辿り着く手がかりが残らない。
+      //   ただし1接続につき1回で足りる（壊れたクライアントは同じ形を送り続ける）
+      let warnedBadAck = false;
 
-        socket.on("message", (data) => {
-          const ack = parseAck(String(data));
-          // 知らない形は捨てる。maxPayload 超過はそもそもここに来ない（MAX_PAYLOAD_BYTES 参照）
-          if (ack === null) {
-            if (!warnedBadAck) {
-              warnedBadAck = true;
-              console.warn(`[WS] 読めない ack を捨てました (${peer}): ${String(data).slice(0, 120)}`);
-            }
-            return;
+      // ★ サイズ判定 → パースの順を1つのハンドラで保つこと。分けると、超過した形の正しい ack が
+      //   同じ tick で onAck まで通る
+      socket.on("message", (data) => {
+        if (byteLengthOf(data) > MAX_PAYLOAD_BYTES) {
+          socket.close(1009, "message too big");
+          return;
+        }
+        if (!options.onAck) return;
+
+        const ack = parseAck(String(data));
+        if (ack === null) {
+          if (!warnedBadAck) {
+            warnedBadAck = true;
+            console.warn(`[WS] 読めない ack を捨てました (${peer}): ${String(data).slice(0, 120)}`);
           }
-          // 隣の onConnect と同じ理由。ここで投げると message イベント経由の uncaught になり
-          // サーバーごと落ちる
-          try {
-            options.onAck?.(ack.seq, ack.epoch);
-          } catch (err) {
-            console.error("[WS] onAck failed:", err);
-          }
-        });
-      }
+          return;
+        }
+        // 隣の onConnect と同じ理由。ここで投げると message イベント経由の uncaught になり
+        // サーバーごと落ちる
+        try {
+          options.onAck(ack.seq, ack.epoch);
+        } catch (err) {
+          console.error("[WS] onAck failed:", err);
+        }
+      });
 
       if (!options.onConnect) return;
 

@@ -1,10 +1,11 @@
 import { defineConfig } from "tsdown";
 
 /**
- * 配布物に載せる帰属表示と改変告知。
+ * node で動かすバンドルに載せる帰属表示と改変告知。
  *
- * ★ バンドラはソースのヘッダコメントを落とす。ビルドした成果物にも残っていないと
- *   Apache-2.0 §4(b)（改変の告知）と §4(d)（帰属表示）を満たさない。
+ * ★ バンドラはソースのヘッダコメントを落とす。node で動かすバンドル（開発と `CHATTER_AGENT_CLI` の
+ *   経路）にも帰属表示と改変告知を残す。配る `.app` の単一バイナリには banner が付かず、
+ *   同梱の `NOTICE`（`tauri.bundle.conf.json` の `resources`）が担う。
  *
  * 内容はルートの `NOTICE` と揃えること。対象ファイルの一覧は docs/origin.md。
  */
@@ -36,7 +37,7 @@ const shared = {
 export default defineConfig([
   /**
    * CLI を node で動かすのは `CHATTER_AGENT_CLI` の経路（開発と、ChatterAgent を使わない運用）。
-   * hook から**毎 delta 起こされる**ので `tsx`（起動 ~300ms）では使えない。バンドルする。
+   * hook から**毎 delta 起こされる**ので `tsx` は起動が重くて使えない。バンドルする。
    */
   {
     ...shared,

@@ -4,4 +4,6 @@ _.file = ".env"
 # ~/.npmrc に engine-strict=true があると、これを満たさない Node では npm install が通らない。
 [tools]
 node = "24.19.0"
+# compile 版で Ollaya の子を起こす判定が Bun の内部の形（`argv[1]` が `/$bunfs/` で始まる）に頼っている。
+# 上げたら、`speak` が子を `<実行ファイル> ollaya-child` で起こすことを `ps` で確かめる。
 bun = "1.4.3"

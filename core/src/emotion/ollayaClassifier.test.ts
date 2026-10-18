@@ -198,7 +198,7 @@ describe("createOllayaEmotionClassifier（spawnSync を差し替えた単体テ�
     expect(fallback.calls).toEqual([["a", "b"]]);
   });
 
-  it("子は自分自身を ollaya-child で起こし、BUN_BE_BUN は付けない", () => {
+  it("子は自分自身を ollaya-child で起こし、環境は親のものを継ぐ", () => {
     let seen: { args?: string[]; env?: NodeJS.ProcessEnv } = {};
     const classify = createOllayaEmotionClassifier({
       getBaseUrl: () => "http://127.0.0.1:11435",
@@ -213,7 +213,7 @@ describe("createOllayaEmotionClassifier（spawnSync を差し替えた単体テ�
 
     classify(["a"]);
     expect(seen.args?.at(-1)).toBe("ollaya-child");
-    expect(seen.env?.BUN_BE_BUN).toBeUndefined();
+    expect(seen.env).toBeUndefined();
   });
 
   it("selfCommand: 単一バイナリ（/$bunfs/...）では実行ファイルへ直接サブコマンドを渡す", () => {

@@ -148,7 +148,7 @@ tmp の名前は対象パスに `.tmp` を足しただけ。
 プラグイン自体は bash だけで、利用者の node は要らない。
 
 hook script は `${CLAUDE_PLUGIN_ROOT}` を**環境変数としては使っていない**（script 内で見えるか未確認のため）。
-`${BASH_SOURCE[0]%/*}/..` で自分の位置から辿る。`hooks.json` 側の `${CLAUDE_PLUGIN_ROOT}` は
+`${BASH_SOURCE[0]%/*}` で自分の隣の `_lib.sh` を探す。`hooks.json` 側の `${CLAUDE_PLUGIN_ROOT}` は
 Claude Code が置換するので、そちらは確実に効く。
 
 > ★ **コピーが作られることと、そのコピーが走ることは別**（2026-08-23 実測）。
@@ -162,7 +162,7 @@ Claude Code が置換するので、そちらは確実に効く。
 > | `installed_plugins.json` | `installPath` | `~/.claude/plugins/cache/…/0.1.0` | **走らない** |
 > | `known_marketplaces.json` | `installLocation` | `/Users/schwarz/dev/chatter-agent` | **走る** |
 >
-> `${BASH_SOURCE[0]%/*}/..` は「実行された script の位置」なので、hook script 側の実装は
+> `${BASH_SOURCE[0]%/*}` は「実行された script の位置」なので、hook script 側の実装は
 > どちらでも正しく動く。問題になるのは**人間が `scripts/` を差し替えるとき**だけ。
 >
 > ★ **実機確認で `scripts/` を差し替えるなら `installLocation` を見ること。** キャッシュ側だけを
@@ -178,6 +178,12 @@ Claude Code が置換するので、そちらは確実に効く。
 GitHub など git の marketplace から入れた環境では、キャッシュのコピーが走る。Claude Code は
 `plugin.json` の `version`（無ければ marketplace 側の値）で更新の要否を決めるので、上げ忘れると
 `/plugin` の更新が「最新」と判定され、**変更が利用者に届かない**。
+
+hook が ChatterAgent に新しく頼る変更（例: `bin-path`）や、spool の形（命名・payload）を変える変更は、
+**それを読める ChatterAgent を先に出してから**プラグインの版を上げる。プラグインは git の marketplace から
+マージした時点で届くが、ChatterAgent は利用者が更新するまで古いままなので、逆にすると hook が黙るか、
+古い CLI が spool を読めずに孤児掃除で捨てる。`agent-v*` のタグは origin の main に入ったコミットにしか
+切れない（→ [`release.md`](./release.md)）ので、そういう変更はマージした直後に間を空けず `agent-v*` を切る。
 
 ローカルディレクトリとして登録した開発環境は、登録元のディレクトリがそのまま走る（上の ★）。
 `version` に関係なく、pull してセッションを開き直すか `/reload-plugins` すれば新しい中身になる。

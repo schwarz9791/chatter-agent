@@ -289,7 +289,7 @@ chatter_spawn_cli() {
   [ -f "$CHATTER_BIN_PATH_FILE" ] && IFS= read -r bin <"$CHATTER_BIN_PATH_FILE"
   # ディレクトリでも -x は真になるので -f と両方見る
   if [ ! -f "$bin" ] || [ ! -x "$bin" ]; then
-    chatter_debug SpawnCli "bin not found: ${bin:-no $CHATTER_BIN_PATH_FILE}"
+    chatter_debug SpawnCli "bin not found: ${bin:-$CHATTER_BIN_PATH_FILE is missing or empty}"
     return 0
   fi
   nohup "$bin" speak >/dev/null 2>&1 </dev/null &

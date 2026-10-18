@@ -473,7 +473,8 @@ node -e '
 ' "$RUNTIME/hook-debug.log"
 
 # bin-path が偽の実行ファイルを指す。node を PATH から外しても `speak` を渡して起こせる
-FAKE_BIN_DIR=$(mktemp -d)
+FAKE_BIN_DIR="$ROOT/fake-bin"
+mkdir -p "$FAKE_BIN_DIR"
 FAKE_BIN="$FAKE_BIN_DIR/chatter-agent"
 FAKE_BIN_ARGS="$FAKE_BIN_DIR/args"
 printf '#!/bin/bash\nprintf "%%s\\n" "$@" > "%s"\n' "$FAKE_BIN_ARGS" > "$FAKE_BIN"
@@ -493,7 +494,6 @@ node -e '
   process.exit(ok ? 0 : 1);
 ' "$FAKE_BIN_ARGS"
 rm -f "$RUNTIME/bin-path" "$SPOOL"/m-r7-bin.*
-rm -rf "$FAKE_BIN_DIR"
 
 show "⑬ 孤児カスケード: 救済されたメッセージの遅延 final が、ストリーミング中の次のメッセージを打ち切らない"
 

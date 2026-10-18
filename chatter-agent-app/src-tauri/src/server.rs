@@ -116,11 +116,13 @@ pub fn pick_core(dev_dir: Option<PathBuf>, bundled: Option<PathBuf>) -> Option<C
 }
 
 /// `.app` の `Contents/MacOS` には実行ファイルと並んで置かれる（開発ビルドでは `target/<profile>/`）。
+/// hook が別の cwd で読むので、絶対パスにして返す。
 pub fn bundled_bin() -> Option<PathBuf> {
     let bin = std::env::current_exe()
         .ok()?
         .parent()?
         .join("chatter-agent");
+    let bin = fs::canonicalize(bin).ok()?;
     bin.is_file().then_some(bin)
 }
 

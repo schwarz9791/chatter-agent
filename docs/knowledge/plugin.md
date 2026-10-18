@@ -307,10 +307,11 @@ export CHATTER_AGENT_CLI=<repo>/core/dist/chatter-agent-speak.mjs
 **既定 OFF。** 毎 delta で `perl`（ミリ秒の取得）を起動するうえ、**会話の本文がそのまま残る**。
 測り終えたら切ること。
 
-`chatter_spawn_cli` が CLI を起動できなかった理由（CLI が無い / `node` が PATH に無い）も、
-ここに `SpawnCli` タグで1行残る。**spool をドレインする経路も孤児掃除（既定6時間）を走らせる
-経路もここ以外に無い**ので、無言だと診断情報ゼロのまま恒久的に沈黙するプラグインになる。
-本リポジトリは mise で Node を固定していて、shim が PATH に載るのは対話 rc 経由のみ——
+`chatter_spawn_cli` が CLI を起動できなかった理由も、ここに `SpawnCli` タグで1行残る。
+**spool をドレインする経路も孤児掃除（既定6時間）を走らせる経路もここ以外に無い**ので、無言だと診断情報ゼロのまま恒久的に沈黙するプラグインになる。
+`bin-path` の経路では `bin not found`（`bin-path` が無い・空・指す先が実行できない）が、
+`CHATTER_AGENT_CLI` の経路（node で CLI を動かすとき）では CLI が無い / `node` が PATH に無いことが残る。
+後者について、本リポジトリは mise で Node を固定していて、shim が PATH に載るのは対話 rc 経由のみ——
 **Finder / Dock から起動した Claude Code はその PATH を継承しない**ため、`node` が見つからない
 状況は現実に起きる。
 

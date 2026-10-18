@@ -12,6 +12,7 @@
     "build": "npm --prefix ../core run build:bin && tauri build --config src-tauri/tauri.bundle.conf.json && rm -rf build/ChatterAgent.app && mkdir -p build && cp -R src-tauri/target/release/bundle/macos/ChatterAgent.app build/",
     "build:release": "./scripts/build-release.sh",
     "dev:web": "vite",
+    "licenses": "cd src-tauri && cargo about generate --offline about.hbs -o THIRD_PARTY_LICENSES.txt",
     "build:web": "tsc --noEmit && vite build",
     "test": "node --test \"src/**/*.test.ts\""
   },

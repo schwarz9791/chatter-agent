@@ -352,6 +352,21 @@ jobs:
       - name: Run tests
         run: cargo test
 
+      # 版は chatter-agent-app/mise.toml の cargo-about と揃える
+      - name: Install cargo-about
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: cargo-about@0.9.2
+
+      - name: THIRD_PARTY_LICENSES.txt が Cargo.lock と一致すること
+        working-directory: chatter-agent-app
+        run: |
+          npm run licenses
+          if ! git diff --exit-code -- src-tauri/THIRD_PARTY_LICENSES.txt; then
+            echo "::error file=chatter-agent-app/src-tauri/THIRD_PARTY_LICENSES.txt::Cargo.lock を変えたら chatter-agent-app で npm run licenses を実行して生成し直し、THIRD_PARTY_LICENSES.txt をコミットしてください"
+            exit 1
+          fi
+
   unity-audio-settings:
     name: Unity のオーディオ設定が出荷値
     runs-on: ubuntu-latest

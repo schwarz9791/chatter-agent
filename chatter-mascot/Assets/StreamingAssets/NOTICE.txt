@@ -263,6 +263,17 @@ the `.app` as well.** The `.app` carries this NOTICE as a resource.
 
       --- end ---
 
+ChatterAgent itself (`chatter-agent-app/`) statically links Rust crates (Tauri
+and its dependencies).
+
+  - Rust crates linked into ChatterAgent
+      Each crate and its license text are listed in THIRD_PARTY_LICENSES.txt
+      (`Contents/Resources/` of the `.app`; `chatter-agent-app/src-tauri/` in
+      the repository). It is generated from `Cargo.lock` with cargo-about
+      (`npm run licenses` in `chatter-agent-app/`).
+      ★ **The MPL-2.0 crates are used unmodified.** Their sources are
+        available from crates.io under the names and versions listed there.
+
 ---
 
 ## Third-party assets included in the repository

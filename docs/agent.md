@@ -46,6 +46,9 @@ npm test           # 設定窓の純粋な判定（node --test）
 - ★ **同梱は `src-tauri/tauri.bundle.conf.json` を `--config` で渡したときだけ**（`npm run build` と `build:release`）。
   `externalBin` を `tauri.conf.json` に書くと、`cargo test` / `cargo clippy` / `tauri dev` でも実行ファイルの実在が要るため。
   同じ設定で `Contents/Resources/` に `LICENSE` と `NOTICE` も入れる（同梱物に cc-mascot 由来のコードとサードパーティのコードが入るため）
+- ★ **`src-tauri/THIRD_PARTY_LICENSES.txt`** は本体に静的リンクした Rust クレートのライセンス表記で、同じく `Contents/Resources/` に入る。
+  `Cargo.lock` から cargo-about（`mise.toml` で固定。設定は `src-tauri/about.toml`、体裁は `about.hbs`）で生成してコミットする。
+  依存を変えたら `npm run licenses` で生成し直す（CI が差分を見る）
 - Tauri は `.app` を `src-tauri/target/release/bundle/macos/` に作る。`npm run build` はそれを `build/` へ
   写す（マスコットの `chatter-mascot/Build/` と同じく、成果物の場所を1段で分かるようにするため）。
   `.app` は macOS でしかできないので、Windows に持っていくときは写す元と写し方を書き直す

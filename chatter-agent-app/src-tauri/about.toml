@@ -1,0 +1,15 @@
+targets = ["aarch64-apple-darwin"]
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+
+# 選択式（OR）のライセンスは、ここで先に並べたものが選ばれる。
+# MIT を先頭にして、Apache-2.0 を選んだときの NOTICE ファイルの扱いを増やさない
+accepted = [
+  "MIT",
+  "MIT-0",
+  "Zlib",
+  "Unicode-3.0",
+  "MPL-2.0",
+  "Apache-2.0",
+  "BSD-3-Clause",
+]

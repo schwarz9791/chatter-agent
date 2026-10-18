@@ -375,7 +375,7 @@ server / player はこのファイルを読みも書きもしない（読むの�
 警告される。下の3グループはそれぞれ特定のバイナリしか読まないが、別ファイルには分けていない
 ——分けると、読まない側のバイナリが起動のたびにそのキーを未知キーとして警告してしまう。
 
-### 音声合成エンジン（`tts*`。server が読む）
+### 音声合成エンジン（`tts*`。server が読む。`ttsEngine` / `kokoroVoiceId` は `chatter-agent-speak` も読む）
 
 | キー | 既定値 | 環境変数 |
 |---|---|---|
@@ -398,6 +398,9 @@ server / player はこのファイルを読みも書きもしない（読むの�
   [`kokoro.md`](./kokoro.md)。`kokoroBaseUrl` / `kokoroVoiceId`）。
   **エンジンに応じたキーの選択は `server/index.ts` の `currentVoice()` の1か所だけ**で、spawn 計画も
   起動ログもこれを通す。
+- ★ CLI は `ttsEngine` / `kokoroVoiceId` を、応答待ちの定型文の言語を決めるのに読む
+  （→ `core/engineKeys.ts` の `voiceLanguage`）。CLI は hook から起動され、Claude Code の環境で
+  設定を解決する。環境変数を server の環境にだけ置くと CLI と値が食い違うので、`config.json` に書く
 - ★ `ttsEngine` は制御 API から書ける。接続先はどちらも `config.json` で決まっていて、起こす
   コマンドも (a) 区分のキーで固定されているので、外部送信路にならない。切り替えると、サーバーは
   起動判定をやり直す（→ `server/index.ts` の `switchEngine`）。**止めるのは自分が起こしたものだけ**

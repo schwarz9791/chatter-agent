@@ -31,6 +31,7 @@ import * as path from "path";
 import { buildConfigPatch, writableConfigKeys } from "../core/configPatch";
 import { configKeys, createDefaultConfig, type ConfigKey, type ConfigStore } from "../core/config";
 import { writeFileAtomic } from "../core/atomicWrite";
+import { voiceLanguage } from "../core/engineKeys";
 import { VERSION } from "../core/version";
 import { runSummaryPreview, type SummaryPreviewDeps } from "../summarizer/summaryPreview";
 import type { AssetCatalog } from "./assetCatalog";
@@ -48,7 +49,7 @@ import type { Pairing } from "./pairing";
 export const TTS_PREVIEW_TEXT = "テスト音声です。この声と速さで読み上げます。";
 
 /**
- * `ttsEngine: "openai"` のときの固定文。Kokoro のような英語の声に日本語の文を読ませると、
+ * 英語の声のときの固定文。Kokoro のような英語の声に日本語の文を読ませると、
  * G2P が漢字・仮名を文字の名前として読み上げてしまい、テストとして意味を成さない。
  */
 export const TTS_PREVIEW_TEXT_EN = "This is a test voice. I will read aloud with this voice and speed.";
@@ -259,7 +260,8 @@ export function createControlApi(deps: ControlApiDeps): ControlApi {
       if (!deps.config.get("ttsEnabled")) return fail(409, "tts_disabled");
       if (!ttsGate.tryEnter()) return fail(429, "too_many_requests");
       try {
-        const text = deps.config.get("ttsEngine") === "openai" ? TTS_PREVIEW_TEXT_EN : TTS_PREVIEW_TEXT;
+        const lang = voiceLanguage(deps.config.get("ttsEngine"), deps.config.get("kokoroVoiceId"));
+        const text = lang === "en" ? TTS_PREVIEW_TEXT_EN : TTS_PREVIEW_TEXT;
         const wav = await deps.synthesizePreview(text);
         return { status: 200, kind: "wav", body: wav };
       } catch (err) {

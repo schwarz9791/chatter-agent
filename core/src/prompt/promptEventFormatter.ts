@@ -9,12 +9,13 @@
  * ユーザーが回答した後になる。フックはツール実行の直前に発火するので間に合う。
  */
 
+import type { VoiceLanguage } from "../core/engineKeys";
 // 改変: 上流は adapters/harnessAdapter から型を取っていたが、adapters/ は移植しない
 // （対象が Claude Code のみでログ形式の抽象化が不要）ため、契約側から取り込む。
 import type { SpeakMessage } from "../core/types";
 
-/** 定型文の言語。読み上げる声が読める言語に合わせる */
-export type PromptLanguage = "ja" | "en";
+// ラベル内のカンマと区切りを聞き分けられるよう、英語は "or" でつなぐ
+const EN_OR = new Intl.ListFormat("en", { type: "disjunction" });
 
 const TEMPLATES = {
   ja: {
@@ -26,12 +27,12 @@ const TEMPLATES = {
     permissionPrompt: "許可を求めています。確認をお願いします。",
   },
   en: {
-    options: (question: string, labels: string[]) => `${question} The options are ${labels.join(", ")}.`,
+    options: (question: string, labels: string[]) => `${question} The options are ${EN_OR.format(labels)}.`,
     planApproval: "The plan is ready. Please take a look.",
     planApprovalWithHeading: (heading: string) => `The plan "${heading}" is ready. Please take a look.`,
     permissionPrompt: "I need your permission. Please take a look.",
   },
-} satisfies Record<PromptLanguage, unknown>;
+} satisfies Record<VoiceLanguage, unknown>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -42,7 +43,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * 例: 「どちらにしますか？ 選択肢は、そのまま進める、やり直す。」
  * 選択肢の description は長くなりすぎるため読み上げない
  */
-function buildQuestionTexts(input: unknown, language: PromptLanguage): string[] {
+function buildQuestionTexts(input: unknown, language: VoiceLanguage): string[] {
   if (!isRecord(input) || !Array.isArray(input.questions)) return [];
 
   const texts: string[] = [];
@@ -68,7 +69,7 @@ function buildQuestionTexts(input: unknown, language: PromptLanguage): string[] 
  * ExitPlanMode の入力から承認依頼の読み上げ文を組み立てる
  * plan は計画の全文マークダウン（数千字）なので、先頭の見出しだけを使う
  */
-function buildPlanApprovalText(input: unknown, language: PromptLanguage): string {
+function buildPlanApprovalText(input: unknown, language: VoiceLanguage): string {
   const plan = isRecord(input) && typeof input.plan === "string" ? input.plan : "";
   const heading = plan.match(/^#{1,6}\s+(.+)$/m)?.[1].trim();
   const templates = TEMPLATES[language];
@@ -103,7 +104,7 @@ function getStringField(payload: unknown, key: string): string | null {
  * フックの payload を読み上げメッセージに変換する
  * 対象外のイベントや壊れた payload の場合は空配列を返す
  */
-export function formatPromptEvent(payload: unknown, language: PromptLanguage): SpeakMessage[] {
+export function formatPromptEvent(payload: unknown, language: VoiceLanguage): SpeakMessage[] {
   if (!isRecord(payload)) return [];
 
   const texts = buildTexts(payload, language);
@@ -113,7 +114,7 @@ export function formatPromptEvent(payload: unknown, language: PromptLanguage): S
     .map((text) => ({ type: "speak" as const, text, kind: "prompt" as const }));
 }
 
-function buildTexts(payload: Record<string, unknown>, language: PromptLanguage): string[] {
+function buildTexts(payload: Record<string, unknown>, language: VoiceLanguage): string[] {
   switch (payload.hook_event_name) {
     case "PreToolUse":
       // 応答待ちで止まるツールのみが対象（フック側の matcher でも絞っている）

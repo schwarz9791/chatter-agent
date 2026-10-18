@@ -15,11 +15,11 @@
 
 import {
   formatPromptEvent,
-  type PromptLanguage,
   getEventHookName,
   getEventPromptId,
   getEventSessionId,
 } from "../prompt/promptEventFormatter";
+import type { VoiceLanguage } from "../core/engineKeys";
 import { cleanTextForSpeech, splitIntoSentences } from "../text/textFilter";
 import { toSpeechSentences } from "../text/speechText";
 import { acquireLock, type Lock } from "../core/lock";
@@ -216,7 +216,7 @@ export interface DrainDeps {
   /** 応答待ち通知（kind: "prompt"）を読み上げるか */
   speakPrompts: boolean;
   /** 応答待ち通知の定型文の言語 */
-  promptLanguage: PromptLanguage;
+  promptLanguage: VoiceLanguage;
   /** これより無活動な spool は孤児として掃除する */
   spoolMaxAgeMs: number;
   /**

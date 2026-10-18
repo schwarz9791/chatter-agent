@@ -58,6 +58,8 @@ export CHATTER_AGENT_CLI="$ROOT/detach-is-suppressed-here.mjs"
 #   実際の Ollaya へ判定を投げてしまい、この検証を実機の状態に依存させてしまう。この検証は
 #   形と順序だけを見るので辞書式に固定する（Ollaya / fm の実機確認は別途 README の手順で行う）。
 export CHATTER_AGENT_EMOTION_CLASSIFIER=dictionary
+# 応答待ちの定型文の言語は声で決まる。実機の設定に左右されないよう固定する。
+export CHATTER_AGENT_TTS_ENGINE=voicevox
 
 # MessageDisplay の実測ペイロード（設計書 §2-3）を組み立てて hook の stdin に流す。
 # CLI は呼ばない

@@ -500,7 +500,7 @@ describe("応答待ち通知", () => {
   it("promptLanguage が en なら英語の定型文を書く", () => {
     writePrompt("q", question);
     drain({ promptLanguage: "en" });
-    expect(texts()).toEqual(["次は何をしますか？", "The options are 進める, やめる."]);
+    expect(texts()).toEqual(["次は何をしますか？", "The options are 進める or やめる."]);
   });
 
   it("PreToolUse に付随する同一 prompt_id の Notification は捨てる", () => {

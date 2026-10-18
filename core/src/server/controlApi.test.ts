@@ -6,7 +6,7 @@ import { createConfigStore, createDefaultConfig, type ConfigStore } from "../cor
 import { VERSION } from "../core/version";
 import type { AssetCatalog } from "./assetCatalog";
 import { createPairing } from "./pairing";
-import { createControlApi, type ControlApiDeps } from "./controlApi";
+import { createControlApi, TTS_PREVIEW_TEXT, type ControlApiDeps } from "./controlApi";
 
 let dir: string;
 let filePath: string;
@@ -320,6 +320,19 @@ describe("POST /v1/tts/preview", () => {
     }).ttsPreview();
     expect(seen).toHaveLength(1);
     expect(seen[0]).toContain("This is a test voice");
+  });
+
+  it("★ ttsEngine が openai でも日本語の声なら固定文は日本語になる", async () => {
+    write({ ttsEngine: "openai", kokoroVoiceId: "jf_alpha" });
+    const seen: string[] = [];
+    await api({
+      config: store(),
+      synthesizePreview: (text) => {
+        seen.push(text);
+        return Promise.resolve(new ArrayBuffer(44));
+      },
+    }).ttsPreview();
+    expect(seen).toEqual([TTS_PREVIEW_TEXT]);
   });
 
   /**

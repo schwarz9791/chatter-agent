@@ -143,7 +143,31 @@ describe("formatPromptEvent（英語）", () => {
       "en",
     );
 
-    expect(result).toEqual([{ type: "speak", text: "Which one? The options are A, B.", kind: "prompt" }]);
+    expect(result).toEqual([{ type: "speak", text: "Which one? The options are A or B.", kind: "prompt" }]);
+  });
+
+  it("ラベルにカンマを含む2択は or でつなぐ", () => {
+    const result = formatPromptEvent(
+      preToolUse("AskUserQuestion", {
+        questions: [{ question: "Proceed?", options: [{ label: "Yes, continue" }, { label: "No, stop" }] }],
+      }),
+      "en",
+    );
+
+    expect(result).toEqual([
+      { type: "speak", text: "Proceed? The options are Yes, continue or No, stop.", kind: "prompt" },
+    ]);
+  });
+
+  it("3択は A, B, or C でつなぐ", () => {
+    const result = formatPromptEvent(
+      preToolUse("AskUserQuestion", {
+        questions: [{ question: "Which one?", options: [{ label: "A" }, { label: "B" }, { label: "C" }] }],
+      }),
+      "en",
+    );
+
+    expect(result).toEqual([{ type: "speak", text: "Which one? The options are A, B, or C.", kind: "prompt" }]);
   });
 
   it("選択肢がなければ質問文のみ読み上げる", () => {

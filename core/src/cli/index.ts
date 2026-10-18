@@ -15,6 +15,7 @@
  */
 
 import { createConfigStore, isSpeakDisabled } from "../core/config";
+import { voiceLanguage } from "../core/engineKeys";
 import {
   getEmotionKeywordsPath,
   getEmotionSchemaPath,
@@ -122,7 +123,7 @@ function main(): void {
       summarizerSessionsPath: getSummarizerSessionsPath(),
       speakPrompts: config.get("speakPrompts"),
       // 定型文は声が読める言語にする。英語の声に日本語を渡すと文字の名前を読み上げる
-      promptLanguage: config.get("ttsEngine") === "openai" ? "en" : "ja",
+      promptLanguage: voiceLanguage(config.get("ttsEngine"), config.get("kokoroVoiceId")),
       spoolMaxAgeMs: config.get("spoolMaxAgeHours") * 60 * 60 * 1000,
       classify,
       // Ollaya は neutral を「感情が乗っていない」という判定そのものとして返すので、

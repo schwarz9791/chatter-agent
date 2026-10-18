@@ -48,7 +48,7 @@ Claude Code
 | ディレクトリ | 内容 |
 |---|---|
 | `plugin/` | Claude Code プラグイン。bash の hook が payload を置くだけ |
-| `core/` | サーバーと CLI（TypeScript / Node）。`src/server/` `src/cli/` `src/player/` |
+| `core/` | サーバーと CLI（TypeScript）。Bun で1本の実行ファイルにして ChatterAgent に同梱します。`src/server/` `src/cli/` `src/player/` |
 | `chatter-mascot/` | 表示側アプリ（Unity + UniVRM）。macOS と Android XR を1プロジェクトから |
 | `chatter-agent-app/` | ChatterAgent（Tauri）。メニューバー常駐でサーバーを起動・停止し、設定パネルを持ち、マスコットの表示・ミュート・大きさ・モーションの確認を操作する |
 | `docs/` | 基本設計・ファイル構成・コマンド。実装で踏んだことは `docs/knowledge/` |
@@ -123,7 +123,7 @@ XR 版はまだエミュレータでしか動かしていません。**実機に
 ```
 
 - **macOS がローカルネットワークの許可を求めたら許可し、もう一度「サーバーを再起動」を選びます。** 許可より前に起動したサーバーは、Aura から見つかりません。
-- ターミナルから起動するなら、先に ChatterAgent のメニュー「終了」を選び（サーバーは同時に1つしか動きません）、core をビルドした clone で（→「ビルド」）`cd core && CHATTER_AGENT_HOST=0.0.0.0 npm run start:server` を実行します。環境変数は `config.json` より優先されます。**この場合、許可が付くのはターミナルのアプリで、再起動もターミナル側で行います**（ChatterAgent の「サーバーを再起動」は、外で動いているサーバーには効きません）。
+- ターミナルから起動するなら、先に ChatterAgent のメニュー「終了」を選び（サーバーは同時に1つしか動きません）、同梱の実行ファイルを `CHATTER_AGENT_HOST=0.0.0.0 /Applications/ChatterAgent.app/Contents/MacOS/chatter-agent server` で起こします。環境変数は `config.json` より優先されます。**この場合、許可が付くのはターミナルのアプリで、再起動もターミナル側で行います**（ChatterAgent の「サーバーを再起動」は、外で動いているサーバーには効きません）。
 - **ChatterAgent のメニューで「ミュート」を ON にします**（macOS のマスコットが出ていれば「マスコットを隠す」も）。同時に繋げるクライアントは1つだけです。両方繋ぐと Mac と Aura が文を取り合い、Aura が文を飛ばします。
 
 ### 4. ペアリング
@@ -196,7 +196,7 @@ npm install
 npm run build
 ```
 
-`core/dist/` に CLI・サーバー・プレーヤーが出ます。
+`core/dist/` に CLI・サーバー・プレーヤーが出ます。**開発用です**（ChatterAgent を使うなら要りません）。使うのは、ChatterAgent の `devCoreDir` で向ける、プラグインの `CHATTER_AGENT_CLI` で指す、`npm run start:server` / `npm run start:player` で起こす（ChatterAgent を使わない運用）、といった場面です。
 
 ### ChatterAgent（macOS）
 
@@ -283,14 +283,19 @@ tail -f "${XDG_CONFIG_HOME:-$HOME/.config}/chatter-agent/speech.jsonl"
 
 ### サーバー
 
+macOS では、メニューバー常駐アプリ **ChatterAgent** を開くとサーバーが起動します（Releases のもの、または「ビルド」で作った
+`chatter-agent-app/build/ChatterAgent.app`）。同梱のサーバーをログインシェルと同じ環境で起こし、起動・停止・再起動も任せられます。
+メニューの「設定…」から、サーバーの設定とマスコットの設定（モデル・大きさ・音量・モーションなど）を変えられます。マスコットを右クリックするか、Finder などから ChatterAgent を開き直しても、設定窓が前面に出ます。
+
+ターミナルから手で起こすこともできます。サーバーは同時に1つしか動かないので、先に ChatterAgent のメニュー「終了」を選びます
+（ChatterAgent は「外で動いている」と表示するだけで、手を出しません）。
+
 ```bash
+/Applications/ChatterAgent.app/Contents/MacOS/chatter-agent server
+
+# ChatterAgent を使わないとき（Linux など）: clone で（→「ビルド」の「サーバーと CLI」）
 cd core && npm run start:server
 ```
-
-macOS では、メニューバー常駐アプリ **ChatterAgent** にサーバーの起動・停止・再起動を任せることもできます。
-ChatterAgent（Releases のもの、または「ビルド」で作った `chatter-agent-app/build/ChatterAgent.app`）を開くと、同梱のサーバーを
-ログインシェルと同じ環境で起こします。上の手動起動もこれまでどおり使えます（ChatterAgent は「外で動いている」と表示するだけで、
-手を出しません）。メニューの「設定…」から、サーバーの設定とマスコットの設定（モデル・大きさ・音量・モーションなど）を変えられます。マスコットを右クリックするか、Finder などから ChatterAgent を開き直しても、設定窓が前面に出ます。
 
 メニューの「マスコットを表示 / 隠す」と「ミュート」で、繋ぐクライアントも切り替わります。表示中は macOS アプリ、
 隠している間は CLI プレーヤーで声だけを鳴らし、隠してミュートしているときは何も繋ぎません（2つを同時に繋ぐと
@@ -305,14 +310,16 @@ ChatterAgent（Releases のもの、または「ビルド」で作った `chatte
 
 | ケース | サーバー | クライアント |
 |---|---|---|
-| A. Mac だけ | `cd core && npm run start:server` | macOS アプリ / CLI プレーヤー |
+| A. Mac だけ | ChatterAgent を開く | macOS アプリ / CLI プレーヤー |
 | B. エミュレータ・USB 接続の実機を Mac のサーバーへ | そのまま起動（既定でループバックのみ listen） | `./scripts/run-android.sh`（`adb reverse` 経由。トークンも LAN 公開も要りません。端末の `connection` は空にしておきます —— `./scripts/configure-android.sh --clear`） |
-| C. LAN 越し（Wi-Fi の実機） | `CHATTER_AGENT_HOST=0.0.0.0 npm run start:server` | XR: 端末の設定パネルの「ペアリング…」に、XR なし: 繋がらないときに開くダイアログに、ChatterAgent の「Android とペアリング…」に出る4桁の PIN を入れます。mDNS が届かないとき: [繋がらないとき](#5-繋がらないとき)を見る |
+| C. LAN 越し（Wi-Fi の実機） | `config.json` に `"host": "0.0.0.0"` を足して、ChatterAgent の「サーバーを再起動」（→ [サーバーを LAN に公開する](#3-サーバーを-lan-に公開する)） | XR: 端末の設定パネルの「ペアリング…」に、XR なし: 繋がらないときに開くダイアログに、ChatterAgent の「Android とペアリング…」に出る4桁の PIN を入れます。mDNS が届かないとき: [繋がらないとき](#5-繋がらないとき)を見る |
 | D. Mac と Android を同時に動かす | 別のランタイムルート・別ポートでもう1本 | B か C をそのポートで |
 
 ```bash
 # CLI プレーヤー（耳で聞くだけ。Unity を待たずに音が出ます）
-cd core && npm run start:player
+# ChatterAgent はマスコットを隠しているあいだ自分で起こします。手で起こすのは ChatterAgent を動かしていないときだけです（2つ繋ぐと文を取り合います）
+/Applications/ChatterAgent.app/Contents/MacOS/chatter-agent player
+# clone なら: cd core && npm run start:player
 ```
 
 ```bash

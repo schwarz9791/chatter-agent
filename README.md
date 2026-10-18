@@ -48,7 +48,7 @@ The speech contract is in [`docs/protocol.md`](./docs/protocol.md). If you're wr
 | Directory | Contents |
 |---|---|
 | `plugin/` | The Claude Code plugin. A bash hook just drops the payload |
-| `core/` | The server and CLIs (TypeScript / Node). `src/server/` `src/cli/` `src/player/` |
+| `core/` | The server and CLIs (TypeScript). Bundled into a single Bun executable that ships inside ChatterAgent. `src/server/` `src/cli/` `src/player/` |
 | `chatter-mascot/` | The display-side app (Unity + UniVRM). macOS and Android XR from a single project |
 | `chatter-agent-app/` | ChatterAgent (Tauri). A menu bar app that starts and stops the server, hosts the settings panel, and shows, hides, mutes, resizes the mascot and previews its motions |
 | `docs/` | The basic design, file layout, and commands. What was learned along the way is in `docs/knowledge/` |
@@ -123,7 +123,7 @@ By default the server listens on `127.0.0.1` only, which the Aura can't reach. A
 ```
 
 - **If macOS asks for Local Network access, allow it, then choose "Restart Server" once more.** A server started before you allowed it can't be found by the Aura.
-- If you start the server from a terminal instead, first choose "Quit" in ChatterAgent's menu (only one server can run at a time), then run `cd core && CHATTER_AGENT_HOST=0.0.0.0 npm run start:server` in a clone with the core built (see "Building"). The environment variable takes priority over `config.json`. **In that case the Local Network permission belongs to the terminal app, and you restart the server in the terminal too** (ChatterAgent's "Restart Server" doesn't affect a server running outside it).
+- If you start the server from a terminal instead, first choose "Quit" in ChatterAgent's menu (only one server can run at a time), then run the bundled executable with `CHATTER_AGENT_HOST=0.0.0.0 /Applications/ChatterAgent.app/Contents/MacOS/chatter-agent server`. The environment variable takes priority over `config.json`. **In that case the Local Network permission belongs to the terminal app, and you restart the server in the terminal too** (ChatterAgent's "Restart Server" doesn't affect a server running outside it).
 - **Turn on "Mute" in ChatterAgent's menu** (and choose "Hide Mascot" if the macOS mascot is showing). Only one client can be connected at a time. If both are connected, the Mac and the Aura take sentences from each other, and the Aura skips some.
 
 ### 4. Pair
@@ -196,7 +196,7 @@ npm install
 npm run build
 ```
 
-This produces the CLI, the server and the player under `core/dist/`.
+This produces the CLI, the server and the player under `core/dist/`. **This is for development** (you don't need it if you use ChatterAgent). You use the output when pointing ChatterAgent's `devCoreDir` at it, when setting the plugin's `CHATTER_AGENT_CLI`, or when starting things with `npm run start:server` / `npm run start:player` (running without ChatterAgent).
 
 ### ChatterAgent (macOS)
 
@@ -283,15 +283,19 @@ To silence it, start Claude Code with `CHATTER_AGENT_DISABLE=1` set.
 
 ### Server
 
+On macOS, opening **ChatterAgent** (a menu bar app) starts the server (from the Releases page, or `chatter-agent-app/build/ChatterAgent.app` built as in "Building"). It starts
+its bundled server with the same environment a login shell gives you, and can also stop and restart it. Its settings panel (menu → "Settings…")
+edits the server settings and the mascot settings (model, size, volume, motion, and so on). Right-clicking the mascot, or reopening ChatterAgent from Finder, brings the settings window to the front too.
+
+You can also start it by hand from a terminal. Only one server can run at a time, so first choose "Quit" in ChatterAgent's menu
+(ChatterAgent shows a server running outside it as such and leaves it alone).
+
 ```bash
+/Applications/ChatterAgent.app/Contents/MacOS/chatter-agent server
+
+# Without ChatterAgent (Linux, etc.): in a clone (see "Server and CLIs" under "Building")
 cd core && npm run start:server
 ```
-
-On macOS you can let **ChatterAgent** (a menu bar app) start, stop, and restart the server instead.
-Open ChatterAgent (from the Releases page, or `chatter-agent-app/build/ChatterAgent.app` built as in "Building"). It starts
-its bundled server with the same environment a login shell gives you. Starting it by hand as above keeps
-working; ChatterAgent shows it as running outside and leaves it alone. Its settings panel (menu → "Settings…")
-edits the server settings and the mascot settings (model, size, volume, motion, and so on). Right-clicking the mascot, or reopening ChatterAgent from Finder, brings the settings window to the front too.
 
 "Show Mascot / Hide Mascot" and "Mute" in the menu also switch which client is connected. While the
 mascot is shown, the macOS app plays the speech; while it is hidden, the CLI player plays the voice
@@ -308,14 +312,16 @@ How the server and client pair up depends on the case. See
 
 | Case | Server | Client |
 |---|---|---|
-| A. Mac only | `cd core && npm run start:server` | macOS app / CLI player |
+| A. Mac only | Open ChatterAgent | macOS app / CLI player |
 | B. Emulator or a USB-connected device, against the Mac's server | Start it as-is (listens on loopback only by default) | `./scripts/run-android.sh` (goes over `adb reverse`, so it needs neither a token nor exposing the server to the LAN. Keep the device's `connection` empty — `./scripts/configure-android.sh --clear`) |
-| C. Over the LAN (a Wi-Fi device) | `CHATTER_AGENT_HOST=0.0.0.0 npm run start:server` | enter the 4-digit PIN shown by ChatterAgent's "Pair with Android…" into the device's settings panel ("Pair…") on XR, or into the dialog that opens when it can't connect without XR. When mDNS doesn't reach: see [If it doesn't connect](#5-if-it-doesnt-connect) |
+| C. Over the LAN (a Wi-Fi device) | Add `"host": "0.0.0.0"` to `config.json`, then "Restart Server" in ChatterAgent (see [Expose the server to the LAN](#3-expose-the-server-to-the-lan)) | enter the 4-digit PIN shown by ChatterAgent's "Pair with Android…" into the device's settings panel ("Pair…") on XR, or into the dialog that opens when it can't connect without XR. When mDNS doesn't reach: see [If it doesn't connect](#5-if-it-doesnt-connect) |
 | D. Running Mac and Android at once | A second server on its own runtime root and port | Case B or C, pointed at that port |
 
 ```bash
 # CLI player (audio only. Sound plays without waiting on Unity)
-cd core && npm run start:player
+# ChatterAgent starts it itself while the mascot is hidden. Start it by hand only while ChatterAgent isn't running (two at once fight over sentences)
+/Applications/ChatterAgent.app/Contents/MacOS/chatter-agent player
+# In a clone: cd core && npm run start:player
 ```
 
 ```bash

@@ -105,8 +105,12 @@ Tauri の `externalBin` で `.app` に入れた。
   - トークン無しは 401 になり、ログに `Rejected unauthorized request from <LAN の IP>` が出る。Bun でも `req.socket.remoteAddress` に実際の相手が入る
   - トークン有りは 200、ループバックは 200
   - テストは非ループバックを Unix ソケットで模擬しているので、ここは実物でしか見られない
+- **XR エミュレータ（`XR_Glasses`）から同梱の server へ**: `configure-android.sh` で `ws://<LAN の IP>:<port>` と
+  トークンを書き込むと、非ループバック（Mac の LAN の IP）として繋がった。同梱の `speak` で流した2文が、
+  音声の取得・再生・ack まで通った。`speak` は Ollaya の子（`BUN_BE_BUN=1`）を起こして約 1.2 秒かかった
+  （辞書式へ落ちるなら子はすぐ終わる）
 
 ## 確かめていないこと
 
-- XR 実機（Aura）から同梱の server への接続。
+- XR 実機（Aura）から同梱の server への接続（エミュレータでは確かめた）。
 - Claude Code 実機の hook から同梱の実行ファイルを起こすこと（#213）、Developer ID での署名と公証。

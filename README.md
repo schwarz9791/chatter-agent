@@ -196,7 +196,7 @@ npm install
 npm run build
 ```
 
-This produces the CLI, the server and the player under `core/dist/`. **This is for development** (you don't need it if you use ChatterAgent). You use the output when pointing ChatterAgent's `devCoreDir` at it, when setting the plugin's `CHATTER_AGENT_CLI`, or when starting things with `npm run start:server` / `npm run start:player` (running without ChatterAgent).
+This produces the CLI, the server and the player under `core/dist/`. **This is for development** (you don't need it if you use ChatterAgent). To try a branch's core, point ChatterAgent's `devCoreDir` at it, or the plugin's `CHATTER_AGENT_CLI`.
 
 ### ChatterAgent (macOS)
 
@@ -236,11 +236,11 @@ cd chatter-mascot
 ### Prerequisites
 
 - **Claude Code**
-- **Node 24.11 or later** — only to build and run from a clone (the plugin itself doesn't need Node)
+- **Node 24.11 or later** — only to build from a clone (the plugin itself doesn't need Node)
 - **[AivisSpeech](https://aivis-project.com/)** — **just having it installed is enough.** If the synthesis engine isn't running, the server wakes it up, and stopping the server takes it down too. You only need to start it by hand to connect to an engine on a different host, or **to add a speaker** (adding a voice model needs the GUI). To turn the auto-start off entirely, set `CHATTER_AGENT_TTS_SPAWN=0`
 - **The synthesis engine is swappable** (`ttsEngine`). The default is AivisSpeech (VOICEVOX-compatible); for languages other than Japanese, **[Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI)** (OpenAI-compatible) is also supported. Setup steps are in [`docs/kokoro.md`](./docs/kokoro.md)
-- **macOS** — the display apps target macOS and Android XR, the playback command defaults to `afplay`, and the engine is auto-discovered only at macOS paths. On Linux / Windows, point the CLI player at a playback command with `CHATTER_AGENT_PLAYER_COMMAND`
-- **Summarization (optional)** — shortens long messages before reading them aloud. The default backend is `fm` (the Apple Foundation Models CLI, macOS 27+). Where it's unavailable (pre-macOS 27, Linux, Windows), the original text is read as-is. `aiSummaryBackend` can be switched to `claude` (`claude -p`) instead
+- **macOS** — the display apps target macOS and Android XR, the playback command defaults to `afplay`, and the engine is auto-discovered only at macOS paths
+- **Summarization (optional)** — shortens long messages before reading them aloud. The default backend is `fm` (the Apple Foundation Models CLI, macOS 27+). Where it's unavailable (pre-macOS 27), the original text is read as-is. `aiSummaryBackend` can be switched to `claude` (`claude -p`) instead
 - **Emotion classification (optional)** — picks an expression for each utterance. The default is **[Ollaya](https://ollaya.dev/)** (a local decision model). Run `ollaya pull laya:multilingual` once to fetch the model; after that the server wakes it up whenever it isn't running, the same way it does for AivisSpeech. Where it's not installed or unreachable, classification falls back to the dictionary-based classifier, so speech never stops. `emotionClassifier` can also be switched to `fm` or `dictionary` (the original rule-based classifier)
 
 ### Installing the Claude Code plugin
@@ -253,8 +253,6 @@ claude plugin install chatter-agent@chatter-agent
 ```
 
 The plugin's hook runs the executable bundled in ChatterAgent, so **speech starts after you have opened ChatterAgent once** (it records the executable's path each time it launches).
-
-Without ChatterAgent (Linux, or running the server by hand), build the core in a clone (`cd core && npm install && npm run build`) and set `CHATTER_AGENT_CLI=<clone>/core/dist/chatter-agent-speak.mjs` in Claude Code's environment. This path needs Node 24.11 or later.
 
 To update, refresh the marketplace and then update the plugin. Updates arrive when the plugin's
 `version` goes up, which happens only when the hook (the contents of `plugin/`) changes.
@@ -292,9 +290,6 @@ You can also start it by hand from a terminal. Only one server can run at a time
 
 ```bash
 /Applications/ChatterAgent.app/Contents/MacOS/chatter-agent server
-
-# Without ChatterAgent (Linux, etc.): in a clone (see "Server and CLIs" under "Building")
-cd core && npm run start:server
 ```
 
 "Show Mascot / Hide Mascot" and "Mute" in the menu also switch which client is connected. While the
@@ -321,7 +316,6 @@ How the server and client pair up depends on the case. See
 # CLI player (audio only. Sound plays without waiting on Unity)
 # ChatterAgent starts it itself while the mascot is hidden. Start it by hand only while ChatterAgent isn't running (two at once fight over sentences)
 /Applications/ChatterAgent.app/Contents/MacOS/chatter-agent player
-# In a clone: cd core && npm run start:player
 ```
 
 ```bash

@@ -196,7 +196,7 @@ npm install
 npm run build
 ```
 
-`core/dist/` に CLI・サーバー・プレーヤーが出ます。**開発用です**（ChatterAgent を使うなら要りません）。使うのは、ChatterAgent の `devCoreDir` で向ける、プラグインの `CHATTER_AGENT_CLI` で指す、`npm run start:server` / `npm run start:player` で起こす（ChatterAgent を使わない運用）、といった場面です。
+`core/dist/` に CLI・サーバー・プレーヤーが出ます。**開発用です**（ChatterAgent を使うなら要りません）。ブランチの core を試すときに、ChatterAgent の `devCoreDir` で向けたり、プラグインの `CHATTER_AGENT_CLI` で指したりして使います。
 
 ### ChatterAgent（macOS）
 
@@ -236,11 +236,11 @@ cd chatter-mascot
 ### 前提
 
 - **Claude Code**
-- **Node 24.11 以上** —— clone からビルド・実行するときだけ要ります（プラグイン自体は Node を使いません）
+- **Node 24.11 以上** —— clone からビルドするときだけ要ります（プラグイン自体は Node を使いません）
 - **[AivisSpeech](https://aivis-project.com/)** —— **インストールだけしておけば十分です。** 合成エンジンが動いていなければサーバーが起こし、サーバーを止めれば一緒に落ちます。手で起こすのは、別ホストのエンジンに繋ぐときと、**話者を増やすとき**（音声モデルの追加には GUI が要ります）。自動起動そのものを止めるなら `CHATTER_AGENT_TTS_SPAWN=0`
 - **音声合成エンジンは差し替え可能です**（`ttsEngine`）。既定は AivisSpeech（VOICEVOX 互換）ですが、日本語以外の言語には **[Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI)**（OpenAI 互換）も使えます。導入手順は [`docs/kokoro.md`](./docs/kokoro.md)
-- **macOS** —— 表示側アプリは macOS と Android XR 向けで、再生コマンドの既定は `afplay`、合成エンジンの自動探索も macOS のパスしか見ません。Linux / Windows では、CLI プレーヤーに `CHATTER_AGENT_PLAYER_COMMAND` で再生コマンドを指定してください
-- **要約（任意）** —— 長い発言を短く整えてから読み上げます。既定は `fm`（macOS 27 以降に入っている Apple Foundation Models CLI）。使えない環境（macOS 27 未満・Linux・Windows）では原文がそのまま読み上げられます。`aiSummaryBackend` を `claude`（`claude -p`）に切り替えることもできます
+- **macOS** —— 表示側アプリは macOS と Android XR 向けで、再生コマンドの既定は `afplay`、合成エンジンの自動探索も macOS のパスしか見ません
+- **要約（任意）** —— 長い発言を短く整えてから読み上げます。既定は `fm`（macOS 27 以降に入っている Apple Foundation Models CLI）。使えない環境（macOS 27 未満）では原文がそのまま読み上げられます。`aiSummaryBackend` を `claude`（`claude -p`）に切り替えることもできます
 - **感情判定（任意）** —— 発話ごとに表情を選びます。既定は **[Ollaya](https://ollaya.dev/)**（ローカルで動く decision model）で、`ollaya pull laya:multilingual` で一度モデルを取得しておけば、以後は AivisSpeech と同じく居なければサーバーが起こします。導入していない・繋がらないときは辞書式の判定にフォールバックするので、無くても発話は止まりません。`emotionClassifier` で `fm` や `dictionary`（従来の辞書式）にも切り替えられます
 
 ### Claude Code プラグインの導入
@@ -253,8 +253,6 @@ claude plugin install chatter-agent@chatter-agent
 ```
 
 プラグインの hook は ChatterAgent に同梱した実行ファイルを起こすので、**ChatterAgent を1度起動してから**喋り始めます（起動のたびに実行ファイルのパスを記録します）。
-
-ChatterAgent を使わない場合（Linux・サーバーを手で起動する運用）は、clone の `core/` で `npm install && npm run build` し、Claude Code の環境に `CHATTER_AGENT_CLI=<clone>/core/dist/chatter-agent-speak.mjs` を設定します。この経路は Node 24.11 以上が要ります。
 
 更新するときは、marketplace を読み直してからプラグインを更新します。更新が届くのは、プラグインの
 `version` が上がったとき（hook、つまり `plugin/` の中身を変えたとき）だけです。
@@ -292,9 +290,6 @@ macOS では、メニューバー常駐アプリ **ChatterAgent** を開くと�
 
 ```bash
 /Applications/ChatterAgent.app/Contents/MacOS/chatter-agent server
-
-# ChatterAgent を使わないとき（Linux など）: clone で（→「ビルド」の「サーバーと CLI」）
-cd core && npm run start:server
 ```
 
 メニューの「マスコットを表示 / 隠す」と「ミュート」で、繋ぐクライアントも切り替わります。表示中は macOS アプリ、
@@ -319,7 +314,6 @@ cd core && npm run start:server
 # CLI プレーヤー（耳で聞くだけ。Unity を待たずに音が出ます）
 # ChatterAgent はマスコットを隠しているあいだ自分で起こします。手で起こすのは ChatterAgent を動かしていないときだけです（2つ繋ぐと文を取り合います）
 /Applications/ChatterAgent.app/Contents/MacOS/chatter-agent player
-# clone なら: cd core && npm run start:player
 ```
 
 ```bash

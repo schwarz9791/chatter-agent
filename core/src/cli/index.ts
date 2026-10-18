@@ -33,7 +33,7 @@ import { createSpeechLog } from "../core/speechLog";
 import { createSpeechQueue } from "../core/speechQueue";
 import { readEmotionKeywords, writeDefaultEmotionKeywordsIfAbsent } from "../emotion/emotionKeywordsFile";
 import { createFmEmotionClassifier } from "../emotion/fmClassifier";
-import { createOllayaEmotionClassifier } from "../emotion/ollayaClassifier";
+import { createOllayaEmotionClassifier, runOllayaChild } from "../emotion/ollayaClassifier";
 import { RuleBasedEmotionClassifier } from "../emotion/ruleBasedEmotionClassifier";
 import { createSummaryPipeline } from "../summarizer/summaryPipeline";
 import { createPublisher } from "./publish";
@@ -133,11 +133,16 @@ function main(): void {
   }
 }
 
-try {
-  main();
-} catch (err) {
-  // hook 経路なので stderr は握り潰される可能性が高いが、手動実行時の手がかりに残す
-  console.error("[chatter-agent-speak]", err);
-}
+if (process.argv[2] === "ollaya-child") {
+  // 単体バンドルを node で動かすときは main.ts を通らないので、Ollaya の子もここから起こす
+  await runOllayaChild();
+} else {
+  try {
+    main();
+  } catch (err) {
+    // hook 経路なので stderr は握り潰される可能性が高いが、手動実行時の手がかりに残す
+    console.error("[chatter-agent-speak]", err);
+  }
 
-process.exit(0);
+  process.exit(0);
+}

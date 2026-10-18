@@ -1781,10 +1781,12 @@ function createFmEmotionClassifier(deps) {
 *   出来事の種類（「予期しない事実」等）で書くと、ただの説明文までその出来事の感情に
 *   引き寄せられる。
 * ★ 選択肢の説明は短く保つ（長いと判定時に切り詰められる）。
-* ★ **CLI（chatter-agent-speak）は同期実行**なので、Node の `fetch`（非同期）はメイン
-*   プロセスの中では直接使えない。1メッセージぶんの文をまとめて子プロセス（`spawnSync`）に
-*   渡し、子の中で非同期に問い合わせて結果をまとめて返すことで、プロセス起動のコストを
-*   メッセージ単位に抑える（依存を増やさない。curl には頼らない）。
+* ★ **CLI（chatter-agent-speak）は同期実行**なので、`fetch`（非同期）はメインプロセスの
+*   中では直接使えない。1メッセージぶんの文をまとめて子プロセス（`spawnSync`）に渡し、
+*   子の中で非同期に問い合わせて結果をまとめて返すことで、プロセス起動のコストをメッセージ
+*   単位に抑える（依存を増やさない。curl には頼らない）。子は自分自身を隠しサブコマンド
+*   `ollaya-child` で起こす。単一バイナリでも bun の CLI としては動かさないので、cwd の
+*   `bunfig.toml` や `.env` を読まないという、親と同じ前提のまま立ち上がる。
 * ★ 判定の指示と基準は英語で書く。日本語で書くと精度が落ちる。本文の言語は問わない。
 * ★ どの失敗（接続拒否・タイムアウト・壊れた応答）でも例外を投げず、渡された `fallback`
 *   （辞書式）に委ねる。子プロセス全体が失敗すれば全文を、一部の文だけ壊れていればその文
@@ -1816,81 +1818,99 @@ const EMOTION_FLOOR = .8;
 const RELAXED_FLOOR = .5;
 /** `GROUP_A` の感情が1段目で取るべき確率。3択の過半に届かなければ、向きを迷っているとみなす。 */
 const GROUP_A_MAJORITY = .5;
+function choice(keys) {
+	const criteria = {};
+	for (const k of keys) criteria[k] = CRITERIA[k];
+	return {
+		type: "choice",
+		instructions: EMOTION_QUESTION_INSTRUCTIONS,
+		criteria
+	};
+}
+async function ask(baseUrl, model, text, questions) {
+	const res = await fetch(baseUrl + "/v1/systemone", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			model,
+			state: text,
+			questions
+		})
+	});
+	if (!res.ok) return null;
+	return (await res.json())?.answers ?? null;
+}
+function probs(answer, keys) {
+	const p = answer?.probabilities;
+	if (typeof p !== "object" || p === null) return null;
+	const rec = p;
+	for (const k of keys) if (typeof rec[k] !== "number") return null;
+	return rec;
+}
+function top(p, keys) {
+	let best = keys[0];
+	for (const k of keys) if (p[k] > p[best]) best = k;
+	return best;
+}
+async function classifyOne(baseUrl, model, text) {
+	const s1 = await ask(baseUrl, model, text, {
+		a: choice(GROUP_A),
+		b: choice(GROUP_B)
+	});
+	const pa = probs(s1?.a, GROUP_A);
+	const pb = probs(s1?.b, GROUP_B);
+	if (!pa || !pb) return null;
+	const wa = top(pa, GROUP_A);
+	const wb = top(pb, GROUP_B);
+	const finalKeys = [
+		wa,
+		wb,
+		"neutral"
+	];
+	const pf = probs((await ask(baseUrl, model, text, { final: choice(finalKeys) }))?.final, finalKeys);
+	if (!pf) return null;
+	const first = {
+		[wa]: pa[wa],
+		[wb]: pb[wb]
+	};
+	const final = {};
+	for (const k of finalKeys) final[k] = pf[k];
+	return {
+		first,
+		final
+	};
+}
 /**
-* 子プロセス（Node、CommonJS として `node -e` に渡す）の中で実行するスクリプト。
-* stdin から `{ texts, baseUrl, model }` を読み、stdout に `(StageScores | null)[]` を JSON で書く。
-* 壊れた応答・接続エラーはその文だけ `null` にして続行する（1文の失敗で残りを諦めない）。
-*
-* ★ テンプレートリテラルの入れ子を避けるため、文字列連結だけで組んである（コード生成時の
-*   エスケープ事故を避けるため）。
+* 1文ずつ Ollaya に問い合わせる。壊れた応答・接続エラーはその文だけ `null` にして続行する
+* （1文の失敗で残りを諦めない）。
 */
-const CHILD_SCRIPT = [
-	"const fs = require(\"fs\");",
-	`const CRITERIA = ${JSON.stringify(CRITERIA)};`,
-	`const INSTRUCTIONS = ${JSON.stringify(EMOTION_QUESTION_INSTRUCTIONS)};`,
-	`const GROUP_A = ${JSON.stringify(GROUP_A)};`,
-	`const GROUP_B = ${JSON.stringify(GROUP_B)};`,
-	"function choice(keys) {",
-	"  const criteria = {};",
-	"  for (const k of keys) criteria[k] = CRITERIA[k];",
-	"  return { type: \"choice\", instructions: INSTRUCTIONS, criteria: criteria };",
-	"}",
-	"async function ask(baseUrl, model, text, questions) {",
-	"  const res = await fetch(baseUrl + \"/v1/systemone\", {",
-	"    method: \"POST\",",
-	"    headers: { \"Content-Type\": \"application/json\" },",
-	"    body: JSON.stringify({ model: model, state: text, questions: questions }),",
-	"  });",
-	"  if (!res.ok) return null;",
-	"  const obj = await res.json();",
-	"  return obj && obj.answers ? obj.answers : null;",
-	"}",
-	"function probs(answer, keys) {",
-	"  const p = answer ? answer.probabilities : undefined;",
-	"  if (typeof p !== \"object\" || p === null) return null;",
-	"  for (const k of keys) {",
-	"    if (typeof p[k] !== \"number\") return null;",
-	"  }",
-	"  return p;",
-	"}",
-	"function top(p, keys) {",
-	"  let best = keys[0];",
-	"  for (const k of keys) {",
-	"    if (p[k] > p[best]) best = k;",
-	"  }",
-	"  return best;",
-	"}",
-	"async function classifyOne(baseUrl, model, text) {",
-	"  const s1 = await ask(baseUrl, model, text, { a: choice(GROUP_A), b: choice(GROUP_B) });",
-	"  const pa = probs(s1 && s1.a, GROUP_A);",
-	"  const pb = probs(s1 && s1.b, GROUP_B);",
-	"  if (!pa || !pb) return null;",
-	"  const wa = top(pa, GROUP_A);",
-	"  const wb = top(pb, GROUP_B);",
-	"  const finalKeys = [wa, wb, \"neutral\"];",
-	"  const s2 = await ask(baseUrl, model, text, { final: choice(finalKeys) });",
-	"  const pf = probs(s2 && s2.final, finalKeys);",
-	"  if (!pf) return null;",
-	"  const first = {};",
-	"  first[wa] = pa[wa];",
-	"  first[wb] = pb[wb];",
-	"  const final = {};",
-	"  for (const k of finalKeys) final[k] = pf[k];",
-	"  return { first: first, final: final };",
-	"}",
-	"(async () => {",
-	"  const input = JSON.parse(fs.readFileSync(0, \"utf-8\"));",
-	"  const out = [];",
-	"  for (const text of input.texts) {",
-	"    try {",
-	"      out.push(await classifyOne(input.baseUrl, input.model, text));",
-	"    } catch (e) {",
-	"      out.push(null);",
-	"    }",
-	"  }",
-	"  process.stdout.write(JSON.stringify(out));",
-	"})();"
-].join("\n");
+async function classifyAll(input) {
+	const out = [];
+	for (const text of input.texts) try {
+		out.push(await classifyOne(input.baseUrl, input.model, text));
+	} catch {
+		out.push(null);
+	}
+	return out;
+}
+/**
+* 子プロセスの本体。stdin から `{ texts, baseUrl, model }` を読み、stdout に
+* `(StageScores | null)[]` を JSON で書く。`process.exit` は呼ばない（パイプへの書き込みを
+* 流しきってから自然に終わらせる）。
+*/
+async function runOllayaChild() {
+	const input = JSON.parse(fs.readFileSync(0, "utf-8"));
+	process.stdout.write(JSON.stringify(await classifyAll(input)));
+}
+/**
+* 自分自身を `ollaya-child` で起こすコマンド。単一バイナリでは `argv[1]` が埋め込みの仮想パス
+* （`/$bunfs/...`）になるので、スクリプトを挟まず実行ファイルへ直接サブコマンドを渡す。
+*/
+function selfCommand(execPath, argv) {
+	const script = argv[1] ?? "";
+	if (script.startsWith("/$bunfs/")) return [execPath, ["ollaya-child"]];
+	return [execPath, [script, "ollaya-child"]];
+}
 /** 2段目の最上位の感情を選び、確信が足りなければ neutral にする。壊れていれば `null`。 */
 function decide(result) {
 	if (typeof result !== "object" || result === null) return null;
@@ -1912,7 +1932,8 @@ function createOllayaEmotionClassifier(deps) {
 		if (texts.length === 0) return [];
 		let stdout;
 		try {
-			const result = spawnSyncFn(process.execPath, ["-e", CHILD_SCRIPT], {
+			const [cmd, args] = selfCommand(process.execPath, process.argv);
+			const result = spawnSyncFn(cmd, args, {
 				input: JSON.stringify({
 					texts,
 					baseUrl: deps.getBaseUrl(),
@@ -1921,12 +1942,7 @@ function createOllayaEmotionClassifier(deps) {
 				encoding: "utf-8",
 				timeout: deps.getTimeoutMs(),
 				killSignal: "SIGKILL",
-				maxBuffer: 8388608,
-				env: {
-					...process.env,
-					BUN_BE_BUN: "1"
-				},
-				cwd: os.tmpdir()
+				maxBuffer: 8388608
 			});
 			if (result.error || result.status !== 0 || !result.stdout) return deps.fallback(texts);
 			stdout = result.stdout;
@@ -4099,12 +4115,15 @@ function main() {
 		lock.release();
 	}
 }
-try {
-	main();
-} catch (err) {
-	console.error("[chatter-agent-speak]", err);
+if (process.argv[2] === "ollaya-child") await runOllayaChild();
+else {
+	try {
+		main();
+	} catch (err) {
+		console.error("[chatter-agent-speak]", err);
+	}
+	process.exit(0);
 }
-process.exit(0);
 
 //#endregion
 export {  };

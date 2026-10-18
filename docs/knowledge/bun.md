@@ -93,9 +93,13 @@ Tauri の `externalBin` で `.app` に入れた。
 - **`--compile` は minify しない。** 関数名が残るので、`server.log` のスタックトレースは読める。
 - **compile 版は既定で、cwd の `.env` と `bunfig.toml` を読む。** `speak` は hook の cwd（利用者のプロジェクト）で走るので、
   → `--no-compile-autoload-dotenv --no-compile-autoload-bunfig` で切った。
-- **`process.execPath` が実行ファイル自身になる。** `emotion/ollayaClassifier.ts` は `process.execPath -e <script>` で
-  子を起こすので、`-e` が振り分けに渡り、黙って辞書式の判定へ落ちる。
-  → 子の env に `BUN_BE_BUN=1` を付けて、実行ファイルを bun として振る舞わせる（Node では無視される）。
+- **`process.execPath` が実行ファイル自身になる。** `emotion/ollayaClassifier.ts` が `process.execPath -e <script>` で
+  子を起こすと、`-e` が振り分けに渡り、黙って辞書式の判定へ落ちる。
+  `BUN_BE_BUN=1` で bun として振る舞わせると、子は bun の CLI として cwd の `bunfig.toml`（`preload`）・`.env` と
+  `~/.bunfig.toml` を読んでしまう（compile 時の `--no-compile-autoload-*` が効かない）。
+  → `main.ts` の隠しサブコマンド `ollaya-child` で起こす。compile 版では `process.argv` が
+  `["bun", "/$bunfs/root/<実行ファイル名>", ...]` になる（bun 1.4.3 で実測）ので、`/$bunfs/` で始まる `argv[1]` を
+  見分けて、スクリプトのパスを挟まず実行ファイルへ直接サブコマンドを渡す。node のバンドルは `<script> ollaya-child`。
 - **Tauri の bundler は sidecar も ad-hoc で署名し直す**（`Signing …/Contents/MacOS/chatter-agent`）。
   - Identifier は `chatter-agent-<ハッシュ>` になる。
   - `.app` の `codesign --verify --deep --strict` は通り、署名し直した後も実行ファイルは動く。
@@ -113,7 +117,7 @@ Tauri の `externalBin` で `.app` に入れた。
   - テストは非ループバックを Unix ソケットで模擬しているので、ここは実物でしか見られない
 - **XR エミュレータ（`XR_Glasses`）から同梱の server へ**: `configure-android.sh` で `ws://<LAN の IP>:<port>` と
   トークンを書き込むと、非ループバック（Mac の LAN の IP）として繋がった。同梱の `speak` で流した2文が、
-  音声の取得・再生・ack まで通った。`speak` は Ollaya の子（`BUN_BE_BUN=1`）を起こして約 1.2 秒かかった
+  音声の取得・再生・ack まで通った。`speak` は Ollaya の子（当時は `BUN_BE_BUN=1`）を起こして約 1.2 秒かかった
   （辞書式へ落ちるなら子はすぐ終わる）
 
 ## 確かめていないこと

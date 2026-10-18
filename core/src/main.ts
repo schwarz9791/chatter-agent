@@ -11,6 +11,8 @@ const entries: Record<string, () => Promise<unknown>> = {
   server: () => import("./server/index"),
   player: () => import("./player/index"),
   speak: () => import("./cli/index"),
+  // Ollaya 問い合わせの子プロセス。usage には出さない
+  "ollaya-child": () => import("./emotion/ollayaClassifier").then((m) => m.runOllayaChild()),
 };
 
 const role = process.argv[2] ?? "";

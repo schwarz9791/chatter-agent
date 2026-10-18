@@ -1,7 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { spawn, type ChildProcess } from "child_process";
-import * as os from "os";
-import { createOllayaEmotionClassifier } from "./ollayaClassifier";
+import { classifyAll, createOllayaEmotionClassifier, selfCommand } from "./ollayaClassifier";
 import type { Emotion } from "../core/types";
 
 function makeFallback(): { fn: (texts: string[]) => Emotion[]; calls: string[][] } {
@@ -199,22 +198,36 @@ describe("createOllayaEmotionClassifier（spawnSync を差し替えた単体テ�
     expect(fallback.calls).toEqual([["a", "b"]]);
   });
 
-  it("子プロセスは BUN_BE_BUN 付きの環境と一時ディレクトリの cwd で起動する", () => {
-    let seen: { env?: NodeJS.ProcessEnv; cwd?: string } = {};
+  it("子は自分自身を ollaya-child で起こし、BUN_BE_BUN は付けない", () => {
+    let seen: { args?: string[]; env?: NodeJS.ProcessEnv } = {};
     const classify = createOllayaEmotionClassifier({
       getBaseUrl: () => "http://127.0.0.1:11435",
       getModel: () => "laya:multilingual",
       getTimeoutMs: () => 5000,
       fallback: (texts) => texts.map(() => "neutral"),
-      spawnSyncFn: ((_cmd: string, _args: string[], options: typeof seen) => {
-        seen = options;
+      spawnSyncFn: ((_cmd: string, args: string[], options: { env?: NodeJS.ProcessEnv }) => {
+        seen = { args, env: options.env };
         return { pid: 1, output: [], stdout: "[]", stderr: "", status: 0, signal: null, error: undefined };
       }) as never,
     });
 
     classify(["a"]);
-    expect(seen.env?.BUN_BE_BUN).toBe("1");
-    expect(seen.cwd).toBe(os.tmpdir());
+    expect(seen.args?.at(-1)).toBe("ollaya-child");
+    expect(seen.env?.BUN_BE_BUN).toBeUndefined();
+  });
+
+  it("selfCommand: 単一バイナリ（/$bunfs/...）では実行ファイルへ直接サブコマンドを渡す", () => {
+    expect(selfCommand("/opt/chatter-agent", ["bun", "/$bunfs/root/chatter-agent", "speak"])).toEqual([
+      "/opt/chatter-agent",
+      ["ollaya-child"],
+    ]);
+  });
+
+  it("selfCommand: スクリプトを動かしている node / bun ではスクリプトのパスを挟む", () => {
+    expect(selfCommand("/usr/bin/node", ["/usr/bin/node", "/x/chatter-agent-speak.mjs", "foo"])).toEqual([
+      "/usr/bin/node",
+      ["/x/chatter-agent-speak.mjs", "ollaya-child"],
+    ]);
   });
 
   it("空配列は子プロセスを起動せずに空配列を返す", () => {
@@ -235,13 +248,12 @@ describe("createOllayaEmotionClassifier（spawnSync を差し替えた単体テ�
   });
 });
 
-describe("createOllayaEmotionClassifier（実プロセス経由の結合テスト）", () => {
-  // ★ `createOllayaEmotionClassifier` は `spawnSync`（同期）で子プロセスを起こす。
-  //   スタブサーバーをこのテストプロセス自身の中で `http.createServer` すると、
-  //   `spawnSync` がイベントループを止めている間はその接続を一切さばけず、
-  //   子プロセスの fetch が `getTimeoutMs` まで固まって必ず失敗する（デッドロック）。
-  //   本番では Ollaya は常に**別プロセス**（`ollaya serve`）なので起きない問題だが、
-  //   テストのスタブも同じく別プロセスにして再現する。
+describe("classifyAll（別プロセスのスタブ経由の結合テスト）", () => {
+  // ★ スタブサーバーは別プロセスで起こす。本番の Ollaya は常に別プロセス（`ollaya serve`）で、
+  //   同期の `spawnSync` がイベントループを止めている間はテストプロセス内のサーバーは接続を
+  //   さばけないため。
+  //   子の起動そのもの（`selfCommand`）は vitest 下では vitest 自身を指してしまうので、
+  //   子の本体 `classifyAll` をここで直接呼び、その出力を `spawnSyncFn` の stdout として返す。
   let stub: ChildProcess | undefined;
 
   afterEach(() => {
@@ -251,9 +263,8 @@ describe("createOllayaEmotionClassifier（実プロセス経由の結合テス�
 
   // ★ 実装の2段階（1回目 `questions.a` / `questions.b`、2回目 `questions.final`）を模す。
   //   どちらの回も `body.state` で判定するので、同じ文には一貫した勝者を返す。
-  //   `isTorn` は1段目が過半（`GROUP_A_MAJORITY`）を取れない文で、`CHILD_SCRIPT` の
-  //   `first[wa] = pa[wa]` / `first[wb] = pb[wb]`（子プロセス側の組み立て）が
-  //   実プロセス経由でしか検証できない経路を通す。
+  //   `isTorn` は1段目が過半（`GROUP_A_MAJORITY`）を取れない文で、`classifyAll` の
+  //   `first` の組み立て（`pa[wa]` / `pb[wb]`）を通す。
   const STUB_SCRIPT = [
     'const http = require("http");',
     "const server = http.createServer((req, res) => {",
@@ -324,48 +335,55 @@ describe("createOllayaEmotionClassifier（実プロセス経由の結合テス�
     return `http://127.0.0.1:${port}`;
   }
 
-  it("★ 実際に子プロセス（node -e）を起動し、fetch で /v1/systemone を叩いて argmax を返す", async () => {
-    const baseUrl = await startStub();
-
+  /** `classifyAll` の出力を子プロセスの stdout として流し、classifier を `decide` まで通す */
+  async function run(baseUrl: string, texts: string[]) {
+    const stdout = JSON.stringify(await classifyAll({ texts, baseUrl, model: "laya:multilingual" }));
     const fallback = makeFallback();
     const classify = createOllayaEmotionClassifier({
       getBaseUrl: () => baseUrl,
       getModel: () => "laya:multilingual",
       getTimeoutMs: () => 5000,
       fallback: fallback.fn,
+      spawnSyncFn: (() => ({
+        pid: 1,
+        output: [],
+        stdout,
+        stderr: "",
+        status: 0,
+        signal: null,
+        error: undefined,
+      })) as never,
     });
+    return { emotions: classify(texts), fallback };
+  }
 
-    expect(classify(["やりました！", "残念です。"])).toEqual(["happy", "sad"]);
+  it("★ fetch で /v1/systemone を叩き、argmax を返す", async () => {
+    const baseUrl = await startStub();
+
+    const { emotions, fallback } = await run(baseUrl, ["やりました！", "残念です。"]);
+
+    expect(emotions).toEqual(["happy", "sad"]);
     expect(fallback.calls).toHaveLength(0);
   });
 
-  it("★ 1段目の勝者が過半未満なら、2段目の confidence が高くても neutral にする（first の組み立てを実プロセスで確認）", async () => {
+  it("★ 1段目の勝者が過半未満なら、2段目の confidence が高くても neutral にする（first の組み立てを確認）", async () => {
     const baseUrl = await startStub();
-
-    const fallback = makeFallback();
-    const classify = createOllayaEmotionClassifier({
-      getBaseUrl: () => baseUrl,
-      getModel: () => "laya:multilingual",
-      getTimeoutMs: () => 5000,
-      fallback: fallback.fn,
-    });
 
     // 1段目 happy 0.45 / angry 0.3 / sad 0.25（過半未満）、2段目は happy 0.9。
     // `first[wa]` に `pb[wb]`（surprised 0.9）が紛れ込む取り違えがあれば happy になって落ちる
-    expect(classify(["迷いがあります。"])).toEqual(["neutral"]);
+    const { emotions, fallback } = await run(baseUrl, ["迷いがあります。"]);
+
+    expect(emotions).toEqual(["neutral"]);
     expect(fallback.calls).toHaveLength(0);
   });
 
-  it("接続できないポートでは fallback に落ちる（例外を投げない）", () => {
-    const fallback = makeFallback();
-    const classify = createOllayaEmotionClassifier({
-      getBaseUrl: () => "http://127.0.0.1:1", // 特権ポート。まず開いていない
-      getModel: () => "laya:multilingual",
-      getTimeoutMs: () => 3000,
-      fallback: fallback.fn,
-    });
+  it("接続できないポートでは全文が null になり、fallback に落ちる（例外を投げない）", async () => {
+    const baseUrl = "http://127.0.0.1:1"; // 特権ポート。まず開いていない
+    expect(await classifyAll({ texts: ["a"], baseUrl, model: "m" })).toEqual([null]);
 
-    expect(() => classify(["a"])).not.toThrow();
-    expect(classify(["a"])).toEqual(["neutral"]);
+    const { emotions, fallback } = await run(baseUrl, ["a"]);
+
+    expect(emotions).toEqual(["neutral"]);
+    expect(fallback.calls).toEqual([["a"]]);
   }, 10_000);
 });

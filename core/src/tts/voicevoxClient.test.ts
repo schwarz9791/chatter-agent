@@ -8,7 +8,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import * as http from "http";
 import type { AddressInfo } from "net";
 import { applySpeedScale, createVoicevoxEngine } from "./voicevoxClient";
-import { TtsHttpError, TtsTransportError } from "./ttsEngine";
+import { explain, TtsHttpError, TtsTransportError } from "./ttsEngine";
 
 type Handler = (req: http.IncomingMessage, res: http.ServerResponse) => void;
 
@@ -136,16 +136,14 @@ describe("失敗の診断（#49 のレビュー）", () => {
     expect(message).toContain(`127.0.0.1:${closed}`);
   });
 
-  it("★ AggregateError（複数アドレスに解決されるホスト）でもアドレスを出す", async () => {
+  it("★ AggregateError（複数アドレスに解決されるホスト）でも errors[] からアドレスを出す", () => {
     // `localhost` は ::1 と 127.0.0.1 の両方に解決されるので、undici は
-    // **メッセージが空の** AggregateError を cause に置く。errors[] を開かないと何も出ない
-    const closed = await closedPort();
-    const result = await client(`http://localhost:${closed}`)
-      .synthesize("あ。")
-      .catch((err: unknown) => err);
+    // **メッセージが空の** AggregateError を cause に置き、アドレスは errors[] の中にしか無い。
+    // 実接続では接続先も ECONNREFUSED も別の経路で載り、errors[] を開いたかが分からないので explain に直接渡す
+    const refused = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:1"), { code: "ECONNREFUSED" });
+    const aggregate = Object.assign(new AggregateError([refused], ""), { code: "ECONNREFUSED" });
 
-    expect((result as Error).message).toContain("ECONNREFUSED");
-    expect((result as Error).message).toContain(String(closed));
+    expect(explain(new TypeError("fetch failed", { cause: aggregate }))).toContain("127.0.0.1:1");
   });
 
   it("★ エンジンが 4xx を返したら、status と応答本文を持つ（ttsSpeakerId の診断はここにある）", async () => {

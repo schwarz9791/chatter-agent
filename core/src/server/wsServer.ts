@@ -242,7 +242,10 @@ export function createWsServer(options: WsServerOptions): Promise<WsServer> {
       // ★ サイズ判定 → パースの順を1つのハンドラで保つこと。分けると、超過した形の正しい ack が
       //   同じ tick で onAck まで通る
       socket.on("message", (data) => {
-        if (byteLengthOf(data) > MAX_PAYLOAD_BYTES) {
+        const size = byteLengthOf(data);
+        if (size > MAX_PAYLOAD_BYTES) {
+          // 切った理由を残す。Node では ws の error として上の Client error に出るが、Bun はここで切る
+          console.warn(`[WS] Message too big (${size}B > ${MAX_PAYLOAD_BYTES}B), closing: ${peer}`);
           socket.close(1009, "message too big");
           return;
         }

@@ -33,6 +33,6 @@
 | **音声合成エンジンが起動しない・二重に起動する** / **GUI を閉じたらエンジンも落ちた** / **ChatterAgent の設定パネルのテスト要約を押すと発話が止まる** / 感情判定がおかしい / **mDNS の広告が Wi-Fi に出ない** / `core/` の設計が設計書と違う / 対応しないと決めたこと | [`core.md`](./core.md) |
 | hook が発火しない・無音になる / プラグインの変更が反映されない / 要約が遅い・タイムアウトする / `final` が来ない | [`plugin.md`](./plugin.md) |
 | ChatterAgent が Dock に出てしまう / ChatterAgent を終えたのに server が残る / メニューバーのアイコンが出ない / マスコットとの依頼箱 | [`agent.md`](./agent.md) |
-| core を Bun で動かす・compile する / Bun で WebSocket の上限が効かない / Bun で診断メッセージから接続先が消える | [`bun.md`](./bun.md) |
+| core を Bun で動かす・compile する / Bun で WebSocket の上限が効かない / Bun で診断メッセージから接続先が消える / `bun --bun run verify:phase-a` が落ちる | [`bun.md`](./bun.md) |
 
 各ファイルの見出しがそのまま索引になっている（GitHub の目次から辿れる）。

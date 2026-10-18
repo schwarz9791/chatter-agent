@@ -149,7 +149,7 @@ export function createRequester(timeoutMs: number) {
     try {
       res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
     } catch (err) {
-      throw describe(`${op} (${new URL(url).host})`, err);
+      throw describe(`${op} (${URL.parse(url)?.host ?? url})`, err);
     }
     if (!res.ok) {
       const detail = await res

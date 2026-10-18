@@ -120,7 +120,21 @@ Tauri の `externalBin` で `.app` に入れた。
   音声の取得・再生・ack まで通った。`speak` は Ollaya の子（当時は `BUN_BE_BUN=1`）を起こして約 1.2 秒かかった
   （辞書式へ落ちるなら子はすぐ終わる）
 
+## hook から同梱の実行ファイルを起こす（#213）
+
+測定条件は冒頭と同じ。ChatterAgent は `npm run build` した `.app` を、プラグインは 0.3.0 を使った。
+
+- **node の無い PATH でも読み上げられた。** `env PATH=/usr/bin:/bin:/usr/sbin:/sbin claude` で起こした Claude Code の
+  hook が、`bin-path` の `chatter-agent speak` を起こした。`AskUserQuestion` を挟んでも、記録は本文 → prompt → 返事の順だった。
+- **`speak` は Ollaya の子を `<実行ファイル> ollaya-child` で起こした。** 実行中の `ps` に、`/$bunfs/` を挟まない形で現れた。
+- **devCoreDir で起動すると `bin-path` が消え**、server は `node dist/chatter-agent-server.mjs` で上がった。
+- **App Translocation**: quarantine 付きの zip を Archive Utility で展開し、移さずに「このまま開く」で開いた。
+  - `bin-path` は `/private/var/folders/…/AppTranslocation/<UUID>/d/ChatterAgent.app/Contents/MacOS/chatter-agent` になる
+  - 起動している間は、hook から起こしても Gatekeeper に止められずに読み上げた
+  - 終了するとマウントが外れてパスが消える。hook は `bin not found` を残して抜け、発言は spool に残る。
+    次に ChatterAgent を起動して CLI が動いたときに、まとめて読まれる
+
 ## 確かめていないこと
 
 - XR 実機（Aura）から同梱の server への接続（エミュレータでは確かめた）。
-- Claude Code 実機の hook から同梱の実行ファイルを起こすこと（#213）、Developer ID での署名と公証。
+- Developer ID での署名と公証。

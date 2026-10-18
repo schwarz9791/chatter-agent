@@ -39,8 +39,12 @@ if [[ "$tags" != "$latest_tag" ]]; then
   exit 1
 fi
 
+# 同梱するバイナリは配る .app のときだけ要る。tauri.conf.json に書かないのは、開発と CI をバイナリ無しで回すため。
+npm --prefix ../core ci
+npm --prefix ../core run build:bin
+
 # --config は設定にマージされ、package_info().version と Info.plist に入る。
-npm run tauri -- build --config "{\"version\":\"$version\"}"
+npm run tauri -- build --config src-tauri/tauri.bundle.conf.json --config "{\"version\":\"$version\"}"
 
 rm -rf build/ChatterAgent.app build/ChatterAgent.zip
 mkdir -p build

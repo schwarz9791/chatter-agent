@@ -19,14 +19,13 @@ use tauri::menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, Predefined
 use tauri::tray::TrayIconBuilder;
 use tauri::{Manager as _, RunEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
-use tauri_plugin_dialog::{DialogExt as _, MessageDialogKind};
 use tauri_plugin_opener::OpenerExt as _;
 
 /// ChatterAgent 自身の設定。
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Settings {
-    core_dir: Option<PathBuf>,
+    dev_core_dir: Option<PathBuf>,
     #[serde(default = "yes")]
     mascot_visible: bool,
 }
@@ -38,7 +37,7 @@ fn yes() -> bool {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            core_dir: None,
+            dev_core_dir: None,
             mascot_visible: true,
         }
     }
@@ -189,7 +188,6 @@ fn main() {
                 .enabled(false)
                 .build(app)?;
             let open_log_item = MenuItemBuilder::with_id("open_log", t.open_log).build(app)?;
-            let pick_core_item = MenuItemBuilder::with_id("pick_core", t.pick_core).build(app)?;
             let autostart_item = CheckMenuItemBuilder::with_id("autostart", t.autostart)
                 .checked(app.autolaunch().is_enabled().unwrap_or(false))
                 .build(app)?;
@@ -204,7 +202,6 @@ fn main() {
                 .item(&pairing_item)
                 .item(&restart_item)
                 .item(&open_log_item)
-                .item(&pick_core_item)
                 .item(&autostart_item)
                 .item(&PredefinedMenuItem::separator(app)?)
                 .item(&quit_item)
@@ -212,7 +209,7 @@ fn main() {
 
             let log_path = app.path().app_log_dir()?.join("server.log");
             let (si, ri) = (status_item.clone(), restart_item.clone());
-            let core_dir = Settings::load(&settings_path).core_dir;
+            let dev_core_dir = Settings::load(&settings_path).dev_core_dir;
             let (mi, vi) = (mute_item.clone(), visible_item.clone());
             let clients = Clients::new(
                 app.handle().clone(),
@@ -228,7 +225,7 @@ fn main() {
                 },
             );
             let c = clients.clone();
-            let manager = Manager::new(log_path.clone(), core_dir, move |s| {
+            let manager = Manager::new(log_path.clone(), dev_core_dir, move |s| {
                 let _ = si.set_text(t.status(s));
                 let _ = ri.set_text(if matches!(s, Status::Running(_)) {
                     t.restart
@@ -284,34 +281,6 @@ fn main() {
                         let _ = app
                             .opener()
                             .open_path(target.to_string_lossy(), None::<&str>);
-                    }
-                    "pick_core" => {
-                        let (m, path, handle) = (m.clone(), settings_path.clone(), app.clone());
-                        app.dialog()
-                            .file()
-                            .set_title(t.pick_core_title)
-                            .pick_folder(move |picked| {
-                                let Some(dir) = picked.and_then(|p| p.into_path().ok()) else {
-                                    return;
-                                };
-                                // 選び直しの失敗は状態欄に出さない。動いている server の状態と食い違うため。
-                                let saved = server::check_core(&dir)
-                                    .map_err(|f| t.cannot(&f))
-                                    .and_then(|()| {
-                                        update_settings(&path, |s| s.core_dir = Some(dir.clone()))
-                                            .map_err(|e| e.to_string())
-                                    });
-                                if let Err(reason) = saved {
-                                    handle
-                                        .dialog()
-                                        .message(reason)
-                                        .kind(MessageDialogKind::Warning)
-                                        .show(|_| {});
-                                    return;
-                                }
-                                m.set_core_dir(dir);
-                                m.start_or_restart();
-                            });
                     }
                     "autostart" => {
                         // クリックでチェックは先に切り替わっている。失敗したら戻す。
@@ -380,15 +349,18 @@ mod tests {
         assert!(Settings::load(&path).mascot_visible);
         // 旧い形式（mascotVisible 無し）は表示ありとして読む。
         std::fs::create_dir_all(&d).unwrap();
-        std::fs::write(&path, r#"{"coreDir":"/c"}"#).unwrap();
+        std::fs::write(&path, r#"{"devCoreDir":"/c"}"#).unwrap();
         assert!(Settings::load(&path).mascot_visible);
         update_settings(&path, |s| s.mascot_visible = false).unwrap();
         let s = Settings::load(&path);
         assert!(!s.mascot_visible);
-        assert_eq!(s.core_dir, Some(PathBuf::from("/c")));
-        update_settings(&path, |s| s.core_dir = Some("/d".into())).unwrap();
+        assert_eq!(s.dev_core_dir, Some(PathBuf::from("/c")));
+        update_settings(&path, |s| s.dev_core_dir = Some("/d".into())).unwrap();
         let s = Settings::load(&path);
-        assert!(!s.mascot_visible && s.core_dir == Some(PathBuf::from("/d")));
+        assert!(!s.mascot_visible && s.dev_core_dir == Some(PathBuf::from("/d")));
+        // 旧キーは読まない。
+        std::fs::write(&path, r#"{"coreDir":"/c"}"#).unwrap();
+        assert_eq!(Settings::load(&path).dev_core_dir, None);
         let _ = std::fs::remove_dir_all(&d);
     }
 }

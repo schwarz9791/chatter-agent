@@ -71,7 +71,7 @@ The XR build has only run on an emulator so far. **This is the first time it mee
 You need:
 
 - A Mac with Apple Silicon, running Claude Code
-- Node 24.11 or later, and `adb`
+- Node (the Claude Code plugin's hook runs on it), and `adb`
 - An XREAL Aura
 - The Mac and the Aura on the same Wi-Fi
 
@@ -91,17 +91,9 @@ You need:
    - Run `xattr -dr com.apple.quarantine /Applications/ChatterAgent.app`
    - Open it once, then go to System Settings → Privacy & Security and click "Open Anyway". Click "Open Anyway" again in the dialog that follows, then authenticate with Touch ID or an administrator password
 
-3. **The core (server and CLIs).** It is not bundled, so clone and build it. Then choose "Choose Core Folder…" in ChatterAgent's menu and select the `core/` folder.
+   The server is bundled, and ChatterAgent starts it when it opens. Right after that, ChatterAgent shows a "Cannot Show the Mascot" warning. That is expected, because these steps don't install the macOS mascot. The CLI player on the Mac then starts speaking; you mute it in step 3.
 
-   ```bash
-   git clone https://github.com/schwarz9791/chatter-agent.git
-   cd chatter-agent
-   (cd core && npm install && npm run build)
-   ```
-
-   Run the commands in the rest of this section from this `chatter-agent` folder. Right after you choose the core folder, ChatterAgent shows a "Cannot Show the Mascot" warning. That is expected, because these steps don't install the macOS mascot. The CLI player on the Mac then starts speaking; you mute it in step 3.
-
-4. **The Claude Code plugin.** Follow [Installing the Claude Code plugin](#installing-the-claude-code-plugin), then restart your Claude Code session.
+3. **The Claude Code plugin.** Follow [Installing the Claude Code plugin](#installing-the-claude-code-plugin), then restart your Claude Code session.
 
 ### 2. Pick an English voice
 
@@ -131,7 +123,7 @@ By default the server listens on `127.0.0.1` only, which the Aura can't reach. A
 ```
 
 - **If macOS asks for Local Network access, allow it, then choose "Restart Server" once more.** A server started before you allowed it can't be found by the Aura.
-- If you start the server from a terminal instead, first choose "Quit" in ChatterAgent's menu (only one server can run at a time), then run `cd core && CHATTER_AGENT_HOST=0.0.0.0 npm run start:server`. The environment variable takes priority over `config.json`. **In that case the Local Network permission belongs to the terminal app, and you restart the server in the terminal too** (ChatterAgent's "Restart Server" doesn't affect a server running outside it).
+- If you start the server from a terminal instead, first choose "Quit" in ChatterAgent's menu (only one server can run at a time), then run `cd core && CHATTER_AGENT_HOST=0.0.0.0 npm run start:server` in a clone with the core built (see "Building"). The environment variable takes priority over `config.json`. **In that case the Local Network permission belongs to the terminal app, and you restart the server in the terminal too** (ChatterAgent's "Restart Server" doesn't affect a server running outside it).
 - **Turn on "Mute" in ChatterAgent's menu** (and choose "Hide Mascot" if the macOS mascot is showing). Only one client can be connected at a time. If both are connected, the Mac and the Aura take sentences from each other, and the Aura skips some.
 
 ### 4. Pair
@@ -158,9 +150,10 @@ Check these in order.
 
 1. **`host` is still `127.0.0.1`.** The pairing window says "The server isn't exposed to the LAN. …". With curl, you get `409` `{"error":"not_lan"}`. Redo step 3.
 2. **macOS denied the Local Network permission.** The permission belongs to the app that started the server (ChatterAgent, or your terminal app). If you chose "Don't Allow" once, the dialog never appears again, and the Mac can reach its own server while the LAN can't. Turn that app on in System Settings → Privacy & Security → Local Network, then choose "Restart Server" (or restart it in the terminal if you started it there).
-3. **mDNS doesn't reach the Aura.** This happens when the router doesn't pass multicast (mDNS), or when the Mac and the Aura are on different subnets or VLANs. The panel says "Couldn't find the server." From your clone, write the server address to the Aura directly:
+3. **mDNS doesn't reach the Aura.** This happens when the router doesn't pass multicast (mDNS), or when the Mac and the Aura are on different subnets or VLANs. The panel says "Couldn't find the server." Clone the repository and write the server address to the Aura directly:
 
    ```bash
+   git clone https://github.com/schwarz9791/chatter-agent.git && cd chatter-agent
    ADB="$(command -v adb)" ./chatter-mascot/scripts/configure-android.sh ws://<mac-ip>:8570
    ```
 
@@ -186,6 +179,7 @@ Prebuilt APKs, the macOS mascot, and ChatterAgent (macOS) are on the [Releases p
 ### Prerequisites
 
 - **Node 24.11 or later** (pinned to 24.19.0 in `mise.toml`)
+- **Bun** (pinned in `mise.toml`) — to build ChatterAgent (it compiles the core into one executable and bundles it)
 - **Rust** (pinned in `chatter-agent-app/mise.toml`) — to build ChatterAgent
 - **Unity 6000.3.14f1** — requires the macOS / Android build support modules
 - **Unity CLI** (`unity` command) — `chatter-mascot/scripts/*.sh` run the Editor through it
@@ -207,12 +201,13 @@ This produces `plugin/bin/chatter-agent-speak.mjs` (the CLI bundled with the plu
 ### ChatterAgent (macOS)
 
 ```bash
+(cd core && npm install)
 cd chatter-agent-app
 npm install
-npm run build      # → build/ChatterAgent.app
+npm run build      # compiles the core with Bun → build/ChatterAgent.app
 ```
 
-The menu bar app that starts and stops the server and hosts the settings panel. How to use it is under "Running" → "Server".
+The menu bar app that starts and stops the server and hosts the settings panel. The server and player are bundled in the app. How to use it is under "Running" → "Server".
 
 ### macOS client
 
@@ -241,6 +236,7 @@ cd chatter-mascot
 ### Prerequisites
 
 - **Claude Code**
+- **Node** — the plugin's hook runs the CLI with it
 - **[AivisSpeech](https://aivis-project.com/)** — **just having it installed is enough.** If the synthesis engine isn't running, the server wakes it up, and stopping the server takes it down too. You only need to start it by hand to connect to an engine on a different host, or **to add a speaker** (adding a voice model needs the GUI). To turn the auto-start off entirely, set `CHATTER_AGENT_TTS_SPAWN=0`
 - **The synthesis engine is swappable** (`ttsEngine`). The default is AivisSpeech (VOICEVOX-compatible); for languages other than Japanese, **[Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI)** (OpenAI-compatible) is also supported. Setup steps are in [`docs/kokoro.md`](./docs/kokoro.md)
 - **macOS** — the display apps target macOS and Android XR, the playback command defaults to `afplay`, and the engine is auto-discovered only at macOS paths. On Linux / Windows, point the CLI player at a playback command with `CHATTER_AGENT_PLAYER_COMMAND`
@@ -288,8 +284,8 @@ cd core && npm run start:server
 ```
 
 On macOS you can let **ChatterAgent** (a menu bar app) start, stop, and restart the server instead.
-Once `core/` and ChatterAgent are built (see "Building"), open `chatter-agent-app/build/ChatterAgent.app` and choose the `core/` folder once from the menu ("Choose Core Folder…"). It then starts
-the server with the same environment a login shell gives you. Starting it by hand as above keeps
+Open ChatterAgent (from the Releases page, or `chatter-agent-app/build/ChatterAgent.app` built as in "Building"). It starts
+its bundled server with the same environment a login shell gives you. Starting it by hand as above keeps
 working; ChatterAgent shows it as running outside and leaves it alone. Its settings panel (menu → "Settings…")
 edits the server settings and the mascot settings (model, size, volume, motion, and so on). Right-clicking the mascot, or reopening ChatterAgent from Finder, brings the settings window to the front too.
 

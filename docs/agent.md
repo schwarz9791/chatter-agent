@@ -26,21 +26,25 @@
 
 ## ビルドと起動
 
-前提は `core/` がビルド済みであること（server と player の成果物 `core/dist/chatter-agent-server.mjs` / `core/dist/chatter-agent-player.mjs` を使う）。
+server と player は、core を1本にした実行ファイル `chatter-agent` を `.app` に同梱して使う
+（`Contents/MacOS/chatter-agent`。サブコマンド `server` / `player`。→ [`core.md`](./core.md)「バンドル」）。
+`npm run build` は先に core の `build:bin` でそれを作るので、core の依存と bun（ルートの `mise.toml` で固定）が要る。
 Rust は `chatter-agent-app/mise.toml` で固定している。
 
 ```bash
-cd core && npm install && npm run build
+cd core && npm install
 
 cd ../chatter-agent-app
 npm install
-npm run build      # → build/ChatterAgent.app
-npm run dev        # 開発時
+npm run build      # core の build:bin → build/ChatterAgent.app
+npm run dev        # 開発時（同梱の実行ファイルは無い。→「開発用の上書き」）
 npm test           # 設定窓の純粋な判定（node --test）
 ```
 
 - `npm run dev` は Vite（`dev:web`、ポート 1420）も起こす。`npm run build` は先に `build:web`
   （`tsc --noEmit && vite build`）を走らせ、`dist/` を `.app` に取り込む
+- ★ **同梱は `src-tauri/tauri.bundle.conf.json` を `--config` で渡したときだけ**（`npm run build` と `build:release`）。
+  `externalBin` を `tauri.conf.json` に書くと、`cargo test` / `cargo clippy` / `tauri dev` でも実行ファイルの実在が要るため
 - Tauri は `.app` を `src-tauri/target/release/bundle/macos/` に作る。`npm run build` はそれを `build/` へ
   写す（マスコットの `chatter-mascot/Build/` と同じく、成果物の場所を1段で分かるようにするため）。
   `.app` は macOS でしかできないので、Windows に持っていくときは写す元と写し方を書き直す
@@ -49,12 +53,17 @@ npm test           # 設定窓の純粋な判定（node --test）
 
 Dock にも ⌘Tab にも出ない。操作はメニューバーのアイコンから行う。
 
-### 初回
+アプリを起動すると、同梱の `chatter-agent` で server を起こす。初回の設定は要らない。
 
-メニューの「core の場所を選ぶ…」で `core/` を選ぶ。選んだ場所は
-`~/Library/Application Support/tech.sukima.chatter-agent/settings.json` の `coreDir` に保存され、
-次回からはアプリを起動すると自動で server を起こす。`dist/chatter-agent-server.mjs`・`dist/chatter-agent-player.mjs`・
-`node_modules` のどれかが無いフォルダは、警告ダイアログを出して保存しない（動いている server の状態は変わらない）。
+### 開発用の上書き（`devCoreDir`）
+
+ブランチの core を動かすときは、`~/Library/Application Support/tech.sukima.chatter-agent/settings.json` に
+`"devCoreDir": "<core の絶対パス>"` を書いて ChatterAgent を起動し直す。あれば同梱より優先し、
+`node dist/chatter-agent-{server,player}.mjs`（cwd は core）で起こす。消せば同梱に戻る。メニューからは変えられない。
+
+- `dist/chatter-agent-server.mjs`・`dist/chatter-agent-player.mjs`・`node_modules` のどれかが無ければ起動しない（状態欄に理由）
+- `tauri dev` には同梱の実行ファイルが無いので、`devCoreDir` が要る
+- 以前の版のキー `coreDir` は読まない。以前の版で core を選んだ利用者を、更新だけで同梱へ移すため
 
 ## メニューと状態
 
@@ -67,7 +76,7 @@ Dock にも ⌘Tab にも出ない。操作はメニューバーのアイコン�
 | 停止 | 動いていない。自分が起こした server が外から止められて、正常に終わったときも |
 | 異常終了（終了コード N / シグナル N） | 自分が起こした server が予期せず終わった（終了コード 0 以外） |
 | 外で動いている（pid N） | 別の手段で起こされた server がいる（次節） |
-| 起動できません: 理由 | core が未設定・`dist` か `node_modules` が無い・node が見つからない／古い（24.11 以上が必要）・環境を取得できない・spawn の失敗 |
+| 起動できません: 理由 | 同梱の実行ファイルも `devCoreDir` も無い・（`devCoreDir` のとき）`dist` か `node_modules` が無い／node が見つからない・環境を取得できない・spawn の失敗 |
 
 | 項目 | 動き |
 |---|---|
@@ -77,7 +86,6 @@ Dock にも ⌘Tab にも出ない。操作はメニューバーのアイコン�
 | 設定… | 設定窓を前面に出す。無ければ作る（次節）。マスコットの右クリックや Finder からの開き直しでも同じ（→「マスコットとのやり取り」） |
 | サーバーを再起動 / サーバーを起動 | 自分の server が動いていれば再起動、そうでなければ起動。外で動いている間と処理中は無効 |
 | ログを開く | `server.log` を開く。無ければディレクトリを開く |
-| core の場所を選ぶ… | 上記。保存したら起動（動いていれば再起動）。処理中に選び直したときは、今の処理が終わってから、選び直した core で起こし直す |
 | ログイン時に起動 | 下記 |
 | 終了 | player → マスコット → server の順に止めてから終わる |
 
@@ -88,7 +96,7 @@ Dock にも ⌘Tab にも出ない。操作はメニューバーのアイコン�
 | 表示 | ミュート | 繋ぐもの |
 |---|---|---|
 | 表示 | しない / する | Chatter Mascot（ミュートはマスコット自身が `audio.mute` を1秒ごとに読んで無音にする） |
-| 非表示 | しない | `chatter-agent-player`（`node dist/chatter-agent-player.mjs`。cwd は `core/`） |
+| 非表示 | しない | `chatter-agent player`（`devCoreDir` のときは `node dist/chatter-agent-player.mjs`。cwd は core） |
 | 非表示 | する | 何も繋がない |
 
 ★ **マスコットと player を同時に繋がない。** server はフレームを全員に配り、誰か1台が ack すればキューを
@@ -99,7 +107,8 @@ player は SIGTERM を1回だけ送って待つ（停止の仕組みと同じ）
 **強制終了はしない**（Unity は未送信の ack を投げ切ってから自分で終わる）。
 
 - **`.app` の探す順**: `/Applications/ChatterMascot.app` → `~/Applications/ChatterMascot.app` →
-  `<core>/../chatter-mascot/Build/ChatterMascot.app`。見つからない・`open` が失敗する・pid が現れない
+  （`devCoreDir` のときだけ）`<devCoreDir>/../chatter-mascot/Build/ChatterMascot.app` →
+  （ChatterAgent が `<repo>/chatter-agent-app/build/` から動いているときだけ）`<repo>/chatter-mascot/Build/ChatterMascot.app`。見つからない・`open` が失敗する・pid が現れない
   ときは、探した場所を警告ダイアログとログに出し、**非表示に寄せて player に切り替える**。見つからないときだけ
   非表示を保存する（置くまで直らないので、次の起動でダイアログを繰り返さない。置いたらメニューから表示する）
 - マスコットは `open -a` で、server に渡している環境を引き継いで起こす（同じ設定の場所を見る）。
@@ -108,14 +117,13 @@ player は SIGTERM を1回だけ送って待つ（停止の仕組みと同じ）
   「マスコットを隠す」と「終了」だけ
 - **古い発話を飛ばすのは、ChatterAgent の起動直後と、何も繋がない状態（非表示＋ミュート、player が自分で終わった後）から繋ぐときだけ。**
   マスコットには起動引数 `-speechBacklogMaxAgeMs 60000`、player には環境変数
-  `CHATTER_AGENT_SPEECH_BACKLOG_MAX_AGE_MS=60000` を渡す。音量や core による player の起こし直しと、
+  `CHATTER_AGENT_SPEECH_BACKLOG_MAX_AGE_MS=60000` を渡す。音量による player の起こし直しと、
   マスコット ⇄ player の切り替えでは渡さず、未再生の文を引き継いで鳴らす
 - マスコットには、起動のたびに自分の `.app` のパスを `-chatterAgentApp <path>` で渡す（右クリックで開き直す相手に使う。
   `.app` の中で動いていない `tauri dev` のときは付けない）
 - **player の音量**は `audio.volume`。1.0 でないときだけ `CHATTER_AGENT_PLAYER_ARGS=-v,<音量>,{file}`
   （`afplay` の引数列）を足す。1.0 のときは足さないので、`config.json` の `playerArgs` が生きる。
-  音量が変わると player を起こし直す。core を選び直したときも起こし直す（server と同じ core を使わせる）。
-  player の出力は `server.log` に追記する
+  音量が変わると player を起こし直す。player の出力は `server.log` に追記する
 - ★ **`playerCommand` を `afplay` 以外にしているときは、音量を 1.0 にする。** `-v` は `afplay` の
   引数なので、ほかのコマンドは受け付けず、無音のまま ack されて消えうる
 - **XR だけで使うときは「隠す＋ミュート」にする。** 既定は表示で、`.app` が無ければ player が繋ぐので、
@@ -198,13 +206,13 @@ macOS 限定。Windows は single-instance プラグインで同じ口にでき�
 ## server に渡す環境
 
 **ログインシェルの環境を丸ごと渡す。** `$SHELL`（無ければ `/bin/zsh`）に `-ilc` を渡し、cwd を
-`core/` にして `env` を取り出す。だから端末で `npm run start:server` したときと同じになる
-（mise が選ぶ node、`XDG_CONFIG_HOME`、`CHATTER_AGENT_*`）。Finder から起動したアプリは薄い環境しか
-持たないので、これが要る。
+`devCoreDir`（無ければ HOME）にして `env` を取り出す。だから端末で `npm run start:server` したときと同じになる
+（`XDG_CONFIG_HOME`、`CHATTER_AGENT_*`、`claude` や合成エンジンを探す PATH、`devCoreDir` のときは mise が選ぶ node）。
+Finder から起動したアプリは薄い環境しか持たないので、同梱の実行ファイルで起こすときもこれが要る。
 
 - ★ **ログインシェルが10秒で終わらなければ起動しない。** 状態欄に理由を出し、シェルの stderr の末尾を
   ログへ書く。既知のディレクトリへのフォールバックはしない
-- node は解決した環境の PATH で探し、`node --version`（cwd は `core/`）が 24.11 未満なら起動しない
+- `devCoreDir` のときの node は、解決した環境の PATH で探す。版は確かめない
 
 ## 外で動いている server
 

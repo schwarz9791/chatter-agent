@@ -6,7 +6,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -24,7 +24,9 @@ use crate::mascot::{read_settings, set_mute, settings_path};
 use crate::mascot_app::{
     candidates, find_app, home_of, launch, request_quit, running_pids, take_rechecked,
 };
-use crate::server::{exit_info, exit_label, lock, runtime_root, stop_child, Env, Manager, Serial};
+use crate::server::{
+    exit_info, exit_label, lock, runtime_root, stop_child, Core, Env, Manager, Serial,
+};
 use crate::text;
 
 /// 誰も繋いでいなかった間の後に繋ぐクライアントへ、起動時点でこれより古い発話を音なしで飛ばさせる
@@ -65,11 +67,10 @@ enum StartFail {
     Failed(String),
 }
 
-/// player の子と、起こしたときの音量・core。
+/// player の子と、起こしたときの音量。
 struct PlayerProc {
     child: Child,
     volume: String,
-    core: PathBuf,
 }
 
 /// `mascot/settings.json` のうち、ここが使う値。
@@ -341,7 +342,7 @@ impl Clients {
         let Some(m) = self.0.manager.get() else {
             return;
         };
-        let (Some(env), Some(core)) = (m.resolved_env(), m.core_dir()) else {
+        let (Some(env), Some(core)) = (m.resolved_env(), m.core()) else {
             return;
         };
         self.refresh(&env);
@@ -357,7 +358,7 @@ impl Clients {
         // 先に止める。
         let stale = lock(&self.0.player)
             .as_ref()
-            .is_some_and(|p| w != Want::Player || p.volume != volume || p.core != core);
+            .is_some_and(|p| w != Want::Player || p.volume != volume);
         if stale {
             self.stop_player();
         }
@@ -372,7 +373,7 @@ impl Clients {
         match w {
             Want::Mascot => {
                 if running_pids().is_empty() {
-                    if let Err(fail) = self.start_mascot(&env, &core, backlog) {
+                    if let Err(fail) = self.start_mascot(&env, core.dir(), backlog) {
                         let (msg, persist) = match fail {
                             StartFail::NotFound(m) => (m, true),
                             StartFail::Failed(m) => (m, false),
@@ -430,11 +431,11 @@ impl Clients {
         wait_until(MASCOT_QUIT_TIMEOUT, || running_pids().is_empty())
     }
 
-    fn start_mascot(&self, env: &Env, core: &Path, backlog: bool) -> Result<(), StartFail> {
+    fn start_mascot(&self, env: &Env, core: Option<&Path>, backlog: bool) -> Result<(), StartFail> {
         let t = text::current();
         let home = home_of(env);
-        let Some(app) = find_app(Some(core), &home) else {
-            let places: Vec<_> = candidates(Some(core), &home)
+        let Some(app) = find_app(core, &home) else {
+            let places: Vec<_> = candidates(core, &home)
                 .iter()
                 .map(|p| p.display().to_string())
                 .collect();
@@ -453,17 +454,15 @@ impl Clients {
         &self,
         m: &Manager,
         env: &Env,
-        core: &Path,
+        core: &Core,
         volume: f64,
         volume_label: String,
         backlog: bool,
     ) -> std::io::Result<()> {
         let log = m.open_log()?;
         let log_err = log.try_clone()?;
-        let mut cmd = Command::new("node");
-        cmd.arg("dist/chatter-agent-player.mjs")
-            .current_dir(core)
-            .envs(env);
+        let mut cmd = core.command("player");
+        cmd.envs(env);
         if backlog {
             cmd.env(
                 "CHATTER_AGENT_SPEECH_BACKLOG_MAX_AGE_MS",
@@ -490,7 +489,6 @@ impl Clients {
         *lock(&self.0.player) = Some(PlayerProc {
             child,
             volume: volume_label,
-            core: core.to_path_buf(),
         });
         Ok(())
     }

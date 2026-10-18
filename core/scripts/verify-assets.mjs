@@ -15,7 +15,17 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { check, disposableRoot, fail, killAll, requireBundles, show, spawnLogged, summarize } from "./lib/harness.mjs";
+import {
+  check,
+  disposableRoot,
+  entryArgv,
+  fail,
+  killAll,
+  requireBundles,
+  show,
+  spawnLogged,
+  summarize,
+} from "./lib/harness.mjs";
 
 const CORE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SERVER = path.join(CORE, "dist", "chatter-agent-server.mjs");
@@ -61,7 +71,7 @@ process.on("exit", cleanup);
 const base = `http://127.0.0.1:${PORT}`;
 
 try {
-  server = spawnLogged([SERVER], { env, label: "server" });
+  server = spawnLogged(entryArgv("server", SERVER), { env, label: "server" });
   await server.waitFor("[Server] Ready");
 
   show("① マニフェスト取得");

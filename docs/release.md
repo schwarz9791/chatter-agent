@@ -67,6 +67,8 @@ git push origin agent-v0.2.0         # 版を確かめてから（下）
 
 - `build-release.sh` は作業ツリーがきれいで HEAD に `agent-v*` タグがちょうど1つ、かつ最大のときだけ通る。
   main かどうかは見ないので、マスコットと同じく origin と同じ main でタグを付ける
+- `build-release.sh` は core の `npm ci` と `build:bin` を先に走らせ、できた実行ファイルを `.app` に同梱する
+  （→ [`agent.md`](./agent.md)「ビルドと起動」）。bun はルートの `mise.toml` で固定している
 - 版は `defaults read "$PWD/build/ChatterAgent.app/Contents/Info.plist" CFBundleShortVersionString` か、
   起動して設定窓の情報欄で確かめる
 - arm64 だけのビルドになる（Intel Mac 向けは作らない）
@@ -90,7 +92,7 @@ gh release create agent-v0.2.0 --draft --verify-tag --title "ChatterAgent 0.2.0"
   draft の zip をダウンロードして**（quarantine が付く経路で）、ノートの開き方で開けることを確かめる。マスコットは
   開いたあと、ChatterAgent から表示できることも確かめる。確かめたら publish
   （→ [`knowledge/agent.md`](./knowledge/agent.md)「配った zip は Gatekeeper の「このまま開く」で開ける」）
-- core（`dist/` と `node_modules`）は添付しない
+- core は `ChatterAgent.app` に同梱される（`Contents/MacOS/chatter-agent`）ので、別に添付しない
 
 ## やり直すとき
 

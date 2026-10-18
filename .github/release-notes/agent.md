@@ -1,9 +1,9 @@
-ChatterAgent is a macOS menu bar app that starts and stops chatter-agent-server and provides a settings panel.
+ChatterAgent is a macOS menu bar app that starts and stops chatter-agent-server and provides a settings panel. The server is bundled; it starts when you open the app.
 
 ## Requirements
 
 - A Mac with Apple Silicon (arm64 build)
-- Node 24.11 or later
+- Node, for the Claude Code plugin's hook
 - Claude Code with the chatter-agent plugin (see the [README](https://github.com/schwarz9791/chatter-agent#readme))
 - [AivisSpeech](https://aivis-project.com/) for the voice. Installing it is enough; the server starts it when needed
 
@@ -13,17 +13,6 @@ The app is ad-hoc signed and not notarized, so Gatekeeper blocks it after downlo
 
 - Run `xattr -dr com.apple.quarantine /Applications/ChatterAgent.app`
 - Open it once, then go to System Settings → Privacy & Security and click "Open Anyway". Click "Open Anyway" again in the dialog that follows, then authenticate with Touch ID or an administrator password
-
-## Set up core
-
-The core (server and CLIs) is not bundled.
-
-```sh
-git clone https://github.com/schwarz9791/chatter-agent.git
-cd chatter-agent/core && npm install && npm run build
-```
-
-Then choose "Choose Core Folder…" in the menu and select the `core/` folder.
 
 ## Notes
 

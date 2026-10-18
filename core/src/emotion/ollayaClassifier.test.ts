@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { spawn, type ChildProcess } from "child_process";
+import * as os from "os";
 import { createOllayaEmotionClassifier } from "./ollayaClassifier";
 import type { Emotion } from "../core/types";
 
@@ -196,6 +197,24 @@ describe("createOllayaEmotionClassifier（spawnSync を差し替えた単体テ�
 
     expect(classify(["a", "b"])).toEqual(["neutral", "neutral"]);
     expect(fallback.calls).toEqual([["a", "b"]]);
+  });
+
+  it("子プロセスは BUN_BE_BUN 付きの環境と一時ディレクトリの cwd で起動する", () => {
+    let seen: { env?: NodeJS.ProcessEnv; cwd?: string } = {};
+    const classify = createOllayaEmotionClassifier({
+      getBaseUrl: () => "http://127.0.0.1:11435",
+      getModel: () => "laya:multilingual",
+      getTimeoutMs: () => 5000,
+      fallback: (texts) => texts.map(() => "neutral"),
+      spawnSyncFn: ((_cmd: string, _args: string[], options: typeof seen) => {
+        seen = options;
+        return { pid: 1, output: [], stdout: "[]", stderr: "", status: 0, signal: null, error: undefined };
+      }) as never,
+    });
+
+    classify(["a"]);
+    expect(seen.env?.BUN_BE_BUN).toBe("1");
+    expect(seen.cwd).toBe(os.tmpdir());
   });
 
   it("空配列は子プロセスを起動せずに空配列を返す", () => {

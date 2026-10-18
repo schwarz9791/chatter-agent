@@ -228,6 +228,10 @@ hook → CLI → server → player の全経路を1本で見る。
 バンドル（`plugin/bin/` と `core/dist/`）を実行するので `npm run build` が先に要る。
 手元でも同じコマンドで回せる。
 
+**`CHATTER_AGENT_BIN` に compile した実行ファイル（→「バンドル」）を渡すと、4本は server・player・CLI を
+それで起こす**（`chatter-agent server` など）。compile すると Bun の実装に差し替わるもの（`ws` など）と
+サブコマンドの振り分けが、実物で通るかを見るため。CI の `bun` ジョブが `phase-b` と `player` をこれで回す。
+
 ### バンドル
 
 | エントリ | 出力 | 依存 |
@@ -235,6 +239,15 @@ hook → CLI → server → player の全経路を1本で見る。
 | `src/cli/index.ts` | `plugin/bin/chatter-agent-speak.mjs`（**git にコミット**） | 全部バンドル。npm 依存ゼロ |
 | `src/server/index.ts` | `core/dist/chatter-agent-server.mjs`（gitignore） | `ws` / `@homebridge/ciao` は external |
 | `src/player/index.ts` | `core/dist/chatter-agent-player.mjs`（gitignore） | `ws` は external |
+| `src/main.ts` | `chatter-agent-app/src-tauri/binaries/chatter-agent-aarch64-apple-darwin`（`npm run build:bin`。gitignore） | Bun で compile。全部入り（`ws` は Bun 組み込みの実装に差し替わる） |
+
+- **`build:bin` は server / player / CLI を1本にした実行ファイル**で、サブコマンド `server` / `player` / `speak` で
+  振り分ける。ChatterAgent が `.app` に同梱する（→ [`agent.md`](./agent.md)「ビルドと起動」）。
+  3本に分けないのは、1本ごとに Bun のランタイムを丸ごと抱えるため
+  - サブコマンドは dynamic import で読む。`speak` の起動で server 側（`ws` / `@homebridge/ciao`）を評価しないため
+  - ★ **`.env` と `bunfig.toml` の自動読み込みを切っている。** `speak` は hook の cwd（利用者のプロジェクト）で
+    走るので、そこのファイルを読ませない
+  - Bun での違いと実測は [`knowledge/bun.md`](./knowledge/bun.md)
 
 - **`@homebridge/ciao`（server のみ）は LAN での発見（DNS-SD / mDNS）のために入れている。** 純 JS なので
   OS のコマンド（macOS の `dns-sd`、avahi）に依存せず、Windows への道も残る。RFC 6762/6763 に準拠

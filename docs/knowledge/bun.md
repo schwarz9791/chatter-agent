@@ -1,8 +1,8 @@
 # core を Bun で動かして踏んだこと
 
-core を `bun build --compile` で1本の実行ファイルにし、ChatterAgent に同梱する計画（#169）がある。
+core を `bun build --compile` で1本の実行ファイルにし、ChatterAgent に同梱した（#169 / #212）。
 その前に、コードを書き換えずに Bun でどこまで動くかを試した。ここは**その結果と実測**と、
-それを受けた手当て（`→` の行）を残す。
+それを受けた手当て（`→` の行）を残す。同梱で踏んだことは「1本にして同梱する」の節。
 
 **測定条件**: bun 1.4.3 / node 24.19.0 / Apple M1 Max / macOS 27.0.1（2026-10-18）。
 `npm run build` で作った `dist/` と `plugin/bin/` を、そのまま bun で動かした。compile もした。
@@ -35,7 +35,7 @@ core を `bun build --compile` で1本の実行ファイルにし、ChatterAgent
 - ただし Bun では、この判定はメッセージを受け切った後に走る。Node のように溜め込む前には切れない。
   - 1フレームで送ると、5KB・8MB・15MB は受け切ってから 1009、17MB・20MB は Bun 自身が 1006 で切った。
     実効の上限は1接続あたり約 16MB。
-  - 繋げるのはループバックかトークンを持つ相手だけなので、今は困らない。compile して配るとき（#169）に検討する。
+  - 繋げるのはループバックかトークンを持つ相手だけなので、同梱しても手当てしない（#212）。
 
 ## Bun の fetch の接続エラーには `cause` が無い
 
@@ -77,8 +77,36 @@ core を `bun build --compile` で1本の実行ファイルにし、ChatterAgent
   - node: 約 40ms
   - compile 版: 約 16ms
 
+## 1本にして同梱する（#212）
+
+測定条件は冒頭と同じ。server・player・CLI を `src/main.ts` からサブコマンドで振り分ける1本にし、
+Tauri の `externalBin` で `.app` に入れた。
+
+- **大きさ**: 1本で約 71MB。CLI だけを compile しても約 71MB なので、ほぼ Bun のランタイムの大きさ。`.app` は約 80MB。
+- **CLI の空振り起動**（spool が空）を、3つを交互に 30 回ずつ起こした中央値:
+  - node（`plugin/bin/chatter-agent-speak.mjs`）: 42.2ms
+  - 1本の `chatter-agent speak`: 25.3ms
+  - CLI だけを compile したもの: 17.0ms
+  - 1本の方が遅いのは、使わない server / player のコードもパースするため。評価はしていない
+    （`bun build --target=bun` の出力で、ciao の `source-map-support/register` は遅延の `init_*` の中にだけある）。
+    hook を同梱の実行ファイルに切り替える（#213）ときの判断材料
+- **`--compile` は minify しない。** 関数名が残るので、`server.log` のスタックトレースは読める。
+- **compile 版は既定で、cwd の `.env` と `bunfig.toml` を読む。** `speak` は hook の cwd（利用者のプロジェクト）で走るので、
+  → `--no-compile-autoload-dotenv --no-compile-autoload-bunfig` で切った。
+- **`process.execPath` が実行ファイル自身になる。** `emotion/ollayaClassifier.ts` は `process.execPath -e <script>` で
+  子を起こすので、`-e` が振り分けに渡り、黙って辞書式の判定へ落ちる。
+  → 子の env に `BUN_BE_BUN=1` を付けて、実行ファイルを bun として振る舞わせる（Node では無視される）。
+- **Tauri の bundler は sidecar も ad-hoc で署名し直す**（`Signing …/Contents/MacOS/chatter-agent`）。
+  - Identifier は `chatter-agent-<ハッシュ>` になる。
+  - `.app` の `codesign --verify --deep --strict` は通り、署名し直した後も実行ファイルは動く。
+  - hardened runtime は付かないので、JIT の entitlements は要らない。
+
+- **実 LAN 経由のトークン検査**（同梱の server に、同じ Mac から自分の LAN の IP 宛てで `GET /v1/health`）:
+  - トークン無しは 401 になり、ログに `Rejected unauthorized request from <LAN の IP>` が出る。Bun でも `req.socket.remoteAddress` に実際の相手が入る
+  - トークン有りは 200、ループバックは 200
+  - テストは非ループバックを Unix ソケットで模擬しているので、ここは実物でしか見られない
+
 ## 確かめていないこと
 
-- **実 LAN 経由のトークン検査。** テストは、非ループバックを Unix ソケットで模擬している。
-  Bun では `req.socket.remoteAddress` の実際の値が効くので、XR 実機で確かめる（#212）。
-- Tauri への同梱、Claude Code 実機の hook からの起動、Developer ID での署名と公証。
+- XR 実機（Aura）から同梱の server への接続。
+- Claude Code 実機の hook から同梱の実行ファイルを起こすこと（#213）、Developer ID での署名と公証。

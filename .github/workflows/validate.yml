@@ -269,6 +269,16 @@ jobs:
       - name: Verify assets on Bun
         run: bun --bun run verify:assets
 
+      # 単一バイナリ（chatter-agent）にして、同じ verify を通す
+      - name: Compile single binary
+        run: bun build --compile --no-compile-autoload-dotenv --no-compile-autoload-bunfig src/main.ts --outfile "$RUNNER_TEMP/chatter-agent"
+
+      - name: Verify phase B on binary
+        run: CHATTER_AGENT_BIN="$RUNNER_TEMP/chatter-agent" bun --bun run verify:phase-b
+
+      - name: Verify player on binary
+        run: CHATTER_AGENT_BIN="$RUNNER_TEMP/chatter-agent" bun --bun run verify:player
+
   agent-app:
     name: ChatterAgent
     runs-on: macos-latest

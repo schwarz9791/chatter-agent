@@ -23,6 +23,7 @@ import { WebSocket } from "ws";
 import {
   check,
   disposableRoot,
+  entryArgv,
   fail,
   makeWav,
   requireBundles,
@@ -200,7 +201,7 @@ function serverEnv(overrides = {}) {
 }
 
 async function startServer(env) {
-  server = spawnLogged([SERVER], { env, label: "server" });
+  server = spawnLogged(entryArgv("server", SERVER), { env, label: "server" });
   await server.waitFor("[Server] Ready");
 }
 

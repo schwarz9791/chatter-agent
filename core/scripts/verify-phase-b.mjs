@@ -17,6 +17,7 @@ import { WebSocket } from "ws";
 import {
   check,
   disposableRoot,
+  entryArgv,
   fail,
   killAll,
   requireBundles,
@@ -81,7 +82,8 @@ function speak(messageId, text) {
     delta: text,
   };
   fs.writeFileSync(path.join(spoolDir, `${messageId}.0.json`), JSON.stringify(payload));
-  const { status } = spawnSync(process.execPath, [CLI], { env, stdio: "ignore" });
+  const [speakCmd, ...speakArgs] = entryArgv("speak", CLI);
+  const { status } = spawnSync(speakCmd, speakArgs, { env, stdio: "ignore" });
   if (status !== 0) throw new Error(`CLI が異常終了しました (status=${status})`);
 }
 
@@ -135,7 +137,7 @@ const serverLogs = () => stoppedLog + (server?.log ?? "");
  *   `lastIndexOf` の比較で判定する羽目になる（`spawnLogged` はハンドルごとに持つ）。
  */
 async function startServer() {
-  server = spawnLogged([SERVER], { env, label: "server" });
+  server = spawnLogged(entryArgv("server", SERVER), { env, label: "server" });
   await server.waitFor("[Server] Ready");
 }
 

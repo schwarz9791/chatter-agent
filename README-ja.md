@@ -71,7 +71,7 @@ XR 版はまだエミュレータでしか動かしていません。**実機に
 要るものは次のとおりです。
 
 - Apple Silicon の Mac と Claude Code
-- Node 24.11 以上と `adb`
+- Node（Claude Code プラグインの hook が使います）と `adb`
 - XREAL Aura
 - 同じ Wi-Fi に置いた Mac と Aura
 
@@ -91,17 +91,9 @@ XR 版はまだエミュレータでしか動かしていません。**実機に
    - `xattr -dr com.apple.quarantine /Applications/ChatterAgent.app` を実行する
    - 一度開いてから、システム設定 → プライバシーとセキュリティで「このまま開く」を押す。続くダイアログでもう一度「このまま開く」を押し、Touch ID か管理者パスワードで認証する
 
-3. **core（サーバーと CLI）。** 同梱されていないので、clone してビルドします。そのあと ChatterAgent のメニュー「core の場所を選ぶ…」で `core/` を選びます。
+   サーバーは同梱されていて、ChatterAgent を開くと起動します。その直後、ChatterAgent が「マスコットを表示できません」という警告を出しますが、この手順では macOS のマスコットを入れないので想定どおりです。そのあと Mac の CLI プレーヤーが声を出し始めますが、3 でミュートします。
 
-   ```bash
-   git clone https://github.com/schwarz9791/chatter-agent.git
-   cd chatter-agent
-   (cd core && npm install && npm run build)
-   ```
-
-   この節で以降に打つコマンドは、この `chatter-agent` フォルダで実行します。core を選んだ直後、ChatterAgent が「マスコットを表示できません」という警告を出しますが、この手順では macOS のマスコットを入れないので想定どおりです。そのあと Mac の CLI プレーヤーが声を出し始めますが、3 でミュートします。
-
-4. **Claude Code プラグイン。** [Claude Code プラグインの導入](#claude-code-プラグインの導入)に従って入れ、Claude Code のセッションを再起動します。
+3. **Claude Code プラグイン。** [Claude Code プラグインの導入](#claude-code-プラグインの導入)に従って入れ、Claude Code のセッションを再起動します。
 
 ### 2. 英語の声を選ぶ
 
@@ -131,7 +123,7 @@ XR 版はまだエミュレータでしか動かしていません。**実機に
 ```
 
 - **macOS がローカルネットワークの許可を求めたら許可し、もう一度「サーバーを再起動」を選びます。** 許可より前に起動したサーバーは、Aura から見つかりません。
-- ターミナルから起動するなら、先に ChatterAgent のメニュー「終了」を選び（サーバーは同時に1つしか動きません）、`cd core && CHATTER_AGENT_HOST=0.0.0.0 npm run start:server` を実行します。環境変数は `config.json` より優先されます。**この場合、許可が付くのはターミナルのアプリで、再起動もターミナル側で行います**（ChatterAgent の「サーバーを再起動」は、外で動いているサーバーには効きません）。
+- ターミナルから起動するなら、先に ChatterAgent のメニュー「終了」を選び（サーバーは同時に1つしか動きません）、core をビルドした clone で（→「ビルド」）`cd core && CHATTER_AGENT_HOST=0.0.0.0 npm run start:server` を実行します。環境変数は `config.json` より優先されます。**この場合、許可が付くのはターミナルのアプリで、再起動もターミナル側で行います**（ChatterAgent の「サーバーを再起動」は、外で動いているサーバーには効きません）。
 - **ChatterAgent のメニューで「ミュート」を ON にします**（macOS のマスコットが出ていれば「マスコットを隠す」も）。同時に繋げるクライアントは1つだけです。両方繋ぐと Mac と Aura が文を取り合い、Aura が文を飛ばします。
 
 ### 4. ペアリング
@@ -158,9 +150,10 @@ curl -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8570/v1/pairin
 
 1. **`host` が `127.0.0.1` のまま。** ペアリング窓に「サーバーが LAN に公開されていません。config.json の host か環境変数 CHATTER_AGENT_HOST を 0.0.0.0 にして、サーバーを再起動してください」と出ます。curl なら `409` `{"error":"not_lan"}` です。3 をやり直します。
 2. **macOS のローカルネットワークの許可が拒否されている。** 許可が付くのは、サーバーを起動したアプリ（ChatterAgent か、ターミナルのアプリ）です。一度「許可しない」を選んでいると、ダイアログは二度と出ず、Mac 自身からは繋がるのに LAN からだけ繋がらなくなります。システム設定 → プライバシーとセキュリティ → ローカルネットワークでそのアプリをオンにし、「サーバーを再起動」を選びます（ターミナルで起動したなら、ターミナル側で再起動します）。
-3. **mDNS が Aura に届かない。** ルーターがマルチキャスト（mDNS）を通さないときや、Mac と Aura が別のサブネット・VLAN にいるときに起きます。設定パネルには「サーバーが見つかりません」と出ます。clone から、接続先を明示して Aura に書き込みます。
+3. **mDNS が Aura に届かない。** ルーターがマルチキャスト（mDNS）を通さないときや、Mac と Aura が別のサブネット・VLAN にいるときに起きます。設定パネルには「サーバーが見つかりません」と出ます。リポジトリを clone して、接続先を明示して Aura に書き込みます。
 
    ```bash
+   git clone https://github.com/schwarz9791/chatter-agent.git && cd chatter-agent
    ADB="$(command -v adb)" ./chatter-mascot/scripts/configure-android.sh ws://<mac-ip>:8570
    ```
 
@@ -186,6 +179,7 @@ curl -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8570/v1/pairin
 ### 前提
 
 - **Node 24.11 以上**（`mise.toml` で 24.19.0 に固定しています）
+- **Bun**（`mise.toml` で固定しています）—— ChatterAgent をビルドするとき（core を1本の実行ファイルにして同梱します）
 - **Rust**（`chatter-agent-app/mise.toml` で固定しています）—— ChatterAgent をビルドするとき
 - **Unity 6000.3.14f1** —— macOS / Android のビルドサポートモジュールが必要です
 - **Unity CLI**（`unity` コマンド） —— `chatter-mascot/scripts/*.sh` がこれ経由で Editor を動かします
@@ -207,12 +201,13 @@ npm run build
 ### ChatterAgent（macOS）
 
 ```bash
+(cd core && npm install)
 cd chatter-agent-app
 npm install
-npm run build      # → build/ChatterAgent.app
+npm run build      # core を Bun で compile → build/ChatterAgent.app
 ```
 
-サーバーの起動・停止と設定パネルを受け持つメニューバー常駐アプリです。使い方は「実行」の「サーバー」にあります。
+サーバーの起動・停止と設定パネルを受け持つメニューバー常駐アプリです。サーバーとプレーヤーはアプリに同梱されます。使い方は「実行」の「サーバー」にあります。
 
 ### macOS クライアント
 
@@ -241,6 +236,7 @@ cd chatter-mascot
 ### 前提
 
 - **Claude Code**
+- **Node** —— プラグインの hook が CLI を動かすのに使います
 - **[AivisSpeech](https://aivis-project.com/)** —— **インストールだけしておけば十分です。** 合成エンジンが動いていなければサーバーが起こし、サーバーを止めれば一緒に落ちます。手で起こすのは、別ホストのエンジンに繋ぐときと、**話者を増やすとき**（音声モデルの追加には GUI が要ります）。自動起動そのものを止めるなら `CHATTER_AGENT_TTS_SPAWN=0`
 - **音声合成エンジンは差し替え可能です**（`ttsEngine`）。既定は AivisSpeech（VOICEVOX 互換）ですが、日本語以外の言語には **[Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI)**（OpenAI 互換）も使えます。導入手順は [`docs/kokoro.md`](./docs/kokoro.md)
 - **macOS** —— 表示側アプリは macOS と Android XR 向けで、再生コマンドの既定は `afplay`、合成エンジンの自動探索も macOS のパスしか見ません。Linux / Windows では、CLI プレーヤーに `CHATTER_AGENT_PLAYER_COMMAND` で再生コマンドを指定してください
@@ -288,8 +284,8 @@ cd core && npm run start:server
 ```
 
 macOS では、メニューバー常駐アプリ **ChatterAgent** にサーバーの起動・停止・再起動を任せることもできます。
-`core/` と ChatterAgent をビルドしたら（→「ビルド」）、`chatter-agent-app/build/ChatterAgent.app` を開き、メニューの「core の場所を選ぶ…」で `core/` を一度選ぶと、ログインシェルと同じ環境で
-サーバーを起こします。上の手動起動もこれまでどおり使えます（ChatterAgent は「外で動いている」と表示するだけで、
+ChatterAgent（Releases のもの、または「ビルド」で作った `chatter-agent-app/build/ChatterAgent.app`）を開くと、同梱のサーバーを
+ログインシェルと同じ環境で起こします。上の手動起動もこれまでどおり使えます（ChatterAgent は「外で動いている」と表示するだけで、
 手を出しません）。メニューの「設定…」から、サーバーの設定とマスコットの設定（モデル・大きさ・音量・モーションなど）を変えられます。マスコットを右クリックするか、Finder などから ChatterAgent を開き直しても、設定窓が前面に出ます。
 
 メニューの「マスコットを表示 / 隠す」と「ミュート」で、繋ぐクライアントも切り替わります。表示中は macOS アプリ、

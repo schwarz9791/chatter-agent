@@ -29,14 +29,32 @@ static RECHECKED: AtomicU32 = AtomicU32::new(0);
 
 /// `.app` の探す場所を優先順に並べる。
 pub fn candidates(core: Option<&Path>, home: &Path) -> Vec<PathBuf> {
+    candidates_from(core, own_app().as_deref(), home)
+}
+
+/// 開発の配置では、`core`（`devCoreDir`）と自分の `.app` の置き場所から、リポジトリのマスコットのビルドも探す。
+fn candidates_from(core: Option<&Path>, me: Option<&Path>, home: &Path) -> Vec<PathBuf> {
     let mut v = vec![
         Path::new("/Applications").join(APP_NAME),
         home.join("Applications").join(APP_NAME),
     ];
-    if let Some(parent) = core.and_then(Path::parent) {
-        v.push(parent.join("chatter-mascot/Build").join(APP_NAME));
+    let repos = [core.and_then(Path::parent), me.and_then(repo_of_build)];
+    for repo in repos.into_iter().flatten() {
+        let p = repo.join("chatter-mascot/Build").join(APP_NAME);
+        if !v.contains(&p) {
+            v.push(p);
+        }
     }
     v
+}
+
+/// `<repo>/chatter-agent-app/build/ChatterAgent.app` なら `<repo>`。
+fn repo_of_build(app: &Path) -> Option<&Path> {
+    let build = app.parent()?;
+    let agent = build.parent()?;
+    (build.file_name()? == "build" && agent.file_name()? == "chatter-agent-app")
+        .then(|| agent.parent())
+        .flatten()
 }
 
 pub fn find_app(core: Option<&Path>, home: &Path) -> Option<PathBuf> {
@@ -132,11 +150,7 @@ pub fn launch(app: &Path, env: &Env, backlog: bool) -> io::Result<()> {
         cmd.arg("-speechBacklogMaxAgeMs")
             .arg(BACKLOG_MAX_AGE_MS.to_string());
     }
-    if let Some(me) = std::env::current_exe()
-        .ok()
-        .as_deref()
-        .and_then(app_bundle_of)
-    {
+    if let Some(me) = own_app() {
         cmd.arg("-chatterAgentApp").arg(me);
     }
     let status = cmd.envs(env).stdin(Stdio::null()).status()?;
@@ -147,8 +161,15 @@ pub fn launch(app: &Path, env: &Env, backlog: bool) -> io::Result<()> {
     }
 }
 
+/// 自分（ChatterAgent）の `.app`。`tauri dev` のように `.app` の外で動いていれば `None`。
+fn own_app() -> Option<PathBuf> {
+    std::env::current_exe()
+        .ok()
+        .as_deref()
+        .and_then(app_bundle_of)
+}
+
 /// 実行ファイル（`X.app/Contents/MacOS/<bin>`）を含む `.app`。`.app` の外で動いていれば `None`。
-#[cfg(any(target_os = "macos", test))]
 fn app_bundle_of(exe: &Path) -> Option<PathBuf> {
     exe.ancestors()
         .find(|p| p.extension().is_some_and(|e| e == "app"))
@@ -204,17 +225,32 @@ mod tests {
 
     #[test]
     fn candidates_in_priority_order() {
-        let v = candidates(Some(Path::new("/w/core")), Path::new("/h"));
+        let h = Path::new("/h");
+        let me = Path::new("/r/chatter-agent-app/build/ChatterAgent.app");
+        let v = candidates_from(Some(Path::new("/w/core")), Some(me), h);
         assert_eq!(
             v,
             [
                 "/Applications/ChatterMascot.app",
                 "/h/Applications/ChatterMascot.app",
                 "/w/chatter-mascot/Build/ChatterMascot.app",
+                "/r/chatter-mascot/Build/ChatterMascot.app",
             ]
             .map(PathBuf::from)
         );
-        assert_eq!(candidates(None, Path::new("/h")).len(), 2);
+        assert_eq!(candidates_from(None, None, h).len(), 2);
+        // 同じリポジトリは1回だけ。
+        assert_eq!(
+            candidates_from(Some(Path::new("/r/core")), Some(me), h).len(),
+            3
+        );
+        // 開発の配置でなければ足さない。
+        for app in [
+            "/Applications/ChatterAgent.app",
+            "/h/Applications/ChatterAgent.app",
+        ] {
+            assert_eq!(candidates_from(None, Some(Path::new(app)), h).len(), 2);
+        }
     }
 
     #[test]

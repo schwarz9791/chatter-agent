@@ -25,6 +25,7 @@ import { WebSocketServer } from "ws";
 import {
   check,
   disposableRoot,
+  entryArgv,
   fail,
   killAll,
   makeWav,
@@ -251,7 +252,7 @@ function playerEnv(overrides = {}) {
 }
 
 function startPlayer(env) {
-  return spawnLogged([PLAYER], { env, label: "player" });
+  return spawnLogged(entryArgv("player", PLAYER), { env, label: "player" });
 }
 
 /**
@@ -649,7 +650,7 @@ try {
     // ★ `spawnLogged` で起動すること。自前で spawn すると、失敗時の一括出力
     //   （`spawned()` を回る）に出てこず、唯一の end-to-end シナリオが落ちたときに
     //   空のログしか読めない
-    const server = spawnLogged([SERVER], { env: chainEnv, label: "server" });
+    const server = spawnLogged(entryArgv("server", SERVER), { env: chainEnv, label: "server" });
     await server.waitFor("[Server] Ready");
 
     const player = await startReadyPlayer(chainEnv);
@@ -665,7 +666,8 @@ try {
       delta: "配管がつながりました。ふたつめの文です。",
     };
     fs.writeFileSync(path.join(spoolDir, "m-e2e.0.json"), JSON.stringify(payload));
-    const cli = spawnSync(process.execPath, [CLI], { env: chainEnv, stdio: "ignore" });
+    const [speakCmd, ...speakArgs] = entryArgv("speak", CLI);
+    const cli = spawnSync(speakCmd, speakArgs, { env: chainEnv, stdio: "ignore" });
     check("CLI が正常終了する", cli.status === 0, `status=${cli.status}`);
 
     const heard = await until(() => played().length === 2, 10_000);

@@ -97,8 +97,29 @@ export function disposableRoot(prefix) {
   return { root, runtime: path.join(root, "chatter-agent") };
 }
 
-/** ビルド済みバンドルが揃っているか。無ければその場で終わる */
+/**
+ * 単一バイナリ（`chatter-agent`）で検証するときの実行ファイル。
+ * 未設定なら従来どおりビルド済みバンドルを Node / Bun で起こす。
+ */
+const BIN = process.env.CHATTER_AGENT_BIN;
+
+/**
+ * 役割（`server` / `player` / `speak`）を起動する `[command, ...args]`。
+ * `bundle` は `BIN` が無いときに process.execPath で動かすバンドル。
+ */
+export function entryArgv(role, bundle) {
+  return BIN ? [BIN, role] : [process.execPath, bundle];
+}
+
+/** ビルド済みバンドル（`BIN` 指定時はバイナリ）が揃っているか。無ければその場で終わる */
 export function requireBundles(entries) {
+  if (BIN) {
+    if (!fs.existsSync(BIN)) {
+      console.error(`CHATTER_AGENT_BIN が存在しません: ${BIN}`);
+      process.exit(1);
+    }
+    return;
+  }
   for (const [label, file] of entries) {
     if (fs.existsSync(file)) continue;
     console.error(`${label} のバンドルがありません: ${file}\n先に core/ で npm run build を実行してください。`);
@@ -140,7 +161,7 @@ export function makeWav(seconds) {
 const running = [];
 
 /**
- * ビルド済みバンドルを Node で起動し、stdout / stderr を1本のログに溜める。
+ * `[command, ...args]`（`entryArgv` の戻り値）を起動し、stdout / stderr を1本のログに溜める。
  *
  * ★ **stdout と stderr を分けないこと。** 見たいのは時系列で、どちらに出たかではない。
  *   分けると「警告の後に Ready が出たか」のような順序の検査が書けなくなる。
@@ -150,7 +171,8 @@ const running = [];
  */
 export function spawnLogged(argv, options = {}) {
   const { env, label = "プロセス" } = options;
-  const child = spawn(process.execPath, argv, { env, stdio: ["ignore", "pipe", "pipe"] });
+  const [command, ...args] = argv;
+  const child = spawn(command, args, { env, stdio: ["ignore", "pipe", "pipe"] });
   const handle = {
     label,
     child,

@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "tsdown",
+    "build:bin": "bun build --compile --target=bun-darwin-arm64 --no-compile-autoload-dotenv --no-compile-autoload-bunfig src/main.ts --outfile ../chatter-agent-app/src-tauri/binaries/chatter-agent-aarch64-apple-darwin",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint",
     "format": "oxfmt",

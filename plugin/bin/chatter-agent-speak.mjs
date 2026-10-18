@@ -1921,7 +1921,12 @@ function createOllayaEmotionClassifier(deps) {
 				encoding: "utf-8",
 				timeout: deps.getTimeoutMs(),
 				killSignal: "SIGKILL",
-				maxBuffer: 8388608
+				maxBuffer: 8388608,
+				env: {
+					...process.env,
+					BUN_BE_BUN: "1"
+				},
+				cwd: os.tmpdir()
 			});
 			if (result.error || result.status !== 0 || !result.stdout) return deps.fallback(texts);
 			stdout = result.stdout;

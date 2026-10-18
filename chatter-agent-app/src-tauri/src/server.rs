@@ -14,8 +14,6 @@ use crate::text;
 
 pub type Env = HashMap<String, String>;
 
-/// server が要求する node の下限（`core/package.json` の engines と揃える）。
-pub const NODE_MIN: (u32, u32, u32) = (24, 11, 0);
 const LOG_MAX_BYTES: u64 = 10 * 1024 * 1024;
 const ENV_MARKER: &[u8] = b"\0__CHATTER_AGENT_ENV__\0";
 
@@ -27,8 +25,6 @@ pub enum Fail {
     NoNodeModules,
     Env,
     NodeMissing,
-    NodeUnknown,
-    NodeOld(String),
     SpawnFailed(String),
 }
 
@@ -67,24 +63,52 @@ pub fn parse_env_output(stdout: &[u8]) -> Option<Env> {
     Some(env)
 }
 
-/// `node --version` の出力（`v24.19.0`）を解析する。
-pub fn parse_node_version(output: &str) -> Option<(u32, u32, u32)> {
-    let mut parts = output.trim().strip_prefix('v')?.split('.');
-    let v = (
-        parts.next()?.parse().ok()?,
-        parts.next()?.parse().ok()?,
-        parts.next()?.parse().ok()?,
-    );
-    parts.next().is_none().then_some(v)
+/// server / player の起こし方。
+#[derive(Clone, Debug, PartialEq)]
+pub enum Core {
+    /// 同梱の実行ファイル（サブコマンドで役割を選ぶ）。
+    Bundled(PathBuf),
+    /// 開発用に `devCoreDir` で指した core。ビルド済みの `dist/` を node で動かす。
+    Dir(PathBuf),
 }
 
-/// `24.11.0` の形に整える。
-pub fn version_label(v: (u32, u32, u32)) -> String {
-    format!("{}.{}.{}", v.0, v.1, v.2)
+impl Core {
+    pub fn command(&self, role: &str) -> Command {
+        match self {
+            Core::Bundled(bin) => {
+                let mut c = Command::new(bin);
+                c.arg(role);
+                c
+            }
+            Core::Dir(dir) => {
+                let mut c = Command::new("node");
+                c.arg(format!("dist/chatter-agent-{role}.mjs"))
+                    .current_dir(dir);
+                c
+            }
+        }
+    }
+
+    pub fn dir(&self) -> Option<&Path> {
+        match self {
+            Core::Dir(d) => Some(d),
+            Core::Bundled(_) => None,
+        }
+    }
 }
 
-pub fn node_is_new_enough(v: (u32, u32, u32)) -> bool {
-    v >= NODE_MIN
+/// `devCoreDir` があれば同梱より優先する。
+fn pick_core(dev_dir: Option<PathBuf>, bundled: Option<PathBuf>) -> Option<Core> {
+    dev_dir.map(Core::Dir).or(bundled.map(Core::Bundled))
+}
+
+/// `.app` の `Contents/MacOS` には実行ファイルと並んで置かれる（開発ビルドでは `target/<profile>/`）。
+fn bundled_bin() -> Option<PathBuf> {
+    let bin = std::env::current_exe()
+        .ok()?
+        .parent()?
+        .join("chatter-agent");
+    bin.is_file().then_some(bin)
 }
 
 /// server が使うランタイムルート（`core/src/core/paths.ts` と同じ解決）。
@@ -220,14 +244,14 @@ impl Drain {
 
 /// 端末から起動したときと同じ環境を、ログインシェルから得る。失敗の詳細（シェルの stderr の末尾など）を返す。
 #[cfg(unix)]
-pub fn resolve_login_env(core: &Path) -> Result<Env, String> {
+pub fn resolve_login_env(cwd: &Path) -> Result<Env, String> {
     let shell = std::env::var("SHELL")
         .ok()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "/bin/zsh".into());
     let mut child = Command::new(&shell)
         .args(["-ilc", ENV_SCRIPT])
-        .current_dir(core)
+        .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -255,22 +279,8 @@ pub fn resolve_login_env(core: &Path) -> Result<Env, String> {
 }
 
 #[cfg(not(unix))]
-pub fn resolve_login_env(_core: &Path) -> Result<Env, String> {
+pub fn resolve_login_env(_cwd: &Path) -> Result<Env, String> {
     Ok(std::env::vars().collect())
-}
-
-fn node_version(core: &Path, env: &Env) -> Result<(u32, u32, u32), Fail> {
-    let out = Command::new("node")
-        .arg("--version")
-        .current_dir(core)
-        .envs(env)
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|e| match e.kind() {
-            std::io::ErrorKind::NotFound => Fail::NodeMissing,
-            _ => Fail::SpawnFailed(e.to_string()),
-        })?;
-    parse_node_version(&String::from_utf8_lossy(&out.stdout)).ok_or(Fail::NodeUnknown)
 }
 
 #[cfg(unix)]
@@ -333,9 +343,8 @@ pub fn status_after_exit(info: ExitInfo, owner: Option<u32>) -> Status {
 }
 
 struct Prepared {
-    core: PathBuf,
+    core: Core,
     env: Env,
-    node: (u32, u32, u32),
 }
 
 enum Poll {
@@ -401,10 +410,6 @@ impl Manager {
             log_path,
             on_change: Box::new(on_change),
         }))
-    }
-
-    pub fn set_core_dir(&self, dir: PathBuf) {
-        *lock(&self.0.core_dir) = Some(dir);
     }
 
     pub fn status(&self) -> Status {
@@ -473,24 +478,22 @@ impl Manager {
     }
 
     fn prepare(&self) -> Result<Prepared, Status> {
-        let core = lock(&self.0.core_dir)
-            .clone()
-            .ok_or(Status::Cannot(Fail::NoCoreDir))?;
-        check_core(&core).map_err(Status::Cannot)?;
-        let env = resolve_login_env(&core).map_err(|detail| {
+        let core = self.core().ok_or(Status::Cannot(Fail::NoCoreDir))?;
+        if let Core::Dir(dir) = &core {
+            check_core(dir).map_err(Status::Cannot)?;
+        }
+        let cwd = core.dir().map(Path::to_path_buf).unwrap_or_else(|| {
+            std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from)
+        });
+        let env = resolve_login_env(&cwd).map_err(|detail| {
             self.log(&format!("ログインシェルから環境を取得できない: {detail}"));
             Status::Cannot(Fail::Env)
         })?;
         *lock(&self.0.env) = Some(env.clone());
-        let node = node_version(&core, &env).map_err(Status::Cannot)?;
-        if !node_is_new_enough(node) {
-            let v = format!("v{}", version_label(node));
-            return Err(Status::Cannot(Fail::NodeOld(v)));
-        }
         if let Some(pid) = runtime_root(&env).and_then(|r| external_server_pid(&r)) {
             return Err(Status::External(pid));
         }
-        Ok(Prepared { core, env, node })
+        Ok(Prepared { core, env })
     }
 
     fn do_start(&self) {
@@ -514,9 +517,10 @@ impl Manager {
         //   server が EPIPE で壊れる。
         // ★ プロセスグループは分けない。端末で tauri dev を Ctrl-C したとき、SIGINT が server にも届いて
         //   server が自分で後始末して終わる。
-        let child = Command::new("node")
-            .arg("dist/chatter-agent-server.mjs")
-            .current_dir(&p.core)
+        let bundled = matches!(p.core, Core::Bundled(_));
+        let child = p
+            .core
+            .command("server")
             .envs(&p.env)
             .stdin(Stdio::null())
             .stdout(log)
@@ -524,16 +528,12 @@ impl Manager {
             .spawn()
             .map_err(|e| {
                 Status::Cannot(match e.kind() {
-                    std::io::ErrorKind::NotFound => Fail::NodeMissing,
+                    std::io::ErrorKind::NotFound if !bundled => Fail::NodeMissing,
                     _ => Fail::SpawnFailed(e.to_string()),
                 })
             })?;
         let pid = child.id();
-        self.log(&format!(
-            "起動した: pid={pid} node=v{} core={}",
-            version_label(p.node),
-            p.core.display()
-        ));
+        self.log(&format!("起動した: pid={pid} {:?}", p.core));
         *lock(&self.0.child) = Some(child);
         Ok(pid)
     }
@@ -574,8 +574,13 @@ impl Manager {
         lock(&self.0.env).clone()
     }
 
+    /// `devCoreDir`。
     pub fn core_dir(&self) -> Option<PathBuf> {
         lock(&self.0.core_dir).clone()
+    }
+
+    pub fn core(&self) -> Option<Core> {
+        pick_core(self.core_dir(), bundled_bin())
     }
 
     /// server に渡している環境。まだ解決していなければ ChatterAgent 自身の環境。
@@ -665,22 +670,15 @@ mod tests {
     }
 
     #[test]
-    fn node_version_threshold() {
-        for (s, ok) in [
-            ("v24.10.9", false),
-            ("v24.11.0", true),
-            ("v25.0.0", true),
-            ("v24.19.0\n", true),
-        ] {
-            assert_eq!(
-                node_is_new_enough(parse_node_version(s).unwrap()),
-                ok,
-                "{s}"
-            );
-        }
-        for s in ["", "24.11.0", "v24.11", "v24.x.0", "v24.11.0.1", "garbage"] {
-            assert!(parse_node_version(s).is_none(), "{s}");
-        }
+    fn dev_core_dir_beats_bundled() {
+        let (d, b) = (PathBuf::from("/d"), PathBuf::from("/b"));
+        assert_eq!(
+            pick_core(Some(d.clone()), Some(b.clone())),
+            Some(Core::Dir(d.clone()))
+        );
+        assert_eq!(pick_core(None, Some(b.clone())), Some(Core::Bundled(b)));
+        assert_eq!(pick_core(Some(d.clone()), None), Some(Core::Dir(d)));
+        assert_eq!(pick_core(None, None), None);
     }
 
     #[cfg(unix)]

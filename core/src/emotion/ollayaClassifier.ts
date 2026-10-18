@@ -24,6 +24,7 @@
  */
 
 import { spawnSync } from "child_process";
+import * as os from "os";
 import { pickEmotion } from "./emotionScores";
 import type { Emotion } from "../core/types";
 
@@ -176,6 +177,10 @@ export function createOllayaEmotionClassifier(deps: OllayaEmotionClassifierDeps)
         timeout: deps.getTimeoutMs(),
         killSignal: "SIGKILL",
         maxBuffer: 8 * 1024 * 1024,
+        // 単一バイナリでは execPath が自分自身になるので、BUN_BE_BUN で bun として振る舞わせる
+        // （Node では無視される）。cwd は bun が作業ディレクトリの bunfig / .env を読むのを避ける
+        env: { ...process.env, BUN_BE_BUN: "1" },
+        cwd: os.tmpdir(),
       });
       if (result.error || result.status !== 0 || !result.stdout) return deps.fallback(texts);
       stdout = result.stdout;

@@ -189,6 +189,7 @@ EditMode だけでテストできているのは、この層が描画に依存�
 cd core
 npm run typecheck && npm run lint && npm run format && npm run test:run
 npm run build            # CLI → plugin/bin/、server と player → dist/
+npm run build:bin        # 3つを Bun で1本に（ChatterAgent が同梱する）。verify は CHATTER_AGENT_BIN でこれを起こせる
 
 npm run verify:phase-a   # hook → 記録 + 配信キュー
 npm run verify:phase-b   # 配信キュー → WebSocket（実サーバーを起動する）

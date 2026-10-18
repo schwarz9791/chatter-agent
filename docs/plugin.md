@@ -182,8 +182,8 @@ GitHub など git の marketplace から入れた環境では、キャッシュ�
 hook が ChatterAgent に新しく頼る変更（例: `bin-path`）や、spool の形（命名・payload）を変える変更は、
 **それを読める ChatterAgent を先に出してから**プラグインの版を上げる。プラグインは git の marketplace から
 マージした時点で届くが、ChatterAgent は利用者が更新するまで古いままなので、逆にすると hook が黙るか、
-古い CLI が spool を読めずに孤児掃除で捨てる。`agent-v*` のタグは origin の main に入ったコミットにしか
-切れない（→ [`release.md`](./release.md)）ので、そういう変更はマージした直後に間を空けず `agent-v*` を切る。
+古い CLI が spool を読めずに孤児掃除で捨てる。`agent-v*` のタグは origin の main に入ったコミットに
+切る決まり（→ [`release.md`](./release.md)）なので、そういう変更はマージした直後に間を空けず `agent-v*` を切る。
 
 ローカルディレクトリとして登録した開発環境は、登録元のディレクトリがそのまま走る（上の ★）。
 `version` に関係なく、pull してセッションを開き直すか `/reload-plugins` すれば新しい中身になる。

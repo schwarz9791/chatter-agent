@@ -86,7 +86,7 @@ namespace ChatterMascot.Vrm
         /// </summary>
         public static string DescribeCandidates(IReadOnlyList<AssetCandidate> candidates)
         {
-            if (candidates == null || candidates.Count == 0) return "(no candidates)";
+            if (candidates == null || candidates.Count == 0) return " (no candidates)";
 
             var text = new StringBuilder();
             foreach (var candidate in candidates)

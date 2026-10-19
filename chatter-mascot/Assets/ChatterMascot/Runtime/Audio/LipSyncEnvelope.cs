@@ -33,7 +33,7 @@ namespace ChatterMascot.Audio
         /// ★ <b>呼び出し側に書き写さないこと。</b> 逐語コピーの実体は文字列なので、
         ///   ここを畳まないと <see cref="BuildOrWarn"/> にまとめた意味が半分になる。
         /// </summary>
-        private const string BuildFailedMessage = "failed to build lip sync (audio still plays): ";
+        private const string BuildFailedMessage = "Failed to build lip sync (audio still plays): ";
 
         /// <summary>
         /// <see cref="Build"/> して、<b>作れなかったら1回だけ</b>警告する。
@@ -95,8 +95,8 @@ namespace ChatterMascot.Audio
             var stride = WavDecoder.BytesPerSample(header.Format, header.BitsPerSample);
             if (stride == 0)
             {
-                // ★ 文言は WavDecoder と共有する（「対応していないフォーマット」と
-                //   「対応していないビット深度」の区別が、無音の原因を追うときに要る）
+                // ★ 文言は WavDecoder と共有する（「unsupported WAV format」と
+                //   「unsupported bit depth」の区別が、無音の原因を追うときに要る）
                 error = WavDecoder.DescribeUnsupported(header.Format, header.BitsPerSample);
                 return null;
             }

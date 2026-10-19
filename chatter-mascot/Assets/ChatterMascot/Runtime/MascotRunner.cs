@@ -746,7 +746,7 @@ namespace ChatterMascot
             {
                 var startedAt = Time.realtimeSinceStartupAsDouble;
                 // ★ **この詳細は保留した経路でしか出ない。** 通常経路は投げ切るものが無いので
-                //   閉じる過程を残す意味が無い。切り分けの入口（上の「終了要求」）は
+                //   閉じる過程を残す意味が無い。切り分けの入口（上の「Quit request」）は
                 //   **両方の経路で出る**
                 Debug.Log("[Mascot] Shutdown: closing connection");
                 try

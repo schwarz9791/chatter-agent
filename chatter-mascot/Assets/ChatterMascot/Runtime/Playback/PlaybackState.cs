@@ -116,7 +116,7 @@ namespace ChatterMascot.Playback
         /// <summary>音声を用意できなかった回数の連続。<c>AudioReady</c> で 0 に戻る。</summary>
         public int UnavailableStreak;
 
-        /// <summary>最後に「用意できない」警告を出した時刻。0 なら未出力。</summary>
+        /// <summary>最後に「Audio unavailable」の警告を出した時刻。0 なら未出力。</summary>
         public long UnavailableWarnedAt;
 
         /// <summary>503 の連続回数。取り直し間隔のバックオフに使う。<c>AudioReady</c> で 0 に戻る。</summary>

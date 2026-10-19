@@ -136,7 +136,7 @@ namespace ChatterMascot.Desktop
                     _step = 4;
                     _controller.isFreePositioningEnabled = true;
                     Debug.Log("[Mascot] Window probe: set isFreePositioningEnabled = true " +
-                              $"-> read back {_controller.isFreePositioningEnabled}");
+                              $"→ read back {_controller.isFreePositioningEnabled}");
                     return;
                 }
                 if (_step == 4 && elapsed >= 7f)

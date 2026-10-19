@@ -212,7 +212,7 @@ prefab にもシーンにも override が無く、`SetWindowSize` を呼ぶの�
 既定配置へ落とすので、上げた瞬間にユーザーの位置そのものが失われる。
 
 実機（2026-09-04）: 既定サイズでの起動では `Framing: 540x540 aspect=1.000 …
-支配軸=垂直` で、腕を上げる `WIN00` の敬礼モーションでも頭上に約10%の余白が残った
+dominantAxis=vertical` で、腕を上げる `WIN00` の敬礼モーションでも頭上に約10%の余白が残った
 （`Hub_laugh01`、`Hub_Idle01` も問題なし）。
 
 ## ★ Unity 6 の URP で透過しないのは `Supports HDR` のせい

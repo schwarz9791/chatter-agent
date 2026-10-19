@@ -236,7 +236,7 @@ namespace ChatterMascot.Protocol
         ///   <c>try</c> は <c>JToken.Load</c> しか囲っていないので、例外は素通りして
         ///   <c>SpeechClient</c> の受信ループまで上がる。そこで接続が切れ、繋ぎ直した先で
         ///   サーバーが<b>同じ未 ack のフレームを再送する</b>ので、**また落ちる**。
-        ///   ログは「受信でエラー」1行だけで、以後ずっと無音になる。
+        ///   ログは「Receive error」1行だけで、以後ずっと無音になる。
         /// </summary>
         private static bool TryAsInteger(JToken token, out long value)
         {

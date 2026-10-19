@@ -132,7 +132,7 @@ namespace ChatterMascot.Net
                 if (request.responseCode == 401)
                 {
                     return AudioFetchResult.Unavailable(
-                        Reason(request, "Token missing or invalid (connection.token in settings.json)"));
+                        Reason(request, "token missing or invalid (connection.token in settings.json)"));
                 }
                 if (request.responseCode == 404)
                 {

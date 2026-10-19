@@ -684,7 +684,7 @@ const targetY = (mouse.y - headY) * eyeSensitivity * 2;
 
 **だから「キーがあるか」だけを見る診断は、いちばん見たいケースで嘘をつく。** bind の数まで見ること。
 
-- `VrmProbe` の `expressions:` は bind が 0 のクリップに `(空)` を付ける
+- `VrmProbe` の `expressions:` は bind が 0 のクリップに `(empty)` を付ける
 - `VrmCharacter` は読み込み時に1回、`Presets in use: happy=ok angry=ok … (ok=works / empty=has a slot but no content / none=missing)` を出す
 
 ★★ **bind の配列は4本ある。** `MorphTargetBindings` / `MaterialColorBindings` /

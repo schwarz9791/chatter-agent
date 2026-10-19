@@ -620,8 +620,7 @@ namespace ChatterMascot
             {
                 _warnedDiscoveryNotFound = true;
                 Debug.LogWarning("[Mascot] No server found on the LAN. Still searching");
-                DeviceToast.Show("サーバーが見つかりません\nMac のサーバーが 0.0.0.0 で待ち受けているか、\n" +
-                                 "同じ Wi-Fi か（AP 分離・VLAN に注意）確認してください");
+                DeviceToast.Show(UiText.For(Application.systemLanguage).ServerNotFoundToast);
             }
         }
 

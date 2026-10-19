@@ -71,6 +71,8 @@ namespace ChatterMascot.Ui
         public override string XrBack => "Back";
         public override string ServerUnreachableToast =>
             "Can't reach the server\nCheck that the server is running,\nthen restart the app.";
+        public override string ServerNotFoundToast =>
+            "Can't find the server\nCheck that the Mac's server is exposed to the LAN (host 0.0.0.0)\nand on the same network.";
         public override string PairingNeededToast =>
             "Can't reach the server\nShow a PIN from \"Pair with Android…\" in the ChatterAgent menu on your Mac,\n" +
             "then enter it from \"Pair…\" in the settings panel.";

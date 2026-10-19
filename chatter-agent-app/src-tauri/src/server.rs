@@ -288,7 +288,7 @@ pub fn resolve_login_env(cwd: &Path) -> Result<Env, String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("{shell} を起動できない: {e}"))?;
+        .map_err(|e| format!("cannot launch {shell}: {e}"))?;
     let out = Drain::new(child.stdout.take());
     let err = Drain::new(child.stderr.take());
     let deadline = Instant::now() + ENV_TIMEOUT;
@@ -300,14 +300,18 @@ pub fn resolve_login_env(cwd: &Path) -> Result<Env, String> {
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(format!(
-                    "ログインシェルが時間内に終わらなかった。stderr: {}",
+                    "login shell did not finish in time. stderr: {}",
                     err.stderr_tail()
                 ));
             }
         }
     }
-    parse_env_output(&out.take(PIPE_GRACE))
-        .ok_or_else(|| format!("環境を取り出せなかった。stderr: {}", err.stderr_tail()))
+    parse_env_output(&out.take(PIPE_GRACE)).ok_or_else(|| {
+        format!(
+            "could not extract the environment. stderr: {}",
+            err.stderr_tail()
+        )
+    })
 }
 
 #[cfg(not(unix))]
@@ -343,9 +347,9 @@ pub(crate) fn exit_info(status: &ExitStatus) -> ExitInfo {
 /// ログ用の終了状態。
 pub(crate) fn exit_label(info: ExitInfo) -> String {
     match info {
-        ExitInfo::Code(c) => format!("終了コード {c}"),
-        ExitInfo::Signal(s) => format!("シグナル {s}"),
-        ExitInfo::Unknown => "終了状態不明".into(),
+        ExitInfo::Code(c) => format!("exit code {c}"),
+        ExitInfo::Signal(s) => format!("signal {s}"),
+        ExitInfo::Unknown => "unknown exit status".into(),
     }
 }
 
@@ -515,7 +519,9 @@ impl Manager {
             check_core(dir).map_err(Status::Cannot)?;
         }
         let env = resolve_login_env(&core.cwd()).map_err(|detail| {
-            self.log(&format!("ログインシェルから環境を取得できない: {detail}"));
+            self.log(&format!(
+                "Cannot get the environment from the login shell: {detail}"
+            ));
             Status::Cannot(Fail::Env)
         })?;
         *lock(&self.0.env) = Some(env.clone());
@@ -527,7 +533,7 @@ impl Manager {
                 Core::Dir(_) => None,
             };
             if let Err(e) = write_bin_path(root, bin) {
-                self.log(&format!("bin-path を更新できない: {e}"));
+                self.log(&format!("Cannot update bin-path: {e}"));
             }
         }
         if let Some(pid) = root.and_then(|r| external_server_pid(&r)) {
@@ -541,7 +547,7 @@ impl Manager {
         let status = match self.prepare().and_then(|p| self.spawn(p)) {
             Ok(pid) => Status::Running(pid),
             Err(status) => {
-                self.log(&format!("起動しない。{}", text::JA.status(&status)));
+                self.log(&format!("Not starting. {}", text::EN.status(&status)));
                 status
             }
         };
@@ -573,7 +579,7 @@ impl Manager {
                 })
             })?;
         let pid = child.id();
-        self.log(&format!("起動した: pid={pid} {:?}", p.core));
+        self.log(&format!("Started the server: pid={pid} {:?}", p.core));
         *lock(&self.0.child) = Some(child);
         Ok(pid)
     }
@@ -586,11 +592,11 @@ impl Manager {
         };
         let pid = child.id();
         self.set_status(Status::Stopping);
-        self.log(&format!("停止を要求した: pid={pid}"));
+        self.log(&format!("Requested the server to stop: pid={pid}"));
         if !stop_child(&mut child) {
-            self.log("止まらなかったので強制終了した。合成エンジンが残っている可能性がある");
+            self.log("Server did not stop, so it was killed. The TTS engine may still be running");
         }
-        self.log(&format!("停止を完了した: pid={pid}"));
+        self.log(&format!("Server stopped: pid={pid}"));
         self.set_status(Status::Stopped);
     }
 
@@ -640,8 +646,8 @@ impl Manager {
                 let status = status_after_exit(info, owner);
                 let how = exit_label(info);
                 self.log(&format!(
-                    "server が終わった: pid={pid} {how} → {}",
-                    text::JA.status(&status)
+                    "Server exited: pid={pid} {how} → {}",
+                    text::EN.status(&status)
                 ));
                 self.set_status(status);
             }

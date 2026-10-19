@@ -34,7 +34,7 @@ const KEPT_ON_RESET: &[&[&str]] = &[&["character", "scale"]];
 static SETTINGS_LOCK: Mutex<()> = Mutex::new(());
 
 fn root_of(manager: &Manager) -> Result<PathBuf, String> {
-    runtime_root(&manager.env()).ok_or_else(|| "ランタイムルートを決められない".to_string())
+    runtime_root(&manager.env()).ok_or_else(|| "cannot determine the runtime root".to_string())
 }
 
 pub(crate) fn settings_path(root: &Path) -> PathBuf {
@@ -62,12 +62,12 @@ pub(crate) fn read_settings(path: &Path) -> Result<Value, String> {
     let text = match fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Value::Object(Map::new())),
-        Err(e) => return Err(format!("settings.json を読めない: {e}")),
+        Err(e) => return Err(format!("cannot read settings.json: {e}")),
     };
     match serde_json::from_str::<Value>(&text) {
         Ok(v) if v.is_object() => Ok(v),
-        Ok(_) => Err("settings.json の最上位が object ではない".into()),
-        Err(e) => Err(format!("settings.json が壊れている: {e}")),
+        Ok(_) => Err("top level of settings.json is not an object".into()),
+        Err(e) => Err(format!("settings.json is corrupted: {e}")),
     }
 }
 
@@ -80,7 +80,7 @@ fn set_path(root: &mut Value, path: &[String], value: Value) {
         }
         cur = cur
             .as_object_mut()
-            .expect("直前で object にした")
+            .expect("just made into an object")
             .entry(key.clone())
             .or_insert(Value::Null);
     }
@@ -108,7 +108,7 @@ fn write_settings(path: &Path, settings: &mut Value) -> Result<(), String> {
     if let Some(map) = settings.as_object_mut() {
         map.entry("version").or_insert(Value::from(1));
     }
-    let io = |e: std::io::Error| format!("settings.json を書けない: {e}");
+    let io = |e: std::io::Error| format!("cannot write settings.json: {e}");
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).map_err(io)?;
     }
@@ -128,7 +128,7 @@ fn update_path(root: &Path, path: &[String], value: Value) -> Result<(), String>
 
 fn apply_set(root: &Path, path: &[String], value: Value) -> Result<(), String> {
     if !is_managed(path) {
-        return Err(format!("管理外のキー: {}", path.join(".")));
+        return Err(format!("unmanaged key: {}", path.join(".")));
     }
     update_path(root, path, value)
 }
@@ -164,7 +164,7 @@ fn reset_models(root: &Path) -> (u32, Option<String>) {
     let entries = match fs::read_dir(models_dir(root)) {
         Ok(e) => e,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (0, None),
-        Err(e) => return (0, Some(format!("models を読めない: {e}"))),
+        Err(e) => return (0, Some(format!("cannot read models: {e}"))),
     };
     let mut removed = 0;
     let mut error = None;
@@ -174,7 +174,7 @@ fn reset_models(root: &Path) -> (u32, Option<String>) {
             match fs::remove_file(&path) {
                 Ok(()) => removed += 1,
                 Err(e) => {
-                    error.get_or_insert(format!("{} を消せない: {e}", path.display()));
+                    error.get_or_insert(format!("cannot delete {}: {e}", path.display()));
                 }
             }
         }
@@ -203,7 +203,7 @@ fn install_vrm(root: &Path, src: &Path) -> Result<String, String> {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .ok_or("not_vrm")?;
-    let io = |e: std::io::Error| format!("VRM を置けない: {e}");
+    let io = |e: std::io::Error| format!("cannot place the VRM: {e}");
     let dir = models_dir(root);
     fs::create_dir_all(&dir).map_err(io)?;
     let tmp = dir.join("mascot.vrm.chatter-agent.tmp");
@@ -226,7 +226,7 @@ static REQUEST_COUNTER: AtomicU32 = AtomicU32::new(0);
 /// 依頼を1件置く。マスコットは拡張子が `.json` のものだけ拾うので、tmp は別の拡張子で書く。
 /// 名前が一意なので `SETTINGS_LOCK` は要らない。
 fn send_request(root: &Path, req: &Request) -> Result<(), String> {
-    let io = |e: std::io::Error| format!("依頼を置けない: {e}");
+    let io = |e: std::io::Error| format!("cannot place the request: {e}");
     let dir = root.join("mascot").join("requests");
     fs::create_dir_all(&dir).map_err(io)?;
     let millis = SystemTime::now()
@@ -380,7 +380,7 @@ pub async fn mascot_request(
     let req = match (kind.as_str(), id) {
         ("resetWindow", _) => Request::ResetWindow,
         ("playMotion", Some(id)) if !id.is_empty() => Request::PlayMotion { id },
-        _ => return Err(format!("不正な依頼: {kind}")),
+        _ => return Err(format!("invalid request: {kind}")),
     };
     blocking(move || {
         if crate::mascot_app::running_pids().is_empty() {

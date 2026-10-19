@@ -157,7 +157,7 @@ pub fn launch(app: &Path, env: &Env, backlog: bool) -> io::Result<()> {
     if status.success() {
         Ok(())
     } else {
-        Err(io::Error::other(format!("open が失敗した: {status}")))
+        Err(io::Error::other(format!("open failed: {status}")))
     }
 }
 
@@ -194,7 +194,7 @@ pub fn request_quit(_pid: u32) {}
 pub fn launch(_app: &Path, _env: &crate::server::Env, _backlog: bool) -> io::Result<()> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
-        "macOS 以外ではマスコットを起動できない",
+        "cannot launch the mascot on non-macOS",
     ))
 }
 

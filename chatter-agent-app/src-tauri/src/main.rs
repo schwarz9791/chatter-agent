@@ -258,7 +258,7 @@ fn main() {
             });
             if let Some(e) = settings_err {
                 manager.log(&format!(
-                    "settings.json を読めない（既定値で動かし、書き換えない）: {e}"
+                    "Cannot read settings.json (running with defaults and not overwriting it): {e}"
                 ));
             }
             clients.attach(manager.clone());
@@ -331,7 +331,7 @@ fn main() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("ChatterAgent の起動に失敗しました")
+        .expect("failed to start ChatterAgent")
         .run(|app, event| {
             match event {
                 // 常駐アプリなので、設定窓を全部閉じても終了しない。メニューの「終了」は

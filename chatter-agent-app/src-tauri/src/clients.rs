@@ -279,14 +279,14 @@ impl Clients {
             .manager
             .get()
             .and_then(|m| runtime_root(&m.env()))
-            .ok_or_else(|| "ランタイムルートを決められない".to_string())
+            .ok_or_else(|| "cannot determine the runtime root".to_string())
             .and_then(|root| set_mute(&root, on));
         match result {
             Ok(()) => {
                 lock(&self.0.st).cfg.mute = on;
                 self.request();
             }
-            Err(e) => self.log(&format!("ミュートを書けなかった: {e}")),
+            Err(e) => self.log(&format!("Failed to write mute state: {e}")),
         }
         // 失敗したときは、先に切り替わったメニューのチェックを実態へ戻す。
         self.notify();
@@ -305,7 +305,7 @@ impl Clients {
             if let Err(e) =
                 crate::update_settings(&self.0.settings_path, |s| s.mascot_visible = visible)
             {
-                self.log(&format!("表示状態を保存できなかった: {e}"));
+                self.log(&format!("Failed to save visibility state: {e}"));
             }
         }
         self.notify();
@@ -326,7 +326,9 @@ impl Clients {
         let stamp = stamp(&path);
         let cfg = read_settings(&path).map(|v| parse_cfg(&v));
         if let Err(e) = &cfg {
-            self.log(&format!("マスコットの設定を読めない。前回の値を使う: {e}"));
+            self.log(&format!(
+                "Cannot read mascot settings. Using the previous values: {e}"
+            ));
         }
         let mut st = lock(&self.0.st);
         st.stamp = Some(stamp);
@@ -363,7 +365,7 @@ impl Clients {
             self.stop_player();
         }
         if w != Want::Mascot && !self.quit_mascot() {
-            self.log("マスコットが終わらなかった。この回は player を起こさない");
+            self.log("Mascot did not exit. Not starting the player this time");
             // 実態はまだマスコットが居る。遅れて終わったら、監視が実態との差を見て決め直す。
             lock(&self.0.st).applied = Some(Want::Mascot);
             return;
@@ -378,7 +380,7 @@ impl Clients {
                             StartFail::NotFound(m) => (m, true),
                             StartFail::Failed(m) => (m, false),
                         };
-                        self.log(&format!("マスコットを起動できない: {msg}"));
+                        self.log(&format!("Cannot launch the mascot: {msg}"));
                         let t = text::current();
                         self.0
                             .app
@@ -404,7 +406,7 @@ impl Clients {
                 if lock(&self.0.player).is_none() {
                     // 失敗しても起こし直しはしない（終わった player と同じ扱い）。
                     if let Err(e) = self.spawn_player(m, &env, &core, cfg.volume, volume, backlog) {
-                        self.log(&format!("player を起動できない: {e}"));
+                        self.log(&format!("Cannot start the player: {e}"));
                     }
                     // ★ 終了処理（`stop_sync`）は `serial.busy` を取らないので、起こした直後に見直して残さない。
                     if self.0.shutting_down.load(Ordering::SeqCst) {
@@ -424,7 +426,7 @@ impl Clients {
         if pids.is_empty() {
             return true;
         }
-        self.log(&format!("マスコットの終了を要求した: pid={pids:?}"));
+        self.log(&format!("Requested the mascot to quit: pid={pids:?}"));
         for pid in pids {
             request_quit(pid);
         }
@@ -446,7 +448,7 @@ impl Clients {
         if !wait_until(MASCOT_START_TIMEOUT, || !running_pids().is_empty()) {
             return Err(StartFail::Failed(t.mascot_launch_failed("timeout")));
         }
-        self.log(&format!("マスコットを起動した: {}", app.display()));
+        self.log(&format!("Launched the mascot: {}", app.display()));
         Ok(())
     }
 
@@ -483,7 +485,7 @@ impl Clients {
             .stderr(log_err)
             .spawn()?;
         self.log(&format!(
-            "player を起動した: pid={} volume={volume_label}",
+            "Started the player: pid={} volume={volume_label}",
             child.id()
         ));
         *lock(&self.0.player) = Some(PlayerProc {
@@ -499,9 +501,9 @@ impl Clients {
             return;
         };
         let pid = child.id();
-        self.log(&format!("player の停止を要求した: pid={pid}"));
+        self.log(&format!("Requested the player to stop: pid={pid}"));
         if !stop_child(&mut child) {
-            self.log("player が止まらなかったので強制終了した");
+            self.log("Player did not stop, so it was killed");
         }
     }
 
@@ -530,7 +532,7 @@ impl Clients {
         }
         let gs = self.0.app.global_shortcut();
         if let Err(e) = gs.unregister_all() {
-            self.log(&format!("ショートカットを外せなかった: {e}"));
+            self.log(&format!("Failed to unregister the shortcut: {e}"));
         }
         let toggle_mute: fn(&Clients) = Clients::toggle_mute;
         let actions = [(want.0, toggle_mute), (want.1, Clients::toggle_visible)];
@@ -545,7 +547,7 @@ impl Clients {
                 }
             });
             if let Err(e) = result {
-                self.log(&format!("ショートカットを登録できなかった: {e}"));
+                self.log(&format!("Failed to register the shortcut: {e}"));
             }
         }
         lock(&self.0.st).hotkeys = Some(want);
@@ -567,7 +569,7 @@ impl Clients {
                     lock(&self.0.st).applied = Some(Want::Nothing);
                     // ponytail: 自動では起こし直さない。主因は外で動いている player の `player.lock` で、
                     // 起こし直すと再起動を繰り返すだけになる。次の reconcile か手動の切り替えで戻る。
-                    self.log(&format!("player が終わった: pid={pid} {info}"));
+                    self.log(&format!("Player exited: pid={pid} {info}"));
                 }
             }
         }
@@ -577,15 +579,15 @@ impl Clients {
         let rechecked = take_rechecked();
         if rechecked > 0 {
             self.log(&format!(
-                "マスコットが一覧に出なかったが pid は生きていた: {rechecked}回"
+                "Mascot was missing from the process list but its pid was alive: {rechecked} times"
             ));
         }
         match applied {
             Some(Want::Mascot) if !running => {
-                self.follow_outside(false, "マスコットが外で終了された");
+                self.follow_outside(false, "Mascot was quit outside ChatterAgent");
             }
             Some(Want::Player | Want::Nothing) if running => {
-                self.follow_outside(true, "マスコットが外で起動された");
+                self.follow_outside(true, "Mascot was launched outside ChatterAgent");
             }
             _ => {}
         }

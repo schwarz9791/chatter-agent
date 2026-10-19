@@ -26,7 +26,7 @@ restore_audio_manager() {
   if [ -f "$AUDIO_MANAGER" ] && grep -qx "  m_DisableAudio: 1" "$AUDIO_MANAGER"; then
     # macOS 専用スクリプト（--target StandaloneOSX をビルドする）なので BSD sed
     sed -i '' 's/^  m_DisableAudio: 1$/  m_DisableAudio: 0/' "$AUDIO_MANAGER"
-    echo "中断を検出したので Disable Unity Audio を出荷値に戻しました" >&2
+    echo "Interruption detected, so Disable Unity Audio was reset to the shipping value" >&2
   fi
 }
 
@@ -63,7 +63,7 @@ if [[ -n "$RELEASE" ]]; then
 
   # 配る前に封印が生きていることを確かめる。壊れていると、ダウンロードしたコピーは「壊れている」と扱われる。
   if ! codesign --verify --deep --strict "$app"; then
-    echo "署名の封印が壊れています: $app" >&2
+    echo "The code signature seal is broken: $app" >&2
     exit 1
   fi
 
@@ -71,11 +71,11 @@ if [[ -n "$RELEASE" ]]; then
   plist="$app/Contents/Info.plist"
   version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"
   if [[ "$version" != "${CHATTER_MASCOT_RELEASE_TAG#mascot-v}" ]]; then
-    echo "版がタグと合いません: Info.plist=$version tag=$CHATTER_MASCOT_RELEASE_TAG" >&2
+    echo "Version does not match the tag: Info.plist=$version tag=$CHATTER_MASCOT_RELEASE_TAG" >&2
     exit 1
   fi
   if [[ "$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' "$plist" 2>/dev/null)" != "true" ]]; then
-    echo "LSUIElement がありません（Dock に出ます）: $plist" >&2
+    echo "LSUIElement is missing (the app would appear in the Dock): $plist" >&2
     exit 1
   fi
 

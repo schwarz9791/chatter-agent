@@ -5,7 +5,7 @@
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/unity.sh"
 
-METHOD="${1:?メソッド名を指定してください}"
+METHOD="${1:?Specify a method name}"
 shift || true
 
 RUN_LOG="$PROJECT_PATH/Logs/run.log"
@@ -35,6 +35,6 @@ STATUS=${PIPESTATUS[0]}
 set -e
 
 if [ "$STATUS" -ne 0 ]; then
-  echo "失敗しました (exit=$STATUS)。全文は $RUN_LOG" >&2
+  echo "Failed (exit=$STATUS). Full log: $RUN_LOG" >&2
 fi
 exit $STATUS

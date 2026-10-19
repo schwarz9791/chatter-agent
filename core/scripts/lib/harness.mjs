@@ -69,11 +69,11 @@ export function fail(label) {
  *   （Linux と TTY は同期なので CI では起きない ＝ 手元でだけ再現する）。
  */
 export async function summarize(diagnostics) {
-  show("結果");
+  show("Result");
   if (failures.length === 0) {
-    console.log("\x1b[32mすべて PASS\x1b[0m");
+    console.log("\x1b[32mAll PASS\x1b[0m");
   } else {
-    console.log(`\x1b[31m${failures.length} 件 FAIL\x1b[0m`);
+    console.log(`\x1b[31m${failures.length} FAIL\x1b[0m`);
     for (const label of failures) console.log(`  - ${label}`);
     const dump = diagnostics?.();
     if (dump) console.log(`\n${dump}`);
@@ -115,14 +115,14 @@ export function entryArgv(role, bundle) {
 export function requireBundles(entries) {
   if (BIN) {
     if (!fs.existsSync(BIN)) {
-      console.error(`CHATTER_AGENT_BIN が存在しません: ${BIN}`);
+      console.error(`CHATTER_AGENT_BIN does not exist: ${BIN}`);
       process.exit(1);
     }
     return;
   }
   for (const [label, file] of entries) {
     if (fs.existsSync(file)) continue;
-    console.error(`${label} のバンドルがありません: ${file}\n先に core/ で npm run build を実行してください。`);
+    console.error(`${label} bundle not found: ${file}\nRun npm run build in core/ first`);
     process.exit(1);
   }
 }
@@ -170,7 +170,7 @@ const running = [];
  *   「今回の起動で出た行か」を判定するために `lastIndexOf` の比較が要る。
  */
 export function spawnLogged(argv, options = {}) {
-  const { env, label = "プロセス" } = options;
+  const { env, label = "process" } = options;
   const [command, ...args] = argv;
   const child = spawn(command, args, { env, stdio: ["ignore", "pipe", "pipe"] });
   const handle = {
@@ -184,7 +184,7 @@ export function spawnLogged(argv, options = {}) {
     async waitFor(mark, timeoutMs = 15_000) {
       const ok = await until(() => handle.log.includes(mark) || handle.exited !== null, timeoutMs);
       if (!ok || handle.exited !== null) {
-        throw new Error(`${label} が「${mark}」を出しませんでした（exited=${handle.exited}）:\n${handle.log}`);
+        throw new Error(`${label} did not print "${mark}" (exited=${handle.exited}):\n${handle.log}`);
       }
       return handle;
     },

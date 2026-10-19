@@ -27,7 +27,7 @@ if [[ -n "${CHATTER_MASCOT_KEYSTORE:-}" ]]; then
   require_release_tag
 
   if [[ ! -f "$CHATTER_MASCOT_KEYSTORE" ]]; then
-    echo "keystore が見つかりません: $CHATTER_MASCOT_KEYSTORE" >&2
+    echo "Keystore not found: $CHATTER_MASCOT_KEYSTORE" >&2
     exit 1
   fi
   CHATTER_MASCOT_KEYSTORE="$(/bin/realpath "$CHATTER_MASCOT_KEYSTORE")"
@@ -37,8 +37,8 @@ if [[ -n "${CHATTER_MASCOT_KEYSTORE:-}" ]]; then
   # 読む（→ docs/mascot.md「署名と版」）。読めなければ、下でキャッシュを消す前に止める。
   if [[ -z "${CHATTER_MASCOT_KEYSTORE_PASS:-}" ]]; then
     if ! keystore_pass="$(security find-generic-password -a "$USER" -s chatter-mascot-keystore -w)"; then
-      echo "キーチェーンから chatter-mascot-keystore のパスワードを読めませんでした。" \
-           "項目が無ければ docs/mascot.md の「署名と版」で登録するか、CHATTER_MASCOT_KEYSTORE_PASS を設定してください。" >&2
+      echo "Could not read the chatter-mascot-keystore password from the keychain." \
+           "If the item does not exist, register it following docs/mascot.md \"署名と版\", or set CHATTER_MASCOT_KEYSTORE_PASS." >&2
       exit 1
     fi
     export CHATTER_MASCOT_KEYSTORE_PASS="$keystore_pass"

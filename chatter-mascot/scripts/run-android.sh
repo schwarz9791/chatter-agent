@@ -29,12 +29,12 @@ for arg in "$@"; do
       NO_LOGCAT="--no-logcat"
       ;;
     --*)
-      echo "不明なオプションです: $arg" >&2
+      echo "Unknown option: $arg" >&2
       exit 1
       ;;
     *)
       if [ -n "$APK" ]; then
-        echo "APK は1つだけ指定できます" >&2
+        echo "Only one APK can be specified" >&2
         exit 1
       fi
       APK="$arg"
@@ -50,12 +50,12 @@ case "$APK" in
 esac
 
 if [ ! -x "$ADB" ]; then
-  echo "adb が見つかりません: ${ADB}（ADB 環境変数で指定できます）" >&2
+  echo "adb not found: ${ADB} (set the ADB environment variable to point at it)" >&2
   exit 1
 fi
 
 if [ ! -f "$APK" ]; then
-  echo "APK がありません: ${APK}（先に ./scripts/build-android.sh）" >&2
+  echo "APK not found: ${APK} (run ./scripts/build-android.sh first)" >&2
   exit 1
 fi
 
@@ -65,7 +65,7 @@ fi
 #   USB / エミュレータで繋いでいる間だけ成り立つ、検証用の踏み台（LAN 越しの接続先の指定ではない）。
 REVERSE_PORT="${CHATTER_AGENT_PORT:-8570}"
 "$ADB" reverse tcp:8570 "tcp:$REVERSE_PORT"
-echo "転送しました: tcp:8570 -> tcp:$REVERSE_PORT"
+echo "Forwarded: tcp:8570 -> tcp:$REVERSE_PORT"
 
 "$ADB" install -r "$APK"
 
@@ -74,9 +74,9 @@ echo "転送しました: tcp:8570 -> tcp:$REVERSE_PORT"
 "$ADB" shell am start -n "$APP_ID/tech.sukima.chattermascot.ChatterMascotGameActivity"
 
 if [ "$NO_LOGCAT" = "--no-logcat" ]; then
-  echo "起動しました（--no-logcat のため logcat は追いません）"
+  echo "Launched (not following logcat because of --no-logcat)"
   exit 0
 fi
 
-echo "Unity のログを表示します（Ctrl-C で終了）"
+echo "Showing Unity logs (Ctrl-C to quit)"
 "$ADB" logcat -s Unity ChatterMascot

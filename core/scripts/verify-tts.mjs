@@ -249,39 +249,39 @@ try {
   await startServer(serverEnv());
 
   {
-    show("① 誰も繋いでいない間は合成しない");
+    show("① Does not synthesize while nobody is connected");
     const record = enqueue("だれも聞いていません。");
     await sleep(500);
     check(
-      "★ エンジンを一度も叩かない（GET が来て初めて合成する）",
+      "★ never calls the engine (synthesizes only once a GET arrives)",
       synthesized.length === 0,
       JSON.stringify(synthesized),
     );
 
-    show("② フレームには音声の相対パスが載る");
+    show("② Frames carry the relative audio path");
     const client = await connect();
     const arrived = await until(() => client.frames.length === 1);
-    check("配信された", arrived, JSON.stringify(client.frames));
+    check("was delivered", arrived, JSON.stringify(client.frames));
     check(
-      "★ 相対パス（サーバーは自分の到達アドレスを知らない）",
+      "★ relative path (the server does not know its own reachable address)",
       client.frames[0]?.audio?.path === audioPath(record),
       JSON.stringify(client.frames[0]?.audio),
     );
-    check("配信しただけでは合成しない", synthesized.length === 0, JSON.stringify(synthesized));
+    check("delivery alone does not synthesize", synthesized.length === 0, JSON.stringify(synthesized));
 
-    show("③ GET で初めて合成し、WAV が返る");
+    show("③ Synthesizes only on GET and returns a WAV");
     const res = await fetch(`${base}${audioPath(record)}`);
     const body = await res.arrayBuffer();
-    check("200 が返る", res.status === 200, `status=${res.status}`);
+    check("returns 200", res.status === 200, `status=${res.status}`);
     check(
-      "content-type は audio/wav",
+      "content-type is audio/wav",
       res.headers.get("content-type") === "audio/wav",
       res.headers.get("content-type"),
     );
-    check("WAV の中身が返る", body.byteLength === WAV.byteLength, `${body.byteLength} vs ${WAV.byteLength}`);
-    check("エンジンを1回だけ叩いた", synthesized.length === 1, JSON.stringify(synthesized));
+    check("returns the WAV body", body.byteLength === WAV.byteLength, `${body.byteLength} vs ${WAV.byteLength}`);
+    check("called the engine exactly once", synthesized.length === 1, JSON.stringify(synthesized));
 
-    show("④ ★ 同じ文を複数クライアントが同時に取りに来ても、合成は1回");
+    show("④ ★ Synthesis happens once even when several clients fetch the same sentence at the same time");
     synthesisDelayMs = 300;
     const shared = enqueue("ふたりが同時に取りに来ます。");
     await until(() => client.frames.length === 2);
@@ -293,31 +293,35 @@ try {
     ]);
     await Promise.all([a.arrayBuffer(), b.arrayBuffer(), c.arrayBuffer()]);
     check(
-      "3件とも 200",
+      "all 3 return 200",
       [a, b, c].every((r) => r.status === 200),
       [a, b, c].map((r) => r.status).join(","),
     );
-    check("★ 合成は1回だけ", synthesized.length === before + 1, `${before} → ${synthesized.length}`);
+    check("★ synthesized only once", synthesized.length === before + 1, `${before} → ${synthesized.length}`);
     synthesisDelayMs = 0;
 
-    show("⑤ 2度目の GET はキャッシュから返る");
+    show("⑤ The second GET is served from the cache");
     const cachedBefore = synthesized.length;
     await (await fetch(`${base}${audioPath(record)}`)).arrayBuffer();
-    check("エンジンを叩かない", synthesized.length === cachedBefore, JSON.stringify(synthesized.slice(cachedBefore)));
+    check(
+      "does not call the engine",
+      synthesized.length === cachedBefore,
+      JSON.stringify(synthesized.slice(cachedBefore)),
+    );
 
-    show("⑥ 用意できないものは 404（永久に無い）");
+    show("⑥ Whatever cannot be provided returns 404 (it will never exist)");
     const wrongEpoch = `/audio/other-epoch-${String(record.seq).padStart(12, "0")}.wav`;
-    check("★ 世代違いの URL", (await fetch(`${base}${wrongEpoch}`)).status === 404, wrongEpoch);
-    check("キューに無い seq", (await fetch(`${base}/audio/${EPOCH}-000000009999.wav`)).status === 404);
+    check("★ a URL of a different generation", (await fetch(`${base}${wrongEpoch}`)).status === 404, wrongEpoch);
+    check("a seq not in the queue", (await fetch(`${base}/audio/${EPOCH}-000000009999.wav`)).status === 404);
     for (const bad of ["/audio/../../etc/passwd", "/audio/%2e%2e%2f%2e%2e%2fetc%2fpasswd", "/etc/passwd", "/"]) {
-      check(`★ パストラバーサルを弾く: ${bad}`, (await fetch(`${base}${bad}`)).status === 404);
+      check(`★ rejects path traversal: ${bad}`, (await fetch(`${base}${bad}`)).status === 404);
     }
 
-    show("⑦ Origin（WebSocket と同じ規則）");
+    show("⑦ Origin (same rule as WebSocket)");
     const rejected = await fetch(`${base}${audioPath(record)}`, { headers: { origin: "http://evil.example.com" } });
-    check("許可リストに無い Origin は 403", rejected.status === 403, `status=${rejected.status}`);
+    check("an Origin outside the allow list returns 403", rejected.status === 403, `status=${rejected.status}`);
 
-    show("⑧ ack でキューから消えたら 404 になる");
+    show("⑧ Once ack removes it from the queue, it returns 404");
     client.ack(record.seq);
     // until は同期の述語しか扱えないので、ここは自前で回す（削除は server の 50ms ポーリング外）
     let status = 0;
@@ -325,56 +329,68 @@ try {
       status = (await fetch(`${base}${audioPath(record)}`)).status;
       if (status !== 404) await sleep(100);
     }
-    check("★ ack 済みの音声は配らない（本文の権威はキュー）", status === 404, `status=${status}`);
+    check(
+      "★ does not serve audio that has been acked (the queue is the authority for the text)",
+      status === 404,
+      `status=${status}`,
+    );
 
     await client.close();
   }
 
   {
-    show("⑨ ★ エンジンが落ちていたら 503（テキストの配信は止まらない）");
+    show("⑨ ★ Returns 503 when the engine is down (text delivery does not stop)");
     engineDown = true;
     const client = await connect();
     const record = enqueue("エンジンが落ちている間の発言です。");
     const arrived = await until(() => client.frames.some((f) => f.seq === record.seq), 5000);
-    check("★ テキストは届く（無音の原因を診断できる）", arrived, JSON.stringify(client.frames.map((f) => f.seq)));
+    check(
+      "★ the text arrives (the cause of the silence can be diagnosed)",
+      arrived,
+      JSON.stringify(client.frames.map((f) => f.seq)),
+    );
 
     const res = await fetch(`${base}${audioPath(record)}`);
     await res.arrayBuffer();
-    check("★ 404 ではなく 503（あとで取りに来い）", res.status === 503, `status=${res.status}`);
-    check("Retry-After を返す", res.headers.get("retry-after") === "1", res.headers.get("retry-after"));
+    check("★ 503 rather than 404 (come back later)", res.status === 503, `status=${res.status}`);
+    check("returns Retry-After", res.headers.get("retry-after") === "1", res.headers.get("retry-after"));
 
-    show("⑩ エンジンが戻れば、同じ URL で取り直せる");
+    show("⑩ Once the engine is back, the same URL can be fetched again");
     engineDown = false;
     const recovered = await fetch(`${base}${audioPath(record)}`);
     const body = await recovered.arrayBuffer();
-    check("★ 200 が返る（503 で諦めさせない設計の裏付け）", recovered.status === 200, `status=${recovered.status}`);
-    check("WAV の中身が返る", body.byteLength === WAV.byteLength);
+    check(
+      "★ returns 200 (backs the design of not making clients give up on 503)",
+      recovered.status === 200,
+      `status=${recovered.status}`,
+    );
+    check("returns the WAV body", body.byteLength === WAV.byteLength);
 
     await client.close();
   }
 
   {
-    show("⑪ ttsEnabled=false なら音声を配らない（テキストは配る）");
+    show("⑪ With ttsEnabled=false, no audio is served (text still is)");
     await stopServer();
     await startServer(serverEnv({ CHATTER_AGENT_TTS_ENABLED: "false" }));
 
     const client = await connect();
     const record = enqueue("音声なしで配られる発言です。");
     const arrived = await until(() => client.frames.some((f) => f.seq === record.seq), 5000);
-    check("テキストは届く", arrived, JSON.stringify(client.frames.map((f) => f.seq)));
+    check("the text arrives", arrived, JSON.stringify(client.frames.map((f) => f.seq)));
     check(
-      "★ audio は null",
+      "★ audio is null",
       client.frames.find((f) => f.seq === record.seq)?.audio === null,
       JSON.stringify(client.frames.find((f) => f.seq === record.seq)),
     );
-    check("GET は 404", (await fetch(`${base}${audioPath(record)}`)).status === 404);
-    check("起動ログに理由が出る", serverLogs().includes("ttsEnabled=false"), serverLogs());
+    check("GET returns 404", (await fetch(`${base}${audioPath(record)}`)).status === 404);
+    check("the startup log states the reason", serverLogs().includes("ttsEnabled=false"), serverLogs());
 
     await client.close();
   }
 
   {
-    show("⑫ ★ ttsSpeakerId が存在しないとき、無音の原因がログに出る");
+    show("⑫ ★ When ttsSpeakerId does not exist, the cause of the silence appears in the log");
     // 「音が出ない」以外の症状が無い設定ミス。起動時の診断が候補を並べないと、
     // ユーザーからは「壊れている」としか見えない
     await stopServer();
@@ -384,9 +400,9 @@ try {
     const record = enqueue("話者 ID を間違えたときの発言です。");
     await until(() => client.frames.some((f) => f.seq === record.seq), 5000);
 
-    check("★ 起動時の診断が値を名指しする", serverLogs().includes("Voice ID 999999 ("), serverLogs());
+    check("★ the startup diagnosis names the value", serverLogs().includes("Voice ID 999999 ("), serverLogs());
     check(
-      "★ 実在する話者 ID を候補として並べる（直せる形で出す）",
+      "★ lists the existing speaker IDs as candidates (in a form that can be fixed)",
       serverLogs().includes(String(SPEAKER_ID)),
       serverLogs(),
     );
@@ -395,14 +411,18 @@ try {
     const body = await res.text();
     // ★ 4xx を 404 に落とさないこと。404 はクライアント側で ack まで通り、
     //   本文が物理削除される（設定を直しても復元できない）
-    check("★ エンジンの 422 でも 503（404 にすると本文が物理削除される）", res.status === 503, `status=${res.status}`);
-    check("応答本文にもエンジンの理由が載る", body.includes("speaker not found"), body);
+    check(
+      "★ 503 even on an engine 422 (a 404 would physically delete the text)",
+      res.status === 503,
+      `status=${res.status}`,
+    );
+    check("the response body also carries the engine reason", body.includes("speaker not found"), body);
 
     await client.close();
   }
 
   {
-    show("⑬ 終了処理でポートが解放される（ws は外部 http server を閉じない）");
+    show("⑬ The port is released on shutdown (ws does not close an external http server)");
     await stopServer();
     let reachable = true;
     try {
@@ -410,27 +430,27 @@ try {
     } catch {
       reachable = false;
     }
-    check("★ SIGTERM の後、誰も listen していない", !reachable);
+    check("★ nobody is listening after SIGTERM", !reachable);
   }
 
   {
-    show("⑭ ★ 疎通できるので合成エンジンを起こさない（#51 の条件3）");
+    show("⑭ ★ Does not start the TTS engine because it is reachable (#51 condition 3)");
     // ここまでの全シナリオでスタブのエンジンが listen している。条件3が壊れると、
     // 開発機（macOS）では代わりに**本物の AivisSpeech** が黙って起動する。
     // ★ このスクリプトに CHATTER_AGENT_TTS_SPAWN=0 を入れないこと —— 入れると
     //   条件3が壊れても素通りしてしまい、この検査の意味が無くなる
-    check("★ [Engine] 起動しました が1度も出ていない", !serverLogs().includes("[Engine] Started"), serverLogs());
+    check("★ [Engine] Started never appears", !serverLogs().includes("[Engine] Started"), serverLogs());
     // ★ スキップ理由が増えるたびにここを足さないと、否定検査は落ちるのではなく
     //   **黙って空振りする**（vacuous pass）。全変種が「cannot be started」か「Could not find」を
     //   含むことは describeEngineSkip の単体テスト側で固定してある
     check(
-      "★ ttsSpeakerId が違っても（⑫）疎通は成立しているので起こさない",
+      "★ even with a wrong ttsSpeakerId (⑫) the engine is reachable, so it is not started",
       !serverLogs().includes("Could not find") && !serverLogs().includes("cannot be started"),
       serverLogs(),
     );
   }
   {
-    show("⑮ ★ 起こす経路では「503 を返します」を先に出さない（#52 レビュー）");
+    show("⑮ ★ On the path that starts the engine, does not print the 503 warning first (#52 review)");
     // ★ **⑭ より後ろに置くこと。** ⑭ は累積ログに対して「[Engine] 起動しました が1度も
     //   出ていない」を検査しているので、前に置くと必ず落ちる。
     // ★ **CHATTER_AGENT_TTS_SPAWN_COMMAND を必ず渡すこと。** 渡さないと開発機（macOS）で
@@ -451,16 +471,20 @@ try {
 
     // ★ **累積ログ（serverLogs()）で判定しないこと。** 前のシナリオが出した行を拾ってしまう
     const spawnLog = server?.log ?? "";
-    check("★ 起こす前の観測は残る（原因が消えない）", spawnLog.includes("Cannot connect to the TTS engine"), spawnLog);
-    check("★ エンジンを起こした", spawnLog.includes("[Engine] Started"), spawnLog);
     check(
-      "★ 直後の行が否定する警告を出さない（帰結は起こさないと決めた側だけが出す）",
+      "★ the observation made before starting remains (the cause is not erased)",
+      spawnLog.includes("Cannot connect to the TTS engine"),
+      spawnLog,
+    );
+    check("★ started the engine", spawnLog.includes("[Engine] Started"), spawnLog);
+    check(
+      "★ does not print a warning that the next line would contradict (only the side that decided not to start prints the consequence)",
       !spawnLog.includes("Audio GET requests will return 503"),
       spawnLog,
     );
 
     const enginePid = Number(/\[Engine\] Started \(pid=(\d+)\)/.exec(spawnLog)?.[1]);
-    check("起動ログに pid が載っている", Number.isInteger(enginePid) && enginePid > 0, String(enginePid));
+    check("the startup log carries the pid", Number.isInteger(enginePid) && enginePid > 0, String(enginePid));
 
     await stopServer();
     // ★ CI で「サーバーを止めるとエンジンも落ちる」を見る唯一の場所（今までは実機確認だけ）
@@ -472,11 +496,11 @@ try {
         return true;
       }
     }, 5000);
-    check("★ サーバーを止めるとエンジンも落ちる（プロセスグループごと）", gone, `pid=${enginePid}`);
+    check("★ stopping the server also stops the engine (the whole process group)", gone, `pid=${enginePid}`);
   }
 
   {
-    show("⑯ ★ 名前から解決したときは黙って読み替えず、名指しする（#52 レビュー）");
+    show("⑯ ★ When resolved from a name, does not silently reinterpret it and names it instead (#52 review)");
     await stopServer();
     // ★ **`run` を渡さないこと。** 退行していた場合に verify 自身が無関係なバイナリを起動する。
     //   ここで見たいのは「名前から引いたら名指しする」ことだけなので、実在しない名前で足りる
@@ -496,17 +520,21 @@ try {
 
     const missLog = server?.log ?? "";
     check(
-      "★ 探した場所をフルパスで並べる",
+      "★ lists the searched locations as full paths",
       /\n?\[Server\] {2}\/.*chatter-agent-no-such-engine-xyz/.test(missLog),
       missLog,
     );
-    check("★ 実行ビットの注意も出す", missLog.includes("executable bit"), missLog);
-    check("エンジンは起こしていない", !missLog.includes("[Engine] Started"), missLog);
-    check("★ ここでは帰結（503）まで言う", missLog.includes("Audio GET requests will return 503"), missLog);
+    check("★ also warns about the executable bit", missLog.includes("executable bit"), missLog);
+    check("the engine was not started", !missLog.includes("[Engine] Started"), missLog);
+    check(
+      "★ here it also states the consequence (503)",
+      missLog.includes("Audio GET requests will return 503"),
+      missLog,
+    );
   }
 
   {
-    show("⑰ ★ ttsEngine=openai: GET が openai の口を叩き、voice/speed が設定どおりに載る");
+    show("⑰ ★ ttsEngine=openai: GET calls the openai endpoint, and voice/speed are sent as configured");
     await stopServer();
     await startServer(
       serverEnv({
@@ -523,32 +551,32 @@ try {
     const before = openaiRequests.length;
     const res = await fetch(`${base}${audioPath(record)}`);
     const body = await res.arrayBuffer();
-    check("200 が返る", res.status === 200, `status=${res.status}`);
-    check("WAV の中身が返る", body.byteLength === WAV.byteLength, `${body.byteLength} vs ${WAV.byteLength}`);
+    check("returns 200", res.status === 200, `status=${res.status}`);
+    check("returns the WAV body", body.byteLength === WAV.byteLength, `${body.byteLength} vs ${WAV.byteLength}`);
     check(
-      "★ 叩いた口は openai の /v1/audio/speech",
+      "★ the endpoint called is openai /v1/audio/speech",
       openaiRequests.length === before + 1,
       JSON.stringify(openaiRequests),
     );
     const seen = openaiRequests.at(-1);
-    check("★ voice は kokoroVoiceId どおり", seen?.voice === OPENAI_VOICE_ID, JSON.stringify(seen));
-    check("★ speed は ttsSpeedScale どおり", seen?.speed === 1.5, JSON.stringify(seen));
+    check("★ voice follows kokoroVoiceId", seen?.voice === OPENAI_VOICE_ID, JSON.stringify(seen));
+    check("★ speed follows ttsSpeedScale", seen?.speed === 1.5, JSON.stringify(seen));
 
-    show("⑱ ★ ttsEngine=openai: エンジンが落ちていたら 503（テキストの配信は止まらない）");
+    show("⑱ ★ ttsEngine=openai: returns 503 when the engine is down (text delivery does not stop)");
     engineDown = true;
     const downRecord = enqueue("openai エンジンが落ちている間の発言です。");
     const arrived = await until(() => client.frames.some((f) => f.seq === downRecord.seq), 5000);
-    check("★ テキストは届く", arrived, JSON.stringify(client.frames.map((f) => f.seq)));
+    check("★ the text arrives", arrived, JSON.stringify(client.frames.map((f) => f.seq)));
     const downRes = await fetch(`${base}${audioPath(downRecord)}`);
     await downRes.arrayBuffer();
-    check("★ 404 ではなく 503", downRes.status === 503, `status=${downRes.status}`);
+    check("★ 503 rather than 404", downRes.status === 503, `status=${downRes.status}`);
     engineDown = false;
 
     await client.close();
   }
 
   {
-    show("⑲ ★ ttsEngine=openai: kokoroVoiceId が存在しないとき、起動時の診断が候補を出す");
+    show("⑲ ★ ttsEngine=openai: when kokoroVoiceId does not exist, the startup diagnosis lists candidates");
     await stopServer();
     await startServer(
       serverEnv({
@@ -562,18 +590,18 @@ try {
     await until(() => client.frames.some((f) => f.seq === record.seq), 5000);
 
     const diagLog = server?.log ?? "";
-    check("★ 起動時の診断が値を名指しする", diagLog.includes("Voice ID no-such-voice ("), diagLog);
-    check("★ 実在する声 ID を候補として並べる", diagLog.includes(OPENAI_VOICE_ID), diagLog);
+    check("★ the startup diagnosis names the value", diagLog.includes("Voice ID no-such-voice ("), diagLog);
+    check("★ lists the existing voice IDs as candidates", diagLog.includes(OPENAI_VOICE_ID), diagLog);
 
     const res = await fetch(`${base}${audioPath(record)}`);
     await res.arrayBuffer();
-    check("★ エンジンの 400 でも 503", res.status === 503, `status=${res.status}`);
+    check("★ 503 even on an engine 400", res.status === 503, `status=${res.status}`);
 
     await client.close();
   }
 
   {
-    show("⑳ ★ ttsEngine=openai: 疎通できるので合成エンジンを起こさない");
+    show("⑳ ★ ttsEngine=openai: does not start the TTS engine because it is reachable");
     await stopServer();
     await startServer(
       serverEnv({
@@ -583,15 +611,15 @@ try {
     );
     // ★ 疎通の確認は Ready の後に走る。結論が出るまで待たないと、否定検査が空振りする
     const probed = await until(() => (server?.log ?? "").includes("Connected to the TTS engine"), 5000);
-    check("疎通の確認が済んだ", probed, server?.log ?? "");
+    check("the reachability check finished", probed, server?.log ?? "");
     // ★ この起動ぶんのログだけで見る（累積だと ⑮ が出した「[Engine] 起動しました」を拾う）
     const freshLog = server?.log ?? "";
-    check("★ [Engine] 起動しました が出ていない", !freshLog.includes("[Engine] Started"), freshLog);
+    check("★ [Engine] Started does not appear", !freshLog.includes("[Engine] Started"), freshLog);
 
-    show("㉑ ★ 制御 API: GET /v1/speakers が openai の声一覧を返す");
+    show("㉑ ★ Control API: GET /v1/speakers returns the openai voice list");
     const speakersRes = await fetch(`${base}/v1/speakers`);
     const speakersBody = await speakersRes.json();
-    check("200 が返る", speakersRes.status === 200, `status=${speakersRes.status}`);
+    check("returns 200", speakersRes.status === 200, `status=${speakersRes.status}`);
     check(
       '★ {speakers:[{id:"af_heart", ...}]}',
       Array.isArray(speakersBody.speakers) && speakersBody.speakers.some((s) => s.id === OPENAI_VOICE_ID),
@@ -600,7 +628,7 @@ try {
   }
 
   {
-    show("㉒ ★ #149: 後ろの seq が合成できているのに、この1文だけ拒まれたら 404 に落ちる");
+    show("㉒ ★ #149: when a later seq synthesizes fine but only this one sentence is rejected, it falls to 404");
     // ここまでの ⑳ でサーバーは ttsEngine=openai のまま動いている
     const client = await connect();
 
@@ -612,23 +640,31 @@ try {
 
     const first = await fetch(`${base}${audioPath(rejected)}`);
     await first.arrayBuffer();
-    check("★ 後ろがまだ合成されていない間は 503（消えない）", first.status === 503, `status=${first.status}`);
+    check(
+      "★ 503 while the later one is not yet synthesized (it is not deleted)",
+      first.status === 503,
+      `status=${first.status}`,
+    );
 
     const second = await fetch(`${base}${audioPath(okAfter)}`);
     await second.arrayBuffer();
-    check("後ろの文は 200", second.status === 200, `status=${second.status}`);
+    check("the later sentence returns 200", second.status === 200, `status=${second.status}`);
 
     const third = await fetch(`${base}${audioPath(rejected)}`);
     const thirdBody = await third.text();
-    check("★ 後ろが成功した後は、拒まれた文だけ 404 に落ちる", third.status === 404, `status=${third.status}`);
-    check("理由が本文に載る", thirdBody.includes("rejected by engine"), thirdBody);
+    check(
+      "★ once the later one succeeds, only the rejected sentence falls to 404",
+      third.status === 404,
+      `status=${third.status}`,
+    );
+    check("the reason is in the body", thirdBody.includes("rejected by engine"), thirdBody);
 
     rejectedTexts.delete(rejectedText);
     await client.close();
   }
 
   {
-    show("㉓ ★ #149: 全文が拒まれるときは 404 にならず 503 のまま残る（規則7が守る形のまま）");
+    show("㉓ ★ #149: when every sentence is rejected, it stays 503 instead of becoming 404 (the form rule 7 protects)");
     const client = await connect();
 
     const text = "誰にも通りません。";
@@ -640,7 +676,7 @@ try {
       const res = await fetch(`${base}${audioPath(record)}`);
       await res.arrayBuffer();
       check(
-        `★ ${i + 1}回目の GET も 503 のまま（後ろが無いので404にならない）`,
+        `★ GET #${i + 1} also stays 503 (no later sentence, so no 404)`,
         res.status === 503,
         `status=${res.status}`,
       );
@@ -651,7 +687,9 @@ try {
   }
 
   {
-    show("㉔ ★ #149: openai で kokoroBaseUrl が openai 互換ではない相手（404）を指しても、起こさず警告する");
+    show(
+      "㉔ ★ #149: even if kokoroBaseUrl on openai points at a non-openai-compatible peer (404), warns without starting the engine",
+    );
     await stopServer();
     openaiVoicesUnavailable = true;
     await startServer(
@@ -662,11 +700,11 @@ try {
     );
 
     const warned = await until(() => (server?.log ?? "").includes("The TTS engine responded but"), 5000);
-    check("★ 応答はあったという警告が出る", warned, server?.log ?? "");
+    check("★ a warning that a response was received appears", warned, server?.log ?? "");
     const freshLog = server?.log ?? "";
-    check("★ 警告に status が載る（404）", freshLog.includes("status=404"), freshLog);
+    check("★ the warning carries the status (404)", freshLog.includes("status=404"), freshLog);
     check(
-      "★ 応答はあるので unreachable 扱いにせず、エンジンを起こさない",
+      "★ a response exists, so it is not treated as unreachable and the engine is not started",
       !freshLog.includes("[Engine] Started"),
       freshLog,
     );
@@ -675,7 +713,7 @@ try {
   }
 
   {
-    show("㉕ ★ 実行中の ttsEngine 切り替え: 起動判定がやり直され、自分で起こした AivisSpeech だけが止まる");
+    show("㉕ ★ Switching ttsEngine at runtime: the start decision is redone and only the AivisSpeech we started stops");
     await stopServer();
     // ★ `ttsEngine` を env で固定しないこと（固定すると PATCH が 409 になる）。既定の voicevox で始める。
     //   起こす相手は使い捨てのスタブに限る（`CHATTER_AGENT_TTS_SPAWN_COMMAND` を必ず渡す）。
@@ -729,10 +767,10 @@ http
       }),
     );
     const spawnedAtStart = await until(() => (server?.log ?? "").includes("[Engine] Started"), 10_000);
-    check("★ 起動時に AivisSpeech のスタブを起こした", spawnedAtStart, server?.log ?? "");
+    check("★ started the AivisSpeech stub at startup", spawnedAtStart, server?.log ?? "");
     const pidOf = (log) => Number(/\[Engine\] Started \(pid=(\d+)\)/.exec(log)?.[1]);
     const pidA = pidOf(server?.log ?? "");
-    check("起こしたエンジンの pid がログに出る", Number.isInteger(pidA), server?.log ?? "");
+    check("the pid of the started engine appears in the log", Number.isInteger(pidA), server?.log ?? "");
     const spawnCount = () => (server?.log ?? "").split("[Engine] Started").length - 1;
     const alive = (pid) => {
       try {
@@ -763,69 +801,73 @@ http
     const client = await connect();
 
     const toOpenai = await patchEngine("openai");
-    check("★ PATCH {ttsEngine:openai} が通る", toOpenai.status === 200, `status=${toOpenai.status}`);
+    check("★ PATCH {ttsEngine:openai} succeeds", toOpenai.status === 200, `status=${toOpenai.status}`);
     const closedA = Number.isInteger(pidA) && (await until(() => !alive(pidA), 10_000));
-    check("★ 自分が起こした AivisSpeech は止まる", closedA, `pid=${pidA}`);
-    check("★ openai への切り替えでは何も起こさない", spawnCount() === 1, server?.log ?? "");
+    check("★ the AivisSpeech we started stops", closedA, `pid=${pidA}`);
+    check("★ switching to openai starts nothing", spawnCount() === 1, server?.log ?? "");
 
     const recordA = enqueue("openai に切り替えた後の発言です。");
     await until(() => client.frames.some((f) => f.seq === recordA.seq), 5000);
     const openaiBefore = openaiRequests.length;
     const audioA = await fetchAudio(recordA);
     check(
-      "★ 次の GET は openai の口（Kokoro）へ行く",
+      "★ the next GET goes to the openai endpoint (Kokoro)",
       audioA.status === 200 && audioA.bytes === WAV.byteLength,
       JSON.stringify(audioA),
     );
-    check("openai の口が叩かれた", openaiRequests.length === openaiBefore + 1, JSON.stringify(openaiRequests));
+    check("the openai endpoint was called", openaiRequests.length === openaiBefore + 1, JSON.stringify(openaiRequests));
 
     const toVoicevox = await patchEngine("voicevox");
-    check("★ PATCH {ttsEngine:voicevox} が通る", toVoicevox.status === 200, `status=${toVoicevox.status}`);
+    check("★ PATCH {ttsEngine:voicevox} succeeds", toVoicevox.status === 200, `status=${toVoicevox.status}`);
     const respawned = await until(() => spawnCount() === 2, 10_000);
-    check("★ 切り替えで AivisSpeech を起こし直す", respawned, server?.log ?? "");
+    check("★ switching restarts AivisSpeech", respawned, server?.log ?? "");
     const pidB = pidOf((server?.log ?? "").slice((server?.log ?? "").lastIndexOf("[Engine] Started") - 1));
-    check("新しい pid は前と違う", Number.isInteger(pidB) && pidB !== pidA, `A=${pidA} B=${pidB}`);
+    check("the new pid differs from the previous one", Number.isInteger(pidB) && pidB !== pidA, `A=${pidA} B=${pidB}`);
 
     const recordB = enqueue("voicevox に戻した後の発言です。");
     await until(() => client.frames.some((f) => f.seq === recordB.seq), 5000);
     const openaiMid = openaiRequests.length;
     const audioB = await fetchAudio(recordB);
     check(
-      "★ 次の GET は起こした AivisSpeech のスタブへ行く",
+      "★ the next GET goes to the AivisSpeech stub we started",
       audioB.status === 200 && audioB.bytes === makeWav(SPAWNED_WAV_SECONDS).byteLength,
       JSON.stringify(audioB),
     );
-    check("openai の口は叩かれていない", openaiRequests.length === openaiMid, JSON.stringify(openaiRequests));
+    check("the openai endpoint was not called", openaiRequests.length === openaiMid, JSON.stringify(openaiRequests));
 
     const same = await patchEngine("voicevox");
-    check("同じ値の PATCH も通る", same.status === 200, `status=${same.status}`);
+    check("a PATCH with the same value succeeds too", same.status === 200, `status=${same.status}`);
     await sleep(500);
-    check("★ 同じ値の PATCH では起こし直さない", spawnCount() === 2, server?.log ?? "");
-    check("★ 起こしたエンジンは生きたまま", alive(pidB), `pid=${pidB}`);
+    check("★ a PATCH with the same value does not restart", spawnCount() === 2, server?.log ?? "");
+    check("★ the started engine stays alive", alive(pidB), `pid=${pidB}`);
 
     // ★ 生きているエンジンでは修正前の条件でも素通りする。**落ちた**エンジンで確かめること
     process.kill(-pidB, "SIGTERM"); // detached で起こしているのでプロセスグループごと
-    check("起こしたエンジンを外から止めた", await until(() => !alive(pidB), 5000), `pid=${pidB}`);
+    check("stopped the started engine from outside", await until(() => !alive(pidB), 5000), `pid=${pidB}`);
     const sameAfterCrash = await patchEngine("voicevox");
-    check("落ちた後の同じ値の PATCH も通る", sameAfterCrash.status === 200, `status=${sameAfterCrash.status}`);
+    check(
+      "a same-value PATCH after the crash succeeds too",
+      sameAfterCrash.status === 200,
+      `status=${sameAfterCrash.status}`,
+    );
     await sleep(500);
-    check("★ 落ちたエンジンは同じ値の PATCH で起こし直さない", spawnCount() === 2, server?.log ?? "");
+    check("★ a crashed engine is not restarted by a same-value PATCH", spawnCount() === 2, server?.log ?? "");
 
     // サーバーの終了で道連れにできるかは、切り替えで起こし直した別のエンジンで確かめる
     await patchEngine("openai");
     await patchEngine("voicevox");
-    check("★ 切り替え直せば起こし直す", await until(() => spawnCount() === 3, 10_000), server?.log ?? "");
+    check("★ switching again restarts it", await until(() => spawnCount() === 3, 10_000), server?.log ?? "");
     const pidC = pidOf((server?.log ?? "").slice((server?.log ?? "").lastIndexOf("[Engine] Started") - 1));
 
     await client.close();
     await stopServer();
     const goneC = Number.isInteger(pidC) && (await until(() => !alive(pidC), 5000));
-    check("★ サーバーを止めると起こしたエンジンも落ちる", goneC, `pid=${pidC}`);
+    check("★ stopping the server also stops the started engine", goneC, `pid=${pidC}`);
   }
 } catch (err) {
-  console.error("\n\x1b[31m検証中に例外が発生しました\x1b[0m");
+  console.error("\n\x1b[31mAn exception occurred during verification\x1b[0m");
   console.error(err);
-  fail("例外");
+  fail("exception");
 }
 
-await summarize(() => (serverLogs() ? `server のログ:\n${serverLogs()}` : ""));
+await summarize(() => (serverLogs() ? `server log:\n${serverLogs()}` : ""));

@@ -83,7 +83,7 @@ function speak(messageId, text) {
   fs.writeFileSync(path.join(spoolDir, `${messageId}.0.json`), JSON.stringify(payload));
   const [speakCmd, ...speakArgs] = entryArgv("speak", CLI);
   const { status } = spawnSync(speakCmd, speakArgs, { env, stdio: "ignore" });
-  if (status !== 0) throw new Error(`CLI が異常終了しました (status=${status})`);
+  if (status !== 0) throw new Error(`CLI exited abnormally (status=${status})`);
 }
 
 /** 接続の前に message ハンドラを張る（接続直後の追いつきは同期で来る） */
@@ -155,39 +155,39 @@ function cleanup() {
 try {
   await startServer();
 
-  show("① 接続したクライアントに1文ずつ流れる");
+  show("① Sentences are delivered one by one to a connected client");
   const client = await connect();
   speak("m-1", "確認します。ログを見ます。以上です。");
   await client.settle();
   console.log(client.received.map((r) => `seq=${r.seq} ${r.kind} ${JSON.stringify(r.text)}`).join("\n"));
   check(
-    "1文1行で届く",
+    "arrives one sentence per line",
     JSON.stringify(client.texts()) === JSON.stringify(["確認します。", "ログを見ます。", "以上です。"]),
     JSON.stringify(client.texts()),
   );
-  check("seq が連続している", JSON.stringify(client.seqs()) === JSON.stringify([1, 2, 3]));
+  check("seq is consecutive", JSON.stringify(client.seqs()) === JSON.stringify([1, 2, 3]));
   // ★ #29: 配信フレームには音声の**相対パス**が載る。絶対 URL にしないこと
   //   （bind アドレスは接続先ではないので、絶対 URL だと LAN 越しのクライアントから繋がらない）
   check(
-    "音声の相対パスが載っている",
+    "carries the relative audio path",
     client.frames().every((f) => typeof f.audio?.path === "string" && f.audio.path.startsWith(`/audio/${f.epoch}-`)),
     JSON.stringify(client.frames().map((f) => f.audio)),
   );
 
-  show("② ack でキューが減る");
-  console.log(`ack 前のキュー: ${queueSize()} 件`);
-  check("喋る前はキューに残っている", queueSize() === 3, `${queueSize()} 件`);
+  show("② ack shrinks the queue");
+  console.log(`queue before ack: ${queueSize()} entries`);
+  check("entries remain in the queue before they are spoken", queueSize() === 3, `${queueSize()} entries`);
 
   client.ack(2);
   await sleep(300);
-  console.log(`seq<=2 を ack した後: ${queueSize()} 件`);
-  check("累積 ack で seq<=2 が消える", queueSize() === 1, `${queueSize()} 件`);
+  console.log(`after acking seq<=2: ${queueSize()} entries`);
+  check("a cumulative ack removes seq<=2", queueSize() === 1, `${queueSize()} entries`);
 
   client.ack(3);
   await sleep(300);
-  check("全部 ack すれば空になる", queueSize() === 0, `${queueSize()} 件`);
+  check("acking everything empties the queue", queueSize() === 0, `${queueSize()} entries`);
 
-  show("③ 切断中に書かれた分が、接続時に届く（?since= の代わり）");
+  show("③ Entries written while disconnected arrive on connect (instead of ?since=)");
   await client.close();
   speak("m-2", "切断中の一文目。切断中の二文目。");
   await sleep(300); // server がキューを読んで配信済みと判定するまで待つ
@@ -196,12 +196,12 @@ try {
   await rejoined.settle();
   console.log(rejoined.received.map((r) => `seq=${r.seq} ${JSON.stringify(r.text)}`).join("\n"));
   check(
-    "未 ack の分が届く",
+    "unacked entries arrive",
     JSON.stringify(rejoined.texts()) === JSON.stringify(["切断中の一文目。", "切断中の二文目。"]),
     JSON.stringify(rejoined.texts()),
   );
 
-  show("④ 追いつき送出とブロードキャストが重なっても二重配信・取りこぼしにならない");
+  show("④ Overlapping catch-up and broadcast causes neither duplicates nor drops");
   // ★ speak() と connect() の間で待たないこと。poll() はクライアントの接続の有無に
   //   関係なく50msごとに動き、キューにある entry を見つけ次第 delivered 済みにする。
   //   ここで待つと m-3a は接続前に確実に delivered 済みになり、「配信済みのものだけを
@@ -214,9 +214,13 @@ try {
   speak("m-3b", "重ねて配信される一文目。重ねて配信される二文目。");
   await racer.settle(600);
   console.log(`racer: ${racer.seqs().join(",")}`);
-  check("同じ seq を2度受け取らない", new Set(racer.seqs()).size === racer.seqs().length, racer.seqs().join(","));
   check(
-    "追いつき分・重ねた分の両方が、一度ずつ取りこぼさず届く",
+    "never receives the same seq twice",
+    new Set(racer.seqs()).size === racer.seqs().length,
+    racer.seqs().join(","),
+  );
+  check(
+    "both the catch-up and the overlapped entries arrive exactly once, with no drops",
     ["追いつき対象の一文目。", "追いつき対象の二文目。", "重ねて配信される一文目。", "重ねて配信される二文目。"].every(
       (t) => racer.texts().includes(t),
     ),
@@ -226,7 +230,7 @@ try {
   await racer.close();
   await rejoined.close();
 
-  show("⑤ 上限を超えたら古い方から捨てる");
+  show("⑤ Beyond the cap, the oldest entries are dropped first");
   const before = queueSize();
   const queueSeqs = () =>
     new Set(
@@ -248,27 +252,27 @@ try {
   pushed.sort((a, b) => a - b);
 
   const after = queueSize();
-  console.log(`キュー: ${before} 件 → ${after} 件（上限 ${QUEUE_MAX}）`);
-  check("上限を超えない", after <= QUEUE_MAX, `${after} 件`);
+  console.log(`queue: ${before} entries → ${after} entries (cap ${QUEUE_MAX})`);
+  check("does not exceed the cap", after <= QUEUE_MAX, `${after} entries`);
 
   const remaining = [...queueSeqs()].sort((a, b) => a - b);
   const expectedTail = pushed.slice(-QUEUE_MAX); // 新しい方から数えて上限件数ぶん
   check(
-    "残っているのは、積んだ順の末尾（古い方から捨てられている）",
+    "what remains is the tail of the pushed order (oldest dropped first)",
     JSON.stringify(remaining) === JSON.stringify(expectedTail),
     `remaining=${JSON.stringify(remaining)} expected=${JSON.stringify(expectedTail)}`,
   );
 
-  show("⑥ Origin 付きの接続は拒否される（#3）");
+  show("⑥ A connection with an Origin header is rejected (#3)");
   let rejected = false;
   try {
     await connect({ headers: { Origin: "https://evil.example.com" } });
   } catch {
     rejected = true;
   }
-  check("ブラウザからは繋がらない", rejected);
+  check("browsers cannot connect", rejected);
 
-  show("⑦ 起動時の掃除は、古い entry だけを捨てて直前の entry は残す");
+  show("⑦ Startup cleanup drops only old entries and keeps the latest one");
   // 全消し clear() をやめて dropOlderThan(STARTUP_KEEP_MS) にしたのは、CLI が delta
   // ごとに起動されるため。1つのメッセージの文は複数回のドレインに分かれて publish
   // されるので、全消しだと配信中メッセージの前半だけが消え、マスコットが段落の
@@ -298,20 +302,20 @@ try {
   const afterRestart = await connect();
   await afterRestart.settle(600);
 
-  check("古い entry はファイルごと捨てられる", !fs.existsSync(path.join(queueDir, offlineOldFile)));
+  check("the old entry is removed along with its file", !fs.existsSync(path.join(queueDir, offlineOldFile)));
   check(
-    "古い発話は配信されない",
+    "the old utterance is not delivered",
     !afterRestart.texts().includes("落ちている間に書かれた古い発話です。"),
     afterRestart.texts().join(" / "),
   );
-  check("直前に書かれた entry は残る", fs.existsSync(path.join(queueDir, offlineNewFile)));
+  check("the entry written last is kept", fs.existsSync(path.join(queueDir, offlineNewFile)));
   check(
-    "新しい発話は配信される",
+    "the new utterance is delivered",
     afterRestart.texts().includes("落ちている間に書かれた新しい発話です。"),
     afterRestart.texts().join(" / "),
   );
 
-  show("⑧ ★ [#29/A-1] サーバー稼働中に採番がやり直されても、新世代が配信される");
+  show("⑧ ★ [#29/A-1] The new generation is delivered even if numbering restarts while the server is running");
 
   // ★ この検証がユニットテストと別に要る理由。dispatcher の `delivered` は seq 単独キーで、
   //   CLI の `clear()` → `enqueue()` は**同一プロセス内で同期的に**走るので、
@@ -334,7 +338,7 @@ try {
 
   speak("m-gen-a", "旧世代の一文目です。旧世代の二文目です。旧世代の三文目です。");
   const oldEpoch = JSON.parse(fs.readFileSync(path.join(runtime, "speech.state.json"), "utf8")).epoch;
-  check("旧世代が3件積まれている", queueSize() === 3, `${queueSize()} 件`);
+  check("3 entries of the old generation are queued", queueSize() === 3, `${queueSize()} entries`);
 
   await startServer();
   // ★ 誰も繋がないまま poll させる。ここで全 entry が `delivered` に入る
@@ -345,19 +349,19 @@ try {
   fs.rmSync(path.join(runtime, "speech.state.json"), { force: true });
   speak("m-gen-b", "新世代の一文目です。新世代の二文目です。");
   const newEpoch = JSON.parse(fs.readFileSync(path.join(runtime, "speech.state.json"), "utf8")).epoch;
-  check("採番がやり直されている（epoch が変わる）", newEpoch !== oldEpoch, `${oldEpoch} → ${newEpoch}`);
-  check("新世代の seq は旧世代の範囲に収まっている", queueSize() === 2, `${queueSize()} 件`);
+  check("numbering has restarted (epoch changes)", newEpoch !== oldEpoch, `${oldEpoch} → ${newEpoch}`);
+  check("the new generation seq falls within the old generation range", queueSize() === 2, `${queueSize()} entries`);
 
   const afterRenumber = await connect();
   await afterRenumber.settle(800);
 
   check(
-    "★ 新世代の発話が届く（seq 単独キーで飛ばされていない）",
+    "★ the new generation utterances arrive (not skipped by treating seq as a sole key)",
     afterRenumber.texts().includes("新世代の一文目です。") && afterRenumber.texts().includes("新世代の二文目です。"),
     afterRenumber.texts().join(" / "),
   );
   check(
-    "旧世代の発話は届かない",
+    "the old generation utterances do not arrive",
     !afterRenumber.texts().some((t) => t.startsWith("旧世代")),
     afterRenumber.texts().join(" / "),
   );
@@ -366,17 +370,17 @@ try {
   afterRenumber.ack(Math.max(...afterRenumber.seqs()));
   await sleep(400);
   check(
-    "★ 新世代の ack が通り、キューが空になる（詰まっていない）",
+    "★ the new generation ack goes through and the queue empties (not stuck)",
     queueSize() === 0,
-    `${queueSize()} 件 / ${JSON.stringify(fs.readdirSync(queueDir))}`,
+    `${queueSize()} entries / ${JSON.stringify(fs.readdirSync(queueDir))}`,
   );
 
   await afterRenumber.close();
 } catch (err) {
   console.error(err);
-  fail("実行エラー");
+  fail("runtime error");
 } finally {
   cleanup();
 }
 
-await summarize(() => `server のログ:\n${serverLogs()}`);
+await summarize(() => `server log:\n${serverLogs()}`);

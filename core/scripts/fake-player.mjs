@@ -17,7 +17,7 @@ import * as path from "node:path";
 const file = process.argv[2];
 const log = process.env.FAKE_PLAYER_LOG;
 if (!log) {
-  console.error("FAKE_PLAYER_LOG がありません");
+  console.error("FAKE_PLAYER_LOG is not set");
   process.exit(2);
 }
 

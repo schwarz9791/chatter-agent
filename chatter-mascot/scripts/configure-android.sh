@@ -50,12 +50,12 @@ for arg in "$@"; do
       CLEAR="1"
       ;;
     --*)
-      echo "不明なオプションです: $arg" >&2
+      echo "Unknown option: $arg" >&2
       exit 1
       ;;
     *)
       if [ -n "$SERVER_URL" ]; then
-        echo "接続先は1つだけ指定できます" >&2
+        echo "Only one server can be specified" >&2
         exit 1
       fi
       SERVER_URL="$arg"
@@ -64,7 +64,7 @@ for arg in "$@"; do
 done
 
 if [ -n "$CLEAR" ] && [ -n "$SERVER_URL" ]; then
-  echo "--clear と接続先は同時に指定できません" >&2
+  echo "--clear and a server cannot be specified together" >&2
   exit 1
 fi
 
@@ -73,7 +73,7 @@ if [ -z "$CLEAR" ]; then
     case "$SERVER_URL" in
       ws://*|wss://*) ;;
       *)
-        echo "接続先は ws:// か wss:// で始まる URL である必要があります: $SERVER_URL" >&2
+        echo "The server must be a URL starting with ws:// or wss://: $SERVER_URL" >&2
         exit 1
         ;;
     esac
@@ -82,13 +82,13 @@ if [ -z "$CLEAR" ]; then
   TOKEN_PATH="${XDG_CONFIG_HOME:-$HOME/.config}/chatter-agent/server.token"
   TOKEN="$( { tr -d '[:space:]' < "$TOKEN_PATH"; } 2>/dev/null || true)"
   if [ -z "$TOKEN" ]; then
-    echo "先に chatter-agent-server を起動してください（トークンはサーバーの起動時に作られます）" >&2
+    echo "Start chatter-agent-server first (the token is created when the server starts)" >&2
     exit 1
   fi
 fi
 
 if [ ! -x "$ADB" ]; then
-  echo "adb が見つかりません: ${ADB}（ADB 環境変数で指定できます）" >&2
+  echo "adb not found: ${ADB} (set the ADB environment variable to point at it)" >&2
   exit 1
 fi
 
@@ -98,7 +98,7 @@ LOCAL_SETTINGS="$TMP_DIR/settings.json"
 
 if ! "$ADB" pull "$REMOTE_SETTINGS" "$LOCAL_SETTINGS" >/dev/null 2>&1; then
   if [ -n "$CLEAR" ]; then
-    echo "settings.json がありません。何もしていません: $REMOTE_SETTINGS"
+    echo "settings.json does not exist. Nothing to do: $REMOTE_SETTINGS"
     exit 0
   fi
   echo '{"version":1}' > "$LOCAL_SETTINGS"
@@ -120,20 +120,20 @@ fi
 "$ADB" push "$LOCAL_SETTINGS" "$REMOTE_SETTINGS" >/dev/null
 
 if [ -n "$CLEAR" ]; then
-  echo "connection を消しました: $REMOTE_SETTINGS"
+  echo "Removed connection from: $REMOTE_SETTINGS"
 else
-  echo "書き込みました: $REMOTE_SETTINGS"
+  echo "Wrote: $REMOTE_SETTINGS"
   if [ -n "$SERVER_URL" ]; then
-    echo "接続先: $SERVER_URL"
+    echo "Server: $SERVER_URL"
   else
-    echo "接続先: LAN から自動で探します（mDNS）"
+    echo "Server: discovered automatically on the LAN (mDNS)"
   fi
 fi
 
 if [ -n "$NO_RESTART" ]; then
-  echo "再起動していません。設定は次回の起動時に読み込まれます（--no-restart）"
+  echo "Not restarted. The settings are loaded on the next launch (--no-restart)"
 else
   "$ADB" shell am force-stop "$APP_ID"
   "$ADB" shell am start -n "$APP_ID/tech.sukima.chattermascot.ChatterMascotGameActivity"
-  echo "再起動しました（設定は起動時にだけ読み込まれます）"
+  echo "Restarted (the settings are loaded only at launch)"
 fi

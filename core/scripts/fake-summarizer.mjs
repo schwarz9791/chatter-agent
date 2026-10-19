@@ -52,7 +52,7 @@ if (recordPath) {
 const mode = process.env.FAKE_SUMMARIZER_MODE ?? "short";
 
 if (mode === "fail") {
-  console.error("FAKE_SUMMARIZER_MODE=fail で意図的に失敗しました");
+  console.error("FAKE_SUMMARIZER_MODE=fail made this fail on purpose");
   process.exitCode = 1;
 } else {
   // summaryPipeline.ts の「7. 空 or 原文以上の長さ → 不採用」に引っかからないよう、

@@ -18,14 +18,14 @@ ON_MESSAGE="$REPO/plugin/scripts/on-message.sh"
 ON_PROMPT="$REPO/plugin/scripts/on-prompt.sh"
 
 if [ ! -f "$CLI" ]; then
-  echo "バンドルがありません: $CLI" >&2
-  echo "先に core/ で npm run build を実行してください。" >&2
+  echo "Bundle not found: $CLI" >&2
+  echo "Run npm run build in core/ first" >&2
   exit 1
 fi
 
 for hook in "$ON_MESSAGE" "$ON_PROMPT"; do
   if [ ! -x "$hook" ]; then
-    echo "hook が無いか実行権限がありません: $hook" >&2
+    echo "hook is missing or not executable: $hook" >&2
     exit 1
   fi
 done
@@ -35,7 +35,7 @@ done
 # （→ fake-summarizer.mjs 冒頭のコメント）。
 FAKE_SUMMARIZER="$REPO/core/scripts/fake-summarizer.mjs"
 if [ ! -x "$FAKE_SUMMARIZER" ]; then
-  echo "偽の要約 CLI が無いか実行権限がありません: $FAKE_SUMMARIZER" >&2
+  echo "Fake summarizer CLI is missing or not executable: $FAKE_SUMMARIZER" >&2
   exit 1
 fi
 
@@ -92,7 +92,7 @@ prompt() { # json
 
 show() { printf '\n\033[1m--- %s ---\033[0m\n' "$1"; }
 spoken() {
-  if [ ! -f "$LOG" ]; then echo "(まだ何も無い)"; return; fi
+  if [ ! -f "$LOG" ]; then echo "(nothing yet)"; return; fi
   node -e '
     const fs = require("fs");
     for (const l of fs.readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean)) {
@@ -106,35 +106,35 @@ spoken() {
 #   閉じてから次を始めること。順序を崩すと、検査したかったメッセージが手前で消費されて
 #   検査が空振りする（新設計で最も踏みやすい罠）。
 
-show "① final が来るまで1文も出ない"
+show "① Not a single sentence is spoken until final arrives"
 delta m-aaa 0 false "完全に判明しました。ストリーミングでテキストが流れてきます。"
-echo "[delta 0 の直後 / final はまだ来ていない]"; spoken
+echo "[right after delta 0 / final has not arrived yet]"; spoken
 delta m-aaa 1 false "対照の PostToolUse も2件出たので、設定が読み込まれたことは確定です。"
-echo "[delta 1 の直後]"; spoken
+echo "[right after delta 1]"; spoken
 
-show "② 未閉じコードブロックを積んでも、まだ何も出ない"
+show "② Still nothing is spoken even with an unclosed code block piled up"
 delta m-aaa 2 false $'こう書きます。\n```ts\nconst secret = 1;\n'
 spoken
 
-show "③ 大きく遅れて届く final:true。ここで初めてメッセージ全文が一括で出る"
-echo "[フェンスが閉じてコードは消え、①②③ の全文が1つの塊として出る]"
+show "③ A final:true that arrives much later. Only now is the whole message spoken at once"
+echo "[the fence closes, the code disappears, and the whole text of ①②③ comes out as one batch]"
 delta m-aaa 3 true $'const secret = 1;\n```\nこれは実装方針に関わる分岐があるので確認させてください。'
 spoken
 
-show "④ final が来なかったメッセージは、後続イベントの到着で救済される"
+show "④ A message whose final never came is rescued by the arrival of a later event"
 delta m-eee 0 false "中断された発言です。この後 final は来ません。"
-echo "[m-eee はまだ出ない]"; spoken
-echo "[ここで別メッセージ m-bbb が始まる → m-eee が全文出る]"
+echo "[m-eee is not spoken yet]"; spoken
+echo "[another message m-bbb starts here → m-eee is spoken in full]"
 delta m-bbb 0 false "次の作業に入ります。ログを確認します。"
 spoken
 
-show "⑤ 応答待ち通知（PreToolUse に付随する同一 prompt_id の Notification は捨てる）"
-echo "[この prompt の到着で m-bbb も救済される]"
+show "⑤ Reply-wait notice (a Notification with the same prompt_id accompanying PreToolUse is discarded)"
+echo "[the arrival of this prompt rescues m-bbb too]"
 prompt '{"session_id":"sess-1","prompt_id":"p9","hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"次は何をしますか？","options":[{"label":"進める"},{"label":"やり直す"}]}]}}'
 prompt '{"session_id":"sess-1","prompt_id":"p9","hook_event_name":"Notification","message":"Claude needs your permission"}'
 spoken
 
-show "⑥ 同じ final を複数のワーカーが同時に見ても、二重に発話しない"
+show "⑥ Several workers seeing the same final at once do not speak it twice"
 
 # ★ **final を先に置いてから並列に叩くこと。** 新設計で最も危険なレースは
 #   「2つのワーカーが同じ final を見て両方 publish する」で、メッセージ全文がまるごと
@@ -159,7 +159,7 @@ done
 for p in "${pids[@]}"; do wait "$p"; done
 spoken
 
-show "⑦ hook 側のガード（ここが壊れると spool の形から崩れる）"
+show "⑦ Guards on the hook side (if these break, the spool shape breaks first)"
 
 # ★ **m-ddd だけ専用セッション（sess-ddd）に隔離すること（#22）。** `hasNewer` 救済は
 #   同一セッションの後続イベントで発火するので、sess-1 に置くと後続の probe
@@ -195,7 +195,7 @@ feed_message "Ａｂｃ" 0 true "全角の message_id です。"
 node -e '
   const fs = require("fs");
   const ok = !fs.existsSync(process.argv[1]);
-  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  全角英字の message_id は chatter_safe_name（LC_ALL=C 依存の文字クラスマッチ）で弾かれている${ok ? "" : " (spool にファイルが書かれた)"}`);
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  a full-width message_id is rejected by chatter_safe_name (a character-class match that depends on LC_ALL=C)${ok ? "" : " (a file was written to the spool)"}`);
   process.exit(ok ? 0 : 1);
 ' "$SPOOL/Ａｂｃ.0.json"
 
@@ -234,12 +234,12 @@ node -e '
   try {
     ok = fs.readFileSync(process.argv[1], "utf8").includes("CLIにも0を渡して発話される確認用の発言です。");
   } catch {}
-  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  CLI に直接 CHATTER_AGENT_DISABLE=0 を渡すと、その場で発話される（presence 判定への回帰検出 / R3）`);
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  passing CHATTER_AGENT_DISABLE=0 directly to the CLI makes it speak on the spot (detects regression to the presence check / R3)`);
   process.exit(ok ? 0 : 1);
 ' "$LOG"
 spoken
 
-show "⑧ 同一メッセージに30並行で hook を起動しても、ファイルが壊れず index も欠けない"
+show "⑧ Launching the hook 30 times in parallel on one message corrupts no file and loses no index"
 
 # ★ 追記をやめて tmp + rename（1 delta 1 ファイル）にしたので、複数 hook が同時に走っても
 #   互いの書き込みに割り込む余地が構造的に無い（旧実装は同じ .jsonl への追記だったため、
@@ -266,15 +266,15 @@ node -e '
   }
   const missing = [];
   for (let i = 0; i < 30; i++) if (!indices.includes(i)) missing.push(i);
-  console.log(`  ${files.length} ファイル中 壊れたファイル ${broken}、欠番 ${missing.length}`);
+  console.log(`  of ${files.length} files: ${broken} corrupted, ${missing.length} missing indexes`);
   if (files.length !== 30 || broken > 0 || missing.length > 0) {
-    console.error("並行起動でファイルが壊れた/欠けた。plugin/scripts/on-message.sh の tmp + rename を確認すること");
+    console.error("Files were corrupted or lost by parallel launches. Check the tmp + rename in plugin/scripts/on-message.sh");
     process.exit(1);
   }
 ' "$SPOOL"
 rm -f "$SPOOL"/m-race.*.json
 
-show "⑨ 無効化中でも stdin を読み切る（EPIPE 対策 / R4）"
+show "⑨ Reads stdin to the end even while disabled (EPIPE guard / R4)"
 
 # ★ CHATTER_AGENT_DISABLE=1 の判定が chatter_read_payload より先だと、stdin を読み切る前に
 #   exit してしまい、書き込み側（Claude Code）が EPIPE になる
@@ -320,7 +320,7 @@ node -e '
     p.on("close", () => {
       const ok = err === null;
       if (!ok) failed = true;
-      console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  CHATTER_AGENT_DISABLE=1 中に300KB相当のpayloadを ${label} に流してもEPIPEにならない${ok ? "" : ` (${err})`}`);
+      console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  feeding a payload of about 300KB to ${label} while CHATTER_AGENT_DISABLE=1 does not cause EPIPE${ok ? "" : ` (${err})`}`);
       remaining--;
       if (remaining === 0) process.exit(failed ? 1 : 0);
     });
@@ -329,7 +329,7 @@ node -e '
 ' "$ON_MESSAGE" "$ON_PROMPT"
 rm -f "$SPOOL"/m-epipe.*
 
-show "⑩ トップレベルキー探索が payload 全体に対して二乗にならない（R5）"
+show "⑩ Top-level key lookup is not quadratic in the whole payload (R5)"
 
 # ★ `${var#*pat}` は "マッチしない" とき bash 3.2 で二乗になる。将来 Claude Code が
 #   message_id を改名・省略するリスクを模して、64KB の payload に message_id を含めずに流す。
@@ -349,11 +349,11 @@ node -e '
   spawnSync(process.argv[1], { input: payload, stdio: ["pipe", "ignore", "ignore"] });
   const elapsed = Date.now() - t0;
   const ok = elapsed <= threshold;
-  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  message_id が無い64KB payloadの処理が ${elapsed}ms（閾値 ${threshold}ms）`);
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  processing a 64KB payload without message_id took ${elapsed}ms (threshold ${threshold}ms)`);
   process.exit(ok ? 0 : 1);
 ' "$ON_MESSAGE"
 
-show "⑪ 無効化フラグの trim を bash と Node で揃える（R6）"
+show "⑪ Align the trimming of the disable flag between bash and Node (R6)"
 
 # ★ 全角スペース（U+3000）+ "1"。chatter_disabled が ASCII の [[:space:]] だけで trim すると
 #   "　1" は "1" と一致せず「無効化されない」と判定される。Node 側の .trim()（parseBoolean）は
@@ -374,7 +374,7 @@ node -e '
   try { logged = fs.readFileSync(logPath, "utf8").includes("全角スペース付きで無効化されるはずの発言です。"); } catch {}
   const wroteToSpool = fs.existsSync(spoolFile);
   const ok = !logged && !wroteToSpool;
-  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  全角スペース付きの CHATTER_AGENT_DISABLE で bash 側と Node 側の判定が揃う${ok ? "" : ` (logged=${logged} wroteToSpool=${wroteToSpool})`}`);
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  bash and Node agree on CHATTER_AGENT_DISABLE with a full-width space${ok ? "" : ` (logged=${logged} wroteToSpool=${wroteToSpool})`}`);
   process.exit(ok ? 0 : 1);
 ' "$LOG" "$SPOOL/m-fullwidth.0.json"
 rm -f "$SPOOL"/m-fullwidth.*
@@ -391,12 +391,12 @@ node -e '
   try { logged = fs.readFileSync(logPath, "utf8").includes("NBSP付きで無効化されるはずの発言です。"); } catch {}
   const wroteToSpool = fs.existsSync(spoolFile);
   const ok = !logged && !wroteToSpool;
-  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  NBSP付きの CHATTER_AGENT_DISABLE で bash 側と Node 側の判定が揃う${ok ? "" : ` (logged=${logged} wroteToSpool=${wroteToSpool})`}`);
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  bash and Node agree on CHATTER_AGENT_DISABLE with NBSP${ok ? "" : ` (logged=${logged} wroteToSpool=${wroteToSpool})`}`);
   process.exit(ok ? 0 : 1);
 ' "$LOG" "$SPOOL/m-nbsp.0.json"
 rm -f "$SPOOL"/m-nbsp.*
 
-show "⑫ CLI / node / 実行ファイル不在を診断でき、node 無しでも実行ファイルを起こせる（R7）"
+show "⑫ A missing CLI / node / executable can be diagnosed, and the executable can be launched even without node (R7)"
 
 # ★ CHATTER_AGENT_CLI は検証全体でわざと存在しないパスを指している（このスクリプト冒頭で
 #   デタッチ起動を抑止するために設定）。つまり chatter_spawn_cli の「CLI が無い」早期 return は
@@ -446,8 +446,8 @@ node -e '
   const hasCliMissing = log.includes("SpawnCli") && log.includes("cli not found");
   const hasNodeMissing = log.includes("SpawnCli") && log.includes("node not found");
   const check = (label, ok) => { console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  ${label}`); return ok; };
-  const ok1 = check("CLI 不在が診断ログに残る（chatter_spawn_cli）", hasCliMissing);
-  const ok2 = check("node 不在が診断ログに残る（chatter_spawn_cli）", hasNodeMissing);
+  const ok1 = check("a missing CLI is recorded in the diagnostic log (chatter_spawn_cli)", hasCliMissing);
+  const ok2 = check("a missing node is recorded in the diagnostic log (chatter_spawn_cli)", hasNodeMissing);
   process.exit(ok1 && ok2 ? 0 : 1);
 ' "$RUNTIME/hook-debug.log"
 rm -f "$SPOOL"/m-r7-cli.* "$SPOOL"/m-r7-node.*
@@ -470,7 +470,7 @@ node -e '
   let log = "";
   try { log = fs.readFileSync(process.argv[1], "utf8"); } catch {}
   const ok = log.includes("SpawnCli") && log.includes("bin not found");
-  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  bin-path 不在が診断ログに残る（chatter_spawn_cli）`);
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  a missing bin-path is recorded in the diagnostic log (chatter_spawn_cli)`);
   process.exit(ok ? 0 : 1);
 ' "$RUNTIME/hook-debug.log"
 
@@ -492,12 +492,12 @@ node -e '
   let args = "";
   try { args = fs.readFileSync(process.argv[1], "utf8"); } catch {}
   const ok = args === "speak\n";
-  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  node が PATH に無くても bin-path の実行ファイルが speak で起動される${ok ? "" : ` (args=${JSON.stringify(args)})`}`);
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  the bin-path executable is launched for speak even when node is not on PATH${ok ? "" : ` (args=${JSON.stringify(args)})`}`);
   process.exit(ok ? 0 : 1);
 ' "$FAKE_BIN_ARGS"
 rm -f "$RUNTIME/bin-path" "$SPOOL"/m-r7-bin.*
 
-show "⑬ 孤児カスケード: 救済されたメッセージの遅延 final が、ストリーミング中の次のメッセージを打ち切らない"
+show "⑬ Orphan cascade: the late final of a rescued message does not cut off the next message that is still streaming"
 
 # ★ **専用セッション（sess-orphan）に隔離すること（#22 で踏んだ罠と同じ）。** sess-1 に置くと
 #   このスクリプトの他の probe が `hasNewerInSameSession` を誤って成立させてしまい、
@@ -506,19 +506,19 @@ ORPHAN_SESSION='{"session_id":"sess-orphan"}'
 
 # m-orphan-a は final 未着のまま置く（まだ発話されない）
 delta m-orphan-a 0 false "孤児カスケード検証Aの一文目です。" "$ORPHAN_SESSION"
-echo "[m-orphan-a はまだ出ない]"; spoken
+echo "[m-orphan-a is not spoken yet]"; spoken
 
 # 同一セッションで m-orphan-b が始まる → hasNewerInSameSession が成立し、m-orphan-a が
 # 「final 未着のまま」救済されて spool から消える（tombstone にも記録される）。
 # m-orphan-b 自身は後続が無いので救済されず、ストリーミング中のまま spool に残る。
 delta m-orphan-b 0 false "孤児カスケード検証Bの一文目です。" "$ORPHAN_SESSION"
-echo "[m-orphan-a が救済されて全文出る。m-orphan-b はまだ出ない]"; spoken
+echo "[m-orphan-a is rescued and spoken in full. m-orphan-b is not spoken yet]"; spoken
 
 node -e '
   const fs = require("fs");
   const [orphanFile, streamingFile] = process.argv.slice(1);
   const ok = !fs.existsSync(orphanFile) && fs.existsSync(streamingFile);
-  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  m-orphan-a は救済されて spool から消え、m-orphan-b はストリーミング中のまま spool に残っている`);
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  m-orphan-a is rescued and removed from the spool, and m-orphan-b stays in the spool while still streaming`);
   process.exit(ok ? 0 : 1);
 ' "$SPOOL/m-orphan-a.0.json" "$SPOOL/m-orphan-b.0.json"
 
@@ -541,7 +541,7 @@ node -e '
   const orphanNotSpoken = !logged.includes("孤児カスケード検証Aの最終行です");
   const streamingNotTruncated = !logged.includes("孤児カスケード検証Bの一文目です");
   const ok = orphanGone && streamingIntact && orphanNotSpoken && streamingNotTruncated;
-  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  孤児カスケード: 遅延 final は tombstone で即破棄され、ストリーミング中の m-orphan-b は打ち切られない${ok ? "" : ` (orphanGone=${orphanGone} streamingIntact=${streamingIntact} orphanNotSpoken=${orphanNotSpoken} streamingNotTruncated=${streamingNotTruncated})`}`);
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  orphan cascade: the late final is discarded at once by the tombstone, and the streaming m-orphan-b is not cut off${ok ? "" : ` (orphanGone=${orphanGone} streamingIntact=${streamingIntact} orphanNotSpoken=${orphanNotSpoken} streamingNotTruncated=${streamingNotTruncated})`}`);
   process.exit(ok ? 0 : 1);
 ' "$SPOOL/m-orphan-a.1.json" "$SPOOL/m-orphan-b.0.json" "$LOG"
 spoken
@@ -558,7 +558,7 @@ rm -f "$SPOOL"/m-orphan-*
 #   ★ 既定バックエンドは "fm"（実機に本物の fm があると findCommandPath がそれを解決してしまい、
 #   $FAKE_SUMMARIZER が素通りされる）なので、ここでは明示的に CHATTER_AGENT_AI_SUMMARY_BACKEND=claude
 #   を渡して aiSummaryCommand（$FAKE_SUMMARIZER）が実際に使われるようにする。
-show "⑭ AI要約: 閾値を超えたメッセージは要約されて speech.jsonl に載る（issue #31）"
+show "⑭ AI summary: a message over the threshold is summarized and recorded in speech.jsonl (issue #31)"
 
 # ★ aiSummaryCommand には要約 CLI の絶対パスを渡す。findCommandPath（core/src/summarizer/claudeCli.ts）
 #   は絶対パスをそのまま信頼し、存在確認すらしない。差し替えられることがそのまま検証の
@@ -587,7 +587,7 @@ node -e '
   const fs = require("fs");
   const rows = fs.readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
   const ok = rows.some((r) => r.text === process.argv[2]);
-  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  閾値を超えたメッセージが偽要約の返答に置き換わって記録されている`);
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  a message over the threshold is recorded replaced by the fake summarizer reply`);
   process.exit(ok ? 0 : 1);
 ' "$LOG" "$SUMMARIZER_REPLY_1"
 
@@ -598,7 +598,7 @@ node -e '
   const line = fs.readFileSync(process.argv[1], "utf8").trim().split("\n")[0];
   const rec = JSON.parse(line);
   const ok = typeof rec.sessionId === "string" && rec.sessionId.length > 0 && rec.textLength > 200;
-  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  偽要約が --session-id と200字超の原文を受け取っている (${JSON.stringify(rec)})`);
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  the fake summarizer received --session-id and an original text over 200 characters (${JSON.stringify(rec)})`);
   process.exit(ok ? 0 : 1);
 ' "$SUMMARIZER_RECORD_1"
 
@@ -614,7 +614,7 @@ node -e '
   let lines = [];
   try { lines = fs.readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean); } catch {}
   const ok = lines.length === 1 && lines[0].split("\t")[1] === "ok";
-  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  実測ログ（summarizer.log）に ok の判定が1行残っている${ok ? "" : ` (${JSON.stringify(lines)})`}`);
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  one line with an ok verdict remains in the measurement log (summarizer.log)${ok ? "" : ` (${JSON.stringify(lines)})`}`);
   process.exit(ok ? 0 : 1);
 ' "$RUNTIME/summarizer.log"
 
@@ -625,7 +625,7 @@ SUMMARIZER_SESSION_ID=$(node -e '
   console.log(JSON.parse(line).sessionId);
 ' "$SUMMARIZER_RECORD_1")
 
-show "⑮ AI要約: 閾値以下のメッセージは要約されない（偽要約が一度も起動しない）"
+show "⑮ AI summary: a message at or under the threshold is not summarized (the fake summarizer never starts)"
 
 # ★ 起動していないことは「記録ファイルが作られない」ことで確認する。FAKE_SUMMARIZER_RECORD は
 #   偽要約プロセス自身が execFileSync された後に書くので、ファイルの有無がそのまま
@@ -648,11 +648,11 @@ node -e '
   const spokenOriginal = rows.some((r) => r.text === text);
   const notInvoked = !fs.existsSync(recordPath);
   const ok = spokenOriginal && notInvoked;
-  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  閾値以下のメッセージは原文のまま発話され、偽要約は起動していない${ok ? "" : ` (spokenOriginal=${spokenOriginal} recordExists=${!notInvoked})`}`);
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  a message at or under the threshold is spoken as the original, and the fake summarizer was not started${ok ? "" : ` (spokenOriginal=${spokenOriginal} recordExists=${!notInvoked})`}`);
   process.exit(ok ? 0 : 1);
 ' "$LOG" "$SUMMARIZER_RECORD_2" "$SHORT_TEXT"
 
-show "⑯ ★ AI要約: 要約 CLI が exit 1 で失敗しても、原文がそのまま読み上げられる（発話が止まらないことがこの機能の生命線）"
+show "⑯ ★ AI summary: even if the summarizer CLI fails with exit 1, the original is read aloud as is (speech never stopping is the lifeline of this feature)"
 
 # ★ ここが要約機能の生命線。summaryPipeline.ts の「5. 実行 → 失敗/タイムアウト → 原文」の
 #   フォールバックが、ユニットテストだけでなく実際の hook → CLI の経路でも効くことを見る。
@@ -687,7 +687,7 @@ node -e '
   const fs = require("fs");
   const rows = fs.readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
   const ok = rows.some((r) => r.text.includes("要約が失敗しても発話が止まらないことを確認する長い文章その0です。"));
-  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  ★ 要約 CLI が失敗しても、原文がフォールバックとして発話される`);
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  ★ even if the summarizer CLI fails, the original is spoken as the fallback`);
   process.exit(ok ? 0 : 1);
 ' "$LOG"
 
@@ -696,7 +696,7 @@ node -e '
 node -e '
   const fs = require("fs");
   const ok = fs.existsSync(process.argv[1]);
-  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  偽要約は実際に起動された上で失敗している（no-command 等ですり抜けていない）`);
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  the fake summarizer was actually started and then failed (not slipped through by no-command etc.)`);
   process.exit(ok ? 0 : 1);
 ' "$SUMMARIZER_RECORD_3"
 
@@ -710,11 +710,11 @@ node -e '
   // ★ F1-b: 絶対行数（旧: lines.length === 2）ではなく、この⑯のシナリオ直前からの
   //   増分（+1）と最終行の outcome を見る相対判定にした
   const ok = lines.length === before + 1 && last.split("\t")[1] === "error";
-  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  実測ログ（summarizer.log）に error の判定が追記されている${ok ? "" : ` (before=${before} ${JSON.stringify(lines)})`}`);
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  an error verdict was appended to the measurement log (summarizer.log)${ok ? "" : ` (before=${before} ${JSON.stringify(lines)})`}`);
   process.exit(ok ? 0 : 1);
 ' "$RUNTIME/summarizer.log" "$SUMMARIZER_LOG_LINES_BEFORE_16"
 
-show "⑰ ★ AI要約 第2層: 要約 CLI 自身の session_id を持つ delta は発話されず spool からも消える"
+show "⑰ ★ AI summary layer 2: a delta carrying the summarizer CLI own session_id is not spoken and is removed from the spool"
 
 # ★ 第1層（要約 CLI を CHATTER_AGENT_DISABLE=1 付きで spawn する。claudeCli.ts の runClaudeCli）
 #   はユニットテストでも検証できるが、ここで見たいのは第2層（workerState.ts の
@@ -745,7 +745,7 @@ node -e '
   let ids = [];
   try { ids = JSON.parse(fs.readFileSync(statePath, "utf8")).summarizerSessionIds ?? []; } catch {}
   const ok = Array.isArray(ids) && ids.includes(sessionId);
-  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  前提: 要約 CLI に渡した session_id が第2層のレジストリ（speak.state.json の summarizerSessionIds）に実際に載っている${ok ? "" : ` (ids=${JSON.stringify(ids)})`}`);
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  precondition: the session_id passed to the summarizer CLI is actually listed in the layer 2 registry (summarizerSessionIds in speak.state.json)${ok ? "" : ` (ids=${JSON.stringify(ids)})`}`);
   process.exit(ok ? 0 : 1);
 ' "$RUNTIME/speak.state.json" "$SUMMARIZER_SESSION_ID"
 
@@ -756,7 +756,7 @@ node -e '
   const [logPath, text] = process.argv.slice(1);
   let logged = false;
   try { logged = fs.readFileSync(logPath, "utf8").includes(text); } catch {}
-  console.log(`${logged ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  対照: 無関係な session_id の delta は普通に発話される（hook→CLI→spool→publish の経路自体は生きている）${logged ? "" : " (発話されていない)"}`);
+  console.log(`${logged ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  control: a delta with an unrelated session_id is spoken normally (the hook → CLI → spool → publish path itself is alive)${logged ? "" : " (not spoken)"}`);
   process.exit(logged ? 0 : 1);
 ' "$LOG" "$SUMMARIZER_LOOP_CONTROL_TEXT"
 
@@ -772,12 +772,12 @@ node -e '
   try { logged = fs.readFileSync(logPath, "utf8").includes(text); } catch {}
   const wroteToSpool = fs.existsSync(spoolFile);
   const ok = !logged && !wroteToSpool;
-  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  ★ 要約 CLI に渡した session_id を持つ delta は発話されず、spool からも消える${ok ? "" : ` (logged=${logged} wroteToSpool=${wroteToSpool})`}`);
+  console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  ★ a delta carrying the session_id passed to the summarizer CLI is not spoken and is removed from the spool${ok ? "" : ` (logged=${logged} wroteToSpool=${wroteToSpool})`}`);
   process.exit(ok ? 0 : 1);
 ' "$LOG" "$SPOOL/m-summarizer-loop.0.json" "$SUMMARIZER_LOOP_TEXT"
 spoken
 
-show "⑱ ★ [#33] prompt が本文を追い越して spool に着いても、本文 → 質問の順で出る"
+show "⑱ ★ [#33] Even if a prompt overtakes the body and reaches the spool first, the body is spoken before the question"
 
 # ★ MessageDisplay と PreToolUse は**別プロセスとして同時に走る**ので、どちらが先に spool へ
 #   着くかに保証が無い（実機で PreToolUse が本文を 316ms 追い越した）。到着順に素直に従うと
@@ -796,7 +796,7 @@ feed_message m-overrun 0 true "追い越し検証の本文です。" '{"prompt_i
 node "$CLI"
 spoken
 
-show "⑲ ★ [#33] 本文がまだ spool に無くても、待っている間に着けば本文 → 質問の順で出る"
+show "⑲ ★ [#33] Even if the body is not in the spool yet, if it arrives while waiting, the body is spoken before the question"
 
 # ★ 実機（2026-08-23）で観測した典型ケース。短い本文（1〜2文）は改行で終わらないので
 #   final flush までファイルが1つも置かれず、その手前で PreToolUse が着地して CLI を起こす。
@@ -820,7 +820,7 @@ wait "$late_pid"
 node "$CLI"   # 待ちが尽きた後に着地していた場合の取りこぼしを拾う
 spoken
 
-show "⑳ ★ [#29] 採番のやり直しで epoch が変わり、旧世代の配信キューが捨てられる"
+show "⑳ ★ [#29] Restarting the numbering changes the epoch and discards the old generation delivery queue"
 
 # ★ 使い捨てのルートを**もう1つ**掘る。ここでは speech.jsonl と speech.state.json を消して
 #   「採番がやり直された」状態を作るので、①〜⑲ が積んだ記録の上でやると最後の結果検証が
@@ -867,11 +867,11 @@ show "⑳ ★ [#29] 採番のやり直しで epoch が変わり、旧世代の�
     const rows = fs.readFileSync(logPath, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 
     const checks = [
-      ["state だけ消しても epoch は変わらない（採番が続くなら世代も続く）", s2.epoch === s1.epoch],
-      ["state とログを両方消すと epoch が変わる", s3.epoch !== s1.epoch],
-      ["採番も 1 からやり直されている（epoch の変化と一対一）", rows.length === 1 && rows[0].seq === 1],
-      ["旧世代の配信キューが捨てられている", before.length >= 2 && now.length === 1],
-      ["残っているのは新しい世代の entry だけ", now.every((f) => read(queueDir + "/" + f).epoch === s3.epoch)],
+      ["deleting only the state does not change the epoch (if numbering continues, so does the generation)", s2.epoch === s1.epoch],
+      ["deleting both the state and the log changes the epoch", s3.epoch !== s1.epoch],
+      ["numbering also restarts from 1 (one to one with the epoch change)", rows.length === 1 && rows[0].seq === 1],
+      ["the old generation delivery queue is discarded", before.length >= 2 && now.length === 1],
+      ["only entries of the new generation remain", now.every((f) => read(queueDir + "/" + f).epoch === s3.epoch)],
     ];
     let failed = 0;
     for (const [label, ok] of checks) {
@@ -886,7 +886,7 @@ show "⑳ ★ [#29] 採番のやり直しで epoch が変わり、旧世代の�
   ' "$ROOT2/state-1.json" "$ROOT2/state-2.json" "$R2/speech.state.json" "$ROOT2/queue-before.txt" "$R2/speech" "$R2/speech.jsonl"
 )
 
-show "㉑ ★ [#92] 感情キーワード辞書のユーザーカスタマイズ"
+show "㉑ ★ [#92] User customization of the emotion keyword dictionary"
 
 # ★ ⑳ と同じ理由でもう1つ使い捨てのルートを掘る。①〜⑳ が積んだ $ROOT を汚さないため。
 #
@@ -946,16 +946,16 @@ show "㉑ ★ [#92] 感情キーワード辞書のユーザーカスタマイズ
 
     const EXPECTED_KEYS = ["happy", "angry", "sad", "relaxed", "surprised"];
     const checks = [
-      ["ファイル不在から生成された既定辞書が5キー・順序どおり",
+      ["the default dictionary generated from a missing file has 5 keys in order",
         JSON.stringify(Object.keys(created)) === JSON.stringify(EXPECTED_KEYS)],
-      ["生成された各キーの値が空でない文字列配列",
+      ["every generated key holds a non-empty string array",
         EXPECTED_KEYS.every((k) =>
           Array.isArray(created[k]) && created[k].length > 0 && created[k].every((s) => typeof s === "string" && s.length > 0))],
-      ["既存ファイルは1バイトも変わらず上書きされない", before === after],
-      ["angry を置き換えた語を含む文が angry と判定される", emotionOf("ぷんすかぴょんぴょんしています") === "angry"],
-      ["既定の angry にしか無い語を含む文は angry にならない（既定が置き換わっている）", emotionOf(angryProbe) !== "angry"],
-      ["置き換えていない happy は既定のまま効く", emotionOf(happyProbe) === "happy"],
-      ["壊れた JSON でも発話が止まらない", emotionOf("壊れたファイルでも発話は止まりません") !== undefined],
+      ["an existing file is not overwritten, not even by one byte", before === after],
+      ["a sentence containing the replaced angry word is classified as angry", emotionOf("ぷんすかぴょんぴょんしています") === "angry"],
+      ["a sentence containing a word found only in the default angry is not angry (the default has been replaced)", emotionOf(angryProbe) !== "angry"],
+      ["happy, which was not replaced, still works with its default", emotionOf(happyProbe) === "happy"],
+      ["speech does not stop even with broken JSON", emotionOf("壊れたファイルでも発話は止まりません") !== undefined],
     ];
     let failed = 0;
     for (const [label, ok] of checks) {
@@ -966,7 +966,7 @@ show "㉑ ★ [#92] 感情キーワード辞書のユーザーカスタマイズ
   ' "$ROOT3/created.json" "$ROOT3/before-overwrite.json" "$ROOT3/after-overwrite.json" "$R3/speech.jsonl" "${HAPPY_WORD}です" "${ANGRY_WORD}ことがありました"
 )
 
-show "結果の検証"
+show "Verifying the result"
 node -e '
   const fs = require("fs");
   const rows = fs.readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
@@ -978,46 +978,46 @@ node -e '
     console.log(`${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  ${label}`);
   };
 
-  check("seq が 1 から欠番なく連続", seqs.every((s, i) => s === i + 1));
-  check("重複した発話が無い", new Set(texts).size === texts.length);
-  check("コードが漏れていない", !texts.some((t) => t.includes("const secret")));
-  check("未閉じフェンスの記号が漏れていない", !texts.some((t) => t.includes("```")));
-  check("付随 Notification は捨てられている", !texts.includes("Claude needs your permission"));
-  check("質問と選択肢が読み上げられている", texts.some((t) => t.includes("選択肢は、進める、やり直す")));
-  check("遅れて届いた final でメッセージの最後の文まで出ている",
+  check("seq is consecutive from 1 with no gaps", seqs.every((s, i) => s === i + 1));
+  check("no duplicated utterance", new Set(texts).size === texts.length);
+  check("no code leaked", !texts.some((t) => t.includes("const secret")));
+  check("no symbol of an unclosed fence leaked", !texts.some((t) => t.includes("```")));
+  check("the accompanying Notification is discarded", !texts.includes("Claude needs your permission"));
+  check("the question and options are read aloud", texts.some((t) => t.includes("選択肢は、進める、やり直す")));
+  check("the late final made the message come out up to its last sentence",
     texts.includes("これは実装方針に関わる分岐があるので確認させてください。"));
-  check("並列起動でも順序が保たれている",
+  check("order is preserved even with parallel launches",
     JSON.stringify(texts.filter((t) => t.startsWith("並列") || t === "終わり。")) ===
     JSON.stringify([...[0, 1, 2, 3, 4, 5].map((i) => `並列${i}です。`), "終わり。"]));
-  check("final が来なかったメッセージが後続イベントで救済されている",
+  check("a message whose final never came was rescued by a later event",
     texts.includes("中断された発言です。") && texts.includes("この後 final は来ません。"));
 
   // ★ ⑱ [#33] prompt が本文を追い越して spool へ着いたときの発話順。到着順（birthtime）に
   //   素直に従うと質問が先に鳴るので、worker.ts の hoistMessagesBeforePrompt が本文を前へ戻す
   const overrunBody = texts.indexOf("追い越し検証の本文です。");
   const overrunQuestion = texts.findIndex((t) => t.includes("追い越し検証の質問です"));
-  check("prompt が本文を追い越して spool へ着いても、本文 → 質問の順で発話される（#33）",
+  check("even if a prompt overtakes the body to the spool, the body is spoken before the question (#33)",
     overrunBody !== -1 && overrunQuestion !== -1 && overrunBody < overrunQuestion);
 
   // ★ ⑲ [#33] 本文が spool にまだ無い状態で prompt が CLI を起こす、実機の典型ケース
   const lateBody = texts.indexOf("遅着検証の本文です。");
   const lateQuestion = texts.findIndex((t) => t.includes("遅着検証の質問です"));
-  check("本文が spool に無い状態で prompt が来ても、待って本文 → 質問の順で発話される（#33）",
+  check("even if a prompt arrives while the body is not in the spool, it waits and the body is spoken before the question (#33)",
     lateBody !== -1 && lateQuestion !== -1 && lateBody < lateQuestion);
 
   // ★ ⑬ 孤児カスケード（CLAUDE.md 承認済み計画 B-3）。tombstone が無いと、救済で spool から
   //   消えたはずの m-orphan-a の遅延 final が「同一セッションの後続」として成立してしまい、
   //   まだストリーミング中の m-orphan-b を打ち切って発話してしまう
-  check("孤児カスケード: 救済された m-orphan-a の一文目は発話されている",
+  check("orphan cascade: the first sentence of the rescued m-orphan-a was spoken",
     texts.includes("孤児カスケード検証Aの一文目です。"));
-  check("孤児カスケード: 救済済みメッセージへの遅延 final（孤児）は発話されていない（tombstone）",
+  check("orphan cascade: the late final (orphan) for the rescued message was not spoken (tombstone)",
     !texts.some((t) => t.includes("孤児カスケード検証Aの最終行です")));
-  check("孤児カスケード: ストリーミング中だった m-orphan-b は打ち切られずに発話されていない",
+  check("orphan cascade: m-orphan-b, which was streaming, was not cut off and has not been spoken",
     !texts.some((t) => t.includes("孤児カスケード検証Bの一文目です")));
 
   // ★ F1-c（issue #38 レビュー）: "m-summary-"（⑭⑮⑯）/ "m-summarizer-"（⑰）が抜けていて、
   //   AI要約シナリオの spool が片付いているかは検査対象外になっていた
-  check("spool は片付いている（処理済みのファイルが残っていない）",
+  check("the spool is clean (no processed file remains)",
     !fs.readdirSync(process.argv[2]).some((f) =>
       ["m-aaa", "m-bbb", "m-ccc", "m-ddd", "m-eee", "m-zero", "m-cli-zero", "m-orphan", "m-summary-", "m-summarizer-", "m-overrun", "m-late", "prompt-"].some((p) =>
         f.startsWith(p))));
@@ -1035,37 +1035,37 @@ node -e '
     const solid = group.every((r, i) => rows[firstIndex + i] === r);
     return contiguous && sameTs && solid;
   };
-  check("m-aaa の全文が1つの塊で配信されている（seq 連続 / ts 同値 / 間に他メッセージが挟まらない）",
+  check("the whole of m-aaa is delivered as one batch (consecutive seq / same ts / no other message in between)",
     grouped("m-aaa").length === 5 && isOneBatch("m-aaa"));
-  check("m-ccc（並列に叩いたメッセージ）も1つの塊で配信されている", isOneBatch("m-ccc"));
+  check("m-ccc (the message hit in parallel) is also delivered as one batch", isOneBatch("m-ccc"));
 
   // ⑦ hook 側のガード。ここが崩れると spool の形から壊れるので、記録の中身で裏を取る
   const spoolFiles = fs.readdirSync(process.argv[2]);
   // 本文の "WRONG-ID" は読み上げられて正しい（アシスタントがそう喋ったのだから）。
   // 見るべきは**どのメッセージに属したか**で、貪欲マッチだとファイルが WRONG-ID.<index>.json に割れる
-  check("delta 本文の \"message_id\" に引っ張られていない（貪欲マッチの回帰）",
+  check("not pulled in by \"message_id\" in the delta body (greedy-match regression)",
     !rows.some((r) => r.messageId === "WRONG-ID") &&
     !spoolFiles.some((f) => f.startsWith("WRONG-ID")) &&
     rows.filter((r) => r.text.includes("WRONG-ID")).every((r) => r.messageId === "m-ddd"));
-  check("サブエージェント（agent_id あり）の発言は読み上げていない",
+  check("utterances from a subagent (with agent_id) are not read aloud",
     !texts.some((t) => t.includes("サブエージェントの発言")) && !spoolFiles.some((f) => f.startsWith("m-sub")));
-  check("message_id が取れない payload は spool に積まれていない",
+  check("a payload without a retrievable message_id is not queued in the spool",
     !texts.some((t) => t.includes("message_id なし")));
-  check("ファイル名に使えない message_id は弾かれている（パストラバーサル）",
+  check("a message_id unusable as a file name is rejected (path traversal)",
     !texts.some((t) => t.includes("パストラバーサル")) && !fs.existsSync(`${process.argv[2]}/../escape.0.json`));
-  check("CHATTER_AGENT_DISABLE=1 の間は何も積まれていない",
+  check("nothing is queued while CHATTER_AGENT_DISABLE=1",
     !texts.some((t) => t.includes("無効化中の発言")) && !spoolFiles.some((f) => f.startsWith("m-off")));
-  check("CHATTER_AGENT_DISABLE=0 では黙らない（#4 / presence 判定への逆戻り検出）",
+  check("CHATTER_AGENT_DISABLE=0 does not silence it (#4 / detects reverting to the presence check)",
     texts.includes("ゼロは解除です。"));
   // ★ R3 の「CLI に直接 =0 を渡す」チェックはここではなく、その場（⑦ 内）で見ている。
   //   最終状態だけを見ると、後続の CLI 呼び出しが同じ spool を拾って結局発話してしまい、
   //   presence 判定への回帰が隠れてしまうため（上のコメント参照）
-  check("CLI に直接 CHATTER_AGENT_DISABLE=0 を渡した発言も、最終的な記録に残っている",
+  check("an utterance given CHATTER_AGENT_DISABLE=0 directly to the CLI is also in the final record",
     texts.includes("CLIにも0を渡して発話される確認用の発言です。"));
   // ★ #22: この検査の対象は、**final が来るまで一度も発話されていない**メッセージであること。
   //   m-ddd は ⑦ の先頭で開いて空 final で閉じており、その間に同一セッションの他イベントを
   //   挟んでいないので、`[ -n "$delta" ] || exit 0` の回帰でここが確定的に赤くなる
-  check("final:true の delta が空でも、メッセージ全文が出る",
+  check("even if the final:true delta is empty, the whole message is spoken",
     texts.includes("空のファイナルで確定します。") &&
     texts.some((t) => t.includes("WRONG-ID")));
 
@@ -1077,7 +1077,7 @@ node -e '
   const queueJson = queueFiles.filter((f) => f.endsWith(".json"));
   const queueSeqs = queueJson.map((f) => Number(f.slice(0, -".json".length))).sort((a, b) => a - b);
 
-  check("speech.jsonl と配信キューの seq 集合が一致する（キュー entry が上書きで潰れていない）",
+  check("the seq sets of speech.jsonl and the delivery queue match (no queue entry was lost to an overwrite)",
     JSON.stringify(queueSeqs) === JSON.stringify([...seqs].sort((a, b) => a - b)));
 
   const seqMismatch = queueJson.some((f) => {
@@ -1085,9 +1085,9 @@ node -e '
     const payload = JSON.parse(fs.readFileSync(`${queueDir}/${f}`, "utf8"));
     return payload.seq !== fileSeq;
   });
-  check("各キューファイルの payload の seq がファイル名と食い違っていない", !seqMismatch);
+  check("the payload seq of each queue file does not disagree with its file name", !seqMismatch);
 
-  check(".json.tmp が残っていない（tmp + rename が途中で終わっていない）",
+  check("no .json.tmp remains (no tmp + rename stopped halfway)",
     !queueFiles.some((f) => f.endsWith(".json.tmp")));
 
   // ── epoch（採番の世代。#29）──────────────────────────────────────────────
@@ -1096,16 +1096,16 @@ node -e '
   //   すべてが同じ epoch を持っていなければならない。ここが割れるのは
   //   「1回の append で epoch を計算し直している」「state に書き戻していない」のどちらか
   const epochs = new Set(rows.map((r) => r.epoch));
-  check("speech.jsonl の全レコードが同じ epoch を持つ",
+  check("every record of speech.jsonl has the same epoch",
     epochs.size === 1 && [...epochs].every((e) => typeof e === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(e)),
     [...epochs].join(","));
 
   const state = JSON.parse(fs.readFileSync(process.argv[4], "utf8"));
-  check("speech.state.json に epoch が入っている（次の起動で採番のやり直しと誤判定されない）",
+  check("speech.state.json holds the epoch (the next start does not misjudge it as a numbering restart)",
     state.epoch === [...epochs][0], JSON.stringify(state));
 
   const queueEpochs = new Set(queueJson.map((f) => JSON.parse(fs.readFileSync(`${queueDir}/${f}`, "utf8")).epoch));
-  check("配信キューの epoch が記録と一致する",
+  check("the delivery queue epoch matches the record",
     queueEpochs.size === 1 && [...queueEpochs][0] === [...epochs][0]);
 
   process.exit(failed === 0 ? 0 : 1);

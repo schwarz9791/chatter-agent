@@ -299,20 +299,24 @@ try {
   await startEngine();
 
   {
-    show("① 順序どおりに再生し、seq 順に ack する");
+    show("① Plays in order and acks in seq order");
     const stub = createStubServer();
     await stub.ready;
     const player = await startReadyPlayer(playerEnv({ CHATTER_AGENT_PLAYER_SERVER_URL: stub.url() }));
 
     for (const text of ["ひとつめ。", "ふたつめ。", "みっつめ。"]) stub.send(record(text));
     const ok = await until(() => played().length === 3);
-    check("3文とも鳴った", ok, `鳴ったのは ${JSON.stringify(played())}`);
-    check("seq 昇順に鳴った", JSON.stringify(played()) === JSON.stringify([1, 2, 3]), JSON.stringify(played()));
+    check("all 3 sentences played", ok, `played: ${JSON.stringify(played())}`);
+    check(
+      "played in ascending seq order",
+      JSON.stringify(played()) === JSON.stringify([1, 2, 3]),
+      JSON.stringify(played()),
+    );
 
     await until(() => stub.lastAck() === 3);
-    check("最後まで ack が進んだ", stub.lastAck() === 3, `ack=${JSON.stringify(stub.state.acks)}`);
+    check("ack advanced to the end", stub.lastAck() === 3, `ack=${JSON.stringify(stub.state.acks)}`);
     check(
-      "ack は単調に進む",
+      "ack advances monotonically",
       stub.state.acks.every((a, i, all) => i === 0 || a.seq >= all[i - 1].seq),
       JSON.stringify(stub.state.acks),
     );
@@ -322,7 +326,7 @@ try {
   }
 
   {
-    show("② 後ろの合成が先に終わっても head を追い越さない");
+    show("② A later synthesis finishing first does not overtake the head");
     const stub = createStubServer();
     await stub.ready;
     const player = await startReadyPlayer(playerEnv({ CHATTER_AGENT_PLAYER_SERVER_URL: stub.url() }));
@@ -334,9 +338,9 @@ try {
     stub.send(record("はやい2。"));
 
     const ok = await until(() => played().length === 3);
-    check("3文とも鳴った", ok, JSON.stringify(played()));
+    check("all 3 sentences played", ok, JSON.stringify(played()));
     check(
-      "★ 追い越さずに seq 順で鳴った",
+      "★ played in seq order without overtaking",
       JSON.stringify(played()) === JSON.stringify([1, 2, 3]),
       JSON.stringify(played()),
     );
@@ -346,7 +350,7 @@ try {
   }
 
   {
-    show("③ 合成に失敗した seq は head で ack する（未再生分を巻き込まない）");
+    show("③ A seq whose synthesis failed is acked at the head (without dragging in unplayed ones)");
     const stub = createStubServer();
     await stub.ready;
     const player = await startReadyPlayer(playerEnv({ CHATTER_AGENT_PLAYER_SERVER_URL: stub.url() }));
@@ -359,19 +363,19 @@ try {
     // seq 2 の失敗が確定するのは seq 1 の再生前。ここで ack(2) が飛ぶと seq 1 が道連れになる
     await sleep(200);
     const early = stub.state.acks.map((a) => a.seq);
-    check("★ 失敗が確定しても、まだ ack を出していない", early.length === 0, JSON.stringify(early));
+    check("★ has not acked yet even though the failure is settled", early.length === 0, JSON.stringify(early));
 
     const ok = await until(() => stub.lastAck() === 3);
-    check("最後まで ack が進んだ", ok, JSON.stringify(stub.state.acks));
-    check("失敗した seq は鳴らない", !played().includes(2), JSON.stringify(played()));
-    check("前後の seq は鳴る", played().includes(1) && played().includes(3), JSON.stringify(played()));
+    check("ack advanced to the end", ok, JSON.stringify(stub.state.acks));
+    check("the failed seq does not play", !played().includes(2), JSON.stringify(played()));
+    check("the seqs before and after it play", played().includes(1) && played().includes(3), JSON.stringify(played()));
 
     await stopPlayer(player);
     await stub.close();
   }
 
   {
-    show("④ 再接続で再送されても二度読み上げない");
+    show("④ Does not speak twice even if resent after reconnecting");
     const stub = createStubServer();
     await stub.ready;
     const player = await startReadyPlayer(playerEnv({ CHATTER_AGENT_PLAYER_SERVER_URL: stub.url() }));
@@ -388,18 +392,18 @@ try {
 
     stub.state.sockets[0].close();
     const reconnected = await until(() => stub.state.connections === 2, 15_000);
-    check("切断されたら繋ぎ直す", reconnected, `connections=${stub.state.connections}\n${player.log}`);
+    check("reconnects after a disconnect", reconnected, `connections=${stub.state.connections}\n${player.log}`);
 
     await sleep(500);
-    check("★ 同じ seq を二度読み上げない", played().length === 1, JSON.stringify(played()));
-    check("★ 消費済みの再送には ack を打ち直す", stub.lastAck() === 1, JSON.stringify(stub.state.acks));
+    check("★ does not speak the same seq twice", played().length === 1, JSON.stringify(played()));
+    check("★ re-sends the ack for an already consumed resend", stub.lastAck() === 1, JSON.stringify(stub.state.acks));
 
     await stopPlayer(player);
     await stub.close();
   }
 
   {
-    show("⑤ 採番がやり直されても沈黙しない");
+    show("⑤ Does not fall silent when numbering restarts");
     const stub = createStubServer();
     await stub.ready;
     const player = await startReadyPlayer(playerEnv({ CHATTER_AGENT_PLAYER_SERVER_URL: stub.url() }));
@@ -415,13 +419,17 @@ try {
     stub.send(record("あたらしい1。"));
 
     const ok = await until(() => played().length === 4, 6000);
-    check("★ 採番のやり直し後も喋る（seq だけで覚えていると永久に黙る）", ok, JSON.stringify(played()));
+    check(
+      "★ speaks after numbering restarts (remembering by seq alone would stay silent forever)",
+      ok,
+      JSON.stringify(played()),
+    );
 
     // ★ 旧世代の音声を消し忘れると、孤児の afplay が読んでいる最中のファイルを truncate する。
     //   一時ファイル名は `<内部エポック>-<seq>.wav` なので、やり直しを跨いだ 2 つの seq=1 は
     //   別のファイル名で鳴っていなければならない
     check(
-      "★ やり直しを跨いだ同じ seq が、別の一時ファイルとして鳴っている",
+      "★ the same seq across a restart plays as a different temporary file",
       new Set(playedFiles()).size === playedFiles().length,
       JSON.stringify(playedFiles()),
     );
@@ -431,7 +439,7 @@ try {
   }
 
   {
-    show("⑥ 合成が返ってこなくても固まらない");
+    show("⑥ Does not freeze when synthesis never returns");
     const stub = createStubServer();
     await stub.ready;
     const player = await startReadyPlayer(playerEnv({ CHATTER_AGENT_PLAYER_SERVER_URL: stub.url() }));
@@ -446,20 +454,20 @@ try {
     //   12 秒だと数回に1回取りこぼした
     const ok = await until(() => played().includes(2), 25_000);
     check(
-      "★ タイムアウトして次へ進む（head が固まると以後すべて無音）",
+      "★ times out and moves on (a stuck head would silence everything after it)",
       ok,
       `${JSON.stringify(played())}\n${player.log}`,
     );
-    check("固まった seq は鳴らない", !played().includes(1), JSON.stringify(played()));
+    check("the stuck seq does not play", !played().includes(1), JSON.stringify(played()));
     await until(() => stub.lastAck() === 2, 5000);
-    check("ack も追いつく", stub.lastAck() === 2, `${JSON.stringify(stub.state.acks)}\n${player.log}`);
+    check("ack catches up too", stub.lastAck() === 2, `${JSON.stringify(stub.state.acks)}\n${player.log}`);
 
     await stopPlayer(player);
     await stub.close();
   }
 
   {
-    show("⑦ 再生が返ってこなくてもタイムアウトして次へ進む");
+    show("⑦ Times out and moves on even if playback never returns");
     const stub = createStubServer();
     await stub.ready;
     // 1文目だけハングさせたいが、コマンドは1つしか指定できない。
@@ -473,7 +481,7 @@ try {
     stub.send(record("つぎ。"));
 
     const ok = await until(() => played().length === 2, 15_000);
-    check("★ ハングした再生を諦めて次へ進む", ok, JSON.stringify(played()));
+    check("★ gives up on the hung playback and moves on", ok, JSON.stringify(played()));
 
     await stopPlayer(player);
     await stub.close();
@@ -483,7 +491,7 @@ try {
     // ★ ここが無いと `playbackFailed → ack → サーバーのキューから削除`（player で最も
     //   破壊的な経路）の end-to-end カバレッジがゼロになる。`played()` が証明しているのは
     //   「偽プレイヤーが起動した」ことだけで、「聞こえた」ことではない
-    show("⑧ 再生コマンドが失敗しても止まらず、ack は進む");
+    show("⑧ Does not stop when the playback command fails, and ack advances");
     const stub = createStubServer();
     await stub.ready;
     const player = await startReadyPlayer(
@@ -495,16 +503,16 @@ try {
 
     // 3文とも再生に失敗するが、head で ack して先へ進む
     const drained = await until(() => stub.lastAck() === 3, 15_000);
-    check("★ 全文が再生に失敗しても ack が最後まで進む", drained, JSON.stringify(stub.state.acks));
-    check("3文とも起動は試みている", played().length === 3, JSON.stringify(played()));
-    check("失敗を黙って飲み込まない", player.log.includes("Playback of seq="), player.log);
+    check("★ ack advances to the end even if every sentence fails to play", drained, JSON.stringify(stub.state.acks));
+    check("playback was attempted for all 3 sentences", played().length === 3, JSON.stringify(played()));
+    check("does not swallow failures silently", player.log.includes("Playback of seq="), player.log);
 
     await stopPlayer(player);
     await stub.close();
   }
 
   {
-    show("⑨ 二重起動は失敗する");
+    show("⑨ A second instance fails to start");
     const stub = createStubServer();
     await stub.ready;
     const env = playerEnv({ CHATTER_AGENT_PLAYER_SERVER_URL: stub.url() });
@@ -513,12 +521,12 @@ try {
     const second = startPlayer(env);
     const exited = await until(() => second.exited !== null, 5000);
     check(
-      "★ 2台目は起動に失敗する（ack が1台目のキューを消すため）",
+      "★ the second instance fails to start (its ack would erase the first one's queue)",
       exited && second.exited === 1,
       `exit=${second.exited}`,
     );
     check(
-      "理由が分かるメッセージを出す",
+      "prints a message that explains the reason",
       second.log.includes("Another chatter-agent-player is already running"),
       second.log,
     );
@@ -528,7 +536,7 @@ try {
   }
 
   {
-    show("⑩ 一時ファイルを残さない");
+    show("⑩ Leaves no temporary files behind");
     const stub = createStubServer();
     await stub.ready;
     const player = await startReadyPlayer(playerEnv({ CHATTER_AGENT_PLAYER_SERVER_URL: stub.url() }));
@@ -539,15 +547,15 @@ try {
     await sleep(200);
 
     const left = fs.existsSync(tmpDir) ? fs.readdirSync(tmpDir) : [];
-    check("再生し終えた WAV は消える（失敗した分も）", left.length === 0, JSON.stringify(left));
+    check("WAV files that finished playing are removed (failed ones too)", left.length === 0, JSON.stringify(left));
 
     await stopPlayer(player);
-    check("終了時に一時ディレクトリごと消す", !fs.existsSync(tmpDir), tmpDir);
+    check("the temporary directory is removed on exit", !fs.existsSync(tmpDir), tmpDir);
     await stub.close();
   }
 
   {
-    show("⑪ ★ 503 が返り続けてもバックログを燃やさない（#29）");
+    show("⑪ ★ Does not burn through the backlog while 503 keeps coming back (#29)");
 
     // ★ #29 より前、ここは「エンジンが落ちていたら WebSocket に繋がない」だった。
     //   合成の失敗が「1回リトライして捨てて ack」に流れるので、AivisSpeech を起動し
@@ -570,23 +578,25 @@ try {
     //   おかげでたまたま通っていた）
     const hinted = await until(() => player.log.includes("ttsSpeakerId"), 20_000);
     check(
-      "★ 503 の間も取り直し続け、設定を疑う手がかりを出す",
+      "★ keeps retrying during 503 and prints a hint to suspect the settings",
       hinted,
       `requests=${stub.state.audioRequests.length}\n${player.log}`,
     );
     check(
-      "★ ack を1つも出さない（出すとサーバー側のキューから消える）",
+      "★ sends no ack at all (an ack would remove it from the server queue)",
       stub.state.acks.length === 0,
       JSON.stringify(stub.state.acks),
     );
-    check("何も鳴らない", played().length === 0, JSON.stringify(played()));
+    check("nothing plays", played().length === 0, JSON.stringify(played()));
 
     await stopPlayer(player);
     await stub.close();
   }
 
   {
-    show("⑫ ★ audio を載せないサーバーに繋いだら、無音の理由を1行残す（#49 のレビュー B-1）");
+    show(
+      "⑫ ★ When connected to a server that carries no audio, leaves one line explaining the silence (#49 review B-1)",
+    );
 
     // ★ **`ttsEnabled: false`（`"audio": null` が明示的に載る）と、#29 より前のサーバー
     //   （`audio` キーが無い）を言い分ける。** 潰したままだと、後者は前者と区別なく
@@ -604,12 +614,12 @@ try {
     const silent = record("音声を用意しない設定の発言です。", { audio: null });
     stub.send(silent);
     check(
-      "音声を用意しない設定でも ack して進む",
+      "acks and moves on even when audio is not provided",
       await until(() => stub.lastAck() === silent.seq, 5000),
       JSON.stringify(stub.state.acks),
     );
     check(
-      "★ 明示的な audio: null では警告しない（ttsEnabled: false は正常な設定）",
+      "★ no warning for an explicit audio: null (ttsEnabled: false is a valid setting)",
       !quiet.log.includes("has no audio"),
       quiet.log,
     );
@@ -621,20 +631,24 @@ try {
     delete undeclared.audio; // JSON.stringify がキーごと落とす（＝ #29 より前のサーバーの形）
     stub.send(undeclared);
 
-    check("★ 無音の理由がログに出る", await until(() => legacy.log.includes("has no audio"), 10_000), legacy.log);
     check(
-      "★ 挙動は変えない（それでも ack して次へ進む）",
+      "★ the reason for the silence appears in the log",
+      await until(() => legacy.log.includes("has no audio"), 10_000),
+      legacy.log,
+    );
+    check(
+      "★ behavior is unchanged (still acks and moves on)",
       await until(() => stub.lastAck() === undeclared.seq, 5000),
       JSON.stringify(stub.state.acks),
     );
-    check("どちらも音は鳴らない", played().length === 0, JSON.stringify(played()));
+    check("neither plays any sound", played().length === 0, JSON.stringify(played()));
 
     await stopPlayer(legacy);
     await stub.close();
   }
 
   {
-    show("⑬ 本物の server と CLI を通したエンドツーエンド");
+    show("⑬ End to end through the real server and CLI");
     const PORT = 18571;
     const chainEnv = {
       ...playerEnv(),
@@ -672,18 +686,22 @@ try {
     fs.writeFileSync(path.join(spoolDir, "m-e2e.0.json"), JSON.stringify(payload));
     const [speakCmd, ...speakArgs] = entryArgv("speak", CLI);
     const cli = spawnSync(speakCmd, speakArgs, { env: chainEnv, stdio: "ignore" });
-    check("CLI が正常終了する", cli.status === 0, `status=${cli.status}`);
+    check("the CLI exits normally", cli.status === 0, `status=${cli.status}`);
 
     const heard = await until(() => played().length === 2, 10_000);
-    check("★ hook → CLI → server → player で音が鳴る", heard, JSON.stringify(played()));
+    check("★ sound plays through hook → CLI → server → player", heard, JSON.stringify(played()));
 
     const drained = await until(() => fs.readdirSync(queueDir).filter((f) => f.endsWith(".json")).length === 0, 5000);
-    check("★ 喋り終えるたびに ack が飛び、配信キューが空になる", drained, JSON.stringify(fs.readdirSync(queueDir)));
+    check(
+      "★ an ack is sent after each utterance and the delivery queue empties",
+      drained,
+      JSON.stringify(fs.readdirSync(queueDir)),
+    );
     // ★ **厳密一致にすること。** `>= 2` だと player が別に叩いていても通る。
     //   ⑫ に入る時点で `synthesized` は空（①〜⑪ はスタブサーバーしか使わない）で、
     //   期待は「1文につき1回」。player が独自に合成すれば 4 になる
     check(
-      "★ 合成はサーバー側で1文につき1回だけ行われている",
+      "★ synthesis happens once per sentence, on the server side",
       synthesized.length === 2,
       `synthesized=${JSON.stringify(synthesized)}`,
     );
@@ -694,9 +712,9 @@ try {
     if (!BIN) {
       const playerBundle = fs.readFileSync(PLAYER, "utf-8");
       check(
-        "★ player のバンドルに合成エンジンのクライアントが入っていない",
+        "★ the player bundle does not contain a TTS engine client",
         !playerBundle.includes("createVoicevoxEngine") && !playerBundle.includes("createOpenAiEngine"),
-        "合成エンジンのクライアントがバンドルに含まれています",
+        "the bundle contains a TTS engine client",
       );
     }
 
@@ -705,7 +723,7 @@ try {
   }
 } catch (err) {
   console.error(err);
-  fail("実行エラー");
+  fail("runtime error");
 } finally {
   cleanup();
 }
@@ -713,6 +731,6 @@ try {
 await summarize(() =>
   spawned()
     .filter((handle) => handle.log)
-    .map((handle) => `${handle.label} のログ:\n${handle.log}`)
+    .map((handle) => `${handle.label} log:\n${handle.log}`)
     .join("\n\n"),
 );

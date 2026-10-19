@@ -34,18 +34,18 @@ JSON_PAD = b" "
 def split_chunks(raw):
     """GLB を (JSON チャンクの本体, それ以降のバイト列) に割る。"""
     if len(raw) < 20:
-        raise ValueError("GLB として短すぎます")
+        raise ValueError("Too short to be a GLB")
     magic, version, total = struct.unpack_from("<4sII", raw, 0)
     if magic != GLB_MAGIC:
-        raise ValueError(f"glTF-Binary ではありません: magic={magic!r}")
+        raise ValueError(f"Not glTF-Binary: magic={magic!r}")
     if version != 2:
-        raise ValueError(f"glTF 2.0 ではありません: version={version}")
+        raise ValueError(f"Not glTF 2.0: version={version}")
     if total != len(raw):
-        raise ValueError(f"ヘッダの総長 {total} がファイル長 {len(raw)} と違います")
+        raise ValueError(f"Header total length {total} does not match file length {len(raw)}")
 
     length, kind = struct.unpack_from("<I4s", raw, 12)
     if kind != JSON_CHUNK:
-        raise ValueError(f"先頭チャンクが JSON ではありません: {kind!r}")
+        raise ValueError(f"First chunk is not JSON: {kind!r}")
     return raw[20:20 + length], raw[20 + length:]
 
 
@@ -63,12 +63,12 @@ def replace_string_value(body, key, before, after):
         spaced = f'"{key}": "{before}"'.encode()
         if body.count(spaced) > 0:
             raise ValueError(
-                f"{key} が空白入りの書式で見つかりました。このスクリプトは"
-                "コンパクト形式（VRoid Studio の出力）だけを想定しています"
+                f"{key} was found in a format with whitespace. This script only "
+                "supports the compact format (VRoid Studio output)"
             )
-        raise ValueError(f"{key} に {before!r} が見つかりません")
+        raise ValueError(f"{key} does not contain {before!r}")
     if found > 1:
-        raise ValueError(f"{key} の {before!r} が {found} 箇所あります（一意ではない）")
+        raise ValueError(f"{before!r} for {key} appears {found} times (not unique)")
     return body.replace(old, new)
 
 
@@ -88,11 +88,11 @@ def build(json_body, tail):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("source", help="入力の .vrm")
-    parser.add_argument("destination", help="出力の .vrm")
+    parser.add_argument("source", help="input .vrm")
+    parser.add_argument("destination", help="output .vrm")
     parser.add_argument("--set", dest="assignments", action="append", default=[],
                         metavar="KEY=VALUE", required=True,
-                        help="VRMC_vrm.meta の文字列フィールドを差し替える（複数可）")
+                        help="replace a string field of VRMC_vrm.meta (repeatable)")
     args = parser.parse_args(argv)
 
     raw = open(args.source, "rb").read()
@@ -102,12 +102,12 @@ def main(argv=None):
     patched = json_body
     for assignment in args.assignments:
         if "=" not in assignment:
-            parser.error(f"KEY=VALUE の形で指定してください: {assignment}")
+            parser.error(f"Specify as KEY=VALUE: {assignment}")
         key, value = assignment.split("=", 1)
         if key not in meta:
-            parser.error(f"VRMC_vrm.meta に {key} がありません")
+            parser.error(f"VRMC_vrm.meta has no {key}")
         if not isinstance(meta[key], str):
-            parser.error(f"{key} は文字列ではありません（このスクリプトは文字列だけ扱う）")
+            parser.error(f"{key} is not a string (this script only handles strings)")
         print(f"  {key}: {meta[key]} -> {value}")
         patched = replace_string_value(patched, key, meta[key], value)
 
@@ -116,19 +116,19 @@ def main(argv=None):
     # --- 検証。ここを通らないものは書かない ---
     new_json, new_tail = split_chunks(result)
     if new_tail != tail:
-        raise SystemExit("BIN チャンクが変わっています")
+        raise SystemExit("The BIN chunk has changed")
     after = json.loads(new_json.decode("utf-8"))
     before = json.loads(json_body.decode("utf-8"))
     for assignment in args.assignments:
         key, value = assignment.split("=", 1)
         before["extensions"]["VRMC_vrm"]["meta"][key] = value
     if before != after:
-        raise SystemExit("meta 以外にも差分が出ています")
+        raise SystemExit("Differences exist outside meta")
 
     open(args.destination, "wb").write(result)
-    print(f"  BIN チャンク {len(tail) - 8} バイトはバイト単位で同一")
-    print(f"  {len(raw)} -> {len(result)} バイト（{len(result) - len(raw):+d}）")
-    print(f"できました: {args.destination}")
+    print(f"  BIN chunk ({len(tail) - 8} bytes) is byte-for-byte identical")
+    print(f"  {len(raw)} -> {len(result)} bytes ({len(result) - len(raw):+d})")
+    print(f"Done: {args.destination}")
     return 0
 
 

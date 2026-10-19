@@ -10,12 +10,12 @@ set -euo pipefail
 PROJECT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if pgrep -f "Unity.app/Contents/MacOS/Unity.*${PROJECT_PATH}" >/dev/null 2>&1; then
-  echo "Unity Editor がこのプロジェクトを開いています。閉じてから実行してください" >&2
+  echo "The Unity Editor has this project open. Close it and run again" >&2
   exit 1
 fi
 
 if ! command -v unity >/dev/null 2>&1; then
-  echo "unity コマンドが見つかりません。次でインストールしてください:" >&2
+  echo "The unity command was not found. Install it with:" >&2
   echo "  curl -fsSL https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh | UNITY_CLI_CHANNEL=beta bash" >&2
   exit 1
 fi
@@ -42,7 +42,7 @@ assert_notice_in_sync() {
   local source="$PROJECT_PATH/../NOTICE"
   local copy="$PROJECT_PATH/Assets/StreamingAssets/NOTICE.txt"
   if ! diff -q "$source" "$copy" >/dev/null; then
-    echo "同梱の NOTICE.txt がリポジトリの NOTICE とズレています。次で合わせてから出し直してください:" >&2
+    echo "The bundled NOTICE.txt differs from the repository NOTICE. Sync it with the command below, then build again:" >&2
     echo "  cp NOTICE chatter-mascot/Assets/StreamingAssets/NOTICE.txt" >&2
     diff -u "$source" "$copy" >&2 || true
     exit 1
@@ -103,15 +103,15 @@ unity_build_player() {
   if [ "$status" -ne 0 ]; then
     /bin/rm -rf "$output"
     if [ -s "$log" ]; then
-      echo "ビルドに失敗しました (exit=$status)。全文は $log" >&2
+      echo "Build failed (exit=$status). Full log: $log" >&2
     else
-      echo "ビルドに失敗しました (exit=$status)。Unity は起動していません" >&2
+      echo "Build failed (exit=$status). Unity was not started" >&2
     fi
     # ★ 退避先を消してから戻すこと。残したまま次に Unity を回すと、同じ GUID のアセットが
     #   2箇所にあることになり、**Unity が原本の GUID を振り直す**（参照している側が壊れる）。
     #   退避先は .gitignore 済みで git status に出ないので、ここで名指しする。
     if [ -d "$PROJECT_PATH/Assets/XR/Temp" ]; then
-      echo "XR の設定が Assets/XR/Temp/ に退避されたままです。次の順で戻してください:" >&2
+      echo "The XR settings are still stashed in Assets/XR/Temp/. Restore them in this order:" >&2
       echo "  rm -rf chatter-mascot/Assets/XR/Temp" >&2
       echo "  git checkout -- chatter-mascot/Assets/XR chatter-mascot/ProjectSettings/ProjectSettings.asset" >&2
     fi
@@ -120,11 +120,11 @@ unity_build_player() {
 
   # 終了コードが 0 でも成果物が無いことはある（出力先の書き込み失敗など）
   if [ ! -e "$output" ]; then
-    echo "終了コードは 0 ですが $output がありません" >&2
+    echo "Exit code was 0 but $output does not exist" >&2
     return 1
   fi
 
-  echo "できました: $output"
+  echo "Done: $output"
 }
 
 # release ビルドの関門。成果物とコミットを1対1にするため、作業ツリーがきれいで、
@@ -134,17 +134,17 @@ unity_build_player() {
 # タグの確かめ方は chatter-agent-app/scripts/build-release.sh と同じ形。直すときは両方を揃える。
 require_release_tag() {
   if [[ -n "$(git -C "$PROJECT_PATH" status --porcelain)" ]]; then
-    echo "作業ツリーに未コミットの変更があります。release ビルドはコミット済みの状態でだけ行います。" >&2
+    echo "The working tree has uncommitted changes. Release builds run only from a committed state" >&2
     exit 1
   fi
   local tags
   tags="$(git -C "$PROJECT_PATH" tag --points-at HEAD --list 'mascot-v*')"
   if [[ -z "$tags" ]]; then
-    echo "HEAD に mascot-v* タグがありません。git tag mascot-v<MAJOR>.<MINOR>.<PATCH> を付けてから実行してください（docs/mascot.md「署名と版」）。" >&2
+    echo "HEAD has no mascot-v* tag. Add one with git tag mascot-v<MAJOR>.<MINOR>.<PATCH> and run again (docs/mascot.md \"署名と版\")" >&2
     exit 1
   fi
   if [[ "$tags" == *$'\n'* ]]; then
-    echo "HEAD に mascot-v* タグが複数付いています。1つにしてください:" >&2
+    echo "HEAD has more than one mascot-v* tag. Leave only one:" >&2
     echo "$tags" >&2
     exit 1
   fi
@@ -155,7 +155,7 @@ require_release_tag() {
   all_tags="$(git -C "$PROJECT_PATH" tag --list 'mascot-v*' --sort=-v:refname)"
   latest_tag="${all_tags%%$'\n'*}"
   if [[ "$tags" != "$latest_tag" ]]; then
-    echo "$tags は最新の版ではありません。$latest_tag より大きい版のタグにしてください。" >&2
+    echo "$tags is not the latest version. Use a tag newer than $latest_tag" >&2
     exit 1
   fi
 

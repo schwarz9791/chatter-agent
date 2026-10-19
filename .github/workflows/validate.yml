@@ -96,7 +96,7 @@ jobs:
         run: |
           for f in ../plugin/LICENSE ../plugin/NOTICE; do
             if [ ! -f "$f" ]; then
-              echo "::error::$f がありません。/plugin install の配布物に含める必要があります。"
+              echo "::error::$f is missing. It must be included in what /plugin install distributes"
               exit 1
             fi
           done
@@ -108,7 +108,7 @@ jobs:
         run: |
           copy=../chatter-mascot/Assets/StreamingAssets/NOTICE.txt
           if ! diff -q ../NOTICE "$copy"; then
-            echo "::error::同梱の NOTICE.txt がリポジトリの NOTICE とズレています。cp NOTICE chatter-mascot/Assets/StreamingAssets/NOTICE.txt で合わせてください。"
+            echo "::error::The bundled NOTICE.txt differs from the repository NOTICE. Sync it with: cp NOTICE chatter-mascot/Assets/StreamingAssets/NOTICE.txt"
             diff -u ../NOTICE "$copy" || true
             exit 1
           fi
@@ -163,7 +163,7 @@ jobs:
         run: |
           out="$(printf '%s' '{"texts":["x"],"baseUrl":"http://127.0.0.1:9","model":"m"}' | node dist/chatter-agent-speak.mjs ollaya-child)"
           if [ "$out" != "[null]" ]; then
-            echo "::error::バンドルから Ollaya の子が起動できません: $out"
+            echo "::error::Cannot start the Ollaya child from the bundle: $out"
             exit 1
           fi
 
@@ -174,20 +174,20 @@ jobs:
         run: npm run verify:phase-b
 
       # 合成エンジンはスタブ HTTP に差し替わるので AivisSpeech は要らない
-      - name: Verify TTS (server の合成と GET /audio/)
+      - name: Verify TTS (server synthesis and GET /audio/)
         run: npm run verify:tts
 
       # 音声は上と同じくスタブ、再生コマンドは fake-player.mjs に差し替わるので、
       # AivisSpeech もオーディオデバイスも要らない
-      - name: Verify player (WebSocket → 音声取得 → 再生 → ack)
+      - name: Verify player (WebSocket → fetch audio → play → ack)
         run: npm run verify:player
 
       # 素材は使い捨ての XDG_CONFIG_HOME に仕込むので、モデルも合成エンジンも要らない
-      - name: Verify assets (マニフェスト → GET /v1/assets/ → Range で再開)
+      - name: Verify assets (manifest → GET /v1/assets/ → resume with Range)
         run: npm run verify:assets
 
   bun:
-    name: Bun（単体テスト / verify）
+    name: Bun (unit tests / verify)
     runs-on: ubuntu-latest
 
     # 依存の解決とビルドは Node、テストと verify だけ Bun で回す。
@@ -248,13 +248,13 @@ jobs:
           notice=../NOTICE
           packages="$(bun build src/main.ts --target=bun | grep -oE '^// node_modules/[^ ]+' | sed -E 's#^.*node_modules/((@[^/]+/)?[^/]+).*#\1#' | sort -u)"
           if [ -z "$packages" ]; then
-            echo "::error::バンドルから npm パッケージを拾えませんでした。このステップの抽出を確認してください。"
+            echo "::error::Could not pick up npm packages from the bundle. Check the extraction in this step"
             exit 1
           fi
           status=0
           for pkg in $packages; do
             if ! grep -qF -- "- $pkg (" "$notice"; then
-              echo "::error::$pkg が NOTICE にありません。単一バイナリに入るので、著作権表示とライセンス全文を足してください。"
+              echo "::error::$pkg is missing from NOTICE. It ships in the single binary, so add its copyright notice and full license text"
               status=1
             fi
           done
@@ -268,7 +268,7 @@ jobs:
         run: |
           out="$(printf '%s' '{"texts":["x"],"baseUrl":"http://127.0.0.1:9","model":"m"}' | "$RUNNER_TEMP/chatter-agent" ollaya-child)"
           if [ "$out" != "[null]" ]; then
-            echo "::error::単一バイナリから Ollaya の子が起動できません: $out"
+            echo "::error::Cannot start the Ollaya child from the single binary: $out"
             exit 1
           fi
 
@@ -338,17 +338,17 @@ jobs:
         with:
           tool: cargo-about@0.9.2
 
-      - name: THIRD_PARTY_LICENSES.txt が Cargo.lock と一致すること
+      - name: THIRD_PARTY_LICENSES.txt matches Cargo.lock
         working-directory: chatter-agent-app
         run: |
           npm run licenses
           if ! git diff --exit-code -- src-tauri/THIRD_PARTY_LICENSES.txt; then
-            echo "::error file=chatter-agent-app/src-tauri/THIRD_PARTY_LICENSES.txt::Cargo.lock を変えたら chatter-agent-app で npm run licenses を実行して生成し直し、THIRD_PARTY_LICENSES.txt をコミットしてください"
+            echo "::error file=chatter-agent-app/src-tauri/THIRD_PARTY_LICENSES.txt::After changing Cargo.lock, run npm run licenses in chatter-agent-app to regenerate it, and commit THIRD_PARTY_LICENSES.txt"
             exit 1
           fi
 
   unity-audio-settings:
-    name: Unity のオーディオ設定が出荷値
+    name: Unity audio setting is the shipping value
     runs-on: ubuntu-latest
 
     # scripts/build.sh は macOS ビルドのあいだだけ Disable Unity Audio を ON にして戻す
@@ -366,18 +366,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: m_DisableAudio が出荷値（0）であること
+      - name: m_DisableAudio is the shipping value (0)
         working-directory: .
         run: |
           asset=chatter-mascot/ProjectSettings/AudioManager.asset
           if ! grep -qx "  m_DisableAudio: 0" "$asset"; then
-            echo "::error file=$asset::m_DisableAudio が出荷値（0）ではありません。macOS ビルドが中断して ON のまま残った可能性があります。0 に直してコミットしてください（Android ビルドが無音になります）"
+            echo "::error file=$asset::m_DisableAudio is not the shipping value (0). A macOS build may have been interrupted and left it ON. Set it to 0 and commit (the Android build would be silent)"
             grep -n "m_DisableAudio" "$asset" || true
             exit 1
           fi
 
   unity-macos-identity-settings:
-    name: Unity の一度きりの設定が出荷値
+    name: Unity one-time settings are the shipping values
     runs-on: ubuntu-latest
 
     # ここで守る設定は、どれも「二度と自動で再表明されない」種類の設定で、
@@ -402,27 +402,27 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: macAppStoreCategory が出荷値であること
+      - name: macAppStoreCategory is the shipping value
         working-directory: .
         run: |
           asset=chatter-mascot/ProjectSettings/ProjectSettings.asset
           if ! grep -qx "  macAppStoreCategory: public.app-category.utilities" "$asset"; then
-            echo "::error file=$asset::macAppStoreCategory が出荷値ではありません。Inspector での操作や Player Settings のリセットで戻った可能性があります（Game Mode のロケットが復活します）"
+            echo "::error file=$asset::macAppStoreCategory is not the shipping value. It may have been reverted by an Inspector edit or a Player Settings reset (the Game Mode rocket would come back)"
             grep -n "macAppStoreCategory" "$asset" || true
             exit 1
           fi
 
-      - name: m_BuildTargetIcons が空でないこと
+      - name: m_BuildTargetIcons is not empty
         working-directory: .
         run: |
           asset=chatter-mascot/ProjectSettings/ProjectSettings.asset
           if grep -qx "  m_BuildTargetIcons: \[\]" "$asset"; then
-            echo "::error file=$asset::m_BuildTargetIcons が空です。./scripts/run.sh ChatterMascot.EditorTools.IconSettings.FixAll を実行し直してコミットしてください（アイコンの無い .app が出荷されます）"
+            echo "::error file=$asset::m_BuildTargetIcons is empty. Run ./scripts/run.sh ChatterMascot.EditorTools.IconSettings.FixAll again and commit (the .app would ship without an icon)"
             grep -n "m_BuildTargetIcons" "$asset" || true
             exit 1
           fi
 
-      - name: Android の Adaptive アイコンが空でないこと
+      - name: Android Adaptive icons are not empty
         working-directory: .
         run: |
           asset=chatter-mascot/ProjectSettings/ProjectSettings.asset
@@ -439,27 +439,27 @@ jobs:
             END { printf "%d %d", total, empty }
           ' "$asset")
           if [ "${result% *}" -eq 0 ] || [ "${result#* }" -gt 0 ]; then
-            echo "::error file=$asset::Android の Adaptive アイコンが無い、または空です（total empty = ${result}）。./scripts/run.sh ChatterMascot.EditorTools.IconSettings.FixAll を実行し直してコミットしてください（ランチャーで白い丸に縮んだアイコンになります）"
+            echo "::error file=$asset::Android Adaptive icons are missing or empty (total empty = ${result}). Run ./scripts/run.sh ChatterMascot.EditorTools.IconSettings.FixAll again and commit (the launcher would show a shrunken icon in a white circle)"
             exit 1
           fi
 
-      - name: OpenXR の Offscreen Rendering Only が無効であること
+      - name: OpenXR Offscreen Rendering Only is disabled
         working-directory: .
         run: |
           asset="chatter-mascot/Assets/XR/Settings/OpenXR Editor Settings.asset"
           if ! grep -qx "  m_vulkanOffscreenSwapchainNoMainDisplay: 0" "$asset"; then
-            echo "::error file=$asset::Offscreen Rendering Only (Vulkan) が無効になっていません。./scripts/run.sh ChatterMascot.EditorTools.AndroidPlayerSettings.FixAll を実行し直してコミットしてください（XR の無い Android で画面が真っ黒になります）"
+            echo "::error file=$asset::Offscreen Rendering Only (Vulkan) is not disabled. Run ./scripts/run.sh ChatterMascot.EditorTools.AndroidPlayerSettings.FixAll again and commit (the screen would be black on Android without XR)"
             grep -n "m_vulkanOffscreenSwapchainNoMainDisplay" "$asset" || true
             exit 1
           fi
 
-      - name: 手元ビルドの版と署名が出荷値であること
+      - name: Local build version and signing are the shipping values
         working-directory: .
         run: |
           asset=chatter-mascot/ProjectSettings/ProjectSettings.asset
           for line in "  bundleVersion: 0.0.0-dev" "  AndroidBundleVersionCode: 1" "  androidUseCustomKeystore: 0" "  AndroidKeystoreName: "; do
             if ! grep -qxF -- "$line" "$asset"; then
-              echo "::error file=$asset::「${line}」が出荷値のままではありません。release ビルドが中断して版や署名が残ったか、版を手で書き換えた可能性があります。元に戻してコミットしてください（版はタグから決まります）"
+              echo "::error file=$asset::\"${line}\" is not the shipping value. A release build may have been interrupted and left its version or signing, or the version was edited by hand. Restore it and commit (the version is determined by the tag)"
               grep -n "${line%%:*}:" "$asset" || true
               exit 1
             fi

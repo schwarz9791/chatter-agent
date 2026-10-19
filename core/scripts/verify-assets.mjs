@@ -74,65 +74,71 @@ try {
   server = spawnLogged(entryArgv("server", SERVER), { env, label: "server" });
   await server.waitFor("[Server] Ready");
 
-  show("① マニフェスト取得");
+  show("① Fetch the manifest");
   const manifestRes = await fetch(`${base}/v1/assets`);
-  check("200 が返る", manifestRes.status === 200, `status=${manifestRes.status}`);
+  check("returns 200", manifestRes.status === 200, `status=${manifestRes.status}`);
   const { files } = await manifestRes.json();
   console.log(JSON.stringify(files, null, 2));
 
   const model = files.find((f) => f.path === "models/mascot.vrm");
-  check("★ mascot.vrm が載っている", model !== undefined, JSON.stringify(files));
-  check("size が実体と一致する", model?.size === modelBytes.length, `${model?.size} vs ${modelBytes.length}`);
-  check("sha256 が実体と一致する", model?.sha256 === sha256(modelBytes), model?.sha256);
+  check("★ mascot.vrm is listed", model !== undefined, JSON.stringify(files));
+  check("size matches the actual file", model?.size === modelBytes.length, `${model?.size} vs ${modelBytes.length}`);
+  check("sha256 matches the actual file", model?.sha256 === sha256(modelBytes), model?.sha256);
   check(
-    "★ path の Ordinal 昇順で並ぶ",
+    "★ sorted by path in Ordinal ascending order",
     JSON.stringify(files.map((f) => f.path)) ===
       JSON.stringify(files.map((f) => f.path).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))),
     JSON.stringify(files.map((f) => f.path)),
   );
 
-  show("② 全体取得");
+  show("② Fetch the whole file");
   const full = await fetch(`${base}/v1/assets/models/mascot.vrm`);
   const fullBody = Buffer.from(await full.arrayBuffer());
-  check("200 が返る", full.status === 200, `status=${full.status}`);
+  check("returns 200", full.status === 200, `status=${full.status}`);
   check(
-    "content-type は application/octet-stream",
+    "content-type is application/octet-stream",
     full.headers.get("content-type") === "application/octet-stream",
     full.headers.get("content-type"),
   );
   check(
-    "★ accept-ranges は bytes（資産ルートだけ。/audio/ は none のまま）",
+    "★ accept-ranges is bytes (asset routes only; /audio/ stays none)",
     full.headers.get("accept-ranges") === "bytes",
   );
-  check("本体が実体と一致する", fullBody.equals(modelBytes));
+  check("body matches the actual file", fullBody.equals(modelBytes));
 
-  show("③ ★ 途中まで取ったことにして、Range で残りを取り直し、連結結果のハッシュが一致する");
+  show(
+    "③ ★ Pretend the download stopped midway, refetch the rest with Range, and the hash of the concatenation matches",
+  );
   // 前半は②で取得済みの本体から切り出す（＝「ここまでは既に手元にある」状態を再現）。
   // 後半は実際に Range 付きで GET し直す ——ここが見たい本体
   const cutAt = Math.floor(modelBytes.length / 3);
   const rest = await fetch(`${base}/v1/assets/models/mascot.vrm`, { headers: { range: `bytes=${cutAt}-` } });
-  check("206 が返る", rest.status === 206, `status=${rest.status}`);
+  check("returns 206", rest.status === 206, `status=${rest.status}`);
   check(
-    "Content-Range が正しい",
+    "Content-Range is correct",
     rest.headers.get("content-range") === `bytes ${cutAt}-${modelBytes.length - 1}/${modelBytes.length}`,
     rest.headers.get("content-range"),
   );
   const restBody = Buffer.from(await rest.arrayBuffer());
   const reassembled = Buffer.concat([fullBody.subarray(0, cutAt), restBody]);
-  check("連結した長さが本体と一致する", reassembled.length === modelBytes.length, `${reassembled.length}`);
-  check("★ 連結結果の sha256 がマニフェストと一致する", sha256(reassembled) === model?.sha256, sha256(reassembled));
-
-  show("④ 範囲外の Range は 416");
-  const oob = await fetch(`${base}/v1/assets/models/mascot.vrm`, { headers: { range: `bytes=${modelBytes.length}-` } });
-  check("416 が返る", oob.status === 416, `status=${oob.status}`);
+  check("concatenated length matches the body", reassembled.length === modelBytes.length, `${reassembled.length}`);
   check(
-    "Content-Range は bytes */size",
+    "★ sha256 of the concatenation matches the manifest",
+    sha256(reassembled) === model?.sha256,
+    sha256(reassembled),
+  );
+
+  show("④ An out-of-range Range returns 416");
+  const oob = await fetch(`${base}/v1/assets/models/mascot.vrm`, { headers: { range: `bytes=${modelBytes.length}-` } });
+  check("returns 416", oob.status === 416, `status=${oob.status}`);
+  check(
+    "Content-Range is bytes */size",
     oob.headers.get("content-range") === `bytes */${modelBytes.length}`,
     oob.headers.get("content-range"),
   );
 
-  show("⑤ マニフェストに無いパスは 404");
-  check("404 が返る", (await fetch(`${base}/v1/assets/models/other.vrm`)).status === 404);
+  show("⑤ A path not in the manifest returns 404");
+  check("returns 404", (await fetch(`${base}/v1/assets/models/other.vrm`)).status === 404);
   // ★ `..` を生で書かないこと。`fetch` の URL パーサが送信前に畳んでしまうので、
   //   サーバーには別のパスが届き、検査したつもりのものを検査していないものになる。
   //   エンコードした形はそのまま送られる（サーバー側がデコードしないことが効いているのを見る）
@@ -141,10 +147,10 @@ try {
     "/v1/assets/animations/%2e%2e/wave.vrma",
     "/v1/assets/animations/neutral/x.vrma",
   ]) {
-    check(`★ 3つの形以外は 404: ${bad}`, (await fetch(`${base}${bad}`)).status === 404);
+    check(`★ anything other than the three shapes returns 404: ${bad}`, (await fetch(`${base}${bad}`)).status === 404);
   }
 
-  show("⑥ ★ 途中で切られてもサーバーが生きている");
+  show("⑥ ★ The server stays alive when a download is cut midway");
   // 帯域の細い経路では普通に起きる。読み出し側を閉じ損ねていると、
   // 症状は「しばらく使うと配れなくなる」という見分けにくい壊れ方になる
   for (let i = 0; i < 20; i++) {
@@ -160,12 +166,12 @@ try {
     }
   }
   const after = await fetch(`${base}/v1/assets/models/mascot.vrm`);
-  check("★ 中断を繰り返した後でも 200 を返す", after.status === 200, `status=${after.status}`);
-  check("本体が実体と一致する", Buffer.from(await after.arrayBuffer()).equals(modelBytes));
+  check("★ still returns 200 after repeated aborts", after.status === 200, `status=${after.status}`);
+  check("body matches the actual file", Buffer.from(await after.arrayBuffer()).equals(modelBytes));
 } catch (err) {
-  console.error("\n\x1b[31m検証中に例外が発生しました\x1b[0m");
+  console.error("\n\x1b[31mAn exception occurred during verification\x1b[0m");
   console.error(err);
-  fail("例外");
+  fail("exception");
 }
 
-await summarize(() => (server?.log ? `server のログ:\n${server.log}` : ""));
+await summarize(() => (server?.log ? `server log:\n${server.log}` : ""));

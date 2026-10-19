@@ -60,8 +60,8 @@ namespace ChatterMascot.EditorTools
             bool previous;
             if (!TrySetDisableAudio(true, out previous))
             {
-                Debug.LogWarning("[Build] Disable Unity Audio を切り替えられません。" +
-                                 "無音時に出力デバイスを掴み続けるビルドになります");
+                Debug.LogWarning("[Build] Cannot toggle Disable Unity Audio. " +
+                                 "The build will keep holding the output device while silent");
                 return () => { };
             }
 
@@ -69,12 +69,12 @@ namespace ChatterMascot.EditorTools
             {
                 // ★ 前回のビルドが中断した痕跡。**隠さずに直す。**
                 //   「既に ON なら何もしない」にすると、中断が残ったまま次のビルドを通してしまう
-                Debug.LogWarning("[Build] Disable Unity Audio が既に ON でした" +
-                                 "（前回のビルドが中断した可能性）。ビルド後に出荷値へ戻します");
+                Debug.LogWarning("[Build] Disable Unity Audio was already ON" +
+                                 " (the previous build may have been interrupted). It will be reset to the shipping value after the build");
             }
             else
             {
-                Debug.Log("[Build] Disable Unity Audio を ON にしました（ビルド後に戻します）");
+                Debug.Log("[Build] Set Disable Unity Audio to ON (will be restored after the build)");
             }
 
             // ★ <b>クロージャに UnityEngine.Object を持たせないこと。</b> ビルド中の
@@ -88,12 +88,12 @@ namespace ChatterMascot.EditorTools
                 // ★ **常に出荷値へ戻す**（previous ではなく）。前回の中断が残っていてもここで直る
                 if (!TrySetDisableAudio(ShippedDisableAudio, out ignored))
                 {
-                    Debug.LogError("[Build] Disable Unity Audio を戻せませんでした。" +
-                                   "ProjectSettings/AudioManager.asset の m_DisableAudio を " +
-                                   "手で 0 に直してください");
+                    Debug.LogError("[Build] Could not restore Disable Unity Audio. " +
+                                   "Set m_DisableAudio in ProjectSettings/AudioManager.asset " +
+                                   "to 0 by hand");
                     return;
                 }
-                Debug.Log("[Build] Disable Unity Audio を戻しました");
+                Debug.Log("[Build] Restored Disable Unity Audio");
             };
         }
 
@@ -126,7 +126,7 @@ namespace ChatterMascot.EditorTools
             }
             catch (Exception e)
             {
-                Debug.LogWarning("[Build] AudioManager.asset を操作できませんでした: " + e.Message);
+                Debug.LogWarning("[Build] Could not modify AudioManager.asset: " + e.Message);
                 return false;
             }
         }
@@ -159,8 +159,8 @@ namespace ChatterMascot.EditorTools
             {
                 if (!TryParseReleaseTag(releaseTag, out var releaseVersion, out _))
                 {
-                    Debug.LogError($"[Build] release タグ {ReleaseTagEnv}='{releaseTag}' が " +
-                                   "mascot-v<MAJOR>.<MINOR>.<PATCH> の形ではありません。中止します");
+                    Debug.LogError($"[Build] Release tag {ReleaseTagEnv}='{releaseTag}' is not in the form " +
+                                   "mascot-v<MAJOR>.<MINOR>.<PATCH>. Aborting");
                     EditorApplication.Exit(1);
                     return;
                 }
@@ -263,7 +263,7 @@ namespace ChatterMascot.EditorTools
         {
             if (summary.result != BuildResult.Succeeded) return true;
             if (!release || summary.totalErrors == 0) return false;
-            Debug.LogError($"[Build] エラーが {summary.totalErrors} 件あるので、配るビルドにはしません");
+            Debug.LogError($"[Build] Not producing a distributable build, errors={summary.totalErrors}");
             return true;
         }
 
@@ -310,21 +310,21 @@ namespace ChatterMascot.EditorTools
         {
             if (!TryParseReleaseTag(tag, out var version, out var versionCode))
             {
-                Debug.LogError($"[Build] release タグ {ReleaseTagEnv}='{tag}' が " +
-                               "mascot-v<MAJOR>.<MINOR>.<PATCH> の形ではありません。中止します");
+                Debug.LogError($"[Build] Release tag {ReleaseTagEnv}='{tag}' is not in the form " +
+                               "mascot-v<MAJOR>.<MINOR>.<PATCH>. Aborting");
                 return false;
             }
             var password = Environment.GetEnvironmentVariable(KeystorePassEnv);
             if (string.IsNullOrEmpty(password))
             {
-                Debug.LogError($"[Build] {KeystoreEnv} が設定されていますが {KeystorePassEnv} が空です。" +
-                               "debug keystore には切り替えず中止します");
+                Debug.LogError($"[Build] {KeystoreEnv} is set but {KeystorePassEnv} is empty. " +
+                               "Aborting without falling back to the debug keystore");
                 return false;
             }
             if (!File.Exists(keystorePath))
             {
-                Debug.LogError($"[Build] keystore が見つかりません: {keystorePath}。" +
-                               "debug keystore には切り替えず中止します");
+                Debug.LogError($"[Build] Keystore not found: {keystorePath}. " +
+                               "Aborting without falling back to the debug keystore");
                 return false;
             }
 
@@ -374,10 +374,10 @@ namespace ChatterMascot.EditorTools
 
             if (excluded == 0)
             {
-                Debug.LogWarning($"[Build] {packagePrefix} 配下のネイティブプラグインが見つかりませんでした");
+                Debug.LogWarning($"[Build] No native plugins found under {packagePrefix}");
                 return;
             }
-            Debug.Log($"[Build] com.kirurobo.uniwinc のネイティブプラグイン {excluded} 件をこのビルドから外しました");
+            Debug.Log($"[Build] Excluded com.kirurobo.uniwinc native plugins from this build, count={excluded}");
         }
 
         /// <summary>

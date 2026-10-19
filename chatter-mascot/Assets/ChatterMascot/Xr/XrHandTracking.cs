@@ -95,7 +95,7 @@ namespace ChatterMascot.Xr
             }
             if (available != TrackingAvailable)
             {
-                Debug.Log($"[Mascot] XR: 手の関節 → {(available ? "取れている" : "取れていない")}");
+                Debug.Log($"[Mascot] XR: hand joints → {(available ? "available" : "unavailable")}");
             }
             TrackingAvailable = available;
             PalmFacingSelf = facing;
@@ -132,7 +132,7 @@ namespace ChatterMascot.Xr
 
             _subsystemRequested = true;
             HandTracking.EnsureSubsystemInitialized();
-            Debug.Log("[Mascot] XR: 手のひらメニュー用の HandTracking subsystem を起動しました");
+            Debug.Log("[Mascot] XR: started the HandTracking subsystem for the palm menu");
         }
 
         /// <summary>Palm の関節姿勢（取れなければ Wrist）をワールド空間で返す。手が追跡されていない・

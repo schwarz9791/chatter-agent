@@ -20,7 +20,7 @@ public class ChatterMascotGameActivity extends UnityPlayerGameActivity
     {
         // super.onDestroy() は Unity の終了待ちで UI スレッドを塞ぎ続けるため呼ばない。
         // 自プロセスへの SIGKILL は制御が戻る前に終わる。
-        Log.i(TAG, "onDestroy: プロセスを終了します");
+        Log.i(TAG, "onDestroy: terminating process");
         Process.killProcess(Process.myPid());
     }
 }

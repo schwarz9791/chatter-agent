@@ -109,7 +109,7 @@ namespace ChatterMascot.Net
             {
                 // ★ 最後の受け皿。個々の失敗しうる処理は自分で握っているので、
                 //   ここに来るのは想定外だけ——可視化のためだけに置く
-                Warn?.Invoke("[AssetSync] 同期が異常終了しました: " + e.Message);
+                Warn?.Invoke("[AssetSync] Sync ended abnormally: " + e.Message);
             }
         }
 
@@ -123,14 +123,14 @@ namespace ChatterMascot.Net
             catch (Exception e)
             {
                 // ★ 取得に失敗したら何もしない。前回のキャッシュを消さない
-                Warn?.Invoke("[AssetSync] マニフェストを取得できませんでした: " + e.Message);
+                Warn?.Invoke("[AssetSync] Failed to fetch manifest: " + e.Message);
                 Failed?.Invoke(ManifestUnreachableMessage);
                 return;
             }
 
             if (manifestJson == null)
             {
-                Warn?.Invoke("[AssetSync] マニフェストを取得できませんでした");
+                Warn?.Invoke("[AssetSync] Failed to fetch manifest");
                 Failed?.Invoke(ManifestUnreachableMessage);
                 return;
             }
@@ -138,7 +138,7 @@ namespace ChatterMascot.Net
             var plan = AssetSyncPlan.Build(manifestJson, ScanLocal());
             if (!plan.ManifestOk)
             {
-                Warn?.Invoke("[AssetSync] マニフェストを読めませんでした。前回の内容のまま使います");
+                Warn?.Invoke("[AssetSync] Failed to parse manifest. Keeping the previous content");
                 Failed?.Invoke(ManifestUnreadableMessage);
                 return;
             }
@@ -149,7 +149,7 @@ namespace ChatterMascot.Net
             //   無いもの」になって消える**ので、細い経路で落としかけていた数十 MB が最初からになる。
             if (plan.Manifest.Count == 0)
             {
-                Warn?.Invoke("[AssetSync] サーバーに素材がありません。前回の内容のまま使います");
+                Warn?.Invoke("[AssetSync] Server has no assets. Keeping the previous content");
                 // ★ ここも端末に届ける。素材の置き忘れは**ユーザーに手の打てる状態**なので、
                 //   繋がらなかったときと同じく無音にしない
                 Failed?.Invoke(ManifestEmptyMessage);
@@ -168,8 +168,8 @@ namespace ChatterMascot.Net
 
             CleanupOrphanParts(plan.Manifest);
 
-            Log?.Invoke($"[AssetSync] 完了: 取得 {fetched}/{plan.Fetch.Count} 件、削除 {plan.Delete.Count} 件。" +
-                        "反映は次回の起動からです");
+            Log?.Invoke($"[AssetSync] Done: fetched {fetched}/{plan.Fetch.Count}, deleted {plan.Delete.Count}. " +
+                        "Takes effect from the next launch");
             Completed?.Invoke(fetched, plan.Fetch.Count, plan.Delete.Count);
         }
 
@@ -232,7 +232,7 @@ namespace ChatterMascot.Net
             }
             catch (Exception e)
             {
-                Warn?.Invoke($"[AssetSync] {entry.Path}: 保存先を用意できませんでした: {e.Message}");
+                Warn?.Invoke($"[AssetSync] {entry.Path}: failed to prepare destination: {e.Message}");
                 return false;
             }
             var partPath = AssetPath.Join(partsDir, entry.Sha256 + PartExtension);
@@ -268,7 +268,7 @@ namespace ChatterMascot.Net
                     catch (Exception e)
                     {
                         // ★ 例外はここまで届いた分の .part を残す。次回、続きから取り直せる
-                        Warn?.Invoke($"[AssetSync] {entry.Path}: 取得できませんでした（続きから再試行します）: {e.Message}");
+                        Warn?.Invoke($"[AssetSync] {entry.Path}: fetch failed (will retry from where it stopped): {e.Message}");
                         return false;
                     }
 
@@ -285,8 +285,8 @@ namespace ChatterMascot.Net
                         //     ある。捨てて次回また最初から
                         var resumable = request.responseCode == expected || request.responseCode == 0;
                         if (!resumable) TryDelete(partPath);
-                        Warn?.Invoke($"[AssetSync] {entry.Path}: 取得に失敗しました (HTTP {request.responseCode})" +
-                                     (resumable ? "。次回は続きから取り直します" : ""));
+                        Warn?.Invoke($"[AssetSync] {entry.Path}: fetch failed (HTTP {request.responseCode})" +
+                                     (resumable ? ". Will resume from where it stopped next time" : ""));
                         return false;
                     }
                 }
@@ -299,7 +299,7 @@ namespace ChatterMascot.Net
             }
             catch (Exception e)
             {
-                Warn?.Invoke($"[AssetSync] {entry.Path}: 検証できませんでした: {e.Message}");
+                Warn?.Invoke($"[AssetSync] {entry.Path}: failed to verify: {e.Message}");
                 return false;
             }
 
@@ -307,7 +307,7 @@ namespace ChatterMascot.Net
             if (!string.Equals(actualHash, entry.Sha256, StringComparison.OrdinalIgnoreCase))
             {
                 TryDelete(partPath);
-                Warn?.Invoke($"[AssetSync] {entry.Path}: 取得した内容が一致しませんでした");
+                Warn?.Invoke($"[AssetSync] {entry.Path}: fetched content did not match");
                 return false;
             }
 
@@ -329,7 +329,7 @@ namespace ChatterMascot.Net
             }
             catch (Exception e)
             {
-                Warn?.Invoke($"[AssetSync] {entry.Path}: 置き換えられませんでした: {e.Message}");
+                Warn?.Invoke($"[AssetSync] {entry.Path}: failed to replace: {e.Message}");
                 return false;
             }
 

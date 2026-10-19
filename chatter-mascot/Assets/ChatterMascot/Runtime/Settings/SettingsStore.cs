@@ -69,7 +69,7 @@ namespace ChatterMascot.Settings
             }
             catch (Exception e)
             {
-                WarnOnce("stamp", "設定ファイルの更新を確かめられませんでした: " + e.Message);
+                WarnOnce("stamp", "Could not check the settings file for changes: " + e.Message);
                 return false;
             }
 
@@ -87,7 +87,7 @@ namespace ChatterMascot.Settings
             }
             catch (Exception e)
             {
-                WarnOnce("read", "設定を読めませんでした: " + e.Message);
+                WarnOnce("read", "Could not read settings: " + e.Message);
                 return false;
             }
 
@@ -105,7 +105,7 @@ namespace ChatterMascot.Settings
             if (!SettingsJson.TryParse(raw, out parsed, out error, OnParseWarning))
             {
                 // ★ 直前値を維持する（既定へ戻さない）。 編集中の保存を読んだだけのことがある
-                WarnOnce("parse:" + error, $"設定を読み飛ばします（直前の値を使い続けます）: {error}");
+                WarnOnce("parse:" + error, $"Skipping settings; keeping the previous values: {error}");
                 return false;
             }
 
@@ -124,7 +124,7 @@ namespace ChatterMascot.Settings
             }
             catch (Exception e)
             {
-                WarnOnce("write", "設定を書けませんでした: " + e.Message);
+                WarnOnce("write", "Could not write settings: " + e.Message);
                 return false;
             }
 

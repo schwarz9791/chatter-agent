@@ -80,7 +80,7 @@ namespace ChatterMascot.Playback
                     // 404。永久に用意できない。「長さ0の再生」として終端へ落とす
                     var item = FindItem(state, ev.Epoch, ev.Seq);
                     if (item == null || item.Status != ItemStatus.Fetching) break;
-                    commands.Add(PlaybackCommand.Warn($"seq={ev.Seq} の音声がありません: {ev.Reason}"));
+                    commands.Add(PlaybackCommand.Warn($"seq={ev.Seq} has no audio: {ev.Reason}"));
                     NoteUnavailable(state, now, ev.Reason, commands);
                     Finish(item);
                     break;
@@ -98,7 +98,7 @@ namespace ChatterMascot.Playback
                         item.Status = ItemStatus.Pending;
                         break;
                     }
-                    commands.Add(PlaybackCommand.Warn($"seq={ev.Seq} の音声を取れなかったので飛ばします: {ev.Reason}"));
+                    commands.Add(PlaybackCommand.Warn($"Skipping seq={ev.Seq} because its audio could not be fetched: {ev.Reason}"));
                     Finish(item);
                     break;
                 }
@@ -118,7 +118,7 @@ namespace ChatterMascot.Playback
                     var item = FindItem(state, ev.Epoch, ev.Seq);
                     if (item == null || item.Status != ItemStatus.Playing) break;
                     // 再生はリトライしない。途中まで鳴った文がもう一度頭から鳴る
-                    commands.Add(PlaybackCommand.Warn($"seq={ev.Seq} の再生に失敗しました: {ev.Reason}"));
+                    commands.Add(PlaybackCommand.Warn($"Playback of seq={ev.Seq} failed: {ev.Reason}"));
                     Finish(item);
                     break;
                 }
@@ -300,8 +300,8 @@ namespace ChatterMascot.Playback
 
             state.UnavailableWarnedAt = now;
             commands.Add(PlaybackCommand.Warn(
-                $"音声を用意できない状態が {state.UnavailableStreak} 件続いています（{reason}）。" +
-                "サーバー側の合成エンジンと接続先・声（AivisSpeech は ttsBaseUrl / ttsSpeakerId、Kokoro は kokoroBaseUrl / kokoroVoiceId）を確認してください"));
+                $"Audio unavailable streak={state.UnavailableStreak} ({reason}). " +
+                "Check the server's synthesis engine, its address and voice (ttsBaseUrl / ttsSpeakerId for AivisSpeech, kokoroBaseUrl / kokoroVoiceId for Kokoro)"));
         }
 
         /// <summary>ack を出すか、切断中なら溜める。</summary>
@@ -364,7 +364,7 @@ namespace ChatterMascot.Playback
             {
                 if (item.Status != ItemStatus.Pending && item.Status != ItemStatus.Ready) continue;
                 if (!IsStale(state, item, now)) continue;
-                commands.Add(PlaybackCommand.Log($"seq={item.Record.Seq} は古いので飛ばします"));
+                commands.Add(PlaybackCommand.Log($"Skipping seq={item.Record.Seq} because it is stale"));
                 Finish(item);
                 changed = true;
             }
@@ -475,7 +475,7 @@ namespace ChatterMascot.Playback
             state.StallWarnedAt = now;
             var status = head == null ? "?" : head.Status.ToString();
             var seconds = (long)Math.Round((now - state.HeadSince) / 1000.0);
-            commands.Add(PlaybackCommand.Warn($"seq={seq} が {seconds} 秒 {status} のまま進んでいません"));
+            commands.Add(PlaybackCommand.Warn($"seq={seq} has been {status} for {seconds} seconds without progress"));
         }
 
         /// <summary>
@@ -507,7 +507,7 @@ namespace ChatterMascot.Playback
         /// </summary>
         private static void ResetEpoch(PlaybackState state, List<PlaybackCommand> commands)
         {
-            commands.Add(PlaybackCommand.Warn("seq の採番がやり直されました。再生キューの状態をリセットします"));
+            commands.Add(PlaybackCommand.Warn("seq numbering was restarted. Resetting playback queue state"));
 
             var previous = state.Epoch;
             state.Epoch++;

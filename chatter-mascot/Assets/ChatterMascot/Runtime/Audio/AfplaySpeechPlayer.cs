@@ -112,7 +112,7 @@ namespace ChatterMascot.Audio
             catch (Exception e)
             {
                 // 消せなくても致命的ではない（同名ファイルは上書きする）
-                Debug.LogWarning("[Mascot] 一時ディレクトリを消せませんでした: " + e.Message);
+                Debug.LogWarning("[Mascot] Failed to delete temp directory: " + e.Message);
             }
             Directory.CreateDirectory(_tmpDir);
         }
@@ -132,7 +132,7 @@ namespace ChatterMascot.Audio
             catch (Exception e)
             {
                 // ★ 音量が読めないくらいで発話を落とさない。等倍で鳴らす
-                Debug.LogWarning("[Mascot] 音量を読めませんでした（等倍で鳴らします）: " + e.Message);
+                Debug.LogWarning("[Mascot] Failed to read volume (playing at unity gain): " + e.Message);
                 return 1f;
             }
         }
@@ -170,8 +170,8 @@ namespace ChatterMascot.Audio
         public static string SpawnWarning(long elapsedMs, int frame)
         {
             if (elapsedMs < SpawnWarnMs) return null;
-            return "afplay の起動に " + elapsedMs.ToString(CultureInfo.InvariantCulture) + "ms かかりました（frame=" +
-                   frame.ToString(CultureInfo.InvariantCulture) + "）";
+            return "afplay took " + elapsedMs.ToString(CultureInfo.InvariantCulture) + "ms to start (frame=" +
+                   frame.ToString(CultureInfo.InvariantCulture) + ")";
         }
 
         /// <summary>
@@ -200,7 +200,7 @@ namespace ChatterMascot.Audio
             }
             catch (Exception e)
             {
-                error = "WAV を書けませんでした: " + e.Message;
+                error = "failed to write WAV: " + e.Message;
                 return null;
             }
 
@@ -219,8 +219,8 @@ namespace ChatterMascot.Audio
         public async Task<string> PlayAsync(object audio)
         {
             var handle = audio as AfplayAudioHandle;
-            if (handle == null) return "音声のハンドルがありません";
-            if (string.IsNullOrEmpty(handle.Path) || !File.Exists(handle.Path)) return "WAV がありません";
+            if (handle == null) return "no audio handle";
+            if (string.IsNullOrEmpty(handle.Path) || !File.Exists(handle.Path)) return "WAV is missing";
 
             // 保険。手放していれば掴み直す（この実装では no-op だが契約として呼ぶ）
             ResumeOutput();
@@ -244,14 +244,14 @@ namespace ChatterMascot.Audio
             }
             catch (Exception e)
             {
-                return "再生プロセスを起動できませんでした: " + e.Message;
+                return "failed to start playback process: " + e.Message;
             }
             finally
             {
                 spawnStopwatch.Stop();
             }
 
-            if (process == null) return "再生プロセスを起動できませんでした";
+            if (process == null) return "failed to start playback process";
 
             var spawnWarning = SpawnWarning(spawnStopwatch.ElapsedMilliseconds, Time.frameCount);
             if (spawnWarning != null)
@@ -267,8 +267,8 @@ namespace ChatterMascot.Audio
                 var warn = Warn;
                 if (warn != null)
                 {
-                    warn("同時に鳴らすプロセスが " + _running.Count + " 本になりました" +
-                         "（採番のやり直しが、音が鳴り終わる前に繰り返されている可能性）");
+                    warn(_running.Count + " processes playing at once" +
+                         " (seq numbering may be restarting repeatedly before the audio finishes)");
                 }
             }
 
@@ -298,9 +298,9 @@ namespace ChatterMascot.Audio
                     }
                     catch (Exception e)
                     {
-                        Debug.LogWarning("[Mascot] 再生プロセスを止められませんでした: " + e.Message);
+                        Debug.LogWarning("[Mascot] Failed to stop playback process: " + e.Message);
                     }
-                    return limit.ToString("F1") + " 秒で終わりませんでした";
+                    return "did not finish within " + limit.ToString("F1") + " seconds";
                 }
 
                 // ★ **lipSyncOffsetMs の較正材料。1回だけ出す。**
@@ -315,8 +315,8 @@ namespace ChatterMascot.Audio
                     _measuredStartLag = true;
                     var elapsedMs = (Time.realtimeSinceStartupAsDouble - startedAt) * 1000.0;
                     Debug.Log(
-                        $"[Mascot] afplay の実時間 {elapsedMs:F0}ms / WAV の長さ {handle.DurationMs}ms " +
-                        $"（差 {elapsedMs - handle.DurationMs:F0}ms = 起動ラグ + 終了処理 + ポーリング誤差）");
+                        $"[Mascot] afplay elapsed {elapsedMs:F0}ms / WAV duration {handle.DurationMs}ms " +
+                        $"(diff {elapsedMs - handle.DurationMs:F0}ms = startup lag + teardown + polling error)");
                 }
 
                 if (process.ExitCode == 0) return null;
@@ -335,8 +335,8 @@ namespace ChatterMascot.Audio
                 }
 
                 return string.IsNullOrEmpty(detail)
-                    ? "再生に失敗しました (exit=" + process.ExitCode + ")"
-                    : "再生に失敗しました (exit=" + process.ExitCode + "): " + detail;
+                    ? "playback failed (exit=" + process.ExitCode + ")"
+                    : "playback failed (exit=" + process.ExitCode + "): " + detail;
             }
             finally
             {

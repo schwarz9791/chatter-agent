@@ -36,7 +36,7 @@ namespace ChatterMascot.Window
             }
             catch (Exception e)
             {
-                _warn?.Invoke("ウィンドウの保存を読めませんでした: " + e.Message);
+                _warn?.Invoke("Could not read the saved window state: " + e.Message);
                 return WindowState.None;
             }
 
@@ -45,7 +45,7 @@ namespace ChatterMascot.Window
 
             if (WindowStateJson.TryParse(raw, out var state, out var error)) return state;
 
-            _warn?.Invoke($"ウィンドウの保存を読み飛ばします: {error}");
+            _warn?.Invoke($"Skipping the saved window state: {error}");
             return WindowState.None;
         }
 
@@ -59,7 +59,7 @@ namespace ChatterMascot.Window
             }
             catch (Exception e)
             {
-                _warn?.Invoke("ウィンドウの保存を書けませんでした: " + e.Message);
+                _warn?.Invoke("Could not write the saved window state: " + e.Message);
                 return false;
             }
         }

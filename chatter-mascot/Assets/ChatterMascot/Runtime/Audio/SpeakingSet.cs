@@ -56,7 +56,7 @@ namespace ChatterMascot.Audio
         /// 再生を始めた。
         ///
         /// ★ <b><c>MascotRunner</c> が <c>PlayAsync</c> を呼ぶ<u>直前</u>に呼ぶこと。</b>
-        ///   <c>PlayAsync</c> の中に入れると、同期完了する経路（「音声のハンドルがありません」など）で
+        ///   <c>PlayAsync</c> の中に入れると、同期完了する経路（「no audio handle」など）で
         ///   <c>Dispatch</c> がコマンドループへ再入するため、入れ子の順序が読めなくなる。
         /// ★ <paramref name="envelope"/> が <c>null</c> でも受け付ける（口が動かないだけで、
         ///   <see cref="Count"/> と <see cref="TryGetFace"/> には数える）。

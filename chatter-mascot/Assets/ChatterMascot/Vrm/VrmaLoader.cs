@@ -55,16 +55,16 @@ namespace ChatterMascot.Vrm
                         var vrma = instance != null ? instance.GetComponent<Vrm10AnimationInstance>() : null;
                         if (vrma == null)
                         {
-                            Debug.LogWarning($"[Mascot] {loaded.Candidate.Path} は VRMA として解釈できませんでした" +
-                                              "（Vrm10AnimationInstance がありません）。次の候補へ進みます");
+                            Debug.LogWarning($"[Mascot] {loaded.Candidate.Path} could not be parsed as VRMA " +
+                                              "(no Vrm10AnimationInstance). Trying the next candidate");
                             if (instance != null) UnityEngine.Object.Destroy(instance.gameObject);
                             return null;
                         }
 
                         if (vrma.GetComponent<Animation>() == null)
                         {
-                            Debug.LogWarning($"[Mascot] {loaded.Candidate.Path} に Animation コンポーネントが" +
-                                              "ありません。次の候補へ進みます");
+                            Debug.LogWarning($"[Mascot] {loaded.Candidate.Path} has no " +
+                                              "Animation component. Trying the next candidate");
                             UnityEngine.Object.Destroy(instance.gameObject);
                             return null;
                         }
@@ -79,8 +79,8 @@ namespace ChatterMascot.Vrm
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"[Mascot] {loaded.Candidate.Path} は VRMA として解釈できませんでした: " +
-                                  $"{e.Message}。次の候補へ進みます");
+                Debug.LogWarning($"[Mascot] {loaded.Candidate.Path} could not be parsed as VRMA: " +
+                                  $"{e.Message}. Trying the next candidate");
                 return null;
             }
         }
@@ -132,7 +132,7 @@ namespace ChatterMascot.Vrm
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"[Mascot] {path} の時刻キー検査に失敗しました: {e.Message}");
+                Debug.LogWarning($"[Mascot] Keyframe time check failed for {path}: {e.Message}");
             }
         }
     }

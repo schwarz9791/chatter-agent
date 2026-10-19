@@ -419,7 +419,7 @@ namespace ChatterMascot
 
             // ★ Awake で読むこと。Start は serverUrl が不正だと最後まで走らない
             _quitProbe = CommandLine.Flag("-quitProbe");
-            if (_quitProbe) Debug.Log("[Mascot] -quitProbe: 最初の終了要求を1回だけ強制的に保留します");
+            if (_quitProbe) Debug.Log("[Mascot] -quitProbe: forcibly deferring the first quit request, once only");
 
             ResolveServerUrl();
             StartAssetSyncIfNeeded();
@@ -483,13 +483,13 @@ namespace ChatterMascot
                 //   端末が別の Wi-Fi にいる・トークンが古い、という一番踏む失敗が無音にならないため
                 client.Failed += DeviceToast.Show;
 
-                Debug.Log("[Mascot] synced/ の更新を起こします。反映は次回の起動からです");
+                Debug.Log("[Mascot] Triggering synced/ update. It takes effect from the next launch");
                 _assetSync = client.SyncAsync();
                 return true;
             }
             catch (Exception e)
             {
-                Debug.LogWarning("[Mascot] synced/ の更新を起こせませんでした: " + e.Message);
+                Debug.LogWarning("[Mascot] Failed to trigger synced/ update: " + e.Message);
                 return false;
             }
         }
@@ -548,23 +548,23 @@ namespace ChatterMascot
             {
                 // ★ ファイルのトークンは使わない（→ ServerToken の doc）。判定はここ1箇所で足りる
                 ServerToken = "";
-                Debug.Log("[Mascot] トークン: 起動引数で接続先を上書きしたので使いません");
-                Debug.Log($"[Mascot] serverUrl: 起動引数を使います (\"{overridden}\")");
+                Debug.Log("[Mascot] Token: not used because the launch argument overrides the server");
+                Debug.Log($"[Mascot] serverUrl: using launch argument (\"{overridden}\")");
                 serverUrl = overridden;
                 return;
             }
 
             ServerToken = fromFile.Token ?? "";
             // ★ 値は出さない。401 の切り分けには「持っているか」だけで足りる
-            Debug.Log(ServerToken.Length > 0 ? "[Mascot] トークン: 設定あり" : "[Mascot] トークン: 設定なし");
+            Debug.Log(ServerToken.Length > 0 ? "[Mascot] Token: set" : "[Mascot] Token: not set");
 
             if (!string.IsNullOrEmpty(fromFile.ServerUrl))
             {
                 // ★ ファイルのパスと「Inspector の値は使っていない」を添える。Editor の再生でも
                 //   ここを通るので、デスクトップで connection を試したことがあると気付かないまま
                 //   Inspector の serverUrl を変えても反映されない
-                Debug.Log($"[Mascot] serverUrl: 設定ファイル (\"{settingsPath}\") の \"{fromFile.ServerUrl}\" " +
-                          "を使います（Inspector の値は使っていません）");
+                Debug.Log($"[Mascot] serverUrl: using \"{fromFile.ServerUrl}\" from settings file (\"{settingsPath}\") " +
+                          "(Inspector value is not used)");
                 serverUrl = fromFile.ServerUrl;
                 return;
             }
@@ -575,11 +575,11 @@ namespace ChatterMascot
                 _discovering = true;
                 _discoveryStartedAt = Time.realtimeSinceStartup;
                 _discoveryRestartedAt = _discoveryStartedAt;
-                Debug.Log("[Mascot] serverUrl: 設定ファイルに接続先が無いので LAN から探します（_chatter-agent._tcp）");
+                Debug.Log("[Mascot] serverUrl: no server in settings file, searching the LAN (_chatter-agent._tcp)");
                 return;
             }
 
-            Debug.Log($"[Mascot] serverUrl: 既定を使います (\"{serverUrl}\")");
+            Debug.Log($"[Mascot] serverUrl: using default (\"{serverUrl}\")");
         }
 
         /// <summary>探索の結果を見て、見つかっていればセッションを始める。</summary>
@@ -596,14 +596,14 @@ namespace ChatterMascot
                 var url = ChatterMascot.Net.ServerUrl.FromHostPort(host, port);
                 if (url == null)
                 {
-                    Debug.LogWarning($"[Mascot] 見つけた {name} の接続先を組めません (\"{host}\":{port})。捨てて次の探索に任せます");
+                    Debug.LogWarning($"[Mascot] Cannot build a server URL from discovered {name} (\"{host}\":{port}). Discarding it and leaving it to the next discovery");
                     return;
                 }
 
                 serverUrl = url;
                 _discovering = false;
                 ServerDiscovery.Stop();
-                Debug.Log($"[Mascot] serverUrl: LAN で見つけた {name} の {url} を使います");
+                Debug.Log($"[Mascot] serverUrl: using {url} of {name} found on the LAN");
                 BeginSession();
                 StartAssetSyncIfNeeded();
                 return;
@@ -619,7 +619,7 @@ namespace ChatterMascot
             if (!_warnedDiscoveryNotFound && now - _discoveryStartedAt >= DiscoveryNotFoundNoticeSeconds)
             {
                 _warnedDiscoveryNotFound = true;
-                Debug.LogWarning("[Mascot] LAN でサーバーが見つかりません。探し続けます");
+                Debug.LogWarning("[Mascot] No server found on the LAN. Still searching");
                 DeviceToast.Show("サーバーが見つかりません\nMac のサーバーが 0.0.0.0 で待ち受けているか、\n" +
                                  "同じ Wi-Fi か（AP 分離・VLAN に注意）確認してください");
             }
@@ -637,7 +637,7 @@ namespace ChatterMascot
             }
             catch (Exception e)
             {
-                Debug.LogWarning("[Mascot] settings.json を読めませんでした: " + e.Message);
+                Debug.LogWarning("[Mascot] Failed to read settings.json: " + e.Message);
                 return MascotSettings.Defaults;
             }
 
@@ -682,9 +682,9 @@ namespace ChatterMascot
 
             // ★ **必ず1行残すこと。** 保留したのか素通りしたのかは、ここでしか分からない。
             //   #68 の切り分けはこの行から始まる
-            Debug.Log($"[Mascot] 終了要求: 未 ack={(pending ? "あり" : "なし")}" +
-                      $"{(forced ? "（probe による強制）" : "")} " +
-                      $"2周目={_quitRequested} → {(defer ? "保留します" : "通します")}");
+            Debug.Log($"[Mascot] Quit request: unacked={(pending ? "yes" : "no")}" +
+                      $"{(forced ? " (forced by probe)" : "")} " +
+                      $"secondRound={_quitRequested} → {(defer ? "deferring" : "allowing")}");
 
             _quitRequested = true;
             if (!defer) return true;
@@ -723,8 +723,8 @@ namespace ChatterMascot
             if (_quitAttempts >= QuitMaxAttempts && !_quitGaveUp)
             {
                 _quitGaveUp = true;
-                Debug.LogError($"[Mascot] Application.Quit() を {QuitMaxAttempts} 回呼んでも終了しません。" +
-                               "終了要求が OS 側で無視されている可能性があります (#68)");
+                Debug.LogError($"[Mascot] Application.Quit() called {QuitMaxAttempts} times but the app did not exit. " +
+                               "The OS may be ignoring the quit request (#68)");
             }
         }
 
@@ -732,7 +732,7 @@ namespace ChatterMascot
         {
             _quitAttempts++;
             _lastQuitAttemptAt = now;
-            Debug.Log($"[Mascot] Application.Quit() を呼びました (試行 {_quitAttempts})");
+            Debug.Log($"[Mascot] Called Application.Quit() (attempt {_quitAttempts})");
             Application.Quit();
         }
 
@@ -748,7 +748,7 @@ namespace ChatterMascot
                 // ★ **この詳細は保留した経路でしか出ない。** 通常経路は投げ切るものが無いので
                 //   閉じる過程を残す意味が無い。切り分けの入口（上の「終了要求」）は
                 //   **両方の経路で出る**
-                Debug.Log("[Mascot] 終了処理: 接続を閉じます");
+                Debug.Log("[Mascot] Shutdown: closing connection");
                 try
                 {
                     // 予算内で閉じ切る。返らない相手のためにアプリを終了させないことはしない
@@ -757,17 +757,17 @@ namespace ChatterMascot
                     var ms = (int)((Time.realtimeSinceStartupAsDouble - startedAt) * 1000);
                     if (ReferenceEquals(finished, closing))
                     {
-                        Debug.Log($"[Mascot] 終了処理: 接続を閉じました ({ms}ms)");
+                        Debug.Log($"[Mascot] Shutdown: connection closed ({ms}ms)");
                     }
                     else
                     {
-                        Debug.LogWarning($"[Mascot] 終了処理: {ShutdownBudgetMs}ms の予算を使い切りました。" +
-                                         "閉じ切らずに進みます");
+                        Debug.LogWarning($"[Mascot] Shutdown: used up the {ShutdownBudgetMs}ms budget. " +
+                                         "Continuing without finishing the close");
                     }
                 }
                 catch (Exception e)
                 {
-                    Debug.LogWarning("[Mascot] 終了処理で例外が出ました: " + e.Message);
+                    Debug.LogWarning("[Mascot] Exception during shutdown: " + e.Message);
                 }
             }
 
@@ -811,8 +811,8 @@ namespace ChatterMascot
             //   using しただけの型名は解決できない
             if (!ChatterMascot.Net.ServerUrl.IsValid(serverUrl))
             {
-                Debug.LogError($"[Mascot] serverUrl が不正です: \"{serverUrl}\"。" +
-                               "ws:// か wss:// で始まる絶対 URL を指定してください（例: ws://127.0.0.1:8570）");
+                Debug.LogError($"[Mascot] Invalid serverUrl: \"{serverUrl}\". " +
+                               "Specify an absolute URL starting with ws:// or wss:// (e.g. ws://127.0.0.1:8570)");
                 enabled = false;
                 return;
             }
@@ -841,8 +841,8 @@ namespace ChatterMascot
             if (!_idleGate.Enabled)
             {
                 Debug.Log(audioIdleSuspendMs > 0
-                    ? "[Mascot] このプラットフォームでは出力デバイスを手放せないので、アイドル判定は動かしません"
-                    : "[Mascot] audioIdleSuspendMs が 0 以下なのでアイドル判定は動かしません");
+                    ? "[Mascot] Idle detection is disabled because this platform cannot release the output device"
+                    : "[Mascot] Idle detection is disabled because audioIdleSuspendMs is 0 or less");
             }
             Connect();
         }
@@ -993,8 +993,8 @@ namespace ChatterMascot
                 && _client.ConsecutiveConnectFailures >= ConnectFailureNoticeCount)
             {
                 _warnedUnreachable = true;
-                Debug.LogWarning("[Mascot] サーバーに繋がりません。サーバーが止まっている・接続先が変わった・" +
-                                 "トークンが合っていない（Android では 401 と見分けられない）のどれか");
+                Debug.LogWarning("[Mascot] Cannot connect to the server. Either the server is stopped, its address changed, " +
+                                 "or the token is wrong (indistinguishable from 401 on Android)");
                 switch (UnreachableNotices.Decide(ServerToken.Length > 0, _connectedOnce, PairingPrompt != null))
                 {
                     case UnreachableNotice.ServerDown:
@@ -1130,7 +1130,7 @@ namespace ChatterMascot
                 if (!_warnedBadFrame)
                 {
                     _warnedBadFrame = true;
-                    Debug.LogWarning("[Mascot] 読めないフレームを捨てました");
+                    Debug.LogWarning("[Mascot] Dropped an unreadable frame");
                 }
                 return;
             }
@@ -1141,8 +1141,8 @@ namespace ChatterMascot
                 _audioDeclarationChecked = true;
                 if (!audioDeclared)
                 {
-                    Debug.LogWarning("[Mascot] サーバーのフレームに audio がありません（#29 より前のサーバー？）");
-                    Debug.LogWarning("[Mascot] 音声は鳴らず、すべての発話が無音のまま ack されます");
+                    Debug.LogWarning("[Mascot] Server frame has no audio (server older than #29?)");
+                    Debug.LogWarning("[Mascot] No audio will play and every utterance will be acked silently");
                 }
             }
 
@@ -1168,7 +1168,7 @@ namespace ChatterMascot
                     try
                     {
                         _player.SuspendOutput();
-                        Debug.Log("[Mascot] 無音が続いたのでオーディオ出力を止めました");
+                        Debug.Log("[Mascot] Stopped audio output because silence continued");
                     }
                     catch (Exception e)
                     {
@@ -1176,8 +1176,8 @@ namespace ChatterMascot
                         //   状態だけ戻すと**猶予のたびに失敗を繰り返してログが埋まる**ので、
                         //   一度失敗したら機能ごと止める。掴んだままになるだけで発話は無事
                         if (_idleGate != null) _idleGate.Enabled = false;
-                        Debug.LogWarning("[Mascot] オーディオ出力を止められませんでした。" +
-                                         "以後この機能を無効にします: " + e.Message);
+                        Debug.LogWarning("[Mascot] Failed to stop audio output. " +
+                                         "Disabling this feature from now on: " + e.Message);
                     }
                     break;
 
@@ -1185,14 +1185,14 @@ namespace ChatterMascot
                     try
                     {
                         _player.ResumeOutput();
-                        Debug.Log("[Mascot] オーディオ出力を掴み直しました");
+                        Debug.Log("[Mascot] Reacquired audio output");
                     }
                     catch (Exception e)
                     {
                         // ★ **握りつぶして続行する。** ゲートの _suspended は既に false へ
                         //   倒れている（Wake() が Resume を返す前に落としている）ので、
                         //   状態は「掴んでいる」側にある。次の発話でもう一度 resume を試す
-                        Debug.LogWarning("[Mascot] オーディオ出力を掴み直せませんでした: " + e.Message);
+                        Debug.LogWarning("[Mascot] Failed to reacquire audio output: " + e.Message);
                     }
                     break;
             }
@@ -1318,7 +1318,7 @@ namespace ChatterMascot
 
                 case PlaybackCommandKind.Play:
                     // ★ **PlayAsync の中ではなくここで Begin する。** PlayAsync は同期完了する
-                    //   経路（「音声のハンドルがありません」など）があり、そこから Dispatch が
+                    //   経路（「no audio handle」など）があり、そこから Dispatch が
                     //   このコマンドループへ再入する。入れ子の順序を読めなくしない
                     BeginSpeaking(command.Epoch, command.Seq, command.Audio);
                     _ = PlayAsync(command.Epoch, command.Seq, command.Audio);
@@ -1381,7 +1381,7 @@ namespace ChatterMascot
             var handle = _player.Prepare(result.Wav, $"speech-{epoch}-{seq}", out error);
             if (handle == null)
             {
-                Dispatch(PlaybackEvent.AudioFailed(epoch, seq, error ?? "WAV を読めませんでした"));
+                Dispatch(PlaybackEvent.AudioFailed(epoch, seq, error ?? "failed to read WAV"));
                 return;
             }
 

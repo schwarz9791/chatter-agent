@@ -76,7 +76,7 @@ namespace ChatterMascot.Xr
             _character = stage.ModelAnchor.GetComponent<VrmCharacter>();
             if (_character == null)
             {
-                Debug.LogWarning("[Mascot] XR walk: ModelAnchor に VrmCharacter が無いので歩行を組めません");
+                Debug.LogWarning("[Mascot] XR walk: no VrmCharacter on ModelAnchor, cannot set up walking");
             }
 
             var viewGo = new GameObject("Walk Area");
@@ -130,8 +130,8 @@ namespace ChatterMascot.Xr
 
             var worldRadius = _radius * Wander.AreaScale(ColliderHeightMeters());
             // ★ 1回1行。実機で「円が出た／出ない」を logcat から判定する唯一の手がかり
-            Debug.Log($"[Mascot] XR walk: 歩行範囲 center=({_center.x:F2}, {_center.y:F2}) floor={_floorY:F2} " +
-                      $"radius={worldRadius:F2} 歩行={(_character != null && _character.CanWalk ? "可" : "不可")}");
+            Debug.Log($"[Mascot] XR walk: walk area center=({_center.x:F2}, {_center.y:F2}) floor={_floorY:F2} " +
+                      $"radius={worldRadius:F2} canWalk={(_character != null && _character.CanWalk ? "yes" : "no")}");
         }
 
         /// <summary>
@@ -207,20 +207,20 @@ namespace ChatterMascot.Xr
 
             if (_character.Speaking)
             {
-                Debug.Log("[Mascot] XR walk: 歩き出せません（発話中）");
+                Debug.Log("[Mascot] XR walk: cannot start walking (speaking)");
                 return WalkToResult.Rejected;
             }
 
             if (!_character.IsWalking && !_character.TryStartWalking())
             {
-                Debug.Log("[Mascot] XR walk: 歩き出せません（他のモーション再生中）");
+                Debug.Log("[Mascot] XR walk: cannot start walking (another motion is playing)");
                 return WalkToResult.Rejected;
             }
 
             var now = Time.realtimeSinceStartupAsDouble;
             _wander.GoTo(now, point);
             _hideCircleAt = now + CircleVisibleSeconds;
-            Debug.Log($"[Mascot] XR walk: 指された先へ歩きます ({point.x:F2}, {point.y:F2})");
+            Debug.Log($"[Mascot] XR walk: walking to the pointed position ({point.x:F2}, {point.y:F2})");
             return WalkToResult.Started;
         }
 
@@ -233,7 +233,7 @@ namespace ChatterMascot.Xr
             if (!Active) return;
 
             ShowAreaFor(OutOfRangeCircleSeconds);
-            Debug.Log("[Mascot] XR walk: 範囲外を指したので歩行範囲を出します");
+            Debug.Log("[Mascot] XR walk: pointed outside the area, showing the walk area");
         }
 
         /// <summary>

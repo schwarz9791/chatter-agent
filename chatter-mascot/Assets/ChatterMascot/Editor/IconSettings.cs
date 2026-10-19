@@ -75,7 +75,7 @@ namespace ChatterMascot.EditorTools
                 //   **未保存のシーン・プレハブ編集ごとプロセスを道連れにする**。
                 //   batchmode（build.sh / run.sh 経由）に限れば、失うのはコマンドの終了コードで
                 //   済み、それは呼び出し側（run.sh）が受け取って CI を落とす形に直した
-                Debug.LogError($"[Icon] AppIcon.png が見つかりません: {IconPath}");
+                Debug.LogError($"[Icon] AppIcon.png not found: {IconPath}");
                 if (Application.isBatchMode) EditorApplication.Exit(1);
                 return;
             }
@@ -93,7 +93,7 @@ namespace ChatterMascot.EditorTools
                 //   実体は無い、という #93 の元の症状にそのまま戻る（batchmode の Editor に
                 //   macOS Build Support が入っていないと GetIconSizes が空を返す）。
                 //   上の null チェックと同じ理由・同じ手当てで、はっきり落とす
-                Debug.LogError("[Icon] GetIconSizes が空でした（macOS Build Support 未インストールの疑い）");
+                Debug.LogError("[Icon] GetIconSizes returned nothing (macOS Build Support may not be installed)");
                 if (Application.isBatchMode) EditorApplication.Exit(1);
                 return;
             }
@@ -112,15 +112,15 @@ namespace ChatterMascot.EditorTools
 
                 if (sourceWidth != sourceHeight)
                 {
-                    Debug.LogWarning($"[Icon] AppIcon.png が正方形ではありません: {sourceWidth}x{sourceHeight}");
+                    Debug.LogWarning($"[Icon] AppIcon.png is not square: {sourceWidth}x{sourceHeight}");
                 }
 
                 var maxRequested = Mathf.Max(sizes);
                 if (sourceWidth < maxRequested || sourceHeight < maxRequested)
                 {
                     Debug.LogWarning(
-                        $"[Icon] AppIcon.png ({sourceWidth}x{sourceHeight}) が要求される最大サイズ ({maxRequested}) を"
-                        + "下回っています。ビルド時に引き伸ばされます");
+                        $"[Icon] AppIcon.png ({sourceWidth}x{sourceHeight}) is smaller than the largest requested size ({maxRequested}). "
+                        + "It will be upscaled at build time");
                 }
             }
 
@@ -130,7 +130,7 @@ namespace ChatterMascot.EditorTools
             FixAndroidAdaptive();
 
             AssetDatabase.SaveAssets();
-            Debug.Log("[Icon] Player Settings のアプリアイコンを設定しました");
+            Debug.Log("[Icon] Set the app icon in Player Settings");
         }
 
         /// <summary>
@@ -149,7 +149,7 @@ namespace ChatterMascot.EditorTools
             if (sizes.Length == 0)
             {
                 Debug.LogWarning(
-                    "[Icon] Android の GetIconSizes が空でした（見た目だけの問題なので続行します）");
+                    "[Icon] Android GetIconSizes returned nothing (cosmetic only, continuing)");
                 return;
             }
 
@@ -163,8 +163,8 @@ namespace ChatterMascot.EditorTools
             if (foreground == null || background == null)
             {
                 Debug.LogWarning(
-                    $"[Icon] Adaptive の前景・背景が読めません（{AndroidForegroundPath} / {AndroidBackgroundPath}）。"
-                    + "Adaptive は飛ばして続行します");
+                    $"[Icon] Cannot read Adaptive foreground/background ({AndroidForegroundPath} / {AndroidBackgroundPath}). "
+                    + "Skipping Adaptive and continuing");
                 return;
             }
 
@@ -173,14 +173,14 @@ namespace ChatterMascot.EditorTools
             if (icons.Length == 0)
             {
                 Debug.LogWarning(
-                    "[Icon] Android の Adaptive 枠が0件でした（Android Build Support 未インストールの疑い。見た目だけの問題なので続行します）");
+                    "[Icon] Android Adaptive slots=0 (Android Build Support may not be installed; cosmetic only, continuing)");
                 return;
             }
 
             foreach (var icon in icons) icon.SetTextures(background, foreground);
             PlayerSettings.SetPlatformIcons(NamedBuildTarget.Android, AndroidPlatformIconKind.Adaptive, icons);
 
-            Debug.Log($"[Icon] Android Adaptive を {icons.Length} 枠に登録しました");
+            Debug.Log($"[Icon] Registered Android Adaptive icons, slots={icons.Length}");
         }
 
         /// <summary>

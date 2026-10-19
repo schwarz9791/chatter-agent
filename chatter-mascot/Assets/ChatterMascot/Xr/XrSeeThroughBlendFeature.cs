@@ -64,17 +64,17 @@ namespace ChatterMascot.Xr
             var target = available == null
                 ? XrEnvironmentBlendMode.Additive
                 : (XrEnvironmentBlendMode)available.FirstOrDefault(m => m != (int)XrEnvironmentBlendMode.Opaque);
-            var list = available == null ? "列挙できず" : string.Join(", ", available.Select(m => (XrEnvironmentBlendMode)m));
+            var list = available == null ? "unavailable" : string.Join(", ", available.Select(m => (XrEnvironmentBlendMode)m));
 
             if (target == 0)
             {
-                Debug.Log($"[Mascot] XR: environment blend mode は OPAQUE 以外を持たないので {mode} のまま（持つモード: {list}）");
+                Debug.Log($"[Mascot] XR: environment blend mode has only OPAQUE, so {mode} is kept (available modes: {list})");
                 return;
             }
             if (target == mode) return;
 
             SetEnvironmentBlendMode(target);
-            Debug.Log($"[Mascot] XR: environment blend mode を {mode} から {target} へ要求しました（持つモード: {list}）");
+            Debug.Log($"[Mascot] XR: requested environment blend mode {target} (was {mode}; available modes: {list})");
         }
 
         private int[] EnumerateBlendModes()
@@ -85,7 +85,7 @@ namespace ChatterMascot.Xr
                 var getProcAddrResult = getProcAddr(_instance, "xrEnumerateEnvironmentBlendModes", out var fn);
                 if (getProcAddrResult != XrResult.Success || fn == IntPtr.Zero)
                 {
-                    Debug.LogWarning($"[Mascot] XR: environment blend mode を列挙できませんでした: xrGetInstanceProcAddr → {getProcAddrResult}");
+                    Debug.LogWarning($"[Mascot] XR: failed to enumerate environment blend modes: xrGetInstanceProcAddr → {getProcAddrResult}");
                     return null;
                 }
 
@@ -93,7 +93,7 @@ namespace ChatterMascot.Xr
                 var countResult = enumerate(_instance, _systemId, PrimaryStereo, 0, out var count, null);
                 if (countResult != XrResult.Success)
                 {
-                    Debug.LogWarning($"[Mascot] XR: environment blend mode を列挙できませんでした: xrEnumerateEnvironmentBlendModes → {countResult}");
+                    Debug.LogWarning($"[Mascot] XR: failed to enumerate environment blend modes: xrEnumerateEnvironmentBlendModes → {countResult}");
                     return null;
                 }
 
@@ -101,7 +101,7 @@ namespace ChatterMascot.Xr
                 var enumerateResult = enumerate(_instance, _systemId, PrimaryStereo, count, out count, modes);
                 if (enumerateResult != XrResult.Success)
                 {
-                    Debug.LogWarning($"[Mascot] XR: environment blend mode を列挙できませんでした: xrEnumerateEnvironmentBlendModes → {enumerateResult}");
+                    Debug.LogWarning($"[Mascot] XR: failed to enumerate environment blend modes: xrEnumerateEnvironmentBlendModes → {enumerateResult}");
                     return null;
                 }
 
@@ -110,7 +110,7 @@ namespace ChatterMascot.Xr
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"[Mascot] XR: environment blend mode を列挙できませんでした: {e.Message}");
+                Debug.LogWarning($"[Mascot] XR: failed to enumerate environment blend modes: {e.Message}");
                 return null;
             }
         }

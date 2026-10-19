@@ -35,11 +35,11 @@ namespace ChatterMascot.EditorTools
 
             var fixedSdk = (int)AndroidPlayerSettings.TargetSdkVersion;
             throw new BuildFailedException(
-                $"[Build] targetSdk が {targetSdk}（0 は Automatic）です。{fixedSdk} に固定してください。"
-                + $" Editor を開いているとき: Edit > Project Settings > Player > Android > Other Settings > Target API Level を {fixedSdk} にする。"
-                + " Editor を閉じているとき: ./scripts/run.sh ChatterMascot.EditorTools.AndroidPlayerSettings.FixAll"
-                + $"。{LocalNetworkPermissionSdk} 以上へ上げるには ACCESS_LOCAL_NETWORK の宣言とランタイム要求が要ります"
-                + "（docs/knowledge/mascot-android-xr.md「ネットワークまわりの根拠と未着手」）");
+                $"[Build] targetSdk is {targetSdk} (0 means Automatic). Pin it to {fixedSdk}."
+                + $" With the Editor open: set Edit > Project Settings > Player > Android > Other Settings > Target API Level to {fixedSdk}."
+                + " With the Editor closed: ./scripts/run.sh ChatterMascot.EditorTools.AndroidPlayerSettings.FixAll"
+                + $". Raising it to {LocalNetworkPermissionSdk} or higher requires declaring ACCESS_LOCAL_NETWORK and requesting it at runtime"
+                + " (see docs/knowledge/mascot-android-xr.md, \"ネットワークまわりの根拠と未着手\")");
         }
     }
 }

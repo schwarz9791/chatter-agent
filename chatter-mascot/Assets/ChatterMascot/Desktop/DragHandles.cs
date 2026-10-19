@@ -57,7 +57,7 @@ namespace ChatterMascot.Desktop
             var added = AttachAll(root);
             if (log && added.Count > 0)
             {
-                Debug.Log($"[Mascot] ドラッグハンドルを付けました: {string.Join(", ", added)}");
+                Debug.Log($"[Mascot] Attached drag handles: {string.Join(", ", added)}");
             }
         }
     }

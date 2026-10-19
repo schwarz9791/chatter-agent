@@ -30,10 +30,10 @@ namespace ChatterMascot.Vrm
             if (Shader.Find(MToonUrpShaderName) != null) return;
 
             Debug.LogError(
-                $"[Mascot] {MToonUrpShaderName} がビルドに含まれていません。" +
-                "モデルは読めても真っ黒／ピンクになります。" +
-                "Always Included Shaders を確認してください" +
-                "（./scripts/run.sh ChatterMascot.EditorTools.SceneFixups.FixAll）");
+                $"[Mascot] {MToonUrpShaderName} is not included in the build. " +
+                "The model loads but renders black or pink. " +
+                "Check Always Included Shaders " +
+                "(./scripts/run.sh ChatterMascot.EditorTools.SceneFixups.FixAll)");
         }
 
         /// <summary>
@@ -67,7 +67,7 @@ namespace ChatterMascot.Vrm
 
             if (broken.Count == 0)
             {
-                Debug.Log($"[Mascot] マテリアル {instance.Materials.Count} 件、シェーダー: " +
+                Debug.Log($"[Mascot] Materials: count={instance.Materials.Count}, shaders: " +
                           string.Join(" / ", names));
                 return;
             }
@@ -75,8 +75,8 @@ namespace ChatterMascot.Vrm
             var text = new StringBuilder();
             foreach (var one in broken) text.Append("\n  ").Append(one);
             Debug.LogError(
-                $"[Mascot] シェーダーが解決できていないマテリアルが {broken.Count} 件あります。" +
-                "Always Included Shaders を確認してください:" + text);
+                $"[Mascot] Materials with unresolved shaders: count={broken.Count}. " +
+                "Check Always Included Shaders:" + text);
         }
     }
 }

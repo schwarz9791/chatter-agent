@@ -50,7 +50,7 @@ namespace ChatterMascot.Tests
         /// Newtonsoft は既定で「ISO8601 らしき文字列」を自動変換する。そのままだと
         /// <c>ts</c> が <c>JTokenType.String</c> ではなく <c>Date</c> になり、
         /// <b>正常なフレームが1つも通らなくなる</b>（症状は完全な無音で、
-        /// 「読めないフレームを捨てました」が接続ごとに1回出るだけ）。
+        /// 「Dropped an unreadable frame」が接続ごとに1回出るだけ）。
         /// </summary>
         [Test]
         public void IsoTimestampStaysString()

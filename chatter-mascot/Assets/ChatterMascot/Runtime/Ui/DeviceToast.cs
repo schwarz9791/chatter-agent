@@ -42,7 +42,7 @@ namespace ChatterMascot.Ui
             }
             catch (Exception e)
             {
-                Debug.LogWarning("[Mascot] 通知を出せませんでした: " + e.Message);
+                Debug.LogWarning("[Mascot] Failed to show notification: " + e.Message);
             }
         }
 
@@ -59,7 +59,7 @@ namespace ChatterMascot.Ui
             }
             catch (Exception e)
             {
-                Debug.LogWarning("[Mascot] 通知を出せませんでした: " + e.Message);
+                Debug.LogWarning("[Mascot] Failed to show notification: " + e.Message);
             }
             finally
             {

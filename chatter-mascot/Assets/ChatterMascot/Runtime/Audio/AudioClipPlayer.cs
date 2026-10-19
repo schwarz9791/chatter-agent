@@ -233,10 +233,10 @@ namespace ChatterMascot.Audio
         public async Task<string> PlayAsync(object audio)
         {
             var handle = audio as UnityAudioHandle;
-            if (handle == null) return "音声のハンドルがありません";
+            if (handle == null) return "no audio handle";
 
             var clip = handle.Clip;
-            if (clip == null) return "AudioClip がありません";
+            if (clip == null) return "AudioClip is missing";
 
             // ★ **これを外すと発話が黙って消える。** 出力を止めたまま Play() すると
             //   isPlaying が即 false になり、下の完了待ちが1回目のチェックで抜ける。
@@ -246,7 +246,7 @@ namespace ChatterMascot.Audio
             ResumeOutput();
 
             var voice = Claim();
-            if (voice == null) return "AudioSource がありません";
+            if (voice == null) return "AudioSource is missing";
 
             try
             {
@@ -272,7 +272,7 @@ namespace ChatterMascot.Audio
                     await Task.Yield();
                 }
 
-                if (source == null) return "再生中に AudioSource が失われました";
+                if (source == null) return "AudioSource was lost during playback";
 
                 var timedOut = source.isPlaying;
                 // ★ 止めてよいのは自分が掴んでいる voice だけ。ここが共有されていると、
@@ -280,7 +280,7 @@ namespace ChatterMascot.Audio
                 source.Stop();
                 source.clip = null;
 
-                return timedOut ? $"{limit:F1} 秒で終わりませんでした" : null;
+                return timedOut ? $"did not finish within {limit:F1} seconds" : null;
             }
             finally
             {
@@ -329,8 +329,8 @@ namespace ChatterMascot.Audio
             if (_voices.Count > VoiceWarnThreshold && !_warnedVoiceCount)
             {
                 _warnedVoiceCount = true;
-                Warn?.Invoke($"同時に鳴らす AudioSource が {_voices.Count} 本になりました" +
-                             "（採番のやり直しが、音が鳴り終わる前に繰り返されている可能性）");
+                Warn?.Invoke($"{_voices.Count} AudioSources playing at once" +
+                             " (seq numbering may be restarting repeatedly before the audio finishes)");
             }
             return created;
         }

@@ -66,7 +66,7 @@ namespace ChatterMascot.Desktop
                 }
                 catch (Exception e)
                 {
-                    Debug.LogWarning("[Mascot] 依頼箱の掃除に失敗しました: " + e.Message);
+                    Debug.LogWarning("[Mascot] Failed to clean the request inbox: " + e.Message);
                 }
             }
 
@@ -99,7 +99,7 @@ namespace ChatterMascot.Desktop
                 }
                 catch (Exception e)
                 {
-                    Debug.LogWarning("[Mascot] motions.json を書けませんでした: " + e.Message);
+                    Debug.LogWarning("[Mascot] Could not write motions.json: " + e.Message);
                     // 次の周期でやり直す（_published は更新しない）
                 }
             }
@@ -115,7 +115,7 @@ namespace ChatterMascot.Desktop
                 }
                 catch (Exception e)
                 {
-                    WarnOnce("*", "依頼箱を読めませんでした: " + e.Message);
+                    WarnOnce("*", "Could not read the request inbox: " + e.Message);
                     return;
                 }
 
@@ -133,13 +133,13 @@ namespace ChatterMascot.Desktop
                     }
                     catch (Exception e)
                     {
-                        WarnOnce(name, $"依頼 {name} を読めない・消せません: {e.Message}");
+                        WarnOnce(name, $"Cannot read or delete request {name}: {e.Message}");
                         continue;
                     }
 
                     if (!MascotRequest.TryParse(text, out var request, out var reason))
                     {
-                        Debug.LogWarning($"[Mascot] 依頼 {name} を捨てました: {reason}");
+                        Debug.LogWarning($"[Mascot] Discarded request {name}: {reason}");
                         continue;
                     }
 
@@ -188,12 +188,12 @@ namespace ChatterMascot.Desktop
 
                 if (clip == null)
                 {
-                    Debug.LogWarning($"[Mascot] モーション {id} が見つかりません");
+                    Debug.LogWarning($"[Mascot] Motion {id} not found");
                     return;
                 }
 
                 var result = character.PreviewMotion(clip);
-                Debug.Log("[Mascot] " + SettingsSchema.MotionPlayNotice(result, id, UiText.For(Application.systemLanguage)));
+                Debug.Log("[Mascot] " + SettingsSchema.MotionPlayNotice(result, id, UiText.En));
             }
 
             /// <summary>★ 別名で書いてから置き換える（→ <c>WindowGeometry.WriteState</c> と同じ）</summary>

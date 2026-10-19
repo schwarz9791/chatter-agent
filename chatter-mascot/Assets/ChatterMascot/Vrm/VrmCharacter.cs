@@ -522,7 +522,7 @@ namespace ChatterMascot.Vrm
                 //   カメラ自体はあっても MainCamera タグが外れていると null になる）。
                 //   LateUpdate は _camera == null をガードするので、続行できる異常として警告に留める。
                 //   GazeTarget が作れないだけでなく、視線の中立位置（目の高さ）も出せなくなる
-                Debug.LogWarning("[Mascot] Camera.main が無いので GazeTarget を作れません。視線は動きません");
+                Debug.LogWarning("[Mascot] No Camera.main, so GazeTarget cannot be created. Gaze will not move");
             }
 
             _cancellation = new CancellationTokenSource();
@@ -536,7 +536,7 @@ namespace ChatterMascot.Vrm
             if (faceLog != faceDebugLog)
             {
                 faceDebugLog = faceLog;
-                Debug.Log($"[Mascot] faceDebugLog をコマンドラインで上書きします: {faceDebugLog}");
+                Debug.Log($"[Mascot] Overriding faceDebugLog from the command line: {faceDebugLog}");
             }
 
             // ★ こちらは値を取るので Flag ではなく Argument（-faceLogMs 100）。
@@ -548,7 +548,7 @@ namespace ChatterMascot.Vrm
                 int.TryParse(faceLogMs, out faceLogMsValue) && faceLogMsValue > 0)
             {
                 _faceLogIntervalSeconds = faceLogMsValue / 1000.0;
-                Debug.Log($"[Mascot] face ログの間隔をコマンドラインで上書きします: {faceLogMsValue}ms");
+                Debug.Log($"[Mascot] Overriding the face log interval from the command line: {faceLogMsValue}ms");
             }
 
             // ★ #103 レビューで opt-in にした。既定 OFF——faceLog と同じ形（Flag。単独で渡せば有効化）
@@ -556,7 +556,7 @@ namespace ChatterMascot.Vrm
             if (stallProbe != stallProbeLog)
             {
                 stallProbeLog = stallProbe;
-                Debug.Log($"[Mascot] stallProbeLog をコマンドラインで上書きします: {stallProbeLog}");
+                Debug.Log($"[Mascot] Overriding stallProbeLog from the command line: {stallProbeLog}");
             }
 
             // ★ #70。目視確認用。-motionProbe happy のように渡すと、モーションの読み込みが
@@ -564,8 +564,8 @@ namespace ChatterMascot.Vrm
             _motionProbeArgument = CommandLine.Argument("-motionProbe");
             if (!string.IsNullOrEmpty(_motionProbeArgument))
             {
-                Debug.Log($"[Mascot] motionProbe: 起動引数で指定されたカテゴリ '{_motionProbeArgument}' を" +
-                          $"読み込み完了の{MotionProbeDelaySeconds}秒後に再生します");
+                Debug.Log($"[Mascot] motionProbe: will play category '{_motionProbeArgument}' given on the command line " +
+                          $"{MotionProbeDelaySeconds}s after loading completes");
             }
 
             // ★ sticky なので購読と読み込みの前後関係に依存しない（VrmStage.AddLoadedHandler）
@@ -575,7 +575,7 @@ namespace ChatterMascot.Vrm
             }
             else
             {
-                Debug.LogWarning("[Mascot] VrmCharacter に VrmStage が結線されていません");
+                Debug.LogWarning("[Mascot] VrmStage is not wired to VrmCharacter");
             }
         }
 
@@ -584,7 +584,7 @@ namespace ChatterMascot.Vrm
             _instance = model.GetComponent<Vrm10Instance>();
             if (_instance == null)
             {
-                Debug.LogWarning("[Mascot] 読み込まれたモデルに Vrm10Instance が無いので、体と目の配線を諦めます");
+                Debug.LogWarning("[Mascot] The loaded model has no Vrm10Instance, giving up wiring the body and eyes");
                 return;
             }
 
@@ -815,20 +815,20 @@ namespace ChatterMascot.Vrm
             var category = ParseMotionProbeCategory(_motionProbeArgument);
             if (!category.HasValue)
             {
-                Debug.LogWarning($"[Mascot] motionProbe: '{_motionProbeArgument}' は既知のカテゴリではありません" +
-                                  "（idle / happy / angry / sad / relaxed / surprised / walk）");
+                Debug.LogWarning($"[Mascot] motionProbe: '{_motionProbeArgument}' is not a known category" +
+                                  " (idle / happy / angry / sad / relaxed / surprised / walk)");
                 return;
             }
 
             var clip = _motion.Loaded.Pick(category.Value, () => UnityEngine.Random.value);
             if (clip == null)
             {
-                Debug.Log($"[Mascot] motionProbe: カテゴリ '{_motionProbeArgument}' にクリップがありません");
+                Debug.Log($"[Mascot] motionProbe: category '{_motionProbeArgument}' has no clips");
                 return;
             }
 
             var result = _motion.Play(clip, MotionKind.Emotion, now);
-            Debug.Log($"[Mascot] motionProbe: {clip.FileName} を{(result == MotionPlayResult.Started ? "再生します" : "再生できませんでした")}");
+            Debug.Log($"[Mascot] motionProbe: {(result == MotionPlayResult.Started ? "playing" : "could not play")} {clip.FileName}");
         }
 
         /// <summary>
@@ -895,7 +895,7 @@ namespace ChatterMascot.Vrm
                 if (_instance != null && !_warnedNoGazeOrigin)
                 {
                     _warnedNoGazeOrigin = true;
-                    Debug.LogWarning("[Mascot] 視線の原点（目 / 頭ボーン）が取れないので、GazeOriginViewportY をフォールバック値にします");
+                    Debug.LogWarning("[Mascot] Gaze origin (eye / head bone) unavailable, using the fallback value for GazeOriginViewportY");
                 }
             }
 
@@ -1086,7 +1086,7 @@ namespace ChatterMascot.Vrm
             var expression = runtime != null ? runtime.Expression : null;
             if (expression == null)
             {
-                Debug.LogWarning("[Mascot] Runtime.Expression が取れないので、表情は動きません");
+                Debug.LogWarning("[Mascot] Runtime.Expression unavailable, expressions will not move");
                 return;
             }
 
@@ -1095,12 +1095,12 @@ namespace ChatterMascot.Vrm
             foreach (var key in keys) names.Add(key.Name);
             names.Sort(StringComparer.Ordinal);
 
-            Debug.Log($"[Mascot] expression: {string.Join(", ", names)}（{keys.Count} 件）");
-            Debug.Log("[Mascot] 使う preset: " +
+            Debug.Log($"[Mascot] expression: {string.Join(", ", names)} (count={keys.Count})");
+            Debug.Log("[Mascot] Presets in use: " +
                       $"happy={Mark(HappyKey)} angry={Mark(AngryKey)} sad={Mark(SadKey)} " +
                       $"relaxed={Mark(RelaxedKey)} surprised={Mark(SurprisedKey)} " +
                       $"neutral={Mark(NeutralKey)} blink={Mark(BlinkKey)} aa={Mark(AaKey)}" +
-                      "（○=動く / 空=枠はあるが中身が無い / ×=無い）");
+                      " (ok=works / empty=has a slot but no content / none=missing)");
 
             WarnAboutOverrides();
         }
@@ -1127,10 +1127,10 @@ namespace ChatterMascot.Vrm
                 if (clip == null) continue;
                 if (!asset.CreateKey(clip).Equals(key)) continue;
 
-                return HasBindings(clip) ? "○" : "空";
+                return HasBindings(clip) ? "ok" : "empty";
             }
 
-            return "×";
+            return "none";
         }
 
         /// <summary>
@@ -1213,9 +1213,9 @@ namespace ChatterMascot.Vrm
                 if (!key.IsLookAt && clip.OverrideLookAt != ExpressionOverrideType.none) blocksLookAt = true;
             }
 
-            if (blocksMouth) Debug.LogWarning("[Mascot] このモデルは表情が口をブロックします。喋っても口が動かないことがあります");
-            if (blocksBlink) Debug.LogWarning("[Mascot] このモデルは表情が瞬きをブロックします。表情が強いと瞬かないことがあります");
-            if (blocksLookAt) Debug.LogWarning("[Mascot] このモデルは表情が視線をブロックします。カーソル追従が効かないことがあります");
+            if (blocksMouth) Debug.LogWarning("[Mascot] This model's expressions block the mouth. The mouth may not move while speaking");
+            if (blocksBlink) Debug.LogWarning("[Mascot] This model's expressions block blinking. It may not blink when an expression is strong");
+            if (blocksLookAt) Debug.LogWarning("[Mascot] This model's expressions block gaze. Cursor following may not work");
         }
 
         /// <summary>このアプリが weight を書く preset か。</summary>
@@ -1255,10 +1255,10 @@ namespace ChatterMascot.Vrm
 
             var actual = expression.ActualWeights;
             Debug.Log($"[Mascot] face: kind={_faceLatch.Kind} emotion={_faceLatch.Emotion} speaking={Speaking}" +
-                      $" | 目標 happy={_faceWeights.Happy:F2} angry={_faceWeights.Angry:F2} sad={_faceWeights.Sad:F2}" +
+                      $" | target happy={_faceWeights.Happy:F2} angry={_faceWeights.Angry:F2} sad={_faceWeights.Sad:F2}" +
                       $" relaxed={_faceWeights.Relaxed:F2} surprised={_faceWeights.Surprised:F2}" +
                       $" neutral={_faceWeights.Neutral:F2} aa={_faceWeights.Aa:F2} blink={_faceWeights.Blink:F2}" +
-                      $" | 実効 happy={Actual(actual, HappyKey):F2} angry={Actual(actual, AngryKey):F2}" +
+                      $" | actual happy={Actual(actual, HappyKey):F2} angry={Actual(actual, AngryKey):F2}" +
                       $" sad={Actual(actual, SadKey):F2} relaxed={Actual(actual, RelaxedKey):F2}" +
                       $" surprised={Actual(actual, SurprisedKey):F2} neutral={Actual(actual, NeutralKey):F2}" +
                       $" aa={Actual(actual, AaKey):F2} blink={Actual(actual, BlinkKey):F2}");

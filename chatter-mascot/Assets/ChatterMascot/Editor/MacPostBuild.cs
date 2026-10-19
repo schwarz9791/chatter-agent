@@ -55,7 +55,7 @@ namespace ChatterMascot.EditorTools
             {
                 if (!File.Exists(plistPath))
                 {
-                    Debug.LogWarning($"[Native] Info.plist がありません。Dock に出ます: {plistPath}");
+                    Debug.LogWarning($"[Native] Info.plist not found. The app will show in the Dock: {plistPath}");
                     return;
                 }
 
@@ -66,10 +66,10 @@ namespace ChatterMascot.EditorTools
 
                 if (message != null)
                 {
-                    Debug.LogWarning("[Native] LSUIElement を書けませんでした。Dock に出ます: " + message);
+                    Debug.LogWarning("[Native] Could not write LSUIElement. The app will show in the Dock: " + message);
                     return;
                 }
-                Debug.Log("[Native] LSUIElement を書きました（Dock に出ません）");
+                Debug.Log("[Native] Wrote LSUIElement (the app will not show in the Dock)");
 
                 // ★ 書いた後に署名し直すこと。Info.plist が変わると封印が壊れ、ダウンロードした
                 //   コピーは Gatekeeper に「壊れている」と扱われる。失敗してもビルドは落とさない
@@ -77,14 +77,14 @@ namespace ChatterMascot.EditorTools
                 var sealMessage = Run(Codesign, "--force", "--sign", "-", report.summary.outputPath);
                 if (sealMessage != null)
                 {
-                    Debug.LogWarning("[Native] ad-hoc 署名し直せませんでした。配ると壊れていると扱われます: " + sealMessage);
+                    Debug.LogWarning("[Native] Could not re-sign ad hoc. The app will be treated as damaged when distributed: " + sealMessage);
                     return;
                 }
-                Debug.Log("[Native] ad-hoc 署名し直しました");
+                Debug.Log("[Native] Re-signed ad hoc");
             }
             catch (Exception e)
             {
-                Debug.LogWarning("[Native] LSUIElement を書けませんでした。Dock に出ます: " + OneLine(e.Message));
+                Debug.LogWarning("[Native] Could not write LSUIElement. The app will show in the Dock: " + OneLine(e.Message));
             }
         }
 
@@ -103,7 +103,7 @@ namespace ChatterMascot.EditorTools
 
             using (var process = Process.Start(info))
             {
-                if (process == null) return tool + " を起動できませんでした";
+                if (process == null) return tool + " failed to start";
 
                 // ★★ 両方を ReadToEnd() で順に読まないこと。 片方の EOF を待っている間に
                 //   子がもう片方のパイプを埋めると（OS のバッファは約 64KB）、
@@ -135,7 +135,7 @@ namespace ChatterMascot.EditorTools
         /// <summary>★ 複数行のログは scripts の grep で2行目以降が消える</summary>
         private static string OneLine(string text)
         {
-            if (string.IsNullOrEmpty(text)) return "(理由なし)";
+            if (string.IsNullOrEmpty(text)) return "(no reason)";
             return text.Replace("\r", " ").Replace("\n", " ").Trim();
         }
     }

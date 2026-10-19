@@ -58,7 +58,7 @@ namespace ChatterMascot.Desktop
             _controller = Object.FindFirstObjectByType<UniWindowController>();
             if (_controller == null) { enabled = false; return; }
             AllowInputWithoutFocus();
-            Debug.Log("[Mascot] 右クリックを見張ります");
+            Debug.Log("[Mascot] Watching for right-clicks");
         }
 
         private void Update()
@@ -110,12 +110,12 @@ namespace ChatterMascot.Desktop
                 if (settings.backgroundBehavior == InputSettings.BackgroundBehavior.IgnoreFocus) return;
 
                 settings.backgroundBehavior = InputSettings.BackgroundBehavior.IgnoreFocus;
-                Debug.Log("[Mascot] フォーカスが無くても入力を受け取る設定にしました");
+                Debug.Log("[Mascot] Enabled receiving input without focus");
             }
             catch (Exception e)
             {
                 // ★ ここで落とさないこと。効かなくても「右クリックで開かない」だけ
-                Debug.LogWarning("[Mascot] 入力の設定を変えられませんでした: " + e.Message);
+                Debug.LogWarning("[Mascot] Could not change the input setting: " + e.Message);
             }
         }
     }
@@ -164,7 +164,7 @@ namespace ChatterMascot.Desktop
             }
             catch (Exception e)
             {
-                Debug.LogWarning("[Mascot] ChatterAgent を開けませんでした: " + e.Message);
+                Debug.LogWarning("[Mascot] Could not open ChatterAgent: " + e.Message);
             }
         }
     }

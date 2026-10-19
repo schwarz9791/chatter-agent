@@ -117,13 +117,13 @@ namespace ChatterMascot.Desktop
                 if (_step == 1 && elapsed >= 4f)
                 {
                     _step = 2;
-                    MoveTo(Overhang(), "画面外(freePositioning=false)");
+                    MoveTo(Overhang(), "off-screen (freePositioning=false)");
                     return;
                 }
                 if (_step == 2 && elapsed >= 5f)
                 {
                     _step = 3;
-                    Report("画面外(freePositioning=false)の後");
+                    Report("after off-screen (freePositioning=false)");
                     return;
                 }
 
@@ -135,20 +135,20 @@ namespace ChatterMascot.Desktop
                 {
                     _step = 4;
                     _controller.isFreePositioningEnabled = true;
-                    Debug.Log("[Mascot] 窓の実測: isFreePositioningEnabled = true を入れました " +
-                              $"→ 読み戻し {_controller.isFreePositioningEnabled}");
+                    Debug.Log("[Mascot] Window probe: set isFreePositioningEnabled = true " +
+                              $"-> read back {_controller.isFreePositioningEnabled}");
                     return;
                 }
                 if (_step == 4 && elapsed >= 7f)
                 {
                     _step = 5;
-                    MoveTo(Overhang(), "画面外(freePositioning=true)");
+                    MoveTo(Overhang(), "off-screen (freePositioning=true)");
                     return;
                 }
                 if (_step == 5 && elapsed >= 8f)
                 {
                     _step = 6;
-                    Report("画面外(freePositioning=true)の後");
+                    Report("after off-screen (freePositioning=true)");
                     Destroy(gameObject);
                 }
             }
@@ -167,7 +167,7 @@ namespace ChatterMascot.Desktop
 
                 if (Time.realtimeSinceStartup > _deadline)
                 {
-                    Debug.LogWarning("[Mascot] ウィンドウを掴めないので座標系を測れませんでした: " +
+                    Debug.LogWarning("[Mascot] Could not grab the window, so the coordinate system was not measured: " +
                                      $"clientSize={client} Screen={Screen.width}x{Screen.height}px");
                     Destroy(gameObject);
                 }
@@ -182,7 +182,7 @@ namespace ChatterMascot.Desktop
 
             private void MoveTo(Vector2 position, string label)
             {
-                Debug.Log($"[Mascot] 窓の実測: {label} へ {Fmt(position)} を入れます " +
+                Debug.Log($"[Mascot] Window probe: moving to {label} at {Fmt(position)} " +
                           $"(freePositioning={_controller.isFreePositioningEnabled})");
                 _controller.windowPosition = position;
             }
@@ -195,7 +195,7 @@ namespace ChatterMascot.Desktop
             private void Report(string phase)
             {
                 var sb = new StringBuilder(256);
-                sb.Append("[Mascot] 窓の実測(").Append(phase).Append("): ");
+                sb.Append("[Mascot] Window probe (").Append(phase).Append("): ");
 
                 var count = UniWindowController.GetMonitorCount();
                 sb.Append("monitors=").Append(count);

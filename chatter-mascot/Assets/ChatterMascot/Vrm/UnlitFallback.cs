@@ -52,7 +52,7 @@ namespace ChatterMascot.Vrm
             if (unlitShader == null)
             {
                 Debug.LogWarning(
-                    $"[Mascot] {VrmMaterialCheck.UniUnlitShaderName} が見つからないので MToon の差し替えをスキップしました");
+                    $"[Mascot] {VrmMaterialCheck.UniUnlitShaderName} not found, skipping the MToon replacement");
                 return 0;
             }
 

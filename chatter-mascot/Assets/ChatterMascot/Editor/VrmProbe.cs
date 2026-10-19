@@ -32,13 +32,13 @@ namespace ChatterMascot.EditorTools
             var path = candidates.Select(c => c.Path).FirstOrDefault(System.IO.File.Exists);
             if (path == null)
             {
-                Log("モデルが見つからないのでスキップします。探した順:" +
+                Log("Model not found, skipping. Search order:" +
                     VrmAssetLoader.DescribeCandidates(candidates));
                 EditorApplication.Exit(0);
                 return;
             }
 
-            Debug.Log($"[VrmProbe] 読みます: {path}");
+            Debug.Log($"[VrmProbe] Loading: {path}");
 
             Vrm10Instance instance = null;
             try
@@ -56,14 +56,14 @@ namespace ChatterMascot.EditorTools
             }
             catch (System.Exception e)
             {
-                Debug.LogError("[VrmProbe] 読み込みに失敗しました: " + e);
+                Debug.LogError("[VrmProbe] Load failed: " + e);
                 EditorApplication.Exit(1);
                 return;
             }
 
             if (instance == null)
             {
-                Debug.LogError("[VrmProbe] 読み込みに失敗しました（null が返りました）");
+                Debug.LogError("[VrmProbe] Load failed (returned null)");
                 EditorApplication.Exit(1);
                 return;
             }
@@ -79,7 +79,7 @@ namespace ChatterMascot.EditorTools
             //   反転するのを避けるためで、probe は ControlRig を駆動しないため関係ない。
             //   **ただし probe がアニメーションを扱うようになったら Adopt と同じ順序を再現すること**
             var yaw = VrmStage.FaceCamera(instance);
-            Debug.Log($"[VrmProbe] faceCamera yaw: {yaw:F0} 度");
+            Debug.Log($"[VrmProbe] faceCamera yaw: {yaw:F0} deg");
 
             Describe(instance);
             EditorApplication.Exit(0);
@@ -162,7 +162,7 @@ namespace ChatterMascot.EditorTools
                 var keys = clips.Select(pair =>
                 {
                     var name = pair.Preset == ExpressionPreset.custom ? pair.Clip.name : pair.Preset.ToString();
-                    return VrmCharacter.HasBindings(pair.Clip) ? name : name + "(空)";
+                    return VrmCharacter.HasBindings(pair.Clip) ? name : name + "(empty)";
                 });
                 text.Append("\n  expressions: ").Append(string.Join(", ", keys.OrderBy(k => k)));
 
@@ -183,9 +183,9 @@ namespace ChatterMascot.EditorTools
                                     + $" mouth={pair.Clip.OverrideMouth})")
                     .OrderBy(k => k)
                     .ToList();
-                text.Append("\n  expression の特記: ")
+                text.Append("\n  expression quirks: ")
                     .Append(quirks.Count == 0
-                        ? "なし（全部 isBinary=false / override=none）"
+                        ? "none (all isBinary=false / override=none)"
                         : string.Join(", ", quirks));
             }
 
@@ -250,7 +250,7 @@ namespace ChatterMascot.EditorTools
             //   プロジェクトルート基準で評価されるので、そこに置くと**同梱より上位で当たる**
             //   （PR #69 の再レビューで判明。再現手順:
             //   `mkdir -p models && cp Assets/StreamingAssets/vita.vrm models/mascot.vrm` →
-            //   probe を回すと `[VrmProbe] 読みます: models/mascot.vrm` と出て同梱を読まない）。
+            //   probe を回すと `[VrmProbe] Loading: models/mascot.vrm` と出て同梱を読まない）。
             //   `Join` を「空の基準からは候補を作らない（null を返す）」に直したことで、
             //   この行は宣言どおり「この段を消す」という意味になった。
             env.PersistentDataPath = "";

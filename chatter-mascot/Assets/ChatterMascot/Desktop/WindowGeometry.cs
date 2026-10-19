@@ -127,13 +127,13 @@ namespace ChatterMascot.Desktop
             }
             catch (Exception e)
             {
-                Debug.LogWarning("[Mascot] ウィンドウの保存を消せませんでした: " + e.Message);
+                Debug.LogWarning("[Mascot] Could not delete the saved window state: " + e.Message);
             }
 
             var keeper = _keeper;
             if (keeper == null)
             {
-                Debug.Log("[Mascot] ウィンドウの管理が動いていないので、位置のリセットは次の起動から効きます");
+                Debug.Log("[Mascot] Window management is not running, so the position reset takes effect from the next launch");
                 return;
             }
             keeper.ResetToDefault();
@@ -356,7 +356,7 @@ namespace ChatterMascot.Desktop
 
                 if (Time.realtimeSinceStartup > _deadline)
                 {
-                    Debug.LogWarning("[Mascot] ウィンドウを掴めないので位置を復元しません: " +
+                    Debug.LogWarning("[Mascot] Could not grab the window, so the position is not restored: " +
                                      $"clientSize={client}");
                     Destroy(gameObject);
                 }
@@ -378,7 +378,7 @@ namespace ChatterMascot.Desktop
                 var from = _phase == Phase.Applying ? _wanted : _lastSeen.IsValid ? _lastSeen : Current();
                 if (!from.IsValid)
                 {
-                    Debug.LogWarning("[Mascot] いまのウィンドウを読めないので、大きさを変えられません");
+                    Debug.LogWarning("[Mascot] Cannot read the current window, so it cannot be resized");
                     return;
                 }
                 BeginApplying(new WindowState(from, _signature));
@@ -413,8 +413,8 @@ namespace ChatterMascot.Desktop
                 //   ユーザーが端に寄せた窓が押し戻される
                 if (layout.HasMonitors) _signature = layout.Signature;
 
-                Debug.Log($"[Mascot] ウィンドウ: {placement.Reason} monitor={placement.MonitorIndex} " +
-                          $"rect={placement.Rect} 保存={(from.Rect.IsValid ? from.Rect.ToString() : "なし")} " +
+                Debug.Log($"[Mascot] Window: {placement.Reason} monitor={placement.MonitorIndex} " +
+                          $"rect={placement.Rect} saved={(from.Rect.IsValid ? from.Rect.ToString() : "none")} " +
                           $"displays={layout.Signature}");
 
                 _wanted = placement.Rect;
@@ -440,8 +440,8 @@ namespace ChatterMascot.Desktop
 
                 if (_corrections >= MaxCorrections || Time.realtimeSinceStartup > _applyDeadline)
                 {
-                    Debug.LogWarning($"[Mascot] ウィンドウを {_wanted} にできませんでした（実際は {actual}）。" +
-                                     "そのまま使います");
+                    Debug.LogWarning($"[Mascot] Could not set the window to {_wanted} (actual: {actual}). " +
+                                     "Keeping it as is");
                     _phase = Phase.Watching;
                     _lastSeen = actual;
                     // ★ 諦めた矩形を「保存済み」として覚える。**書きはしない** ——
@@ -453,7 +453,7 @@ namespace ChatterMascot.Desktop
                 }
 
                 _corrections++;
-                Debug.Log($"[Mascot] ウィンドウを直します ({_corrections}/{MaxCorrections}): " +
+                Debug.Log($"[Mascot] Correcting the window ({_corrections}/{MaxCorrections}): " +
                           $"{actual} → {_wanted}");
                 Write(_wanted);
             }
@@ -507,8 +507,8 @@ namespace ChatterMascot.Desktop
 
                 // ★ 指紋は「その位置を選んだときの構成」のまま渡す。食い違うことが、
                 //   そのまま「厳しい方の閾値を使う」条件になる
-                Debug.Log("[Mascot] ディスプレイ構成が変わりました。ウィンドウを置き直します" +
-                          $"（{_reapplyFrom}）");
+                Debug.Log("[Mascot] Display layout changed. Repositioning the window " +
+                          $"({_reapplyFrom})");
                 BeginApplying(new WindowState(_reapplyFrom, _saved.DisplaySignature));
             }
 
@@ -569,8 +569,8 @@ namespace ChatterMascot.Desktop
                 if (_saveFailures >= MaxSaveFailures && !_gaveUpSaving)
                 {
                     _gaveUpSaving = true;
-                    Debug.LogWarning("[Mascot] ウィンドウの保存に繰り返し失敗したので、以後あきらめます。" +
-                                     "次の起動では前回の位置に戻ります");
+                    Debug.LogWarning("[Mascot] Saving the window state failed repeatedly; giving up. " +
+                                     "The next launch will restore the previous position");
                 }
             }
 
@@ -608,7 +608,7 @@ namespace ChatterMascot.Desktop
             /// </summary>
             private void WriteState(string text)
             {
-                if (string.IsNullOrEmpty(_statePath)) throw new IOException("保存先を決められません");
+                if (string.IsNullOrEmpty(_statePath)) throw new IOException("Cannot determine the save path");
 
                 var directory = Path.GetDirectoryName(_statePath);
                 if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);

@@ -489,7 +489,7 @@ namespace ChatterMascot.Xr
                     return;
 
                 default:
-                    Debug.LogWarning($"[Mascot] XR settings: 知らない設定のキーです: \"{key}\"");
+                    Debug.LogWarning($"[Mascot] XR settings: unknown settings key: \"{key}\"");
                     return;
             }
         }
@@ -509,7 +509,7 @@ namespace ChatterMascot.Xr
             }
             catch (Exception e)
             {
-                Debug.LogWarning("[Mascot] XR settings: ペアリングで例外が出ました: " + e);
+                Debug.LogWarning("[Mascot] XR settings: exception while pairing: " + e);
                 if (this == null) return;
                 Notice(SettingKeys.PairingClaim, _context.Text.XrPairUnreachable);
             }
@@ -541,7 +541,7 @@ namespace ChatterMascot.Xr
             Notice(SettingKeys.PairingClaim, done);
             if (result.Kind != PairingKind.Paired) return;
 
-            Debug.Log("[Mascot] XR settings: ペアリングして繋ぎ直しました");
+            Debug.Log("[Mascot] XR settings: paired and reconnected");
             DeviceToast.Show(done);
         }
 
@@ -556,7 +556,7 @@ namespace ChatterMascot.Xr
             var host = MascotSettingsHost.Instance;
             if (host != null) host.Apply(host.Current.WithXrHeight(targetCm.Value));
 
-            Debug.Log($"[Mascot] XR settings: 大きさを {targetCm.Value:F0}cm に変えました");
+            Debug.Log($"[Mascot] XR settings: size changed to {targetCm.Value:F0}cm");
         }
 
         /// <summary>
@@ -659,16 +659,16 @@ namespace ChatterMascot.Xr
             var mode = palmVisible ? InvokerMode.Palm : gearVisible ? InvokerMode.Gear : InvokerMode.None;
             if (mode == _invokerMode) return;
             _invokerMode = mode;
-            Debug.Log($"[Mascot] XR: 呼び出し口 → {InvokerModeLabel(mode)}");
+            Debug.Log($"[Mascot] XR: invoker → {InvokerModeLabel(mode)}");
         }
 
         private static string InvokerModeLabel(InvokerMode mode)
         {
             switch (mode)
             {
-                case InvokerMode.Palm: return "手のひら";
-                case InvokerMode.Gear: return "歯車";
-                default: return "なし";
+                case InvokerMode.Palm: return "palm";
+                case InvokerMode.Gear: return "gear";
+                default: return "none";
             }
         }
 
@@ -733,7 +733,7 @@ namespace ChatterMascot.Xr
             else
             {
                 // ★ XrWalkAreaView が WalkArea マテリアルを読めないときと同じ扱い（画像が無くても壊さない）
-                Debug.LogWarning("[Mascot] XR settings: SettingsIcon を読めないので ⚙ で代用します");
+                Debug.LogWarning("[Mascot] XR settings: could not load SettingsIcon, using ⚙ instead");
                 var text = iconGo.AddComponent<Text>();
                 // ★ TMP は使わない（日本語フォントアセットが要る）
                 text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");

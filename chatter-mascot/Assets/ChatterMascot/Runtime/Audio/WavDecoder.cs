@@ -67,13 +67,13 @@ namespace ChatterMascot.Audio
             error = null;
             if (wav == null || wav.Length < 12)
             {
-                error = "WAV が短すぎます";
+                error = "WAV is too short";
                 return false;
             }
 
             if (!Matches(wav, 0, "RIFF") || !Matches(wav, 8, "WAVE"))
             {
-                error = "RIFF/WAVE ヘッダがありません";
+                error = "RIFF/WAVE header is missing";
                 return false;
             }
 
@@ -105,12 +105,12 @@ namespace ChatterMascot.Audio
                     //   （Int32 では -1）のことがある。参照実装も data の分岐の中でだけ
                     //   測り直している（core/src/player/audioPlayer.ts）。
                     // ★ <b>0 を弾かないこと。</b> 合成側が data サイズを後追いで埋める書き方に
-                    //   変えただけで、全フレームが「data チャンクがありません」になり、
+                    //   変えただけで、全フレームが「data chunk is missing」になり、
                     //   **1文も鳴らないまま無言でスキップされる**（AudioFailed → 1回リトライ →
-                    //   「seq=N の音声を取れなかったので飛ばします」）。
+                    //   「Skipping seq=N because its audio could not be fetched」）。
                     // ★ <b>この測り直しを全チャンクに広げないこと。</b> 広げると、
                     //   <b>data より手前に長さ 0 のチャンク（LIST / fact など）が1つあるだけで</b>
-                    //   走査が末尾まで飛び、data に到達しないまま「data チャンクがありません」になる。
+                    //   走査が末尾まで飛び、data に到達しないまま「data chunk is missing」になる。
                     var usable = declared > 0 && declared <= available;
                     dataLength = usable ? declared : available;
 
@@ -153,18 +153,18 @@ namespace ChatterMascot.Audio
 
             if (channels == 0 || sampleRate <= 0 || bitsPerSample == 0)
             {
-                error = "fmt チャンクが読めません";
+                error = "cannot read fmt chunk";
                 return false;
             }
             if (dataOffset < 0)
             {
-                error = "data チャンクがありません";
+                error = "data chunk is missing";
                 return false;
             }
             // 実体で測り直しても 0 なら、本当に中身が無い
             if (dataLength <= 0)
             {
-                error = "data チャンクが空です";
+                error = "data chunk is empty";
                 return false;
             }
 
@@ -214,7 +214,7 @@ namespace ChatterMascot.Audio
             var perChannel = samples.Length / header.Channels;
             if (perChannel <= 0)
             {
-                error = "サンプルが空です";
+                error = "samples are empty";
                 return null;
             }
 
@@ -306,7 +306,7 @@ namespace ChatterMascot.Audio
             var count = length / stride;
             if (dest == null || dest.Length < count)
             {
-                error = $"サンプル用のバッファが足りません ({count} 要素必要)";
+                error = $"sample buffer is too small ({count} elements required)";
                 return false;
             }
 
@@ -371,13 +371,13 @@ namespace ChatterMascot.Audio
             error = null;
             if (wav == null)
             {
-                error = "WAV がありません";
+                error = "WAV is missing";
                 return false;
             }
             // offset + length は int で溢れうるので long で見る
             if (offset < 0 || length < 0 || (long)offset + length > wav.Length)
             {
-                error = $"WAV の範囲外を読もうとしました (offset={offset}, length={length}, size={wav.Length})";
+                error = $"tried to read outside the WAV (offset={offset}, length={length}, size={wav.Length})";
                 return false;
             }
             return true;
@@ -393,8 +393,8 @@ namespace ChatterMascot.Audio
         internal static string DescribeUnsupported(ushort format, ushort bitsPerSample)
         {
             return format != FormatPcm
-                ? $"対応していない WAV フォーマットです (format={format}, bits={bitsPerSample})"
-                : $"対応していないビット深度です ({bitsPerSample}bit)";
+                ? $"unsupported WAV format (format={format}, bits={bitsPerSample})"
+                : $"unsupported bit depth ({bitsPerSample}bit)";
         }
 
         private static bool Matches(byte[] data, int offset, string tag)

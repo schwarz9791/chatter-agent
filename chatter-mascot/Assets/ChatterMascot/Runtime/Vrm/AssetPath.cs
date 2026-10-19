@@ -57,13 +57,13 @@ namespace ChatterMascot.Vrm
         {
             switch (source)
             {
-                case AssetSource.CommandLine: return "起動引数";
-                case AssetSource.EnvironmentVariable: return "環境変数";
-                case AssetSource.Settings: return "設定";
+                case AssetSource.CommandLine: return "command line";
+                case AssetSource.EnvironmentVariable: return "environment variable";
+                case AssetSource.Settings: return "settings";
                 case AssetSource.PersistentData: return "persistentDataPath";
-                case AssetSource.Synced: return "同期";
-                case AssetSource.UserConfig: return "ユーザー設定";
-                case AssetSource.StreamingAssets: return "同梱";
+                case AssetSource.Synced: return "synced";
+                case AssetSource.UserConfig: return "user settings";
+                case AssetSource.StreamingAssets: return "bundled";
                 default: return source.ToString();
             }
         }

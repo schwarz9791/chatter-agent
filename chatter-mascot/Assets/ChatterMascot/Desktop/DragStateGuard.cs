@@ -133,16 +133,16 @@ namespace ChatterMascot.Desktop
                 {
                     _recovered++;
                     Debug.LogWarning(
-                        $"[Mascot] ドラッグ終了の取りこぼしから復帰しました（{_recovered} 回目 / " +
-                        $"ハンドル {handed} 件）。クリック透過が効かない状態が続いていました");
+                        $"[Mascot] Recovered from a missed drag end (count={_recovered}, " +
+                        $"handles={handed}). Click-through had stayed disabled");
                     return;
                 }
 
                 _controller.isHitTestEnabled = true;
                 _recovered++;
                 Debug.LogWarning(
-                    $"[Mascot] ヒットテストを直接戻しました（{_recovered} 回目 / " +
-                    $"掴んだままのハンドル {handed} 件）。ハンドル側では戻せない状態でした");
+                    $"[Mascot] Restored hit testing directly (count={_recovered}, " +
+                    $"held handles={handed}). The handles could not restore it");
             }
 
             /// <summary>

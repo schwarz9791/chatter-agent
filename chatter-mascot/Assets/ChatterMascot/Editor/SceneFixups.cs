@@ -63,7 +63,7 @@ namespace ChatterMascot.EditorTools
             {
                 if (!System.IO.File.Exists(path))
                 {
-                    Debug.Log($"[Fixups] {path} は無いので飛ばします");
+                    Debug.Log($"[Fixups] {path} not found, skipping");
                     continue;
                 }
 
@@ -86,11 +86,11 @@ namespace ChatterMascot.EditorTools
                     EditorSceneManager.MarkSceneDirty(scene);
                     EditorSceneManager.SaveScene(scene);
                     changed++;
-                    Debug.Log($"[Fixups] {path} に足しました: {string.Join(", ", fixes)}");
+                    Debug.Log($"[Fixups] Added to {path}: {string.Join(", ", fixes)}");
                 }
                 else
                 {
-                    Debug.Log($"[Fixups] {path} は問題なし");
+                    Debug.Log($"[Fixups] {path} is fine");
                 }
             }
 
@@ -102,7 +102,7 @@ namespace ChatterMascot.EditorTools
             AssertRendererFeatures();
             AssertDefaultWindowSize();
 
-            Debug.Log($"[Fixups] 完了（{changed} 件を更新）");
+            Debug.Log($"[Fixups] Done (updated={changed})");
             EditorApplication.Exit(0);
         }
 
@@ -126,7 +126,7 @@ namespace ChatterMascot.EditorTools
                 new EditorBuildSettingsScene(ProductionScene, true),
             };
             EditorBuildSettings.scenes = scenes.ToArray();
-            Debug.Log($"[Fixups] ビルド対象シーンを {ProductionScene} にしました");
+            Debug.Log($"[Fixups] Set build scene to {ProductionScene}");
             return true;
         }
 
@@ -274,8 +274,8 @@ namespace ChatterMascot.EditorTools
             {
                 // ★ EnsureVrmStage が必ず先に作るはずだが、呼び出し順が入れ替わったときに
                 //   静かに何もしないより、原因が分かるログを残す
-                Debug.LogWarning($"[Fixups] {AnchorName} が無いので {nameof(VrmCharacter)} を足せません" +
-                                  $"（{nameof(EnsureVrmStage)} より後に呼びましたか？）");
+                Debug.LogWarning($"[Fixups] {AnchorName} not found, cannot add {nameof(VrmCharacter)}" +
+                                  $" (was it called after {nameof(EnsureVrmStage)}?)");
                 return fixes;
             }
 
@@ -306,13 +306,13 @@ namespace ChatterMascot.EditorTools
             }
             else
             {
-                Debug.LogWarning("[Fixups] Camera.main が無いので GazeTarget を作れません");
+                Debug.LogWarning("[Fixups] Camera.main not found, cannot create GazeTarget");
             }
 
             var stage = Object.FindFirstObjectByType<VrmStage>(FindObjectsInactive.Include);
             if (stage == null)
             {
-                Debug.LogWarning($"[Fixups] {nameof(VrmStage)} が見つからないので {nameof(VrmCharacter)}.stage を結線できません");
+                Debug.LogWarning($"[Fixups] {nameof(VrmStage)} not found, cannot wire {nameof(VrmCharacter)}.stage");
             }
 
             var runner = Object.FindFirstObjectByType<MascotRunner>(FindObjectsInactive.Include);
@@ -321,8 +321,8 @@ namespace ChatterMascot.EditorTools
                 // ★ VrmCharacter.Start の FindFirstObjectByType<MascotRunner>() フォールバックが
                 //   効くので致命ではないが、両方無いと「喋っている」が常に false になり、
                 //   kind: "prompt" の区別と発話中のゲイン、それに口の動き（#58）が丸ごと無効になる
-                Debug.LogWarning($"[Fixups] {nameof(MascotRunner)} が見つからないので {nameof(VrmCharacter)}.runner を結線できません" +
-                                  $"（{nameof(VrmCharacter)}.Start のフォールバックはあるが、両方無いと発話が一切観測できない）");
+                Debug.LogWarning($"[Fixups] {nameof(MascotRunner)} not found, cannot wire {nameof(VrmCharacter)}.runner" +
+                                  $" ({nameof(VrmCharacter)}.Start has a fallback, but with neither present no speech can be observed)");
             }
 
             // ★ [SerializeField] は Inspector からしか繋がらないので、ここで繋ぐ
@@ -381,8 +381,8 @@ namespace ChatterMascot.EditorTools
                 var shader = Shader.Find(name);
                 if (shader == null)
                 {
-                    Debug.LogError($"[Fixups] シェーダーが見つかりません: {name}" +
-                                   "（UniVRM が入っていない可能性があります）");
+                    Debug.LogError($"[Fixups] Shader not found: {name}" +
+                                   " (UniVRM may not be installed)");
                     continue;
                 }
                 wanted.Add(shader);
@@ -394,7 +394,7 @@ namespace ChatterMascot.EditorTools
                 var assets = AssetDatabase.LoadAllAssetsAtPath(GraphicsSettingsPath);
                 if (assets == null || assets.Length == 0 || assets[0] == null)
                 {
-                    Debug.LogError($"[Fixups] {GraphicsSettingsPath} を読めませんでした");
+                    Debug.LogError($"[Fixups] Could not read {GraphicsSettingsPath}");
                     return false;
                 }
 
@@ -402,7 +402,7 @@ namespace ChatterMascot.EditorTools
                 var list = serialized.FindProperty("m_AlwaysIncludedShaders");
                 if (list == null)
                 {
-                    Debug.LogError("[Fixups] m_AlwaysIncludedShaders が見つかりません");
+                    Debug.LogError("[Fixups] m_AlwaysIncludedShaders not found");
                     return false;
                 }
 
@@ -427,12 +427,12 @@ namespace ChatterMascot.EditorTools
 
                 serialized.ApplyModifiedPropertiesWithoutUndo();
                 AssetDatabase.SaveAssets();
-                Debug.Log($"[Fixups] Always Included Shaders に足しました: {string.Join(", ", added)}");
+                Debug.Log($"[Fixups] Added to Always Included Shaders: {string.Join(", ", added)}");
                 return true;
             }
             catch (System.Exception e)
             {
-                Debug.LogError("[Fixups] GraphicsSettings を操作できませんでした: " + e.Message);
+                Debug.LogError("[Fixups] Could not modify GraphicsSettings: " + e.Message);
                 return false;
             }
         }
@@ -459,10 +459,10 @@ namespace ChatterMascot.EditorTools
             if (width == wantedWidth && height == wantedHeight) return;
 
             Debug.LogError(
-                $"[Fixups] Default Screen Width/Height ({width}x{height}) と " +
-                $"WindowGeometry の既定 ({wantedWidth}x{wantedHeight}pt) が食い違っています。" +
-                "起動時の大きさを決めるのは WindowGeometry の方なので、" +
-                "ProjectSettings だけ変えても窓の大きさは変わりません");
+                $"[Fixups] Default Screen Width/Height ({width}x{height}) and " +
+                $"WindowGeometry default ({wantedWidth}x{wantedHeight}pt) differ. " +
+                "WindowGeometry decides the startup size, " +
+                "so changing only ProjectSettings does not change the window size");
         }
 
         /// <summary>
@@ -482,8 +482,8 @@ namespace ChatterMascot.EditorTools
                 var mode = new SerializedObject(asset).FindProperty("m_RenderingMode");
                 if (mode == null || mode.intValue == 0) continue;
 
-                Debug.LogError($"[Fixups] {path} が Forward ではありません（m_RenderingMode: {mode.intValue}）。" +
-                               "MToon10(URP) に UniversalGBuffer パスは無いので Forward にしてください");
+                Debug.LogError($"[Fixups] {path} is not Forward (m_RenderingMode: {mode.intValue}). " +
+                               "MToon10 (URP) has no UniversalGBuffer pass, so set it to Forward");
             }
         }
 
@@ -506,8 +506,8 @@ namespace ChatterMascot.EditorTools
                 }
                 if (found) continue;
 
-                Debug.LogError($"[Fixups] {path} に {OutlineFeatureType} がありません。" +
-                               "アウトラインが出ません（Inspector の Add Renderer Feature から足してください）");
+                Debug.LogError($"[Fixups] {path} has no {OutlineFeatureType}. " +
+                               "Outlines will not render (add it via Add Renderer Feature in the Inspector)");
             }
         }
     }

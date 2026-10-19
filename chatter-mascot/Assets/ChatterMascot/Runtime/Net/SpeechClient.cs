@@ -180,7 +180,7 @@ namespace ChatterMascot.Net
             }
             catch (Exception e)
             {
-                Warn?.Invoke("再接続ループが止まりました（アプリの再起動が要ります）: " + e);
+                Warn?.Invoke("Reconnect loop stopped (app restart required): " + e);
             }
         }
 
@@ -211,7 +211,7 @@ namespace ChatterMascot.Net
                     {
                         if (_closed) break;
                         _consecutiveConnectFailures++;
-                        Warn?.Invoke($"接続エラー: 接続が {ConnectTimeoutMs / 1000} 秒以内に確立しませんでした");
+                        Warn?.Invoke($"Connection error: connection was not established within {ConnectTimeoutMs / 1000} seconds");
                         AbortAndDispose(socket);
                         await BackoffAsync();
                         continue;
@@ -222,10 +222,10 @@ namespace ChatterMascot.Net
                         _consecutiveConnectFailures++;
                         // 起動直後にサーバーが居ないのは通常のこと。毎回スタックを出さない
                         var detail = DescribeExceptionChain(e);
-                        var message = "接続エラー: " + detail;
+                        var message = "Connection error: " + detail;
                         if (LooksUnauthorized(detail))
                         {
-                            message += "。トークンが無いか違います（settings.json の connection.token）";
+                            message += ". Token missing or invalid (connection.token in settings.json)";
                         }
                         Warn?.Invoke(message);
                         AbortAndDispose(socket);
@@ -238,7 +238,7 @@ namespace ChatterMascot.Net
                 _openedAtMs = NowMs();
                 _lastReceivedAtMs = _openedAtMs;
                 _warnedAckFailure = false;
-                Log?.Invoke("接続しました: " + _url);
+                Log?.Invoke("Connected: " + _url);
                 SafeInvoke(Connected, "Connected");
 
                 await ReceiveLoopAsync(socket);
@@ -255,7 +255,7 @@ namespace ChatterMascot.Net
                 if (_openedAtMs != 0 && NowMs() - _openedAtMs >= BackoffResetAfterMs) _attempt = 0;
                 _openedAtMs = 0;
 
-                Warn?.Invoke("切断されました" + closeDetail + "。繋ぎ直します");
+                Warn?.Invoke("Disconnected" + closeDetail + ". Reconnecting");
                 SafeInvoke(Disconnected, "Disconnected");
                 await BackoffAsync();
             }
@@ -281,7 +281,7 @@ namespace ChatterMascot.Net
             }
             catch (Exception e)
             {
-                Warn?.Invoke(what + " の購読者が例外を投げました（無視して続けます）: " + e.Message);
+                Warn?.Invoke(what + " subscriber threw an exception (ignored, continuing): " + e.Message);
             }
         }
 
@@ -317,7 +317,7 @@ namespace ChatterMascot.Net
                 return string.Empty;
             }
 
-            if (status == null) return "（close フレーム無し。サーバーの terminate か、こちらの watchdog）";
+            if (status == null) return " (no close frame: server-side terminate or our watchdog)";
 
             // ★ 1013（try again later）は WebSocketCloseStatus に定義が無いので数値で出す
             var code = ((int)status.Value).ToString();
@@ -404,7 +404,7 @@ namespace ChatterMascot.Net
 
                         if (message.Length + result.Count > MaxFrameBytes)
                         {
-                            Warn?.Invoke($"1フレームが {MaxFrameBytes / (1024 * 1024)}MB を超えました。接続し直します");
+                            Warn?.Invoke($"A frame exceeded {MaxFrameBytes / (1024 * 1024)}MB. Reconnecting");
                             break;
                         }
 
@@ -424,7 +424,7 @@ namespace ChatterMascot.Net
                         }
                         catch (Exception e)
                         {
-                            Warn?.Invoke("フレームの処理で例外が出ました（このフレームは捨てます）: " + e.Message);
+                            Warn?.Invoke("Exception while handling a frame (dropping this frame): " + e.Message);
                         }
                     }
                 }
@@ -435,7 +435,7 @@ namespace ChatterMascot.Net
             }
             catch (Exception e)
             {
-                if (!_closed) Warn?.Invoke("受信でエラー: " + e.Message);
+                if (!_closed) Warn?.Invoke("Receive error: " + e.Message);
             }
         }
 
@@ -502,7 +502,7 @@ namespace ChatterMascot.Net
             if (socket != null && socket.State == WebSocketState.Open &&
                 _lastReceivedAtMs != 0 && now - _lastReceivedAtMs > SilenceWatchdogMs)
             {
-                Warn?.Invoke("サーバーから何も届かない状態が続いています。接続し直します");
+                Warn?.Invoke("Nothing has arrived from the server for a while. Reconnecting");
                 _lastReceivedAtMs = now;
                 // Close ではなく Abort。half-open では close ハンドシェイクが返ってこない
                 try { socket.Abort(); } catch (Exception) { /* 既に閉じている */ }
@@ -562,7 +562,7 @@ namespace ChatterMascot.Net
                 if (!_warnedAckFailure)
                 {
                     _warnedAckFailure = true;
-                    Warn?.Invoke("ack の送信に失敗しました（次の機会に送り直します）: " + e.Message);
+                    Warn?.Invoke("Failed to send ack (will resend next time): " + e.Message);
                 }
                 _ackDeadlineMs = NowMs() + AckRetryMs;
             }
@@ -613,12 +613,12 @@ namespace ChatterMascot.Net
             {
                 if (_pendingAckSeq == null)
                 {
-                    Log?.Invoke($"終了時に保留していた ack を送りました (seq={pendingAtClose})");
+                    Log?.Invoke($"Sent the ack pending at shutdown (seq={pendingAtClose})");
                 }
                 else
                 {
-                    Warn?.Invoke($"終了時に ack を送れませんでした (seq={pendingAtClose})。" +
-                                 "次回起動でその文がもう一度鳴ります");
+                    Warn?.Invoke($"Failed to send ack at shutdown (seq={pendingAtClose}). " +
+                                 "That sentence will be spoken again on next launch");
                 }
             }
 

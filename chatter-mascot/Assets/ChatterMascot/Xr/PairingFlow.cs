@@ -84,7 +84,7 @@ namespace ChatterMascot.Xr
                     var result = await RunAsync(host, runner, pin);
                     if (result.Kind == PairingKind.Paired)
                     {
-                        Debug.Log("[Mascot] ペアリングして繋ぎ直しました");
+                        Debug.Log("[Mascot] Paired and reconnected");
                         DeviceToast.Show(PairingClient.Describe(result, text));
                         return;
                     }
@@ -95,7 +95,7 @@ namespace ChatterMascot.Xr
             }
             catch (Exception e)
             {
-                Debug.LogWarning("[Mascot] ペアリングのダイアログで例外が出ました: " + e);
+                Debug.LogWarning("[Mascot] Exception in the pairing dialog: " + e);
             }
         }
     }

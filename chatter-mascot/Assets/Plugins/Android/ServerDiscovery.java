@@ -37,34 +37,34 @@ public final class ServerDiscovery {
         return new NsdManager.DiscoveryListener() {
             @Override
             public void onDiscoveryStarted(String serviceType) {
-                Log.i(TAG, "ServerDiscovery: 探索を始めました: " + serviceType);
+                Log.i(TAG, "ServerDiscovery: discovery started: " + serviceType);
             }
 
             @Override
             public void onServiceFound(NsdServiceInfo info) {
-                Log.i(TAG, "ServerDiscovery: 見つけました: " + info.getServiceName());
+                Log.i(TAG, "ServerDiscovery: service found: " + info.getServiceName());
                 if (result.get() != null || !resolving.compareAndSet(false, true)) return;
                 resolve(info);
             }
 
             @Override
             public void onServiceLost(NsdServiceInfo info) {
-                Log.i(TAG, "ServerDiscovery: 消えました: " + info.getServiceName());
+                Log.i(TAG, "ServerDiscovery: service lost: " + info.getServiceName());
             }
 
             @Override
             public void onDiscoveryStopped(String serviceType) {
-                Log.i(TAG, "ServerDiscovery: 探索を止めました");
+                Log.i(TAG, "ServerDiscovery: discovery stopped");
             }
 
             @Override
             public void onStartDiscoveryFailed(String serviceType, int errorCode) {
-                Log.w(TAG, "ServerDiscovery: 探索を始められません: error=" + errorCode);
+                Log.w(TAG, "ServerDiscovery: cannot start discovery: error=" + errorCode);
             }
 
             @Override
             public void onStopDiscoveryFailed(String serviceType, int errorCode) {
-                Log.w(TAG, "ServerDiscovery: 探索を止められません: error=" + errorCode);
+                Log.w(TAG, "ServerDiscovery: cannot stop discovery: error=" + errorCode);
             }
         };
     }
@@ -76,7 +76,7 @@ public final class ServerDiscovery {
         nsd.resolveService(info, new NsdManager.ResolveListener() {
             @Override
             public void onResolveFailed(NsdServiceInfo failed, int errorCode) {
-                Log.w(TAG, "ServerDiscovery: 解決できません: " + failed.getServiceName() + " error=" + errorCode);
+                Log.w(TAG, "ServerDiscovery: cannot resolve: " + failed.getServiceName() + " error=" + errorCode);
                 resolving.set(false);
             }
 
@@ -92,7 +92,7 @@ public final class ServerDiscovery {
                     String.valueOf(resolved.getPort()),
                     resolved.getServiceName(),
                 });
-                Log.i(TAG, "ServerDiscovery: 解決しました: " + resolved.getServiceName());
+                Log.i(TAG, "ServerDiscovery: resolved: " + resolved.getServiceName());
             }
         });
     }

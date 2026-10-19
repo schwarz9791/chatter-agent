@@ -47,8 +47,8 @@ namespace ChatterMascot.Tests
             var message = VrmaKeyframes.Describe("happy_01.vrma", 1, 243);
 
             StringAssert.Contains("happy_01.vrma", message);
-            StringAssert.Contains("1 つ", message);
-            StringAssert.Contains("243 キー", message);
+            StringAssert.Contains("count=1", message);
+            StringAssert.Contains("keys=243", message);
         }
     }
 }

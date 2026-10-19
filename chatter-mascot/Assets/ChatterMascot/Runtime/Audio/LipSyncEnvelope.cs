@@ -33,7 +33,7 @@ namespace ChatterMascot.Audio
         /// ★ <b>呼び出し側に書き写さないこと。</b> 逐語コピーの実体は文字列なので、
         ///   ここを畳まないと <see cref="BuildOrWarn"/> にまとめた意味が半分になる。
         /// </summary>
-        private const string BuildFailedMessage = "口の動きを作れませんでした（音は鳴ります）: ";
+        private const string BuildFailedMessage = "failed to build lip sync (audio still plays): ";
 
         /// <summary>
         /// <see cref="Build"/> して、<b>作れなかったら1回だけ</b>警告する。
@@ -78,17 +78,17 @@ namespace ChatterMascot.Audio
 
             if (wav == null)
             {
-                error = "WAV がありません";
+                error = "WAV is missing";
                 return null;
             }
             if (frameMs <= 0)
             {
-                error = $"frameMs が不正です ({frameMs})";
+                error = $"invalid frameMs ({frameMs})";
                 return null;
             }
             if (header.Channels == 0 || header.SampleRate <= 0 || header.DataLength <= 0)
             {
-                error = "ヘッダが読めていません";
+                error = "header has not been read";
                 return null;
             }
 
@@ -104,7 +104,7 @@ namespace ChatterMascot.Audio
             var totalSamples = header.DataLength / stride;
             if (totalSamples <= 0)
             {
-                error = "サンプルがありません";
+                error = "no samples";
                 return null;
             }
 

@@ -185,13 +185,13 @@ namespace ChatterMascot.Vrm
                         Adopt(target, parent, vrma);
                         // ★ 採った候補を出すこと。VrmStage と同じ理由 ——
                         //   「いま何が再生されているか」がこの1行でしか分からない
-                        Debug.Log($"[Mascot] VRMA の読み込み: {candidate}");
+                        Debug.Log($"[Mascot] Loading VRMA: {candidate}");
                         return;
                     }
 
                     // ★ VRMA が無いのは異常ではない。ここは Log 止まり（LogError にしない）
-                    Debug.Log("[Mascot] 読めて VRMA として解釈できた候補が1つもなかったので、" +
-                              "手続き的アイドルにフォールバックします。探した順:" +
+                    Debug.Log("[Mascot] No candidate could be read and parsed as VRMA, " +
+                              "falling back to the procedural idle. Searched in order:" +
                               VrmAssetLoader.DescribeCandidates(candidates));
                 }
                 catch (OperationCanceledException)
@@ -201,7 +201,7 @@ namespace ChatterMascot.Vrm
                 catch (Exception e)
                 {
                     // ★ 握ること。ここから漏らすと理由が残らない（VrmStage.LoadAsync と同じ理由）
-                    Debug.LogError("[Mascot] VRMA の読み込みで例外が出ました: " + e);
+                    Debug.LogError("[Mascot] Exception while loading VRMA: " + e);
                 }
             }
         }
@@ -220,10 +220,10 @@ namespace ChatterMascot.Vrm
             // ★ 弾かないこと（意図して表情アニメーションを乗せた VRMA かもしれない）。
             //   同梱の idle_loop.vrma は Count == 0 になるはず
             var expressionCount = vrma.ExpressionMap.Count;
-            Debug.Log($"[Mascot] VRMA の ExpressionMap: {expressionCount} 件");
+            Debug.Log($"[Mascot] VRMA ExpressionMap: count={expressionCount}");
             if (expressionCount > 0)
             {
-                Debug.LogWarning("[Mascot] この VRMA は表情アニメーションを持つので、emotion とリップシンクが上書きされます");
+                Debug.LogWarning("[Mascot] This VRMA has expression animation, so emotion and lip-sync will be overridden");
             }
 
             vrma.transform.SetParent(parent, false);
@@ -232,7 +232,7 @@ namespace ChatterMascot.Vrm
             //   要求してくる。VrmAnimation へ組み込む前に差し替えないと、最初の1フレームから
             //   指だけ伸びたまま出てしまう。詳細は FingerFallbackPoseProvider のコメント参照
             var supplied = FingerFallbackPoseProvider.Wrap(vrma);
-            Debug.Log($"[Mascot] VRMA に無い指ボーン {supplied} 本を既定の丸めで補います");
+            Debug.Log($"[Mascot] Filling finger bones missing from the VRMA with the default curl: count={supplied}");
 
             vrma.GetComponent<Animation>().Play();
 

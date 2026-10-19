@@ -73,7 +73,7 @@ public final class PinDialog {
                 dialog.show();
                 input.requestFocus();
             } catch (RuntimeException e) {
-                Log.w(TAG, "PinDialog: ダイアログを出せません: " + e);
+                Log.w(TAG, "PinDialog: cannot show dialog: " + e);
                 finish(null);
             }
         });

@@ -236,7 +236,7 @@ namespace ChatterMascot.Vrm
 
                             if (loaded.IsEmpty)
                             {
-                                Debug.LogWarning($"[Mascot] モーション {clip.Path} を読めませんでした。飛ばします");
+                                Debug.LogWarning($"[Mascot] Could not read motion {clip.Path}. Skipping");
                                 continue;
                             }
 
@@ -251,7 +251,7 @@ namespace ChatterMascot.Vrm
 
                             if (vrma == null)
                             {
-                                Debug.LogWarning($"[Mascot] モーション {clip.Path} は VRMA として解釈できませんでした。飛ばします");
+                                Debug.LogWarning($"[Mascot] Motion {clip.Path} could not be parsed as VRMA. Skipping");
                                 continue;
                             }
 
@@ -260,7 +260,7 @@ namespace ChatterMascot.Vrm
                     }
 
                     // ★ 0本は正常（ユーザーが同梱以外に何も置いていない）。LogError にしない
-                    Debug.Log($"[Mascot] モーション: {Manifest.Describe()}（読めた {loadedCount}/{Manifest.TotalCount} 本）");
+                    Debug.Log($"[Mascot] Motions: {Manifest.Describe()} (loaded {loadedCount}/{Manifest.TotalCount})");
                 }
                 catch (OperationCanceledException)
                 {
@@ -269,7 +269,7 @@ namespace ChatterMascot.Vrm
                 catch (Exception e)
                 {
                     // ★ 握ること。ここから漏らすと理由が残らない（VrmIdleAnimation.LoadAsync と同じ理由）
-                    Debug.LogError("[Mascot] モーションの読み込みで例外が出ました: " + e);
+                    Debug.LogError("[Mascot] Exception while loading motions: " + e);
                 }
                 finally
                 {
@@ -321,7 +321,7 @@ namespace ChatterMascot.Vrm
             var supplied = FingerFallbackPoseProvider.Wrap(vrma);
             if (supplied > 0)
             {
-                Debug.Log($"[Mascot] モーション {clip.FileName} に無い指ボーン {supplied} 本を既定の丸めで補います");
+                Debug.Log($"[Mascot] Filling finger bones missing from motion {clip.FileName} with the default curl: count={supplied}");
             }
 
             var animation = vrma.GetComponent<Animation>();
@@ -337,7 +337,7 @@ namespace ChatterMascot.Vrm
 
             if (state == null)
             {
-                Debug.LogWarning($"[Mascot] モーション {clip.FileName} に AnimationState がありません。飛ばします");
+                Debug.LogWarning($"[Mascot] Motion {clip.FileName} has no AnimationState. Skipping");
                 UnityEngine.Object.Destroy(vrma.gameObject);
                 return false;
             }
@@ -357,8 +357,8 @@ namespace ChatterMascot.Vrm
 
             if (vrma.ExpressionMap.Count > 0)
             {
-                Debug.LogWarning($"[Mascot] モーション {clip.FileName} は表情アニメーションを持つので、" +
-                                  "emotion とリップシンクが上書きされます");
+                Debug.LogWarning($"[Mascot] Motion {clip.FileName} has expression animation, " +
+                                  "so emotion and lip-sync will be overridden");
             }
 
             _loaded[clip] = new LoadedClip(clip, vrma, animation);
@@ -436,7 +436,7 @@ namespace ChatterMascot.Vrm
             //   （docs/knowledge/mascot-vrm.md「顔が動かないのが正常と壊れて動かないはログでしか区別できない」と同じ理由）
             // ★★ #70 レビュー #8。上で取った state をそのまま使うこと。loaded.State を
             //   もう一度引くと LoadedClip.State の doc どおり foreach を二重に走らせる無駄がある
-            Debug.Log($"[Mascot] モーション開始: {kind} {clip.FileName}（{MotionCategories.DirectoryName(clip.Category)}、{(state != null ? state.length : 0f):F1}s）");
+            Debug.Log($"[Mascot] Motion started: {kind} {clip.FileName} ({MotionCategories.DirectoryName(clip.Category)}, {(state != null ? state.length : 0f):F1}s)");
             return MotionPlayResult.Started;
         }
 
@@ -495,7 +495,7 @@ namespace ChatterMascot.Vrm
                     {
                         if (state != null)
                         {
-                            Debug.Log($"[Mascot] モーション: フェードアウト開始 time={state.time:F2} length={state.length:F2} 経過={now - _startedAt:F2}s");
+                            Debug.Log($"[Mascot] Motion: fade-out started time={state.time:F2} length={state.length:F2} elapsed={now - _startedAt:F2}s");
                         }
                         BeginFade(_current.Instance.ControlRig, _idle.Idle.ControlRig, now);
                         SetState(PlayState.FadeOut);
@@ -510,7 +510,7 @@ namespace ChatterMascot.Vrm
                     {
                         _idle.PresentIdle();
                         if (_current != null) _current.Animation.Stop();
-                        Debug.Log($"[Mascot] モーション終了: {_kind} → 待機");
+                        Debug.Log($"[Mascot] Motion ended: {_kind} → idle");
                         _current = null;
                         _fade = null;
                         SetState(PlayState.Idle);

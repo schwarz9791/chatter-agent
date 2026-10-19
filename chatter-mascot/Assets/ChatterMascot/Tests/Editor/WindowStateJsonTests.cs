@@ -74,7 +74,7 @@ namespace ChatterMascot.Tests
             Assert.That(WindowStateJson.TryParse(
                 "{\"version\":1,\"rect\":{\"x\":0,\"y\":0,\"width\":0,\"height\":480}}",
                 out _, out var error), Is.False);
-            Assert.That(error, Does.Contain("不正"));
+            Assert.That(error, Does.Contain("valid"));
         }
 
         [Test]

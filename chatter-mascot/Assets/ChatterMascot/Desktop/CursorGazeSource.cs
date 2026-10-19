@@ -181,7 +181,7 @@ namespace ChatterMascot.Desktop
             if (_character != null && _character.HasGazeOrigin)
             {
                 _loggedOnce = true;
-                Debug.Log($"[Mascot] カーソル: cursor={cursor} origin={origin} size={size} " +
+                Debug.Log($"[Mascot] Cursor: cursor={cursor} origin={origin} size={size} " +
                           $"gazeOriginViewportY={viewportY} center={center} normalized={normalized}");
                 return;
             }
@@ -189,10 +189,10 @@ namespace ChatterMascot.Desktop
             if (Time.realtimeSinceStartup - _bindTime < GiveUpSeconds) return;
 
             _loggedOnce = true;
-            Debug.LogWarning("[Mascot] 視線の原点が実測で決まらないまま " +
-                              $"{GiveUpSeconds:F0} 秒経ちました。中立はウィンドウ中心のままです: " +
+            Debug.LogWarning("[Mascot] Gaze origin was not measured after " +
+                              $"{GiveUpSeconds:F0} seconds. Neutral stays at the window center: " +
                               $"cursor={cursor} origin={origin} size={size} " +
-                              $"gazeOriginViewportY={viewportY}（フォールバック） center={center} normalized={normalized}");
+                              $"gazeOriginViewportY={viewportY} (fallback) center={center} normalized={normalized}");
         }
     }
 }

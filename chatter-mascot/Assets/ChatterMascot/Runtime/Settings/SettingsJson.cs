@@ -101,7 +101,7 @@ namespace ChatterMascot.Settings
 
             if (string.IsNullOrWhiteSpace(raw))
             {
-                error = "中身が空です";
+                error = "content is empty";
                 return false;
             }
 
@@ -116,13 +116,13 @@ namespace ChatterMascot.Settings
             }
             catch (Exception e)
             {
-                error = "JSON が壊れています: " + e.Message;
+                error = "malformed JSON: " + e.Message;
                 return false;
             }
 
             if (root == null)
             {
-                error = "トップレベルがオブジェクトではありません";
+                error = "top level is not an object";
                 return false;
             }
 
@@ -131,13 +131,13 @@ namespace ChatterMascot.Settings
             {
                 if (!TryValue<int>(version, out var value))
                 {
-                    error = $"version が {version} です（対応しているのは {CurrentVersion}）";
+                    error = $"version is {version} (supported: {CurrentVersion})";
                     return false;
                 }
                 if (value != CurrentVersion)
                 {
-                    error = $"version が {value.ToString(CultureInfo.InvariantCulture)} です" +
-                            $"（対応しているのは {CurrentVersion}）";
+                    error = $"version is {value.ToString(CultureInfo.InvariantCulture)}" +
+                            $" (supported: {CurrentVersion})";
                     return false;
                 }
             }
@@ -178,7 +178,7 @@ namespace ChatterMascot.Settings
                     default:
                         // ★ 知らないキーは無視する（throw も既定へのリセットもしない）。
                         //   新しい版が書いた設定を古い版が読むことは普通に起きる
-                        Warn(warn, $"知らないキー \"{property.Key}\" は無視します");
+                        Warn(warn, $"Ignoring unknown key \"{property.Key}\"");
                         break;
                 }
             }
@@ -192,7 +192,7 @@ namespace ChatterMascot.Settings
             var audio = raw as JObject;
             if (audio == null)
             {
-                Warn(warn, $"audio がオブジェクトではありません（{Describe(raw)}）。既定を使います");
+                Warn(warn, $"audio is not an object ({Describe(raw)}); using defaults");
                 return settings;
             }
 
@@ -216,7 +216,7 @@ namespace ChatterMascot.Settings
                         break;
 
                     default:
-                        Warn(warn, $"知らないキー \"audio.{property.Key}\" は無視します");
+                        Warn(warn, $"Ignoring unknown key \"audio.{property.Key}\"");
                         break;
                 }
             }
@@ -228,7 +228,7 @@ namespace ChatterMascot.Settings
             var ui = raw as JObject;
             if (ui == null)
             {
-                Warn(warn, $"ui がオブジェクトではありません（{Describe(raw)}）。既定を使います");
+                Warn(warn, $"ui is not an object ({Describe(raw)}); using defaults");
                 return settings;
             }
 
@@ -241,7 +241,7 @@ namespace ChatterMascot.Settings
                         break;
 
                     default:
-                        Warn(warn, $"知らないキー \"ui.{property.Key}\" は無視します");
+                        Warn(warn, $"Ignoring unknown key \"ui.{property.Key}\"");
                         break;
                 }
             }
@@ -253,7 +253,7 @@ namespace ChatterMascot.Settings
             var character = raw as JObject;
             if (character == null)
             {
-                Warn(warn, $"character がオブジェクトではありません（{Describe(raw)}）。既定を使います");
+                Warn(warn, $"character is not an object ({Describe(raw)}); using defaults");
                 return settings;
             }
 
@@ -293,7 +293,7 @@ namespace ChatterMascot.Settings
                         break;
 
                     default:
-                        Warn(warn, $"知らないキー \"character.{property.Key}\" は無視します");
+                        Warn(warn, $"Ignoring unknown key \"character.{property.Key}\"");
                         break;
                 }
             }
@@ -309,7 +309,7 @@ namespace ChatterMascot.Settings
             var display = raw as JObject;
             if (display == null)
             {
-                Warn(warn, $"display がオブジェクトではありません（{Describe(raw)}）。既定を使います");
+                Warn(warn, $"display is not an object ({Describe(raw)}); using defaults");
                 return settings;
             }
 
@@ -323,7 +323,7 @@ namespace ChatterMascot.Settings
                         break;
 
                     default:
-                        Warn(warn, $"知らないキー \"display.{property.Key}\" は無視します");
+                        Warn(warn, $"Ignoring unknown key \"display.{property.Key}\"");
                         break;
                 }
             }
@@ -338,7 +338,7 @@ namespace ChatterMascot.Settings
             var connection = raw as JObject;
             if (connection == null)
             {
-                Warn(warn, $"connection がオブジェクトではありません（{Describe(raw)}）。既定を使います");
+                Warn(warn, $"connection is not an object ({Describe(raw)}); using defaults");
                 return settings;
             }
 
@@ -362,7 +362,7 @@ namespace ChatterMascot.Settings
                         break;
 
                     default:
-                        Warn(warn, $"知らないキー \"connection.{property.Key}\" は無視します");
+                        Warn(warn, $"Ignoring unknown key \"connection.{property.Key}\"");
                         break;
                 }
             }
@@ -379,7 +379,7 @@ namespace ChatterMascot.Settings
             var xr = raw as JObject;
             if (xr == null)
             {
-                Warn(warn, $"xr がオブジェクトではありません（{Describe(raw)}）。既定を使います");
+                Warn(warn, $"xr is not an object ({Describe(raw)}); using defaults");
                 return settings;
             }
 
@@ -421,7 +421,7 @@ namespace ChatterMascot.Settings
                         break;
 
                     default:
-                        Warn(warn, $"知らないキー \"xr.{property.Key}\" は無視します");
+                        Warn(warn, $"Ignoring unknown key \"xr.{property.Key}\"");
                         break;
                 }
             }
@@ -433,7 +433,7 @@ namespace ChatterMascot.Settings
         {
             if (value.Type != JTokenType.String)
             {
-                Warn(warn, $"{key} が文字列ではありません（{value}）。既定を使います");
+                Warn(warn, $"{key} is not a string ({value}); using default");
                 return fallback;
             }
 
@@ -441,7 +441,7 @@ namespace ChatterMascot.Settings
             if (text.Length == 0) return "";
             if (ServerUrl.IsValid(text)) return text;
 
-            Warn(warn, $"{key} は ws:// か wss:// で始まる絶対 URL である必要があります（{text}）。既定を使います");
+            Warn(warn, $"{key} must be an absolute URL starting with ws:// or wss:// ({text}); using default");
             return fallback;
         }
 
@@ -472,7 +472,7 @@ namespace ChatterMascot.Settings
         {
             if (value.Type != JTokenType.String)
             {
-                Warn(warn, $"{key} が文字列ではありません（{value}）。既定を使います");
+                Warn(warn, $"{key} is not a string ({value}); using default");
                 return fallback;
             }
 
@@ -482,7 +482,7 @@ namespace ChatterMascot.Settings
             if (IsValidToken(text)) return text;
 
             // ★ 値そのものは出さない。トークンをログに残さない規律は MascotRunner と揃える
-            Warn(warn, $"{key} に使える文字は英数字と _ - だけです。既定を使います");
+            Warn(warn, $"{key} may contain only alphanumerics, _ and -; using default");
             return fallback;
         }
 
@@ -494,22 +494,22 @@ namespace ChatterMascot.Settings
         {
             if (value.Type != JTokenType.String)
             {
-                Warn(warn, $"{key} が文字列ではありません（{value}）。既定を使います");
+                Warn(warn, $"{key} is not a string ({value}); using default");
                 return fallback;
             }
 
             var text = value.Value<string>().Trim();
             if (text == SettingsMapping.AssetSyncAuto || text == SettingsMapping.AssetSyncOff) return text;
 
-            Warn(warn, $"{key} は \"{SettingsMapping.AssetSyncAuto}\" か \"{SettingsMapping.AssetSyncOff}\" です" +
-                       $"（{text}）。既定を使います");
+            Warn(warn, $"{key} must be \"{SettingsMapping.AssetSyncAuto}\" or \"{SettingsMapping.AssetSyncOff}\"" +
+                       $" ({text}); using default");
             return fallback;
         }
 
         private static bool ReadBool(JToken value, string key, bool fallback, Action<string> warn)
         {
             if (value.Type == JTokenType.Boolean) return value.Value<bool>();
-            Warn(warn, $"{key} が真偽値ではありません（{value}）。既定を使います");
+            Warn(warn, $"{key} is not a boolean ({value}); using default");
             return fallback;
         }
 
@@ -521,13 +521,13 @@ namespace ChatterMascot.Settings
             raw = 0f;
             if (value.Type != JTokenType.Float && value.Type != JTokenType.Integer)
             {
-                Warn(warn, $"{key} が数値ではありません（{value}）。既定を使います");
+                Warn(warn, $"{key} is not a number ({value}); using default");
                 return false;
             }
 
             if (!TryValue(value, out raw) || float.IsNaN(raw) || float.IsInfinity(raw))
             {
-                Warn(warn, $"{key} が数値として扱えません（{value}）。既定を使います");
+                Warn(warn, $"{key} cannot be used as a number ({value}); using default");
                 return false;
             }
 
@@ -549,7 +549,7 @@ namespace ChatterMascot.Settings
             var normalized = SettingsMapping.Normalize(raw, min, max, step);
             if (Math.Abs(normalized - raw) > step / 2f)
             {
-                Warn(warn, $"{key} を {SettingsMapping.Format(normalized)} に丸めました（元の値: {SettingsMapping.Format(raw)}）");
+                Warn(warn, $"{key} rounded to {SettingsMapping.Format(normalized)} (original: {SettingsMapping.Format(raw)})");
             }
             return normalized;
         }
@@ -569,7 +569,7 @@ namespace ChatterMascot.Settings
 
             if (raw < min || raw > max)
             {
-                Warn(warn, $"{key} は {min}〜{max} の範囲である必要があります（{raw}）。既定を使います");
+                Warn(warn, $"{key} must be within {min} to {max} ({raw}); using default");
                 return fallback;
             }
 
@@ -587,21 +587,21 @@ namespace ChatterMascot.Settings
         {
             if (value.Type != JTokenType.Integer)
             {
-                Warn(warn, $"{key} が整数ではありません（{value}）。既定を使います");
+                Warn(warn, $"{key} is not an integer ({value}); using default");
                 return fallback;
             }
 
             // ★ 型検査を通っても int で取り出せるとは限らない（→ TryValue の doc）
             if (!TryValue<int>(value, out var raw))
             {
-                Warn(warn, $"{key} は 30 か 60 です（{value}）。既定の {SettingsMapping.DefaultFrameRate} を使います");
+                Warn(warn, $"{key} must be 30 or 60 ({value}); using default {SettingsMapping.DefaultFrameRate}");
                 return fallback;
             }
 
             var normalized = SettingsMapping.NormalizeFrameRate(raw);
             if (normalized != raw)
             {
-                Warn(warn, $"{key} は 30 か 60 です（{raw}）。既定の {SettingsMapping.DefaultFrameRate} を使います");
+                Warn(warn, $"{key} must be 30 or 60 ({raw}); using default {SettingsMapping.DefaultFrameRate}");
             }
             return normalized;
         }
@@ -617,7 +617,7 @@ namespace ChatterMascot.Settings
         {
             if (value.Type != JTokenType.String)
             {
-                Warn(warn, $"{key} が文字列ではありません（{value}）。既定を使います");
+                Warn(warn, $"{key} is not a string ({value}); using default");
                 return fallback;
             }
 
@@ -626,7 +626,7 @@ namespace ChatterMascot.Settings
 
             if (text.IndexOf('/') >= 0 || text.IndexOf('\\') >= 0 || text == "." || text == "..")
             {
-                Warn(warn, $"{key} はファイル名だけを書いてください（区切り文字は使えません）。既定を使います");
+                Warn(warn, $"{key} must be a bare file name (no path separators); using default");
                 return fallback;
             }
             return text;
@@ -639,7 +639,7 @@ namespace ChatterMascot.Settings
 
         private static string Describe(JToken raw)
         {
-            return raw == null ? "無し" : raw.Type.ToString();
+            return raw == null ? "none" : raw.Type.ToString();
         }
 
         /// <summary>

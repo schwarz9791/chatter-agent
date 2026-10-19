@@ -50,20 +50,20 @@ namespace ChatterMascot.Settings
             }
             catch (Exception e)
             {
-                reason = "JSON が壊れています: " + e.Message;
+                reason = "malformed JSON: " + e.Message;
                 return false;
             }
 
             if (root == null)
             {
-                reason = "トップレベルがオブジェクトではありません";
+                reason = "top level is not an object";
                 return false;
             }
 
             var version = root["version"];
             if (version == null || version.Type != JTokenType.Integer || (long)version != CurrentVersion)
             {
-                reason = $"version が {CurrentVersion} ではありません";
+                reason = $"version is not {CurrentVersion}";
                 return false;
             }
 
@@ -80,14 +80,14 @@ namespace ChatterMascot.Settings
                     var idText = id != null && id.Type == JTokenType.String ? (string)id : null;
                     if (string.IsNullOrEmpty(idText))
                     {
-                        reason = "playMotion に id がありません";
+                        reason = "playMotion has no id";
                         return false;
                     }
                     request = new MascotRequest(MascotRequestType.PlayMotion, idText);
                     return true;
 
                 default:
-                    reason = $"知らない type です（{typeName ?? "なし"}）";
+                    reason = $"unknown type ({typeName ?? "none"})";
                     return false;
             }
         }

@@ -54,7 +54,7 @@ namespace ChatterMascot.Net
             }
             catch (Exception e)
             {
-                Debug.LogWarning("[Mascot] サーバーの探索を始められませんでした: " + e.Message);
+                Debug.LogWarning("[Mascot] Failed to start server discovery: " + e.Message);
                 return false;
             }
         }
@@ -81,7 +81,7 @@ namespace ChatterMascot.Net
             }
             catch (Exception e)
             {
-                Debug.LogWarning("[Mascot] サーバーの探索結果を読めませんでした: " + e.Message);
+                Debug.LogWarning("[Mascot] Failed to read server discovery result: " + e.Message);
                 return false;
             }
         }
@@ -99,7 +99,7 @@ namespace ChatterMascot.Net
             }
             catch (Exception e)
             {
-                Debug.LogWarning("[Mascot] サーバーの探索を止められませんでした: " + e.Message);
+                Debug.LogWarning("[Mascot] Failed to stop server discovery: " + e.Message);
             }
         }
     }

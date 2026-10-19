@@ -98,7 +98,7 @@ namespace ChatterMascot.Tests
         /// ストリーミングで書かれた WAV はここが 0 や <c>0xFFFFFFFF</c> になる。
         /// 0 を弾くと、合成側が data サイズを後追いで埋める書き方に変えただけで
         /// <b>全文が無音のままスキップされる</b>（AudioFailed → 1回リトライ →
-        /// 「seq=N の音声を取れなかったので飛ばします」）。
+        /// 「Skipping seq=N because its audio could not be fetched」）。
         /// 参照実装（<c>core/src/player/audioPlayer.ts</c>）も両方を実体で測り直している。
         /// </summary>
         [Test]
@@ -137,7 +137,7 @@ namespace ChatterMascot.Tests
         ///
         /// 実体での測り直しを<b>全チャンクに広げると</b>、長さ 0 のチャンク1つで
         /// <c>chunkSize</c> が「末尾まで」になり、<c>offset</c> が範囲外へ飛んで
-        /// <b><c>data</c> に到達しないまま「data チャンクがありません」</b>になる。
+        /// <b><c>data</c> に到達しないまま「data chunk is missing」</b>になる。
         /// 測り直すのは <c>data</c> の分岐の中だけ、前進は宣言値で（写し元と同じ）。
         /// </summary>
         [Test]

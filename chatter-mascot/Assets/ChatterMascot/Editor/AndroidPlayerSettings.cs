@@ -108,11 +108,11 @@ namespace ChatterMascot.EditorTools
             if (changed)
             {
                 AssetDatabase.SaveAssets();
-                Debug.Log("[Build] Android の Player Settings を出荷値にしました");
+                Debug.Log("[Build] Android Player Settings set to shipping values");
             }
             else
             {
-                Debug.Log("[Build] Android の Player Settings は既に出荷値でした");
+                Debug.Log("[Build] Android Player Settings already at shipping values");
             }
 
             LogProjectValidationIssues();
@@ -130,7 +130,7 @@ namespace ChatterMascot.EditorTools
 
             PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.Android, false);
             PlayerSettings.SetGraphicsAPIs(BuildTarget.Android, new[] { GraphicsDeviceType.Vulkan });
-            Debug.Log("[Build] Android の Graphics API を Vulkan 単独にしました");
+            Debug.Log("[Build] Android Graphics API set to Vulkan only");
             return true;
         }
 
@@ -142,7 +142,7 @@ namespace ChatterMascot.EditorTools
         {
             if (PlayerSettings.Android.applicationEntry != AndroidApplicationEntry.GameActivity)
             {
-                Debug.LogWarning("[Build] Android のエントリポイントが GameActivity ではありません: "
+                Debug.LogWarning("[Build] Android entry point is not GameActivity: "
                     + PlayerSettings.Android.applicationEntry);
             }
         }
@@ -171,11 +171,11 @@ namespace ChatterMascot.EditorTools
             var manager = generalSettings.ManagerSettingsForBuildTarget(BuildTargetGroup.Android);
             if (!XRPackageMetadataStore.AssignLoader(manager, OpenXrLoaderTypeName, BuildTargetGroup.Android))
             {
-                Debug.LogError("[Build] Android に OpenXR ローダーを割り当てられませんでした");
+                Debug.LogError("[Build] Could not assign the OpenXR loader on Android");
                 return false;
             }
 
-            Debug.Log("[Build] Android の XR Plug-in Management に OpenXR ローダーを割り当てました");
+            Debug.Log("[Build] Assigned the OpenXR loader in Android XR Plug-in Management");
             return true;
         }
 
@@ -222,7 +222,7 @@ namespace ChatterMascot.EditorTools
             var settings = OpenXRSettings.GetSettingsForBuildTargetGroup(BuildTargetGroup.Android);
             if (settings == null)
             {
-                Debug.LogWarning("[Build] Android の OpenXR Settings が見つかりません");
+                Debug.LogWarning("[Build] Android OpenXR Settings not found");
                 return false;
             }
 
@@ -243,14 +243,14 @@ namespace ChatterMascot.EditorTools
             var feature = settings.GetFeature<T>();
             if (feature == null)
             {
-                Debug.LogWarning($"[Build] {label} feature が見つかりません");
+                Debug.LogWarning($"[Build] {label} feature not found");
                 return false;
             }
 
             if (feature.enabled) return false;
 
             feature.enabled = true;
-            Debug.Log($"[Build] OpenXR の {label} feature を有効化しました");
+            Debug.Log($"[Build] Enabled OpenXR {label} feature");
             return true;
         }
 
@@ -264,7 +264,7 @@ namespace ChatterMascot.EditorTools
             var asset = AssetDatabase.LoadMainAssetAtPath(MobileRendererPath);
             if (asset == null)
             {
-                Debug.LogWarning($"[Build] {MobileRendererPath} が見つかりません");
+                Debug.LogWarning($"[Build] {MobileRendererPath} not found");
                 return false;
             }
 
@@ -272,14 +272,14 @@ namespace ChatterMascot.EditorTools
             var property = serialized.FindProperty("postProcessData");
             if (property == null)
             {
-                Debug.LogWarning($"[Build] {MobileRendererPath} に postProcessData がありません");
+                Debug.LogWarning($"[Build] {MobileRendererPath} has no postProcessData");
                 return false;
             }
             if (property.objectReferenceValue == null) return false;
 
             property.objectReferenceValue = null;
             serialized.ApplyModifiedPropertiesWithoutUndo();
-            Debug.Log($"[Build] {MobileRendererPath} の Post Processing を無効化しました（Android XR の必須設定）");
+            Debug.Log($"[Build] Disabled Post Processing in {MobileRendererPath} (required for Android XR)");
             return true;
         }
 
@@ -294,7 +294,7 @@ namespace ChatterMascot.EditorTools
             var asset = AssetDatabase.LoadMainAssetAtPath(OpenXrEditorSettingsPath);
             if (asset == null)
             {
-                Debug.LogWarning($"[Build] {OpenXrEditorSettingsPath} が見つかりません");
+                Debug.LogWarning($"[Build] {OpenXrEditorSettingsPath} not found");
                 return false;
             }
 
@@ -302,14 +302,14 @@ namespace ChatterMascot.EditorTools
             var property = serialized.FindProperty("m_vulkanOffscreenSwapchainNoMainDisplay");
             if (property == null)
             {
-                Debug.LogWarning($"[Build] {OpenXrEditorSettingsPath} に m_vulkanOffscreenSwapchainNoMainDisplay がありません");
+                Debug.LogWarning($"[Build] {OpenXrEditorSettingsPath} has no m_vulkanOffscreenSwapchainNoMainDisplay");
                 return false;
             }
             if (!property.boolValue) return false;
 
             property.boolValue = false;
             serialized.ApplyModifiedPropertiesWithoutUndo();
-            Debug.Log("[Build] OpenXR の Offscreen Rendering Only (Vulkan) を無効化しました（XR の無い Android で画面に描くため）");
+            Debug.Log("[Build] Disabled OpenXR Offscreen Rendering Only (Vulkan) (to draw to the screen on Android without XR)");
             return true;
         }
 
@@ -324,7 +324,7 @@ namespace ChatterMascot.EditorTools
                 BindingFlags.NonPublic | BindingFlags.Static);
             if (method == null)
             {
-                Debug.LogWarning("[Build] Project Validation を読めませんでした（API が変わった可能性）");
+                Debug.LogWarning("[Build] Could not read Project Validation (the API may have changed)");
                 return;
             }
 
@@ -333,7 +333,7 @@ namespace ChatterMascot.EditorTools
 
             if (issues.Count == 0)
             {
-                Debug.Log("[Build] Android の Project Validation に残っている問題はありません");
+                Debug.Log("[Build] No remaining Android Project Validation issues");
                 return;
             }
 

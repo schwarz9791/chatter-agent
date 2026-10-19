@@ -33,8 +33,8 @@ namespace ChatterMascot.Vrm
         /// </summary>
         public static string Describe(string fileName, int count, int keyCount)
         {
-            return $"{fileName} の時刻キーに単調増加でない箇所が {count} つあります（{keyCount} キー）。" +
-                   "終端の外挿で NaN になるので ClipEnd が終端の手前で止めます";
+            return $"{fileName} has non-monotonic keyframe times: count={count}, keys={keyCount}. " +
+                   "ClipEnd stops before the end because extrapolating past it yields NaN";
         }
     }
 }

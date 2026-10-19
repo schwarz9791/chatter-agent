@@ -272,13 +272,13 @@ namespace ChatterMascot.Vrm
                     Adopt(_instance);
                     // ★ **採った候補を出すこと。** 先頭とは限らなくなったので、
                     //   「いまどのモデルが出ているか」がこの1行でしか分からない
-                    Debug.Log($"[Mascot] VRM の読み込み: {(int)((Time.realtimeSinceStartup - startedAt) * 1000)}ms" +
-                              $"（{loaded.Candidate}）");
+                    Debug.Log($"[Mascot] Loaded VRM in {(int)((Time.realtimeSinceStartup - startedAt) * 1000)}ms" +
+                              $" ({loaded.Candidate})");
                     return;
                 }
 
                 // ★ **候補を全部並べること。** 探索順のどこで外れたかはこれが無いと分からない
-                Debug.LogError("[Mascot] 読めて VRM として解釈できた候補が1つもありませんでした。探した順:" +
+                Debug.LogError("[Mascot] No candidate could be read and parsed as VRM. Searched in order:" +
                                VrmAssetLoader.DescribeCandidates(candidates));
                 if (placeholder != null) placeholder.SetActive(true);
             }
@@ -290,7 +290,7 @@ namespace ChatterMascot.Vrm
             {
                 // ★ 握ること。ここから漏らすと `_ = LoadAsync()` の未観測 Task として
                 //   捨てられ、Cube すら出ないまま理由がどこにも残らない
-                Debug.LogError("[Mascot] VRM の読み込みで例外が出ました: " + e);
+                Debug.LogError("[Mascot] Exception while loading VRM: " + e);
                 if (placeholder != null) placeholder.SetActive(true);
             }
             finally
@@ -335,7 +335,7 @@ namespace ChatterMascot.Vrm
                     ct: ct);
                 if (instance != null) return instance;
 
-                Debug.LogWarning($"[Mascot] {loaded.Candidate.Path} は VRM として解釈できませんでした（null）。次の候補へ進みます");
+                Debug.LogWarning($"[Mascot] {loaded.Candidate.Path} could not be parsed as VRM (null). Trying the next candidate");
                 return null;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -344,7 +344,7 @@ namespace ChatterMascot.Vrm
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"[Mascot] {loaded.Candidate.Path} は VRM として解釈できませんでした: {e.Message}。次の候補へ進みます");
+                Debug.LogWarning($"[Mascot] {loaded.Candidate.Path} could not be parsed as VRM: {e.Message}. Trying the next candidate");
                 return null;
             }
         }
@@ -361,7 +361,7 @@ namespace ChatterMascot.Vrm
             if (UnlitFallbackPolicy.AppliesTo(Application.platform))
             {
                 var replaced = UnlitFallback.Apply(instance.gameObject);
-                Debug.Log($"[Mascot] MToon を UniUnlit に差し替えました: {replaced} 件");
+                Debug.Log($"[Mascot] Replaced MToon with UniUnlit: count={replaced}");
             }
 
             // ★ **回す前に ControlRig を作らせること。** Vrm10Runtime は遅延生成で、
@@ -440,11 +440,11 @@ namespace ChatterMascot.Vrm
 
             if (instance.Runtime.SpringBone.ReconstructSpringBone())
             {
-                Debug.Log($"[Mascot] spring bone に縮尺 {scale:F2} を焼き込みました");
+                Debug.Log($"[Mascot] Baked scale {scale:F2} into spring bones");
             }
             else
             {
-                Debug.LogWarning("[Mascot] spring bone の作り直しが実行中だったので、縮尺を焼き込めませんでした");
+                Debug.LogWarning("[Mascot] A spring bone rebuild was in progress, so the scale could not be baked in");
             }
         }
 
@@ -542,7 +542,7 @@ namespace ChatterMascot.Vrm
             {
                 // ★ VRM 1.0 は Humanoid 必須（Vrm10Instance に [RequireComponent(Humanoid)]）
                 //   なので通常は起きないが、起きたときに黙って原点の点を返さないよう警告する
-                Debug.LogWarning("[Mascot] Humanoid ボーンが1つも取れないので bounds を測れませんでした");
+                Debug.LogWarning("[Mascot] No Humanoid bones available, could not measure bounds");
                 return new Bounds();
             }
 
@@ -579,9 +579,9 @@ namespace ChatterMascot.Vrm
             //   probe の出力と一致した」を根拠にしてしまったが、一致した量が
             //   判別できない量だった）。VrmProbe の "frame bounds center" と
             //   突き合わせられるように、ここにも出しておく
-            var message = $"[Mascot] フレーミング: {Screen.width}x{Screen.height} " +
+            var message = $"[Mascot] Framing: {Screen.width}x{Screen.height} " +
                           $"aspect={camera.aspect:F3} bounds={_bounds.size} center={_bounds.center} " +
-                          $"distance={distance:F2} 支配軸={(axis == FramingAxis.Horizontal ? "水平" : "垂直")}";
+                          $"distance={distance:F2} dominantAxis={(axis == FramingAxis.Horizontal ? "horizontal" : "vertical")}";
             if (message != _lastFramingLog)
             {
                 Debug.Log(message);
@@ -617,7 +617,7 @@ namespace ChatterMascot.Vrm
             var right = animator.GetBoneTransform(HumanBodyBones.RightUpperArm);
             if (left == null || right == null)
             {
-                Debug.LogWarning("[Mascot] 上腕のボーンが無いので向きを判定できません");
+                Debug.LogWarning("[Mascot] No upper arm bones, cannot determine the facing direction");
                 return 0f;
             }
 
@@ -625,7 +625,7 @@ namespace ChatterMascot.Vrm
             if (Mathf.Approximately(yaw, 0f)) return 0f;
 
             instance.transform.Rotate(Vector3.up, yaw, Space.World);
-            Debug.Log($"[Mascot] モデルの向きを {yaw:F0} 度回してカメラへ向けました");
+            Debug.Log($"[Mascot] Rotated the model by {yaw:F0} degrees to face the camera");
             return yaw;
         }
 
@@ -694,7 +694,7 @@ namespace ChatterMascot.Vrm
             }
             catch (Exception e)
             {
-                Debug.LogWarning("[Mascot] VRM の読み込み通知で例外が出ました: " + e.Message);
+                Debug.LogWarning("[Mascot] Exception in the VRM load notification: " + e.Message);
             }
         }
 
@@ -708,8 +708,8 @@ namespace ChatterMascot.Vrm
                                     UniVRM10.Migration.Vrm0Meta vrm0Meta)
         {
             if (meta == null) return;
-            var authors = meta.Authors != null ? string.Join(", ", meta.Authors) : "(不明)";
-            Debug.Log($"[Mascot] モデル: \"{meta.Name}\" / 作者: {authors} / ライセンス: {meta.LicenseUrl}");
+            var authors = meta.Authors != null ? string.Join(", ", meta.Authors) : "(unknown)";
+            Debug.Log($"[Mascot] Model: \"{meta.Name}\" / Author: {authors} / License: {meta.LicenseUrl}");
         }
     }
 }

@@ -54,7 +54,7 @@ namespace ChatterMascot.Ui
             }
             catch (Exception e)
             {
-                Debug.LogWarning("[Mascot] PIN の入力欄を出せませんでした: " + e.Message);
+                Debug.LogWarning("[Mascot] Failed to show PIN input: " + e.Message);
                 return null;
             }
         }

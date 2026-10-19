@@ -76,7 +76,7 @@ namespace ChatterMascot.Vrm
             if (bytes == null || bytes.Length == 0) return default;
 
             // ★ 「読めた」であって「採った」ではない。文言を混ぜないこと
-            Debug.Log($"[Mascot] {candidate.Source} から {bytes.Length:N0} バイト読みました: {candidate.Path}");
+            Debug.Log($"[Mascot] Read {bytes.Length:N0} bytes from {candidate.Source}: {candidate.Path}");
             return new LoadedBytes(candidate, bytes);
         }
 
@@ -86,7 +86,7 @@ namespace ChatterMascot.Vrm
         /// </summary>
         public static string DescribeCandidates(IReadOnlyList<AssetCandidate> candidates)
         {
-            if (candidates == null || candidates.Count == 0) return "（候補が1つもありません）";
+            if (candidates == null || candidates.Count == 0) return "(no candidates)";
 
             var text = new StringBuilder();
             foreach (var candidate in candidates)
@@ -134,9 +134,9 @@ namespace ChatterMascot.Vrm
                             // ★ Abort しないと、この後もダウンロードハンドラが生きたまま残る
                             request.Abort();
                             Debug.LogWarning(
-                                $"[Mascot] {path} の読み込みが {DeadlineMs / 1000} 秒で返らないので諦めます。" +
-                                "macOS では ~/Downloads / ~/Desktop / ~/Documents のファイルが" +
-                                "アクセス権で止められることがあります（システム設定 > プライバシーとセキュリティ）");
+                                $"[Mascot] Loading {path} did not return within {DeadlineMs / 1000}s, giving up. " +
+                                "On macOS, files in ~/Downloads / ~/Desktop / ~/Documents " +
+                                "may be blocked by permissions (System Settings > Privacy & Security)");
                             return null;
                         }
                     }
@@ -148,7 +148,7 @@ namespace ChatterMascot.Vrm
                 }
                 catch (Exception e)
                 {
-                    Debug.Log($"[Mascot] {path} は読めませんでした: {e.Message}");
+                    Debug.Log($"[Mascot] Could not read {path}: {e.Message}");
                     return null;
                 }
 
@@ -157,7 +157,7 @@ namespace ChatterMascot.Vrm
                 if (request.result != UnityWebRequest.Result.Success)
                 {
                     // 「無い」は正常な分岐（探索順の途中）なので Log 止まり
-                    Debug.Log($"[Mascot] {path} は読めませんでした: {request.error}");
+                    Debug.Log($"[Mascot] Could not read {path}: {request.error}");
                     return null;
                 }
                 return request.downloadHandler.data;

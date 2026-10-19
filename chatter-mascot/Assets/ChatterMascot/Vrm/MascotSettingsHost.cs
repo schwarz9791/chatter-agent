@@ -98,7 +98,7 @@ namespace ChatterMascot.Vrm
             if (!string.Equals(previous.ServerUrl, Current.ServerUrl, StringComparison.Ordinal) ||
                 !string.Equals(previous.Token, Current.Token, StringComparison.Ordinal))
             {
-                Debug.Log("[Mascot] 接続先の変更は再起動で反映されます");
+                Debug.Log("[Mascot] Connection changes take effect after a restart");
             }
 
             ChangedExternally?.Invoke(previous, Current);
@@ -211,7 +211,7 @@ namespace ChatterMascot.Vrm
         /// <summary>★ 別名で書いてから置き換える（→ <c>WindowGeometry.WriteState</c> と同じ）</summary>
         private void WriteSettings(string text)
         {
-            if (string.IsNullOrEmpty(_settingsPath)) throw new IOException("保存先を決められません");
+            if (string.IsNullOrEmpty(_settingsPath)) throw new IOException("Cannot determine the save path");
 
             var directory = Path.GetDirectoryName(_settingsPath);
             if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);

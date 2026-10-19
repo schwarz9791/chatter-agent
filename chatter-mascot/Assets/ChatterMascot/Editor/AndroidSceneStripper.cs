@@ -69,7 +69,7 @@ namespace ChatterMascot.EditorTools
                 if (component is Transform) continue;
                 if (IsAndroidIncluded(component)) continue;
 
-                Debug.Log($"[Build] Android 非対応のコンポーネントを外しました: {HierarchyPath(go)}/{component.GetType().Name}");
+                Debug.Log($"[Build] Removed components unsupported on Android: {HierarchyPath(go)}/{component.GetType().Name}");
                 Object.DestroyImmediate(component);
                 removed++;
             }
@@ -79,7 +79,7 @@ namespace ChatterMascot.EditorTools
             //   「空だから消してよい」対象ではない
             if (removed > 0 && go.transform.childCount == 0 && go.GetComponents<Component>().Length == 1)
             {
-                Debug.Log($"[Build] 空になった GameObject を削除しました: {HierarchyPath(go)}");
+                Debug.Log($"[Build] Deleted GameObject left empty: {HierarchyPath(go)}");
                 Object.DestroyImmediate(go);
             }
         }

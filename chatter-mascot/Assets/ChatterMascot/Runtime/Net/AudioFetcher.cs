@@ -125,33 +125,33 @@ namespace ChatterMascot.Net
                 //   ここで捨てると無音の原因がクライアント側のログから消える
                 if (request.responseCode == 503)
                 {
-                    return AudioFetchResult.Unavailable(Reason(request, "サーバーが音声を用意できていません (503)"));
+                    return AudioFetchResult.Unavailable(Reason(request, "server has not prepared the audio (503)"));
                 }
                 // ★ 401 も Unavailable。Failed に数えると SynthesisAttempts が燃え尽きて
                 //   ack まで進み、キューの本文が消える——設定を直しても復元できない（404 と同じ理屈）
                 if (request.responseCode == 401)
                 {
                     return AudioFetchResult.Unavailable(
-                        Reason(request, "トークンが無いか違います（settings.json の connection.token）"));
+                        Reason(request, "Token missing or invalid (connection.token in settings.json)"));
                 }
                 if (request.responseCode == 404)
                 {
-                    return AudioFetchResult.Gone(Reason(request, "音声がありません (404)"));
+                    return AudioFetchResult.Gone(Reason(request, "audio not found (404)"));
                 }
 
                 if (request.result == UnityWebRequest.Result.ConnectionError)
                 {
-                    return AudioFetchResult.Failed(request.error ?? "接続できませんでした");
+                    return AudioFetchResult.Failed(request.error ?? "could not connect");
                 }
                 if (request.result != UnityWebRequest.Result.Success || request.responseCode != 200)
                 {
-                    return AudioFetchResult.Failed(Reason(request, $"想定外のステータス {request.responseCode}"));
+                    return AudioFetchResult.Failed(Reason(request, $"unexpected status {request.responseCode}"));
                 }
 
                 var data = request.downloadHandler.data;
                 if (data == null || data.Length == 0)
                 {
-                    return AudioFetchResult.Failed("本体が空でした");
+                    return AudioFetchResult.Failed("response body was empty");
                 }
                 return AudioFetchResult.Ready(data);
             }

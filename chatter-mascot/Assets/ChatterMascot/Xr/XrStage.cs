@@ -46,21 +46,21 @@ namespace ChatterMascot.Xr
                 // 設定パネルが無いので、ペアリングは端末のダイアログで受ける
                 var pairingRunner = UnityEngine.Object.FindFirstObjectByType<MascotRunner>();
                 if (pairingRunner != null) pairingRunner.PairingPrompt = () => _ = PairingFlow.PromptAsync(pairingRunner);
-                Debug.Log("[Mascot] XR: 起動していないので平面表示のまま");
+                Debug.Log("[Mascot] XR: not running, staying in flat display");
                 return;
             }
 
             var stage = UnityEngine.Object.FindFirstObjectByType<VrmStage>(FindObjectsInactive.Include);
             if (stage == null || stage.ModelAnchor == null)
             {
-                Debug.LogWarning("[Mascot] XR: VrmStage / ModelAnchor が見つからないので空間固定を組めません");
+                Debug.LogWarning("[Mascot] XR: VrmStage / ModelAnchor not found, cannot set up spatial anchoring");
                 return;
             }
 
             var camera = Camera.main;
             if (camera == null)
             {
-                Debug.LogWarning("[Mascot] XR: Camera.main が無いので空間固定を組めません");
+                Debug.LogWarning("[Mascot] XR: no Camera.main, cannot set up spatial anchoring");
                 return;
             }
 
@@ -98,7 +98,7 @@ namespace ChatterMascot.Xr
             var realCm = stage.RealHeightCm;
             if (!realCm.HasValue || !(realCm.Value > 0f))
             {
-                Debug.LogWarning("[Mascot] XR: モデルの実寸を測れなかったので大きさの調整を見送ります");
+                Debug.LogWarning("[Mascot] XR: could not measure the model's real size, skipping size adjustment");
                 return;
             }
 
@@ -119,7 +119,7 @@ namespace ChatterMascot.Xr
             }
 
             stage.Rescale(targetCm / realCm.Value);
-            Debug.Log($"[Mascot] XR: 実寸 {realCm.Value:F1}cm → 目標 {targetCm:F0}cm へ縮尺を合わせました");
+            Debug.Log($"[Mascot] XR: scaled from actual {realCm.Value:F1}cm to target {targetCm:F0}cm");
         }
 
         /// <summary>
@@ -140,7 +140,7 @@ namespace ChatterMascot.Xr
             }
             catch (Exception e)
             {
-                Debug.LogWarning("[Mascot] XR: settings.json を読めませんでした: " + e.Message);
+                Debug.LogWarning("[Mascot] XR: could not read settings.json: " + e.Message);
                 return MascotSettings.Defaults;
             }
 
@@ -229,8 +229,8 @@ namespace ChatterMascot.Xr
                         if (!switchWarned && Time.realtimeSinceStartup - startTime > TrackingWaitTimeoutSeconds)
                         {
                             switchWarned = true;
-                            Debug.LogWarning($"[Mascot] XR: トラッキング原点が {TrackingWaitTimeoutSeconds:F0} 秒たっても " +
-                                              "Device に切り替わりません。切り替わるまで配置を待ちます");
+                            Debug.LogWarning($"[Mascot] XR: tracking origin did not switch to Device within {TrackingWaitTimeoutSeconds:F0}s. " +
+                                              "Waiting for placement until it does");
                         }
                         yield return null;
                         continue;
@@ -263,8 +263,8 @@ namespace ChatterMascot.Xr
                     yield return null;
                 }
 
-                Debug.LogWarning($"[Mascot] XR: トラッキング原点の切り替え後、頭の追跡が {TrackingWaitTimeoutSeconds:F0} 秒以内に揃いませんでした。" +
-                                  "そのときのカメラのローカル姿勢で空間固定します");
+                Debug.LogWarning($"[Mascot] XR: head tracking was not ready within {TrackingWaitTimeoutSeconds:F0}s after the tracking origin switch. " +
+                                  "Anchoring with the camera's local pose at that moment");
                 var head = _origin.Camera.transform;
                 Place(head.localPosition, head.localRotation);
                 Destroy(this);
@@ -283,7 +283,7 @@ namespace ChatterMascot.Xr
 
                 _origin.transform.SetPositionAndRotation(originPosition, Quaternion.Euler(0f, originYawDegrees, 0f));
 
-                Debug.Log("[Mascot] XR: 空間固定 " +
+                Debug.Log("[Mascot] XR: spatial anchor " +
                           $"headLocalPosition={headLocalPosition} headLocalYaw={headLocalYaw:F1} headLocalPitch={headLocalPitch:F1} " +
                           $"distance={_settings.XrDistance:F2}→{distance:F2} azimuth={_settings.XrAzimuth:F1} feetBelowEye={_settings.XrFeetBelowEye:F2}→{feetBelowEye:F2} → " +
                           $"originPosition={originPosition} originYaw={originYawDegrees:F1}");
@@ -309,7 +309,7 @@ namespace ChatterMascot.Xr
                 }
                 else
                 {
-                    Debug.LogWarning("[Mascot] XR: ModelAnchor に VrmCharacter が無いので目で追うを組めません");
+                    Debug.LogWarning("[Mascot] XR: no VrmCharacter on ModelAnchor, cannot set up eye tracking");
                 }
             }
         }

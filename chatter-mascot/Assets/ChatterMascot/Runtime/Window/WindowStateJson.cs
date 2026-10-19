@@ -54,7 +54,7 @@ namespace ChatterMascot.Window
 
             if (string.IsNullOrWhiteSpace(raw))
             {
-                error = "中身が空です";
+                error = "content is empty";
                 return false;
             }
 
@@ -71,28 +71,28 @@ namespace ChatterMascot.Window
             }
             catch (Exception e)
             {
-                error = "JSON が壊れています: " + e.Message;
+                error = "malformed JSON: " + e.Message;
                 return false;
             }
 
             if (root == null)
             {
-                error = "トップレベルがオブジェクトではありません";
+                error = "top level is not an object";
                 return false;
             }
 
             var version = AsInt(root["version"]);
             if (version != CurrentVersion)
             {
-                error = $"version が {version?.ToString(CultureInfo.InvariantCulture) ?? "不明"} です" +
-                        $"（対応しているのは {CurrentVersion}）";
+                error = $"version is {version?.ToString(CultureInfo.InvariantCulture) ?? "unknown"}" +
+                        $" (supported: {CurrentVersion})";
                 return false;
             }
 
             var rect = root["rect"] as JObject;
             if (rect == null)
             {
-                error = "rect がありません";
+                error = "rect is missing";
                 return false;
             }
 
@@ -102,14 +102,14 @@ namespace ChatterMascot.Window
             var height = AsFloat(rect["height"]);
             if (x == null || y == null || width == null || height == null)
             {
-                error = "rect の x / y / width / height が数値ではありません";
+                error = "rect x / y / width / height are not numbers";
                 return false;
             }
 
             var parsed = new PointRect(x.Value, y.Value, width.Value, height.Value);
             if (!parsed.IsValid)
             {
-                error = $"rect が矩形として不正です ({parsed})";
+                error = $"rect is not a valid rectangle ({parsed})";
                 return false;
             }
 

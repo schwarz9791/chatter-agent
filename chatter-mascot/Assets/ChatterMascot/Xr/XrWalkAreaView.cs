@@ -96,7 +96,7 @@ namespace ChatterMascot.Xr
             var source = Resources.Load<Material>("WalkArea");
             if (source == null)
             {
-                Debug.LogWarning("[Mascot] XR walk: WalkArea マテリアルを読めないので歩行範囲を描きません");
+                Debug.LogWarning("[Mascot] XR walk: could not load the WalkArea material, not drawing the walk area");
                 _buildFailed = true;
                 return;
             }

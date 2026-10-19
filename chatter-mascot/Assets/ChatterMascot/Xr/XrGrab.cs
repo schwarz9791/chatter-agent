@@ -148,7 +148,7 @@ namespace ChatterMascot.Xr
             _stage.ResetSpringBones();
             _walk?.ResetArea();
 
-            Debug.Log("[Mascot] XR grab: 位置をリセットしました");
+            Debug.Log("[Mascot] XR grab: position reset");
         }
 
         private void OnDestroy()
@@ -210,7 +210,7 @@ namespace ChatterMascot.Xr
 
         private void OnPermissionDenied(string permission)
         {
-            Debug.LogWarning($"[Mascot] XR grab: {permission} が拒否されました");
+            Debug.LogWarning($"[Mascot] XR grab: {permission} was denied");
         }
 
         private void Update()
@@ -233,7 +233,7 @@ namespace ChatterMascot.Xr
             //   GameObject に付ける（別の GO に付けると XROrigin が勝手に生える）
             _planeManager = _origin.gameObject.AddComponent<ARPlaneManager>();
             _planeManager.requestedDetectionMode = PlaneDetectionMode.Horizontal;
-            Debug.Log("[Mascot] XR grab: 平面検知を開始しました");
+            Debug.Log("[Mascot] XR grab: plane detection started");
         }
 
         private void UpdateHand(Hand hand, Transform offset)
@@ -286,7 +286,7 @@ namespace ChatterMascot.Xr
             {
                 _grabbedHand = hand;
                 _grabbedHandle = true;
-                Debug.Log($"[Mascot] XR grab: 歩行範囲のハンドルを掴みました hand={hand.Name}");
+                Debug.Log($"[Mascot] XR grab: grabbed the walk area handle hand={hand.Name}");
                 return;
             }
 
@@ -341,7 +341,7 @@ namespace ChatterMascot.Xr
             _grabbedAt = Time.unscaledTime;
             _anchorAtGrab = _stage.ModelAnchor.position;
             if (_settings != null) _settings.ShowGearForAWhile();
-            Debug.Log($"[Mascot] XR grab: 掴みました hand={hand.Name}");
+            Debug.Log($"[Mascot] XR grab: grabbed hand={hand.Name}");
         }
 
         /// <summary>
@@ -429,7 +429,7 @@ namespace ChatterMascot.Xr
             if (_grabbedHandle)
             {
                 _walk?.ReleaseHandle();
-                Debug.Log("[Mascot] XR grab: 歩行範囲のハンドルを離しました");
+                Debug.Log("[Mascot] XR grab: released the walk area handle");
                 return;
             }
 
@@ -438,7 +438,7 @@ namespace ChatterMascot.Xr
                 // ★ タップ。歯車と歩行範囲を出すだけで、位置・向き・歩行範囲の中心は変えない
                 _walk?.ShowArea();
                 if (_settings != null) _settings.ShowGearForAWhile();
-                Debug.Log("[Mascot] XR grab: タップしました");
+                Debug.Log("[Mascot] XR grab: tapped");
                 return;
             }
 
@@ -476,7 +476,7 @@ namespace ChatterMascot.Xr
             }
 
             if (_settings != null) _settings.ShowGearForAWhile();
-            Debug.Log($"[Mascot] XR grab: 離しました plane={landed} yaw={(faced ? yaw.ToString("F1") : "unchanged")}");
+            Debug.Log($"[Mascot] XR grab: released plane={landed} yaw={(faced ? yaw.ToString("F1") : "unchanged")}");
         }
 
         /// <summary>

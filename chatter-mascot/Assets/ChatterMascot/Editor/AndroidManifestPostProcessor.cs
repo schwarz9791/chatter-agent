@@ -53,7 +53,7 @@ namespace ChatterMascot.EditorTools
             var manifestPath = Path.Combine(path, "src", "main", "AndroidManifest.xml");
             if (!File.Exists(manifestPath))
             {
-                throw new BuildFailedException($"[Build] AndroidManifest.xml が見つかりません: {manifestPath}");
+                throw new BuildFailedException($"[Build] AndroidManifest.xml not found: {manifestPath}");
             }
 
             try
@@ -61,7 +61,7 @@ namespace ChatterMascot.EditorTools
                 var document = XDocument.Load(manifestPath);
                 if (!Apply(document))
                 {
-                    Debug.Log("[Build] AndroidManifest.xml: 既に必要な設定を持っています");
+                    Debug.Log("[Build] AndroidManifest.xml: already has the required settings");
                     return;
                 }
 
@@ -73,7 +73,7 @@ namespace ChatterMascot.EditorTools
             }
             catch (Exception e)
             {
-                throw new BuildFailedException($"[Build] AndroidManifest.xml を編集できませんでした: {e.Message}");
+                throw new BuildFailedException($"[Build] Could not edit AndroidManifest.xml: {e.Message}");
             }
         }
 
@@ -90,23 +90,23 @@ namespace ChatterMascot.EditorTools
             var manifest = document?.Root;
             if (manifest == null || manifest.Name.LocalName != "manifest")
             {
-                throw new BuildFailedException("[Build] AndroidManifest.xml の manifest 要素が読めません");
+                throw new BuildFailedException("[Build] Cannot read the manifest element in AndroidManifest.xml");
             }
 
             var application = manifest.Element("application");
             if (application == null)
             {
-                throw new BuildFailedException("[Build] AndroidManifest.xml に application 要素がありません");
+                throw new BuildFailedException("[Build] AndroidManifest.xml has no application element");
             }
 
             var renamedActivity = EnsureLauncherActivity(application);
             var addedInternet = EnsurePermission(manifest, InternetPermission);
             var addedHandTracking = EnsurePermission(manifest, HandTrackingPermission);
             var addedCleartext = EnsureCleartextTraffic(application);
-            if (renamedActivity) Debug.Log($"[Build] AndroidManifest.xml: 起動 Activity を {LauncherActivityClass} へ差し替え");
-            if (addedInternet) Debug.Log("[Build] AndroidManifest.xml: INTERNET を追加");
-            if (addedHandTracking) Debug.Log("[Build] AndroidManifest.xml: HAND_TRACKING を追加");
-            if (addedCleartext) Debug.Log("[Build] AndroidManifest.xml: usesCleartextTraffic を追加");
+            if (renamedActivity) Debug.Log($"[Build] AndroidManifest.xml: replaced launcher Activity with {LauncherActivityClass}");
+            if (addedInternet) Debug.Log("[Build] AndroidManifest.xml: added INTERNET");
+            if (addedHandTracking) Debug.Log("[Build] AndroidManifest.xml: added HAND_TRACKING");
+            if (addedCleartext) Debug.Log("[Build] AndroidManifest.xml: added usesCleartextTraffic");
             return renamedActivity || addedInternet || addedHandTracking || addedCleartext;
         }
 
@@ -127,7 +127,7 @@ namespace ChatterMascot.EditorTools
             }
 
             throw new BuildFailedException(
-                $"[Build] AndroidManifest.xml に {UnityGameActivityClass} の activity がありません");
+                $"[Build] AndroidManifest.xml has no activity for {UnityGameActivityClass}");
         }
 
         /// <summary>足したら true。</summary>

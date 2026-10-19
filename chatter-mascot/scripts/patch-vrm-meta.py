@@ -86,8 +86,9 @@ def build(json_body, tail):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description="Rewrite string fields of VRMC_vrm.meta in a VRM 1.0 (glTF-Binary) file "
+        "without re-serializing the JSON or touching the BIN chunk.")
     parser.add_argument("source", help="input .vrm")
     parser.add_argument("destination", help="output .vrm")
     parser.add_argument("--set", dest="assignments", action="append", default=[],

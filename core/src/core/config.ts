@@ -550,7 +550,7 @@ const parseStringList: Parser<string[]> = (raw) => {
  *
  * ★ これを超えると静かに壊れる。Node 24 実測: `AbortSignal.timeout(4294967295)` は
  *   `TimeoutOverflowWarning` を出して **1ms に化け**（全リクエストが即 abort し、
- *   `audio_query timed out` という**設定ではなくエンジンを指すメッセージ**が出る）、
+ *   `audio_query (<host>) timed out` という**設定ではなくエンジンを指すメッセージ**が出る）、
  *   `AbortSignal.timeout(99999999999)` は `RangeError` を投げる（`waitForEngine` が
  *   永久にループして接続しない）。「実質無制限」のつもりで大きい数を書くと踏む
  */
@@ -840,7 +840,7 @@ export function createConfigStore(deps: ConfigStoreDeps = {}): ConfigStore {
 
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
       // undefined を返すと呼び出し側は fileValues を触らない＝直前の値が残る。
-      // メッセージも実態に合わせる（「既定値を使います」ではない）
+      // メッセージも実態に合わせる（`Using the default` ではない）
       warnOnce("file:shape", `[Config] The top level of ${filePath} is not an object. Keeping the previous values`);
       return undefined;
     }

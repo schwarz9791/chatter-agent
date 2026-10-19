@@ -620,7 +620,7 @@ try {
     );
     check(
       "★ no warning for an explicit audio: null (ttsEnabled: false is a valid setting)",
-      !quiet.log.includes("has no audio"),
+      !quiet.log.includes("frame has no audio"),
       quiet.log,
     );
     await stopPlayer(quiet);
@@ -633,7 +633,7 @@ try {
 
     check(
       "★ the reason for the silence appears in the log",
-      await until(() => legacy.log.includes("has no audio"), 10_000),
+      await until(() => legacy.log.includes("frame has no audio"), 10_000),
       legacy.log,
     );
     check(

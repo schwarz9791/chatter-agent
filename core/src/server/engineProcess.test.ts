@@ -695,7 +695,7 @@ describe("startEngine", () => {
   });
 
   /**
-   * ★ TTS 専用の文言（「[Engine]」「音声は 503」）を Ollaya に流用すると、11435 が別プロセスに
+   * ★ TTS 専用の文言（「[Engine]」「audio requests will return 503」）を Ollaya に流用すると、11435 が別プロセスに
    *   掴まれて `ollaya serve` がすぐ落ちたときに合成エンジンが壊れたと誤診させる。
    *   呼び出し側から差し替えられること（→ `server/index.ts` の Ollaya 呼び出し）を見る。
    */

@@ -449,7 +449,7 @@ foreach (var m in _gltf.Materials)
 
 ★ **`scripts/*.sh` のロック検査はパスの前方一致。** プロジェクトの**中に**別の Unity
 プロジェクトができていると、そちらを開いているだけで
-「Unity Editor がこのプロジェクトを開いています」と言われて何も動かせなくなる。
+`The Unity Editor has this project open. Close it and run again` と言われて何も動かせなくなる。
 
 ## ★ 画面空間の量をモデル空間の軸で回さない
 

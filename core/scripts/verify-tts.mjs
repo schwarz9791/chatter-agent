@@ -451,7 +451,7 @@ try {
   }
   {
     show("⑮ ★ On the path that starts the engine, does not print the 503 warning first (#52 review)");
-    // ★ **⑭ より後ろに置くこと。** ⑭ は累積ログに対して「[Engine] 起動しました が1度も
+    // ★ **⑭ より後ろに置くこと。** ⑭ は累積ログに対して「[Engine] Started が1度も
     //   出ていない」を検査しているので、前に置くと必ず落ちる。
     // ★ **CHATTER_AGENT_TTS_SPAWN_COMMAND を必ず渡すこと。** 渡さないと開発機（macOS）で
     //   **本物の AivisSpeech** が起きる。起こす相手はここで作る使い捨ての実行ファイルに限る
@@ -612,7 +612,7 @@ try {
     // ★ 疎通の確認は Ready の後に走る。結論が出るまで待たないと、否定検査が空振りする
     const probed = await until(() => (server?.log ?? "").includes("Connected to the TTS engine"), 5000);
     check("the reachability check finished", probed, server?.log ?? "");
-    // ★ この起動ぶんのログだけで見る（累積だと ⑮ が出した「[Engine] 起動しました」を拾う）
+    // ★ この起動ぶんのログだけで見る（累積だと ⑮ が出した「[Engine] Started」を拾う）
     const freshLog = server?.log ?? "";
     check("★ [Engine] Started does not appear", !freshLog.includes("[Engine] Started"), freshLog);
 

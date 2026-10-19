@@ -59,10 +59,10 @@ fn skips_backlog(prev: Option<Want>) -> bool {
     matches!(prev, None | Some(Want::Nothing))
 }
 
-/// マスコットを起こせなかった理由。中身は利用者へ見せる文言。
+/// マスコットを起こせなかった理由。中身は生の理由で、ログは英語、ダイアログは画面の言語で組み立てる。
 enum StartFail {
-    /// `.app` が無い。置くまで直らないので、非表示を保存して次の起動で繰り返さない。
-    NotFound(String),
+    /// `.app` が無い（探した場所）。置くまで直らないので、非表示を保存して次の起動で繰り返さない。
+    NotFound(Vec<String>),
     /// `open` の失敗や起動待ちの打ち切り。一時的でありうるので保存しない。
     Failed(String),
 }
@@ -376,12 +376,23 @@ impl Clients {
             Want::Mascot => {
                 if running_pids().is_empty() {
                     if let Err(fail) = self.start_mascot(&env, core.dir(), backlog) {
-                        let (msg, persist) = match fail {
-                            StartFail::NotFound(m) => (m, true),
-                            StartFail::Failed(m) => (m, false),
-                        };
-                        self.log(&format!("Cannot launch the mascot: {msg}"));
                         let t = text::current();
+                        let (log, msg, persist) = match fail {
+                            StartFail::NotFound(places) => (
+                                format!(
+                                    "Cannot launch the mascot: ChatterMascot.app not found. Searched: {}",
+                                    places.join(", ")
+                                ),
+                                t.mascot_not_found(&places.join("\n")),
+                                true,
+                            ),
+                            StartFail::Failed(e) => (
+                                format!("Cannot launch the mascot: {e}"),
+                                t.mascot_launch_failed(&e),
+                                false,
+                            ),
+                        };
+                        self.log(&log);
                         self.0
                             .app
                             .dialog()
@@ -434,19 +445,17 @@ impl Clients {
     }
 
     fn start_mascot(&self, env: &Env, core: Option<&Path>, backlog: bool) -> Result<(), StartFail> {
-        let t = text::current();
         let home = home_of(env);
         let Some(app) = find_app(core, &home) else {
-            let places: Vec<_> = candidates(core, &home)
+            let places = candidates(core, &home)
                 .iter()
                 .map(|p| p.display().to_string())
                 .collect();
-            return Err(StartFail::NotFound(t.mascot_not_found(&places.join("\n"))));
+            return Err(StartFail::NotFound(places));
         };
-        launch(&app, env, backlog)
-            .map_err(|e| StartFail::Failed(t.mascot_launch_failed(&e.to_string())))?;
+        launch(&app, env, backlog).map_err(|e| StartFail::Failed(e.to_string()))?;
         if !wait_until(MASCOT_START_TIMEOUT, || !running_pids().is_empty()) {
-            return Err(StartFail::Failed(t.mascot_launch_failed("timeout")));
+            return Err(StartFail::Failed("timeout".into()));
         }
         self.log(&format!("Launched the mascot: {}", app.display()));
         Ok(())

@@ -80,7 +80,7 @@ export type EngineSpawnSkip =
   | { skip: "not-loopback"; host: string }
   | { skip: "not-http"; protocol: string }
   /**
-   * `subject` を省略すると `describeEngineSkip` の引数（既定 `"合成エンジン"`）に従う。
+   * `subject` を省略すると `describeEngineSkip` の引数（既定 `"the TTS engine"`）に従う。
    * 実行ファイルの名前（`"uv"` 等）を名指ししたいときだけ渡す —— `resolveKokoroSpawn` が
    * `uv` の not-found にこれを積む（合成エンジン全般ではなく uv が要ることを言うため）。
    */

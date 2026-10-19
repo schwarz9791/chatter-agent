@@ -10,22 +10,22 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 # 配るものとコミットを1対1にするため、作業ツリーがきれいで HEAD にタグが1つだけ付いているときだけ通す。
 # chatter-mascot/scripts/unity.sh の require_release_tag と同じ形。直すときは両方を揃える。
 if [[ -n "$(git status --porcelain)" ]]; then
-  echo "作業ツリーに未コミットの変更があります。release ビルドはコミット済みの状態でだけ行います。" >&2
+  echo "The working tree has uncommitted changes. Release builds run only from a committed state" >&2
   exit 1
 fi
 tags="$(git tag --points-at HEAD --list 'agent-v*')"
 if [[ -z "$tags" ]]; then
-  echo "HEAD に agent-v* タグがありません。git tag agent-v<MAJOR>.<MINOR>.<PATCH> を付けてから実行してください（docs/release.md）。" >&2
+  echo "HEAD has no agent-v* tag. Add one with git tag agent-v<MAJOR>.<MINOR>.<PATCH> and run again (docs/release.md)" >&2
   exit 1
 fi
 if [[ "$tags" == *$'\n'* ]]; then
-  echo "HEAD に agent-v* タグが複数付いています。1つにしてください:" >&2
+  echo "HEAD has more than one agent-v* tag. Leave only one:" >&2
   echo "$tags" >&2
   exit 1
 fi
 
 if [[ ! "$tags" =~ ^agent-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ || "$tags" == "agent-v0.0.0" ]]; then
-  echo "$tags は版の形式に合いません。agent-v<MAJOR>.<MINOR>.<PATCH>（先頭ゼロ不可・接尾辞不可・0.0.0 不可）にしてください。" >&2
+  echo "$tags does not match the version format. Use agent-v<MAJOR>.<MINOR>.<PATCH> (no leading zeros, no suffix, not 0.0.0)" >&2
   exit 1
 fi
 version="${tags#agent-v}"
@@ -35,7 +35,7 @@ version="${tags#agent-v}"
 all_tags="$(git tag --list 'agent-v*' --sort=-v:refname)"
 latest_tag="${all_tags%%$'\n'*}"
 if [[ "$tags" != "$latest_tag" ]]; then
-  echo "$tags は最新の版ではありません。$latest_tag より大きい版のタグにしてください。" >&2
+  echo "$tags is not the latest version. Use a tag newer than $latest_tag" >&2
   exit 1
 fi
 

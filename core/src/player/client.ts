@@ -189,7 +189,9 @@ export function createSpeechClient(options: SpeechClientOptions): SpeechClient {
       // 401 は Origin 検査、またはトークン認証（非ループバックのみ）。ネイティブから
       // ループバックへ張っている限り起きないが、理由が分からないと詰まる
       const hint =
-        res.statusCode === 401 ? "(rejected by allowedOrigins, or CHATTER_AGENT_PLAYER_TOKEN is missing or wrong)" : "";
+        res.statusCode === 401
+          ? " (rejected by allowedOrigins, or CHATTER_AGENT_PLAYER_TOKEN is missing or wrong)"
+          : "";
       console.error(`[Player] Handshake failed: ${res.statusCode}${hint}`);
 
       // ★ このハンドラを張ったら、自分で接続を畳むこと。

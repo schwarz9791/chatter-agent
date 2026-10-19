@@ -42,7 +42,7 @@ core を `bun build --compile` で1本の実行ファイルにし、ChatterAgent
 - ECONNREFUSED は `TypeError { code: "ECONNREFUSED" }` で届き、`cause` を持たない。
   - Node では `cause` に `connect ECONNREFUSED 127.0.0.1:<port>` が載る。
 - そのため、TTS の診断メッセージ（`tts/ttsEngine.ts` の `explain`）から接続先が消える。判定は `code` で取れる。
-  → 接続先は `createRequester` が `op` に添える（`audio_query (127.0.0.1:10101) に失敗しました: …`）。
+  → 接続先は `createRequester` が `op` に添える（`audio_query (127.0.0.1:10101) failed: …`）。
 
 ## Bun の WebSocket クライアントは、拒否された upgrade の後に `error` を出す
 

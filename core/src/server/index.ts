@@ -380,7 +380,7 @@ async function main(): Promise<void> {
     engine = startEngine(plan);
 
     // ★ **起動を待たない。** ここで疎通を確かめ直すと、モデルロード中なので必ず失敗し、
-    //   「繋がりません」という嘘の警告が出る。代わりに間引きを巻き戻して、最初の合成失敗で
+    //   `Cannot connect to the TTS engine` という嘘の警告が出る。代わりに間引きを巻き戻して、最初の合成失敗で
     //   `recheckEngine` が即座に診断を出せるようにする。起動そのものに失敗した場合は
     //   `startEngine` の exit ハンドラが終了コードと stderr の末尾を出す
     lastEngineCheckAt = Number.NEGATIVE_INFINITY;

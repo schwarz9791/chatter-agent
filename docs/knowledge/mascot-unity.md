@@ -300,7 +300,7 @@ Post Processing も無効のまま——**カメラの post-processing を有効
 
 `| grep ... || true` にすると `BuildScript` の `EditorApplication.Exit(1)` が消え、
 判定が「成果物があるか」だけになる。**一度でも成功していれば古い `.app` が残っている**ので、
-コンパイルエラーでも「できました」と言って exit 0 する —— 直っていないバイナリを
+コンパイルエラーでも `Done` と言って exit 0 する —— 直っていないバイナリを
 直ったつもりで起動することになる。`test.sh` と同じ `PIPESTATUS` の形に揃える。
 
 `$OUTPUT` が絶対パスのとき（`BuildScript.cs` の `Path.IsPathRooted` が許容する）に

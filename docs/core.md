@@ -425,7 +425,7 @@ server / player はこのファイルを読みも書きもしない（読むの�
   「数十秒の無音は正常」と区別できなくなる。音声だけを 503 に落として、原因を症状に出す
   ★ `listVoices()` が応答**あり**の失敗（`TtsHttpError`）で落ちたときは unreachable にしない ——
   そのポートには別の何かが応答しているということなので、起こすと bind に失敗するか二重に起こす。
-  「応答はあるが声の一覧を返さない」と警告して `reachable` を返す（→ `server/index.ts` の `checkEngine`）
+  `The TTS engine responded but returned no voice list` と警告して `reachable` を返す（→ `server/index.ts` の `checkEngine`）
 - `ttsEnabled: false` にすると配信フレームの `audio` が常に `null` になり、`GET /audio/…` も
   404 を返す。**テキストの配信は止まらない**ので、自前で合成するクライアントや字幕だけの
   クライアントの逃げ道になる。

@@ -97,11 +97,11 @@ pid で引くので、別のワークツリーのビルドを名前で取り違�
 
 ## マスコットがたまに勝手に消える — 一覧が空でも pid で確かめ直す
 
-- 症状: マスコットがたまに勝手に消える。`server.log` で「マスコットが外で終了された」の直後、同じ秒に生きている pid へ「マスコットの終了を要求した」が出る。この並びなら誤判定。終了の要求が続かず player の起動に進むなら、本当に外で終わったもの
+- 症状: マスコットがたまに勝手に消える。`server.log` で `Mascot was quit outside ChatterAgent` の直後、同じ秒に生きている pid へ `Requested the mascot to quit` が出る。この並びなら誤判定。終了の要求が続かず player の起動に進むなら、本当に外で終わったもの
 - 観測: `running_pids()` が `NSRunningApplication` を使う形になって以降（#173）、2026-10-04〜10-07 に5回。マスコット側は通常の終了要求で閉じていた（クラッシュではない）
 - `running_pids()` が動いているマスコットを一瞬だけ空で返すことがある。理由は未特定（監視スレッドから `NSRunningApplication` を引いていることとの関係は確かめていない）。空と読んだ直後に非表示への切り替えの中の `quit_mascot()` がもう一度読むと見つかり、生きているマスコットに自分で終了を要求して畳んでしまう
 - 手当て: `running_pids()`（`mascot_app.rs`）で、一覧が空のときだけ直前に見えていた pid を `pid_alive` で確かめ直す。監視・reconcile の起動判定・`quit_mascot` の入口と終了待ち・終了処理・設定パネルのどれも同じ関数を1回読んで決めているので、守る場所はここ1か所にする（監視だけで「2回続けて」を見る形では、ほかの経路が残る）
-- 確かめ直して生きていたときは、監視が `server.log` に `[Agent] … マスコットが一覧に出なかったが pid は生きていた: N回` を出す。取りこぼしがまだ起きているか・どのくらいの頻度かはこの行で見る
+- 確かめ直して生きていたときは、監視が `server.log` に `[Agent] … Mascot was missing from the process list but its pid was alive: N times` を出す。取りこぼしがまだ起きているか・どのくらいの頻度かはこの行で見る
 
 ## 終わらないスレッドから AppKit を呼ぶなら autoreleasepool で包む
 
@@ -239,8 +239,8 @@ Gatekeeper に止められる。マスコットの macOS 版も同じ。開き�
 - 2026-10-16（macOS 27.0.1。同じユーザー。clone でビルドした `mascot-v0.1.1` の `ChatterMascot.app` を `ditto` で
   `/Applications` に置き、`com.apple.quarantine` を手で付けた）: ★ **ChatterAgent が `open -a` で起こしても、
   ダブルクリックと同じく Gatekeeper に止められ、黙っては失敗しない。** ChatterAgent の警告は出ない
-  - ログは「マスコットを起動した」の後に「マスコットが外で終了された」。止めたのは Gatekeeper
-  - 「このまま開く」で許可すると macOS がマスコットを起こし、ChatterAgent は「外で起動された」として受け入れる。
+  - ログは `Launched the mascot` の後に `Mascot was quit outside ChatterAgent`。止めたのは Gatekeeper
+  - 「このまま開く」で許可すると macOS がマスコットを起こし、ChatterAgent は `Mascot was launched outside ChatterAgent` として受け入れる。
     以後の表示の切り替えでは何も聞かれない
   - マスコットは `/Applications` ではなく AppTranslocation の下（`/private/var/folders/…/AppTranslocation/…`）から
     動いた。それでも表示の切り替えと「Chatter Agent について」の版（`/Applications` の `Info.plist` を読む）は

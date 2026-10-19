@@ -70,7 +70,7 @@ export function createOpenAiEngine(options: TtsEngineOptions): TtsEngine {
     /**
      * Kokoro-FastAPI は複数の声を `+` で混ぜた合成指定（`af_bella+af_sky`）や、
      * 重み付き（`af_bella(2)+af_sky(1)`）を受け付ける。完全一致で見ると、
-     * 合成は 200 で鳴るのに「存在しません」と誤診断する。**構成要素がすべて
+     * 合成は 200 で鳴るのに `does not exist in this engine` と誤診断する。**構成要素がすべて
      * 一覧にあれば真**（重みの大小や順序までは検査しない —— それはエンジンの仕事）。
      */
     hasVoice(voices, id) {

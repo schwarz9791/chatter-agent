@@ -46,7 +46,7 @@ export interface ChatterAgentConfig {
 
   // ── 以下は server（音声合成）だけが読む ─────────────────────────────
   // ★ ここに置くこと。config.ts は全バイナリが同じ SPECS を共有していて、
-  //   載っていないキーは「未知のキー」として警告される。別ファイルに分けると
+  //   載っていないキーは `Unknown key` として警告される。別ファイルに分けると
   //   chatter-agent-speak が毎 delta の起動ごとに警告を吐く。
   //
   // ★ #29 で読み手が player → server に移った。**キー名も意味も変えていない**
@@ -550,7 +550,7 @@ const parseStringList: Parser<string[]> = (raw) => {
  *
  * ★ これを超えると静かに壊れる。Node 24 実測: `AbortSignal.timeout(4294967295)` は
  *   `TimeoutOverflowWarning` を出して **1ms に化け**（全リクエストが即 abort し、
- *   「エンジンがタイムアウトしました」という**設定ではなくエンジンを指すメッセージ**が出る）、
+ *   `audio_query timed out` という**設定ではなくエンジンを指すメッセージ**が出る）、
  *   `AbortSignal.timeout(99999999999)` は `RangeError` を投げる（`waitForEngine` が
  *   永久にループして接続しない）。「実質無制限」のつもりで大きい数を書くと踏む
  */
@@ -594,7 +594,7 @@ const parsePlayerArgs: Parser<string[]> = (raw) => {
  *
  * 素通しにすると、`localhost:10101`（スキーム忘れ）や末尾スラッシュ付きが
  * そのまま `${baseUrl}/audio_query` に連結されて、症状が「無音」の設定ミスになる。
- * ここで弾けば「不正です。既定値を使います」の警告が出る。
+ * ここで弾けば `is invalid (...). Using the default` の警告が出る。
  */
 function makeUrlParser(protocols: string[]): Parser<string> {
   return (raw) => {

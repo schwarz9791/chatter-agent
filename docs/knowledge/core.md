@@ -391,7 +391,7 @@ server（音声合成）だけが読むキーは「音声合成エンジン」�
   （GUI ではない）
 - サーバーを止めると `lsof` が空に戻る（プロセスグループごとの停止が効いている）
 - **GUI が上げている状態ではサーバーは起こさない**（条件3）。ログには
-  `音声合成エンジンに繋がりました` だけが出て `[Engine]` の行は出ない
+  `Connected to the TTS engine` だけが出て `[Engine]` の行は出ない
 - 起こしてから `/speakers` が応答するまでは**数秒**かかる。★ **この秒数を仕様として扱わないこと** ——
   マシンとモデルで変わる。その間の `GET /audio/…` は `503` になり、クライアントが取り直す
 
@@ -496,7 +496,7 @@ player だけが読むキーの一覧・既定値・意味は [`../core.md`](../
 **`speechLogGenerations`（記録の退避世代数）は [#8](https://github.com/schwarz9791/chatter-agent/issues/8) で廃止した。** 誰も過去世代まで遡らなくなったので、
 複数世代を繰り下げる必要がなくなり、`speechLogMaxBytes` を超えたら `speech.1.jsonl` に退避する1世代だけになった。
 既存の `~/.config/chatter-agent/config.json` に `speechLogGenerations` が残っていると、`config.ts` の未知キー警告
-（`[Config] ... の未知のキー "speechLogGenerations" は無視されます`）が CLI 起動のたびに出る。手で消すこと。
+（`[Config] Unknown key "speechLogGenerations" in ... is ignored`）が CLI 起動のたびに出る。手で消すこと。
 それ以前の環境で作られた `speech.2.jsonl` 以降のファイルも、以後は誰も読み書きしない孤児になる。消してよい。
 
 config に載せない環境変数:

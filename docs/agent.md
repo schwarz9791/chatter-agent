@@ -393,7 +393,7 @@ Finder から起動したアプリは薄い環境しか持たないので、同�
 mDNS での広告（`_chatter-agent._tcp`。→ [`protocol.md`](./protocol.md)「発見（DNS-SD）」）も、同じ
 「ローカルネットワーク」の許可の対象になる。**許可が無いと広告はループバックにしか出ず、端末からは見つからない。**
 許可を付けたら server を再起動すること（許可より前に起動した server は、広告を LAN へ送れないまま動き続ける）。
-`広告を始めました` のログは許可が無くても出る（ciao は EPERM などの送信エラーを握りつぶす）ので、
+`Started advertising` のログは許可が無くても出る（ciao は EPERM などの送信エラーを握りつぶす）ので、
 広告が LAN に届いている証拠にはならない。確かめるには Mac で `dns-sd -B _chatter-agent._tcp local.` を引き、
 `if` 欄に Wi-Fi のインターフェース番号（`ifconfig -v en0` の `index`）が出ているかを見る。`1`（ループバック）だけなら届いていない。
 

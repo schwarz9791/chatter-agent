@@ -178,9 +178,11 @@ spool を見る（走査直後に到着した分の取りこぼし防止）。
 **`ChatterMascot.Runtime` を「描画に依存しない層」のまま保つ。** 契約・状態機械・探索順・画角の計算が
 EditMode だけでテストできているのは、この層が描画に依存していないから。
 
-**マスコットのログは英語で書く。** `Debug.Log*`・Android の `Log.*`・ログに流れるエラー文は、端末の
-言語に関わらず英語だけにする（画面の文言は `UiText`）。プレフィックス（`[Mascot]` など）と、
-引用する docs の見出しは変えない。
+**ログは英語で書く。** マスコットの `Debug.Log*`・Android の `Log.*`、server・CLI・player の
+`console.*`、ChatterAgent の `[Agent]` 行、ログに流れるエラー文、開発用スクリプトと CI の出力は、
+端末の言語に関わらず英語だけにする（画面の文言はマスコットが `UiText`、ChatterAgent が
+`text.rs` / `text.ts`）。プレフィックス（`[Mascot]` / `[Server]` / `[Agent]` など）と、引用する docs の
+見出しは変えない。
 
 ## lint とテスト
 

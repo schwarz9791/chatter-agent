@@ -109,7 +109,7 @@ export function createVoicevoxEngine(options: TtsEngineOptions): TtsEngine {
 
       // ★ 200 でも WAV とは限らない。`ttsBaseUrl` が別サービス（開発サーバー、
       //   キャプティブポータル）を指していると 200 + HTML が返り、そのまま再生に回って
-      //   「再生に失敗しました」で ack される。**症状が原因からいちばん遠いところに出る**ので、
+      //   `Playback of seq=… failed` で ack される。**症状が原因からいちばん遠いところに出る**ので、
       //   ここで名指ししておく
       if (!looksLikeWav(wav)) {
         throw new TtsHttpError("synthesis", synthRes.status, `response is not a WAV (${wav.byteLength} bytes)`);

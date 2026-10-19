@@ -296,7 +296,7 @@ Player.log、Android は `adb logcat -s Unity`）に出る。
 CHATTER_AGENT_HOST=0.0.0.0 npm run start:server
 ```
 
-起動ログに接続先候補（`ws://<LAN IP>:<port>`）とトークンファイルの**パス**が出る
+起動ログに LAN からの接続先候補（`Candidate addresses for LAN connections` の下に `ws://<LAN IP>:<port>`）とトークンファイルの**パス**が出る
 （値そのものは出ない）。
 
 #### `configure-android.sh`
@@ -365,7 +365,7 @@ Android のログは `adb logcat -s Unity`。★★ **Android では 401 と「�
 | 症状（ログ） | 原因 | 確かめ方 |
 |---|---|---|
 | `[Mascot] Connection error: Unable to connect to the remote server`（**内側の例外が付かない**）。サーバー側に `[WS] Rejected unauthorized connection: <端末の IP>`。続くと端末に「サーバーに繋がりません」の通知も出る（通知はトークンに触れない） | トークンが無いか違う（`401`） | 起動ログの `[Mascot] Token: set / not set`。`connection.token` が `server.token` と一致しているか（XR ならペアリングで取り直す。`configure-android.sh` を同じ `XDG_CONFIG_HOME` で撃ち直してもよい） |
-| `[Mascot] Connection error: Unable to connect to the remote server → mono-io-layer-error (111)` | 相手のポートが開いていない。サーバーが止まっている、または `host` がループバックのまま | Mac 側の起動ログに「LAN からは繋げません（host=127.0.0.1）」が出ていないか |
+| `[Mascot] Connection error: Unable to connect to the remote server → mono-io-layer-error (111)` | 相手のポートが開いていない。サーバーが止まっている、または `host` がループバックのまま | Mac 側の起動ログに `Not reachable from the LAN (host=127.0.0.1)` が出ていないか |
 | （未実測）Mac から `curl http://<LAN IP>:<port>/v1/health` は `401` が返るのに、端末からは届かない | macOS のローカルネットワーク許可が拒否されている | システム設定 → プライバシーとセキュリティ → ローカルネットワーク。**この許可は node ではなく起動元のターミナルアプリに紐づく** —— 過去に拒否していると 127.0.0.1 からは繋がるのに LAN からだけ症状が出る |
 | （未実測）WS は `Connected` まで進むが、音声の取得だけ失敗する | `insecureHttpOption` が `AlwaysAllowed` になっていない（`UnityWebRequest` だけが掛かる門） | `Edit > Project Settings > Player` の `Configuration > Insecure HTTP Option`。出荷値は `AndroidPlayerSettings.FixAll` が書く |
 | （未実測）targetSdk 37 以上で全部繋がらない | `ACCESS_LOCAL_NETWORK` のランタイム許可が要る | targetSdk は 36 に固定で、37 以上はビルドで止めているので、今は起きない（→ 上の `AndroidPlayerSettings.FixAll` の表） |
@@ -376,11 +376,11 @@ Android のログは `adb logcat -s Unity`。★★ **Android では 401 と「�
 | `[Mascot] serverUrl: using launch argument (…)` | `-serverUrl` が設定より優先されている | 起動引数を外す |
 | ペアリング: ChatterAgent の窓に `not_lan` の案内が出て PIN が出ない | server がループバックに bind していて、LAN に出ていない | `config.json` の `host` か `CHATTER_AGENT_HOST` を `0.0.0.0` にして server を再起動する |
 | ペアリング: 端末に「サーバーが見つかりません」 | mDNS が届かない（別のサブネット・VLAN、ルーターがマルチキャストを通さない）／server が LAN に出ていない | 端末と Mac が同じネットワークか。server の host が `0.0.0.0` か。届かないなら `configure-android.sh ws://<ip>:<port>` で明示する（AP のクライアント分離なら明示しても繋がらない） |
-| ペアリング: 端末に「サーバーが見つかりません」。server のログには `[mDNS] 広告を始めました` が出ている | ChatterAgent に「ローカルネットワーク」の許可が無い（または許可より前に起動した server のまま）。広告がループバックにしか出ていない | Mac で `dns-sd -B _chatter-agent._tcp local.` の `if` 欄が `1` だけなら届いていない。システム設定 → プライバシーとセキュリティ → ローカルネットワーク で ChatterAgent をオンにし、メニューの「サーバーを再起動」（→ [`../agent.md`](../agent.md)「LAN に公開するとき」）。一覧ですでにオンなのに `1` だけなら、`codesign -dv ChatterAgent.app` の `Identifier` が `tech.sukima.chatter-agent` かを見る（→ [`agent.md`](./agent.md)「「ローカルネットワーク」の許可は署名の識別子とパスで引かれる」） |
+| ペアリング: 端末に「サーバーが見つかりません」。server のログには `[mDNS] Started advertising` が出ている | ChatterAgent に「ローカルネットワーク」の許可が無い（または許可より前に起動した server のまま）。広告がループバックにしか出ていない | Mac で `dns-sd -B _chatter-agent._tcp local.` の `if` 欄が `1` だけなら届いていない。システム設定 → プライバシーとセキュリティ → ローカルネットワーク で ChatterAgent をオンにし、メニューの「サーバーを再起動」（→ [`../agent.md`](../agent.md)「LAN に公開するとき」）。一覧ですでにオンなのに `1` だけなら、`codesign -dv ChatterAgent.app` の `Identifier` が `tech.sukima.chatter-agent` かを見る（→ [`agent.md`](./agent.md)「「ローカルネットワーク」の許可は署名の識別子とパスで引かれる」） |
 | ペアリング: 端末に「PIN が違います（あと N 回）」 | PIN の入れ間違い・古い PIN（発行し直すと置き換わる） | ChatterAgent の窓に出ている最新の PIN を確かめる |
 | ペアリング: 端末に「PIN を出し直してください」 | 期限（5 分）切れ、失敗が 5 回に達して `locked`、または未発行 | ChatterAgent の「Android とペアリング…」で出し直す（窓を開き直すか「発行し直す」） |
 | ペアリング: 端末に「このサーバーはペアリングに対応していません」 | 古い server（`401` / `404`） | server を更新して再起動する |
-| ペアリング: 端末に「サーバーに繋がりません」「サーバーの応答を読めませんでした」 | server が止まっている・LAN の経路が通らない／想定外の応答 | server の起動状態と、同じネットワークか。ログに `ペアリングに失敗しました: <端末の IP> (<status>)` が出ていれば届いている |
+| ペアリング: 端末に「サーバーに繋がりません」「サーバーの応答を読めませんでした」 | server が止まっている・LAN の経路が通らない／想定外の応答 | server の起動状態と、同じネットワークか。ログに `[HTTP] Pairing failed: <端末の IP> (<status>)` が出ていれば届いている |
 
 #### ★★ close フレーム無しで切れた後、Android では `Abort` しないと再接続が止まる
 

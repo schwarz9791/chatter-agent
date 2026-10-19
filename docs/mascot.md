@@ -401,12 +401,12 @@ logcat に出るはずの行:
 ```
 [Mascot] version: 1.2.3                                                              ← 起動直後。macOS では `Player.log` にも出る。報告がどのビルドのものかを見る
 [Mascot] server: ws://127.0.0.1:8570 / audio: http://127.0.0.1:8570/audio/
-[Mascot] … から 19,259,304 バイト読みました: jar:file:///…/base.apk!/assets/vita.vrm   ← 同梱モデル
-[Mascot] XR: 空間固定 headLocalPosition=… → originPosition=… originYaw=…              ← XR 未起動なら「XR: 起動していないので平面表示のまま」
-[Mascot] XR grab: 平面検知を開始しました                                              ← SCENE_UNDERSTANDING_COARSE が許可されていれば出る
-[Mascot] XR grab: 掴みました hand=RightHand
-[Mascot] XR grab: 離しました plane=… yaw=…                                           ← plane=none は面が見つからなかった場合
-[Mascot] 無音が続いたのでオーディオ出力を止めました                                  ← 発話が来れば「掴み直しました」が続く
+[Mascot] Read 19,259,304 bytes from …: jar:file:///…/base.apk!/assets/vita.vrm       ← 同梱モデル
+[Mascot] XR: spatial anchor headLocalPosition=… → originPosition=… originYaw=…       ← XR 未起動なら「XR: not running, staying in flat display」
+[Mascot] XR grab: plane detection started                                            ← SCENE_UNDERSTANDING_COARSE が許可されていれば出る
+[Mascot] XR grab: grabbed hand=RightHand
+[Mascot] XR grab: released plane=… yaw=…                                             ← plane=none は面が見つからなかった場合
+[Mascot] Stopped audio output because silence continued                              ← 発話が来れば「Reacquired audio output」が続く
 ```
 
 権限（`HAND_TRACKING` / `SCENE_UNDERSTANDING_COARSE`）を試し直すときは:
@@ -675,7 +675,7 @@ B・C どちらの経路でもこのポートへ向ける。C（`configure-andro
 - ★ **`connection` が入っていると B（`adb reverse`）の経路は使われない。** C から B へ戻すときは
   `./scripts/configure-android.sh --clear` で `connection` だけ消す（ペアリングで入ったトークンも消える）
 - ★ **`CHATTER_AGENT_HOST=0.0.0.0` を忘れると Android から繋がらない。** logcat には
-  `[Mascot] 接続エラー: Unable to connect to the remote server → mono-io-layer-error (111)`
+  `[Mascot] Connection error: Unable to connect to the remote server → mono-io-layer-error (111)`
   が出る（サーバーのポートが開いていない＝ECONNREFUSED）
 - トークンはサーバーの起動時に生成される。`configure-android.sh` は先に `chatter-agent-server`
   を起動してから使うこと。ペアリングも、server が動いていて LAN に出ていないと発行できない

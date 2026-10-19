@@ -126,8 +126,8 @@ T ポーズ必須なので、その幅は**常に「広げた腕」**になる�
 実測（同梱 `vita.vrm` + `idle_loop.vrma`、300x480）:
 
 ```
-[Mascot] フレーミング: 300x480 aspect=0.625 bounds=(1.54, 1.66, 0.33) distance=2.51 支配軸=水平   ← VRMA 適用前 / Renderer.bounds
-[Mascot] フレーミング: 300x480 aspect=0.625 bounds=(0.62, 1.66, 0.37) distance=1.76 支配軸=垂直   ← VRMA 適用後 / ボーンから測定
+[Mascot] Framing: 300x480 aspect=0.625 bounds=(1.54, 1.66, 0.33) distance=2.51 dominantAxis=horizontal   ← VRMA 適用前 / Renderer.bounds
+[Mascot] Framing: 300x480 aspect=0.625 bounds=(0.62, 1.66, 0.37) distance=1.76 dominantAxis=vertical   ← VRMA 適用後 / ボーンから測定
 ```
 
 幅 1.54m → **0.62m**、距離 2.51 → **1.76**（キャラが約3割大きく映る）、支配軸が
@@ -182,8 +182,8 @@ T ポーズ必須なので、その幅は**常に「広げた腕」**になる�
 （実機での指摘）。実機ログ:
 
 ```
-[Mascot] フレーミング: … bounds=(1.54, 1.66, 0.33) distance=2.51 支配軸=水平   ← 読み込み直後
-[Mascot] フレーミング: … bounds=(0.62, 1.66, 0.37) distance=1.76 支配軸=垂直   ← VRMA 適用後
+[Mascot] Framing: … bounds=(1.54, 1.66, 0.33) distance=2.51 dominantAxis=horizontal   ← 読み込み直後
+[Mascot] Framing: … bounds=(0.62, 1.66, 0.37) distance=1.76 dominantAxis=vertical   ← VRMA 適用後
 ```
 
 **原因**: VRM 1.0 はレストポーズが T ポーズ必須なので、読み込んだ直後（VRMA が非同期で
@@ -313,11 +313,11 @@ probe を別モデルで回すための意図的な口。周囲の状態に左�
 ```console
 # 環境変数は無視される（＝ 環境変数の段を潰した）
 $ CHATTER_MASCOT_VRM=/tmp/decoy.vrm ./scripts/run.sh ChatterMascot.EditorTools.VrmProbe.Report
-[VrmProbe] 読みます: .../Assets/StreamingAssets/vita.vrm
+[VrmProbe] Loading: .../Assets/StreamingAssets/vita.vrm
 
 # 起動引数は効く（＝ 起動引数の段は残す）
 $ ./scripts/run.sh ChatterMascot.EditorTools.VrmProbe.Report -vrm /tmp/decoy.vrm
-[VrmProbe] 読みます: /tmp/decoy.vrm
+[VrmProbe] Loading: /tmp/decoy.vrm
 ```
 
 ★ **根っこは「doc が主張していることをコードが実行していなかった」こと。** `ProbeEnv` の doc は
@@ -644,7 +644,7 @@ const targetY = (mouse.y - headY) * eyeSensitivity * 2;
 **症状**: `VrmCharacter` が出す
 
 ```
-[Mascot] 視線の原点（目 / 頭ボーン）が取れないので、GazeOriginViewportY をフォールバック値にします
+[Mascot] Gaze origin (eye / head bone) unavailable, using the fallback value for GazeOriginViewportY
 ```
 
 が、**VRM が正常に読めている場合でも起動のたびに必ず1回出ていた。**
@@ -664,7 +664,7 @@ const targetY = (mouse.y - headY) * eyeSensitivity * 2;
 1. `CursorGazeSource` の1回だけのログが、`GazeOriginViewportY` が実測で埋まる前に発火して
    **初期値 `0.5` しか記録しなかった**（この値を確かめようとして使えず、スクリーンショットで
    測り直す羽目になった）
-2. 上の「視線の原点が取れない」警告
+2. 上の「Gaze origin (eye / head bone) unavailable」警告
 
 **一般化**: **非同期の読み込みが終わるまで成立しない条件を、起動直後のフレームで判定しない。**
 ラッチ付きのログ／警告は特に危ない —— 1回しか出ないので、**成立前に消費されると永久に
@@ -685,7 +685,7 @@ const targetY = (mouse.y - headY) * eyeSensitivity * 2;
 **だから「キーがあるか」だけを見る診断は、いちばん見たいケースで嘘をつく。** bind の数まで見ること。
 
 - `VrmProbe` の `expressions:` は bind が 0 のクリップに `(空)` を付ける
-- `VrmCharacter` は読み込み時に1回、`使う preset: happy=○ angry=○ …（○=動く / 空=枠はあるが中身が無い / ×=無い）` を出す
+- `VrmCharacter` は読み込み時に1回、`Presets in use: happy=ok angry=ok … (ok=works / empty=has a slot but no content / none=missing)` を出す
 
 ★★ **bind の配列は4本ある。** `MorphTargetBindings` / `MaterialColorBindings` /
 `MaterialUVBindings` / **`NodeTransformBindings`**。最後のひとつは実験扱いの名前だが
@@ -907,7 +907,7 @@ cc-mascot も `performBlink` の入口で `return` している。出力を無�
 
 読み込み時に `aa, angry, blink, blinkLeft, blinkRight, ee, happy, ih, lookDown, lookLeft, lookRight,
 lookUp, neutral, oh, ou, relaxed, sad, surprised`（18 件）の expression が揃い、使う preset も
-すべて○、VRMA の `ExpressionMap` は 0 件だった。`Emotion.Happy → Angry → Sad → Relaxed →
+すべて ok、VRMA の `ExpressionMap` は 0 件だった。`Emotion.Happy → Angry → Sad → Relaxed →
 Surprised → Neutral` の6つを順に流すと、遷移それぞれで前の expression の重みが残ったまま
 次が立ち上がった。
 
@@ -989,7 +989,7 @@ Surprised → Neutral` の6つを順に流すと、遷移それぞれで前の e
 - `motionEdge: frame=… age=… hips=… head=… event=…` —— モーションの遷移が起きたフレームと、
   その直後数フレームを閾値に関係なく無条件に出す。`stall:` / `hipsJump:` のどちらも出ない
   ほど小さい飛びでも、切り替え直後の hips / head の動きをここで直接見られる
-- `afplay の起動に …ms かかりました（frame=…）` —— `Process.Start` の所要時間。`stall:` と
+- `afplay took …ms to start (frame=…)` —— `Process.Start` の所要時間。`stall:` と
   `frame` が近ければ、ストール源をここまで絞り込める
 
 いずれも `frame=` で突き合わせて読むこと（配線は増やしていない——afplay 側とモーション側は
@@ -1050,7 +1050,7 @@ Verlet 積分に渡す。メインスレッドが詰まった直後のフレー�
 VRMA 不在時のフォールバック経路の両方。52 ボーンの VRoid クリップ（#70 の素材）は指を
 自前で持つので `HasValue == true` となり、差し替えは 0 本——**ファイル側の指があるのに
 上書きして原作アニメーションを壊す**ことはない。ログ:
-`[Mascot] VRMA に無い指ボーン 30 本を既定の丸めで補います`（VRoid クリップでは `0 本`）。
+`[Mascot] Filling finger bones missing from the VRMA with the default curl: count=30`（VRoid クリップでは `count=0`）。
 
 角度は `FingerPose` の定数（`ProximalDegrees` / `IntermediateDegrees` / `DistalDegrees`）が
 権威で、**ここには数字を書かない**（実機で調整するたびに文書側が古くなる。この PR の中でも
@@ -1187,8 +1187,8 @@ ChatterAgent への依頼は結果を返さないので、`playMotion` が始ま
 
 **目視の道具**: `open Build/ChatterMascot.app --args -serverUrl ws://127.0.0.1:9 -motionProbe happy`
 で読み込み完了の3秒後に1本だけ再生する。ログは
-`[Mascot] モーション: idle=5 happy=3 …（読めた 15/15 本）` と
-`[Mascot] モーション開始: Emotion WIN00.vrma（happy、4.0s）` / `モーション終了`。
+`[Mascot] Motions: idle=5 happy=3 … (loaded 15/15)` と
+`[Mascot] Motion started: Emotion WIN00.vrma (happy, 4.0s)` / `Motion ended`。
 
 **残した宿題**: `idle/` の 8.8〜18.2秒が小ネタとして長いかは耳と目で判断する（Issue #70に
 持ち越し）。Android の同梱マニフェスト JSON は #97（`AnimationManifest.Build` の `bundled` 引数が

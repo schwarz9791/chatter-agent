@@ -89,7 +89,7 @@ JS の `confirm()` は wry で効かない。確認は `tauri-plugin-dialog` の
 ## マスコットの終了は `NSRunningApplication.terminate()` で頼む
 
 `terminate()` は通常の quit の Apple Event を送るだけで、Unity はそれを `wantsToQuit` で受ける
-（`Player.log` に `[Mascot] 終了要求: 未 ack=… → 通します/保留します` が出る）。保留した回の戻りは
+（`Player.log` に `[Mascot] Quit request: unacked=… → allowing/deferring` が出る）。保留した回の戻りは
 「拒否」になるので、終わったかは pid が消えたことで見る（`clients.rs` の `quit_mascot`）。
 
 pid で引くので、別のワークツリーのビルドを名前で取り違えない。bundle id で列挙する

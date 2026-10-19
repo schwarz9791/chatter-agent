@@ -23,9 +23,9 @@
 [WS] Backpressure (NB buffered), closing    → socket.close(1013, "too slow")
 ```
 
-実際に `Player.log` に「切断されました」が15回出ていて、CPU を見るまで原因が分からなかった。
+実際に `Player.log` に「Disconnected」が15回出ていて、CPU を見るまで原因が分からなかった。
 **切断のログには必ず close コードを出すこと**（→ `SpeechClient.DescribeClose`）。
-1013 なら「こちらが遅い」、close フレーム無しなら「pong が返せていない」と読める。
+1013 なら「こちらが遅い」、no close frame なら「pong が返せていない」と読める。
 
 ★ **`vSyncCount` ではなく `Application.targetFrameRate` で絞る。**
 `targetFrameRate` は VSync が有効だと**無視される**ので、`vSyncCount: 0` のままの方が
@@ -402,7 +402,7 @@ VRM のテクスチャは `.vrm` の中にあるので、`.png` が単体で入�
 Unity のドキュメントに明記されているとおり、`Object.FindFirstObjectByType` は
 **`HideFlags.DontSave` を持つオブジェクトを返さない**。`WindowGeometry.Reset()` は常に
 「見つからない」枝に落ち、`window.json` を消すだけで終わっていた（ログにも
-`ウィンドウの管理が動いていないので、位置のリセットは次の起動から効きます` が出ていた）。
+`Window management is not running, so the position reset takes effect from the next launch` が出ていた）。
 
 **手当て**: **static フィールドで保持**する
 （`Start` で代入、`OnDestroy` で解除）。`FindFirstObjectByType` を使わない。

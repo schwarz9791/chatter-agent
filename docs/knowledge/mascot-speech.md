@@ -91,7 +91,7 @@ entry を消す。CLI Player を動かしたまま Unity を繋いで実際に�
 **正常なフレームが1つも通らなくなる**。外から見えるのは:
 
 - **完全な無音**（テキストも表情も出ない）
-- ログは「読めないフレームを捨てました」が**接続ごとに1回だけ**（洪水を避けるラッチ）
+- ログは「Dropped an unreadable frame」が**接続ごとに1回だけ**（洪水を避けるラッチ）
 
 サーバー側は正常に配信し続けているので、切り分けが難しい。
 
@@ -111,7 +111,7 @@ entry を消す。CLI Player を動かしたまま Unity を繋いで実際に�
 
 ★ **この壊れ方が悪いのは、1フレームで済まないこと。** `TryParse` の外へ例外が出ると:
 
-1. `SpeechClient` の受信ループが終わる（ログは「受信でエラー」1行）
+1. `SpeechClient` の受信ループが終わる（ログは「Receive error」1行）
 2. 再接続する
 3. サーバーは**未 ack の同じフレームを再送する**
 4. また落ちる —— 直すまで永久にこのループ
@@ -144,7 +144,7 @@ try/catch で囲む）で、読めなければ警告してそのキーだけ既�
 
 `SafeInvoke` で握って必ず `Warn` に出す。`RunAsync` の最外殻にも try/catch を置くが、
 **あれは復旧のためではなく可視化のため**（復旧できないなら、せめて
-「再接続ループが止まりました」と言わせる）。
+「Reconnect loop stopped」と言わせる）。
 
 ## ★ `ClientWebSocket.SendAsync` を `_ = ` で投げると、例外が `catch` を素通りする
 
@@ -196,7 +196,7 @@ ack のように「送れたことを前提に手元から消す」値でこれ�
 10秒へ広げたうえで、終了処理に成功／失敗の1行を出させて初めて判定できた:
 
 ```
-[Mascot] 終了時に保留していた ack を送りました (seq=5145)
+[Mascot] Sent the ack pending at shutdown (seq=5145)
 ```
 
 送れなかった側（`Warn`）は**次回起動での二重発話に直結する**ので、これは恒久の診断として残してある。
@@ -234,8 +234,8 @@ macOS では何も起きない**。**フレームを1つ跨ぐだけで効く。
 EditMode で固定した（終了経路は Editor の Play Mode では戻り値が無視されるので、
 ここを `MonoBehaviour` に埋めると1行も固定できない）。
 
-★ **「接続を閉じます / 閉じました」の詳細は保留経路でしか出ない。** 通常経路は投げ切るものが
-無いので閉じる過程を残す意味が無い。**切り分けの入口（「終了要求」の行）は両方の経路で出る。**
+★ **「Shutdown: closing connection / connection closed」の詳細は保留経路でしか出ない。** 通常経路は投げ切るものが
+無いので閉じる過程を残す意味が無い。**切り分けの入口（「Quit request」の行）は両方の経路で出る。**
 
 ## 実測（2026-08-30 / macOS 26.6.2。`-quitProbe` で保留を強制し、終了要求を1回だけ送る）
 
@@ -249,13 +249,13 @@ EditMode で固定した（終了経路は Editor の Play Mode では戻り値�
 `0xFFFFFFFF`（Int32 では -1）だけでなく **0 も実体で測り直す**
 （参照実装 `core/src/player/audioPlayer.ts` の `declared > 0 && declared <= actual`）。
 
-0 を弾くと「data チャンクがありません」になり、`AudioFailed` → 1回リトライ →
-**「seq=N の音声を取れなかったので飛ばします」で全文が無音スキップ**される。
+0 を弾くと「data chunk is missing」になり、`AudioFailed` → 1回リトライ →
+**「Skipping seq=N because its audio could not be fetched」で全文が無音スキップ**される。
 合成側が data サイズを後追いで埋める書き方に変えただけでこうなる。
 
 ★ **測り直しを全チャンクに広げないこと。** 広げると、宣言サイズ 0 のチャンクで
 「末尾まで」が採用されて `offset` が範囲外へ飛び、**その先の `data` に到達しないまま
-「data チャンクがありません」になる**。踏むのは「`data` より手前に長さ 0 の
+「data chunk is missing」になる**。踏むのは「`data` より手前に長さ 0 の
 `LIST` / `fact` がある WAV」だけだが、**この PR で一度実際に入れて指摘された**。
 
 写し元も測り直しは `data` の分岐の中だけで、**前進には宣言値をそのまま使っている**
@@ -437,7 +437,7 @@ Unity 内蔵オーディオが有効なままだと Unity 側がデバイスを�
 ★ **Unity は YAML に無い `SerializeField` に C# のイニシャライザ値を残す。** `MascotRunner` に
 `audioIdleSuspendMs = 5000` を足したがシーンを保存し直していないので、`Mascot.unity` の
 `MonoBehaviour` ブロックにこのキーは**無い**。それでも実測では 5000 が効いていた
-（キーが無い状態のビルドで「無音が続いたので…」のログが12回出た）。型の既定値 0 が
+（キーが無い状態のビルドで「Stopped audio output because silence continued」のログが12回出た）。型の既定値 0 が
 当たるわけではない。★ ただし**シーンを一度でも保存すると値が焼かれる**ので、
 既定を変えるときはシーンも見ること。
 
@@ -574,7 +574,7 @@ release が効くのは**発話中の音素の谷**だけ。
   書き直していない（`SpeakingSetTests.TryGetFaceFallsBackToAssistantNeutral`）
 
 ★ **`Begin` は `Execute` の `Play` の直前、`End` は `PlayAsync` の `finally`。**
-`PlayAsync` は同期完了する経路（「音声のハンドルがありません」など）があり、そこから
+`PlayAsync` は同期完了する経路（「no audio handle」など）があり、そこから
 `Dispatch` がコマンドループへ再入する。また `_ = PlayAsync(...)` の fire-and-forget なので、
 実装が例外を投げるとその例外は**未観測のまま捨てられる** —— `finally` でないと
 **口が開きっぱなしのまま永久に固まる**。

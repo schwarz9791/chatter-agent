@@ -63,7 +63,7 @@ VRM の読み込み直後、`VrmStage.Adopt` が `VrmMaterialCheck.Inspect` の�
 XR パッケージも同じフックで同じマニフェストへ注入してくるので、「最終形を決める仕組み」を1つに保つため。
 
 ★★ **Unity 6000.3 は `INTERNET` を自分で書く（`ForceInternetPermission`）が、`usesCleartextTraffic` は
-書かない。** Gradle がマニフェストを作り直したビルドで `[Build] AndroidManifest.xml: usesCleartextTraffic を追加`
+書かない。** Gradle がマニフェストを作り直したビルドで `[Build] AndroidManifest.xml: added usesCleartextTraffic`
 が出た。後処理は保険ではなく**必須**。
 
 確認は APK を直接読む（`aapt2` は Editor の `PlaybackEngines/AndroidPlayer/SDK/build-tools/<ver>/` にある）:
@@ -104,7 +104,7 @@ stop が猶予に間に合うかは負荷次第の競争。Android XR エミュ�
 `UnityPlayerActivity` を取り違える）。Unity の終了処理（OpenXR セッションの破棄、`wantsToQuit` での ack の
 送り切り）は飛ぶが、システムが kill する普段の経路でも途中で切られている。`am stack remove`（終了処理を通らず即 kill）でも
 再起動は正常だった。手当ての後、負荷をかけた Clear all で kill が見送られた回でも、
-`ChatterMascot: onDestroy: プロセスを終了します` の直後にプロセスが消え、次の起動は正常に上がった。
+`ChatterMascot: onDestroy: terminating process` の直後にプロセスが消え、次の起動は正常に上がった。
 
 ★ **XR Management が同じ GameActivity 名の宣言を別に足す。** XR Management
 （`AndroidManifestProcessor`）は入口の設定を見て、`com.unity3d.player.UnityPlayerGameActivity` を
@@ -153,7 +153,7 @@ Play Mode なので何もしない）が、コンポーネントの型が属す�
 
 `Mascot.unity` で外れるのは `UniWindowController/UniWindowController`（空になった GameObject ごと）と
 `ModelAnchor/ModelPlaceholder/UniWindowMoveHandle`。ログは
-`[Build] Android 非対応のコンポーネントを外しました:` で始まる。
+`[Build] Removed components unsupported on Android:` で始まる。
 
 ★★ **GameObject を消すのは「このパスで空にしたもの」だけ。** `Main Camera/GazeTarget` は仕様として
 Transform しか持たない空オブジェクトで、初版は「空だから」と消していた（`VrmCharacter` が実行時に
@@ -359,21 +359,21 @@ Android で共通。1秒ポーリングで外部変更も拾う。
 
 Android のログは `adb logcat -s Unity`。★★ **Android では 401 と「接続を拒否された」が同じ定型文で
 始まる。** 見分けるのは内側の例外が付くかどうか —— 401 のときは `ClientWebSocket` の例外に
-ステータスがどこにも載らないので、`トークンが無いか違います` のヒントは付かない（デスクトップで
+ステータスがどこにも載らないので、`Token missing or invalid` のヒントは付かない（デスクトップで
 ステータスが内側に載る環境なら付く）。
 
 | 症状（ログ） | 原因 | 確かめ方 |
 |---|---|---|
-| `[Mascot] 接続エラー: Unable to connect to the remote server`（**内側の例外が付かない**）。サーバー側に `[WS] Rejected unauthorized connection: <端末の IP>`。続くと端末に「サーバーに繋がりません」の通知も出る（通知はトークンに触れない） | トークンが無いか違う（`401`） | 起動ログの `[Mascot] トークン: 設定あり / 設定なし`。`connection.token` が `server.token` と一致しているか（XR ならペアリングで取り直す。`configure-android.sh` を同じ `XDG_CONFIG_HOME` で撃ち直してもよい） |
-| `[Mascot] 接続エラー: Unable to connect to the remote server → mono-io-layer-error (111)` | 相手のポートが開いていない。サーバーが止まっている、または `host` がループバックのまま | Mac 側の起動ログに「LAN からは繋げません（host=127.0.0.1）」が出ていないか |
+| `[Mascot] Connection error: Unable to connect to the remote server`（**内側の例外が付かない**）。サーバー側に `[WS] Rejected unauthorized connection: <端末の IP>`。続くと端末に「サーバーに繋がりません」の通知も出る（通知はトークンに触れない） | トークンが無いか違う（`401`） | 起動ログの `[Mascot] Token: set / not set`。`connection.token` が `server.token` と一致しているか（XR ならペアリングで取り直す。`configure-android.sh` を同じ `XDG_CONFIG_HOME` で撃ち直してもよい） |
+| `[Mascot] Connection error: Unable to connect to the remote server → mono-io-layer-error (111)` | 相手のポートが開いていない。サーバーが止まっている、または `host` がループバックのまま | Mac 側の起動ログに「LAN からは繋げません（host=127.0.0.1）」が出ていないか |
 | （未実測）Mac から `curl http://<LAN IP>:<port>/v1/health` は `401` が返るのに、端末からは届かない | macOS のローカルネットワーク許可が拒否されている | システム設定 → プライバシーとセキュリティ → ローカルネットワーク。**この許可は node ではなく起動元のターミナルアプリに紐づく** —— 過去に拒否していると 127.0.0.1 からは繋がるのに LAN からだけ症状が出る |
-| （未実測）WS は `接続しました` まで進むが、音声の取得だけ失敗する | `insecureHttpOption` が `AlwaysAllowed` になっていない（`UnityWebRequest` だけが掛かる門） | `Edit > Project Settings > Player` の `Configuration > Insecure HTTP Option`。出荷値は `AndroidPlayerSettings.FixAll` が書く |
+| （未実測）WS は `Connected` まで進むが、音声の取得だけ失敗する | `insecureHttpOption` が `AlwaysAllowed` になっていない（`UnityWebRequest` だけが掛かる門） | `Edit > Project Settings > Player` の `Configuration > Insecure HTTP Option`。出荷値は `AndroidPlayerSettings.FixAll` が書く |
 | （未実測）targetSdk 37 以上で全部繋がらない | `ACCESS_LOCAL_NETWORK` のランタイム許可が要る | targetSdk は 36 に固定で、37 以上はビルドで止めているので、今は起きない（→ 上の `AndroidPlayerSettings.FixAll` の表） |
-| `[Mascot] serverUrl: 既定を使います ("ws://127.0.0.1:8570")` | 設定が読まれていない。パス違い・JSON が壊れている・`connection.serverUrl` が不正（警告が出る） | `adb shell cat /sdcard/Android/data/tech.sukima.chattermascot/files/settings.json`。`adb reverse` が張られていると既定のままでも繋がってしまい気付かない |
-| `[Mascot] serverUrl: 設定ファイルに接続先が無いので LAN から探します…` のまま `LAN でサーバーが見つかりません`（端末にも通知）。logcat `ChatterMascot` タグの `ServerDiscovery:` に `見つけました` が出ない | サーバーがループバックで待ち受けていて広告されていない／別のサブネット・VLAN／ルーターがマルチキャストを通さず mDNS が届かない | Mac 側の起動ログで host が `0.0.0.0` か。端末と Mac が同じネットワークか。届かないなら `configure-android.sh ws://<ip>:<port>` で明示する。明示しても繋がらなければ AP のクライアント分離（端末どうしの通信をすべて止める）を疑う |
-| `ServerDiscovery: 見つけました` が出るが別の Mac に繋がる／繋がった後 `401` | 複数の Mac が広告していると最初に解決できた1台を使う。トークンはその Mac のものと一致している必要がある | ログの `LAN で見つけた <名前>` を見る。意図した Mac でなければ接続先を明示する |
-| `ServerDiscovery: 解決できません: … error=…` | 見つけたが名前解決に失敗した（次の探索の張り直しで再び試す） | 同じネットワークか。Mac 側のサーバーを再起動する |
-| `[Mascot] serverUrl: 起動引数を使います (…)` | `-serverUrl` が設定より優先されている | 起動引数を外す |
+| `[Mascot] serverUrl: using default ("ws://127.0.0.1:8570")` | 設定が読まれていない。パス違い・JSON が壊れている・`connection.serverUrl` が不正（警告が出る） | `adb shell cat /sdcard/Android/data/tech.sukima.chattermascot/files/settings.json`。`adb reverse` が張られていると既定のままでも繋がってしまい気付かない |
+| `[Mascot] serverUrl: no server in settings file, searching the LAN…` のまま `No server found on the LAN`（端末にも通知）。logcat `ChatterMascot` タグの `ServerDiscovery:` に `service found` が出ない | サーバーがループバックで待ち受けていて広告されていない／別のサブネット・VLAN／ルーターがマルチキャストを通さず mDNS が届かない | Mac 側の起動ログで host が `0.0.0.0` か。端末と Mac が同じネットワークか。届かないなら `configure-android.sh ws://<ip>:<port>` で明示する。明示しても繋がらなければ AP のクライアント分離（端末どうしの通信をすべて止める）を疑う |
+| `ServerDiscovery: service found` が出るが別の Mac に繋がる／繋がった後 `401` | 複数の Mac が広告していると最初に解決できた1台を使う。トークンはその Mac のものと一致している必要がある | ログの `[Mascot] serverUrl: using <URL> of <名前> found on the LAN` を見る。意図した Mac でなければ接続先を明示する |
+| `ServerDiscovery: cannot resolve: … error=…` | 見つけたが名前解決に失敗した（次の探索の張り直しで再び試す） | 同じネットワークか。Mac 側のサーバーを再起動する |
+| `[Mascot] serverUrl: using launch argument (…)` | `-serverUrl` が設定より優先されている | 起動引数を外す |
 | ペアリング: ChatterAgent の窓に `not_lan` の案内が出て PIN が出ない | server がループバックに bind していて、LAN に出ていない | `config.json` の `host` か `CHATTER_AGENT_HOST` を `0.0.0.0` にして server を再起動する |
 | ペアリング: 端末に「サーバーが見つかりません」 | mDNS が届かない（別のサブネット・VLAN、ルーターがマルチキャストを通さない）／server が LAN に出ていない | 端末と Mac が同じネットワークか。server の host が `0.0.0.0` か。届かないなら `configure-android.sh ws://<ip>:<port>` で明示する（AP のクライアント分離なら明示しても繋がらない） |
 | ペアリング: 端末に「サーバーが見つかりません」。server のログには `[mDNS] 広告を始めました` が出ている | ChatterAgent に「ローカルネットワーク」の許可が無い（または許可より前に起動した server のまま）。広告がループバックにしか出ていない | Mac で `dns-sd -B _chatter-agent._tcp local.` の `if` 欄が `1` だけなら届いていない。システム設定 → プライバシーとセキュリティ → ローカルネットワーク で ChatterAgent をオンにし、メニューの「サーバーを再起動」（→ [`../agent.md`](../agent.md)「LAN に公開するとき」）。一覧ですでにオンなのに `1` だけなら、`codesign -dv ChatterAgent.app` の `Identifier` が `tech.sukima.chatter-agent` かを見る（→ [`agent.md`](./agent.md)「「ローカルネットワーク」の許可は署名の識別子とパスで引かれる」） |
@@ -386,12 +386,12 @@ Android のログは `adb logcat -s Unity`。★★ **Android では 401 と「�
 
 サーバーの `terminate()` など close ハンドシェイクを伴わない切断の後、使い終えた `ClientWebSocket` を
 `Dispose()` だけで捨てると、Android では**非ループバックの相手に対して次の `ConnectAsync` が返らなくなる**。
-`切断されました（close フレーム無し。…）。繋ぎ直します` を最後にログが止まり、`接続エラー` も出ない
+`Disconnected (no close frame: …). Reconnecting` を最後にログが止まり、`Connection error` も出ない
 （アプリはフリーズしていない）。**ループバック（`adb reverse`）では起きない**ので、`run-android.sh` の
 経路だけで確かめていると見えない。仕組みは特定できていない（`ServicePointManager` の接続数には余裕があった）。
 
 `SpeechClient.AbortAndDispose` が先に `Abort()` してから破棄する。加えて `ConnectAsync` には期限
-（`ConnectTimeoutMs`）を付けてあり、返らない接続は `接続が N 秒以内に確立しませんでした` として
+（`ConnectTimeoutMs`）を付けてあり、返らない接続は `connection was not established within N seconds` として
 警告してバックオフに戻る —— 同じ種類の詰まりが別の原因で起きても、再接続ループが無言で止まる形にはならない。
 切断を決定的に起こすには、検証用サーバーを `kill -9` する（close フレームが出ない）。
 
@@ -406,7 +406,7 @@ Android のログは `adb logcat -s Unity`。★★ **Android では 401 と「�
 | VRM | `jar:file:///…/base.apk!/assets/vita.vrm`（19,259,304 バイト）を `UnityWebRequest` で約 5.3 秒で読む。`VRM10/Universal Render Pipeline/MToon10` のマテリアル 15、expression 18。`idle_loop.vrma` も APK から。"referenced script … missing" も例外も無し |
 | 探索順 | `persistentDataPath` の候補（`/storage/emulated/0/Android/data/tech.sukima.chattermascot/files/` の `models/mascot.vrm` / `animations/idle.vrma`）は 404、ユーザー設定の候補は飛ばされる（想定どおり） |
 | 発話 | 接続時に未読 1 件 + 追加 2 件が届き、3 件とも ack（`seq<=3`）でキューが空になる。音は Mac のスピーカーからエミュレータ経由で聞こえる |
-| 無音時の解放 | `無音が続いたのでオーディオ出力を止めました` → `オーディオ出力を掴み直しました` → 再び停止。`AudioSettings.Mobile.StopAudioOutput/StartAudioOutput` の経路が動き、発話は落ちない |
+| 無音時の解放 | `Stopped audio output because silence continued` → `Reacquired audio output` → 再び停止。`AudioSettings.Mobile.StopAudioOutput/StartAudioOutput` の経路が動き、発話は落ちない |
 | fps / 音量 | 設定パネルが無いので既定（30 fps / 1.0） |
 
 ★ **キャラクターが白飛びする（未解決）。** 切り分けの経過と結果は
@@ -497,7 +497,7 @@ overwrite 付きの多重定義が無い（`ProjectSettings` の `apiCompatibili
 
 `File.Replace` が Mono / IL2CPP の Android で動くかは資料が見つからなかったので実測した。
 Android XR エミュレータ（`XR_Glasses`、API 36）で、同期済みの `.vrma` にバイトを足して
-ハッシュを変えてから起動 → `取得 1/1 件`、ファイルは正しいサイズへ戻り、例外も警告も出なかった
+ハッシュを変えてから起動 → `fetched 1/1`、ファイルは正しいサイズへ戻り、例外も警告も出なかった
 （2026-09-21）。
 
 ### 完走した `.part` を手で作って確かめる
@@ -514,8 +514,8 @@ adb shell chmod 666 $D/.parts/$SHA.part
 adb shell rm $D/animations/happy/<名前>.vrma
 ```
 
-手当てが効いていれば `取得 1/1 件` で本体が戻り、**`HTTP 416` のログ行が1度も出ない**
-（＝ HTTP を叩いていない）。効いていなければ `取得に失敗しました (HTTP 416)` が出て、
+手当てが効いていれば `fetched 1/1` で本体が戻り、**`HTTP 416` のログ行が1度も出ない**
+（＝ HTTP を叩いていない）。効いていなければ `fetch failed (HTTP 416)` が出て、
 **完全に正しい `.part` が消える**（2026-09-21 / Android XR エミュレータ `XR_Glasses` API 36 で
 前後とも再現）。
 
@@ -523,7 +523,7 @@ adb shell rm $D/animations/happy/<名前>.vrma
 `shell` になり、**アプリから開けない。** そのときの症状は
 
 ```
-[AssetSync] 同期が異常終了しました: Failed to create file .../.parts/<sha>.part
+[AssetSync] Sync ended abnormally: Failed to create file .../.parts/<sha>.part
 ```
 
 で、`DownloadHandlerFile` がコンストラクタで投げている。これは `SyncAsync` のいちばん外側の
@@ -924,7 +924,7 @@ Get を見て次を要求する形だと、どのランタイムでも最後の�
 
 ★ **ログの `(Selected)` は予約が適用される前の値。** ADDITIVE / ALPHA_BLEND が効いていても
 `XR_ENVIRONMENT_BLEND_MODE_OPAQUE (Selected)` と出るので、効いたかどうかは見え方で確かめる。持つモードは
-`[Mascot] XR: environment blend mode …（持つモード: …）` の行で見る。
+`[Mascot] XR: environment blend mode … (available modes: …)` の行で見る。
 
 ★ **AR Camera（`ARCameraFeature` + `ARCameraManager`。パッケージの「パススルー」）では代わりにならない。**
 `ARCameraFeature.OnEnvironmentBlendModeChange`（`com.unity.xr.androidxr-openxr`）はパススルーの有無に応じて

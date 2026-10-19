@@ -12,9 +12,9 @@
 
 ```
 Metal RecreateSurface: surface size 250x400
-[Mascot] フレーミング: 250x400 aspect=0.625 bounds=(1.39, 1.73, 0.55) distance=2.39
+[Mascot] Framing: 250x400 aspect=0.625 bounds=(1.39, 1.73, 0.55) distance=2.39
 Metal RecreateSurface: surface size 500x800            ← 内蔵 Retina パネルへ移した
-[Mascot] フレーミング: 500x800 aspect=0.625 bounds=(1.39, 1.73, 0.55) distance=2.39
+[Mascot] Framing: 500x800 aspect=0.625 bounds=(1.39, 1.73, 0.55) distance=2.39
 Metal RecreateSurface: surface size 250x400            ← 外部 4K へ戻した
 ```
 
@@ -211,7 +211,7 @@ prefab にもシーンにも override が無く、`SetWindowSize` を呼ぶの�
 ★ **`window.json` の `version` は上げない。** `WindowStateJson` は未知の `version` を拒否して
 既定配置へ落とすので、上げた瞬間にユーザーの位置そのものが失われる。
 
-実機（2026-09-04）: 既定サイズでの起動では `フレーミング: 540x540 aspect=1.000 …
+実機（2026-09-04）: 既定サイズでの起動では `Framing: 540x540 aspect=1.000 …
 支配軸=垂直` で、腕を上げる `WIN00` の敬礼モーションでも頭上に約10%の余白が残った
 （`Hub_laugh01`、`Hub_Idle01` も問題なし）。
 

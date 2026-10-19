@@ -347,8 +347,8 @@ function noteUnavailable(state: PlaybackState, now: number, reason: string, comm
   commands.push({
     kind: "warn",
     message:
-      `音声を用意できない状態が ${state.unavailableStreak} 件続いています（${reason}）。` +
-      "サーバー側の合成エンジンと接続先・声（AivisSpeech は ttsBaseUrl / ttsSpeakerId、Kokoro は kokoroBaseUrl / kokoroVoiceId）を確認してください",
+      `Audio has been unavailable for ${state.unavailableStreak} consecutive entries (${reason}). ` +
+      "Check the server's TTS engine, its address and voice (ttsBaseUrl / ttsSpeakerId for AivisSpeech, kokoroBaseUrl / kokoroVoiceId for Kokoro)",
   });
 }
 
@@ -381,7 +381,7 @@ function markStale(state: PlaybackState, now: number, commands: PlaybackCommand[
   for (const item of state.items.values()) {
     if (item.status !== "pending" && item.status !== "ready") continue;
     if (!isStale(state, item, now)) continue;
-    commands.push({ kind: "log", message: `seq=${item.record.seq} は古いので飛ばします` });
+    commands.push({ kind: "log", message: `Skipping seq=${item.record.seq} because it is stale` });
     finish(item);
     changed = true;
   }
@@ -489,7 +489,7 @@ function checkStall(state: PlaybackState, now: number, commands: PlaybackCommand
   const status = head ? head.status : "?";
   commands.push({
     kind: "warn",
-    message: `seq=${seq} が ${Math.round((now - state.headSince) / 1000)} 秒 ${status} のまま進んでいません`,
+    message: `seq=${seq} has stayed ${status} for ${Math.round((now - state.headSince) / 1000)} seconds without progress`,
   });
 }
 
@@ -520,7 +520,7 @@ function step(state: PlaybackState, now: number, commands: PlaybackCommand[]): v
  * **その完了で ack は打たない**。もう別のエポックなので、その seq に意味が無い。
  */
 function resetEpoch(state: PlaybackState, commands: PlaybackCommand[]): void {
-  commands.push({ kind: "warn", message: "seq の採番がやり直されました。再生キューの状態をリセットします" });
+  commands.push({ kind: "warn", message: "seq renumbering detected. Resetting the playback queue state" });
 
   const previous = state.epoch;
   state.epoch++;
@@ -652,7 +652,7 @@ export function reduce(state: PlaybackState, event: PlaybackEvent, now: number):
       // 404。永久に用意できない。「長さ0の再生」として終端へ落とす
       const item = event.epoch === state.epoch ? state.items.get(event.seq) : undefined;
       if (!item || item.status !== "fetching") break;
-      commands.push({ kind: "warn", message: `seq=${event.seq} の音声がありません: ${event.reason}` });
+      commands.push({ kind: "warn", message: `No audio for seq=${event.seq}: ${event.reason}` });
       noteUnavailable(state, now, event.reason, commands);
       finish(item);
       break;
@@ -668,7 +668,10 @@ export function reduce(state: PlaybackState, event: PlaybackEvent, now: number):
         item.status = "pending";
         break;
       }
-      commands.push({ kind: "warn", message: `seq=${event.seq} の音声を取れなかったので飛ばします: ${event.reason}` });
+      commands.push({
+        kind: "warn",
+        message: `Skipping seq=${event.seq} because its audio could not be fetched: ${event.reason}`,
+      });
       finish(item);
       break;
     }
@@ -686,7 +689,7 @@ export function reduce(state: PlaybackState, event: PlaybackEvent, now: number):
       const item = event.epoch === state.epoch ? state.items.get(event.seq) : undefined;
       if (!item || item.status !== "playing") break;
       // 再生はリトライしない。途中まで鳴った文がもう一度頭から鳴る
-      commands.push({ kind: "warn", message: `seq=${event.seq} の再生に失敗しました: ${event.reason}` });
+      commands.push({ kind: "warn", message: `Playback of seq=${event.seq} failed: ${event.reason}` });
       finish(item);
       break;
     }

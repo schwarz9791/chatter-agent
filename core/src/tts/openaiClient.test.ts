@@ -96,7 +96,7 @@ describe("synthesize", () => {
       .synthesize("hello")
       .catch((err: unknown) => err);
     expect(result).toBeInstanceOf(TtsHttpError);
-    expect((result as Error).message).toContain("WAV ではない");
+    expect((result as Error).message).toContain("not a WAV");
   });
 
   /** ★ 存在しない声・空の入力はどちらも 400（404 ではない）。detail を保つ */
@@ -203,6 +203,6 @@ describe("listVoices", () => {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ voices: "nope" }));
     });
-    await expect(client(baseUrl).listVoices()).rejects.toThrow("配列を返しませんでした");
+    await expect(client(baseUrl).listVoices()).rejects.toThrow("did not return an array");
   });
 });

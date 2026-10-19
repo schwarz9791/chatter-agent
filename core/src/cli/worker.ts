@@ -284,7 +284,7 @@ function tryRemoveEntry(entry: SpoolEntry): void {
   try {
     removeEntry(entry);
   } catch (err) {
-    console.warn("[Worker] spool の削除に失敗しました。次のドレインでも残ります:", err);
+    console.warn("[Worker] Failed to delete spool. It will remain on the next drain too:", err);
   }
 }
 
@@ -310,7 +310,7 @@ function tryWriteWorkerState(statePath: string, state: WorkerState): boolean {
     writeWorkerState(statePath, state);
     return true;
   } catch (err) {
-    console.warn("[Worker] state の永続化に失敗しました:", err);
+    console.warn("[Worker] Failed to persist state:", err);
     return false;
   }
 }

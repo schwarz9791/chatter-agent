@@ -58,7 +58,7 @@ export class TtsHttpError extends Error {
   readonly status: number;
   readonly detail: string;
   constructor(op: string, status: number, detail: string) {
-    super(detail ? `${op} が ${status} を返しました: ${detail}` : `${op} が ${status} を返しました`);
+    super(detail ? `${op} returned ${status}: ${detail}` : `${op} returned ${status}`);
     this.name = "TtsHttpError";
     this.status = status;
     this.detail = detail;
@@ -87,9 +87,9 @@ export const DETAIL_MAX_CHARS = 512;
  */
 export function describe(op: string, err: unknown): TtsTransportError {
   if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
-    return new TtsTransportError(`${op} がタイムアウトしました`, { cause: err });
+    return new TtsTransportError(`${op} timed out`, { cause: err });
   }
-  return new TtsTransportError(`${op} に失敗しました: ${explain(err)}`, { cause: err });
+  return new TtsTransportError(`${op} failed: ${explain(err)}`, { cause: err });
 }
 
 /**

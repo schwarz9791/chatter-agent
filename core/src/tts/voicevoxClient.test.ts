@@ -83,7 +83,7 @@ describe("synthesize", () => {
       res.writeHead(422);
       res.end();
     });
-    await expect(client(baseUrl).synthesize("だめ。")).rejects.toThrow("audio_query が 422 を返しました");
+    await expect(client(baseUrl).synthesize("だめ。")).rejects.toThrow("audio_query returned 422");
   });
 
   it("synthesis のエラーも段階が分かる", async () => {
@@ -96,20 +96,20 @@ describe("synthesize", () => {
       res.writeHead(500);
       res.end();
     });
-    await expect(client(baseUrl).synthesize("だめ。")).rejects.toThrow("synthesis が 500 を返しました");
+    await expect(client(baseUrl).synthesize("だめ。")).rejects.toThrow("synthesis returned 500");
   });
 
   it("★ 応答が返らないリクエストはタイムアウトする（無いと head が固まって以後すべて無音になる）", async () => {
     const baseUrl = await serve(() => {
       // 何も返さない
     });
-    await expect(client(baseUrl, 150).synthesize("だんまり。")).rejects.toThrow("タイムアウト");
+    await expect(client(baseUrl, 150).synthesize("だんまり。")).rejects.toThrow("timed out");
   });
 
   it("繋がらない相手も例外になる", async () => {
     // 誰も listen していないポート
     const dead = createVoicevoxEngine({ baseUrl: "http://127.0.0.1:1", voiceId: "0", timeoutMs: 1000 });
-    await expect(dead.synthesize("だれもいない。")).rejects.toThrow("audio_query (127.0.0.1:1) に失敗しました");
+    await expect(dead.synthesize("だれもいない。")).rejects.toThrow("audio_query (127.0.0.1:1) failed");
   });
 
   it("JSON でない audio_query の応答も例外になる", async () => {
@@ -117,7 +117,7 @@ describe("synthesize", () => {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end("not json");
     });
-    await expect(client(baseUrl).synthesize("こわれた。")).rejects.toThrow("audio_query の読み取り");
+    await expect(client(baseUrl).synthesize("こわれた。")).rejects.toThrow("reading audio_query");
   });
 });
 
@@ -192,7 +192,7 @@ describe("失敗の診断（#49 のレビュー）", () => {
       .catch((err: unknown) => err);
 
     expect(result).toBeInstanceOf(TtsHttpError);
-    expect((result as Error).message).toContain("WAV ではない");
+    expect((result as Error).message).toContain("not a WAV");
   });
 
   it("★ タイムアウトは往復ごとに効く（2往復で1つの予算にしない）", async () => {
@@ -245,7 +245,7 @@ describe("listVoices", () => {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end('{"detail":"not found"}');
     });
-    await expect(client(baseUrl).listVoices()).rejects.toThrow("配列を返しませんでした");
+    await expect(client(baseUrl).listVoices()).rejects.toThrow("did not return an array");
   });
 });
 

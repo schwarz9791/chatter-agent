@@ -264,7 +264,7 @@ function startPlayer(env) {
 async function startReadyPlayer(env = playerEnv()) {
   fs.writeFileSync(playLog, "");
   const handle = startPlayer(env);
-  await handle.waitFor("[Player] 接続しました");
+  await handle.waitFor("[Player] Connected");
   return handle;
 }
 
@@ -497,7 +497,7 @@ try {
     const drained = await until(() => stub.lastAck() === 3, 15_000);
     check("★ 全文が再生に失敗しても ack が最後まで進む", drained, JSON.stringify(stub.state.acks));
     check("3文とも起動は試みている", played().length === 3, JSON.stringify(played()));
-    check("失敗を黙って飲み込まない", player.log.includes("再生に失敗しました"), player.log);
+    check("失敗を黙って飲み込まない", player.log.includes("Playback of seq="), player.log);
 
     await stopPlayer(player);
     await stub.close();
@@ -517,7 +517,11 @@ try {
       exited && second.exited === 1,
       `exit=${second.exited}`,
     );
-    check("理由が分かるメッセージを出す", second.log.includes("既に別の chatter-agent-player"), second.log);
+    check(
+      "理由が分かるメッセージを出す",
+      second.log.includes("Another chatter-agent-player is already running"),
+      second.log,
+    );
 
     await stopPlayer(first);
     await stub.close();
@@ -606,7 +610,7 @@ try {
     );
     check(
       "★ 明示的な audio: null では警告しない（ttsEnabled: false は正常な設定）",
-      !quiet.log.includes("audio がありません"),
+      !quiet.log.includes("has no audio"),
       quiet.log,
     );
     await stopPlayer(quiet);
@@ -617,7 +621,7 @@ try {
     delete undeclared.audio; // JSON.stringify がキーごと落とす（＝ #29 より前のサーバーの形）
     stub.send(undeclared);
 
-    check("★ 無音の理由がログに出る", await until(() => legacy.log.includes("audio がありません"), 10_000), legacy.log);
+    check("★ 無音の理由がログに出る", await until(() => legacy.log.includes("has no audio"), 10_000), legacy.log);
     check(
       "★ 挙動は変えない（それでも ack して次へ進む）",
       await until(() => stub.lastAck() === undeclared.seq, 5000),

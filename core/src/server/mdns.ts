@@ -88,7 +88,7 @@ export function startMdnsAdvertiser(
   const warn = deps.warn ?? ((m) => console.warn(m));
   const failed = (err: unknown) =>
     warn(
-      `[mDNS] 広告できませんでした: ${String(err)}。Android からは自動で見つけられません（接続先を明示すれば繋がります）`,
+      `[mDNS] Failed to advertise: ${String(err)}. Android cannot discover the server automatically (it can still connect if given the address explicitly)`,
     );
 
   let responder: MdnsResponder | undefined;
@@ -112,11 +112,11 @@ export function startMdnsAdvertiser(
         txt: { version: opts.version },
         ...addressOptionsForHost(opts.host),
       });
-      service.on("name-change", (n) => log(`[mDNS] 名前が衝突したので変わりました: ${n}`));
+      service.on("name-change", (n) => log(`[mDNS] Name collision, renamed to: ${n}`));
       service.advertise().then(
         // ★ 送信の失敗（ローカルネットワークの未許可など）を ciao は握りつぶして resolve する。
         //   これは「届いている」ではなく「始めた」の記録
-        () => log(`[mDNS] 広告を始めました: ${service.getFQDN()} (port ${opts.port}, ${interfaces.join(" / ")})`),
+        () => log(`[mDNS] Started advertising: ${service.getFQDN()} (port ${opts.port}, ${interfaces.join(" / ")})`),
         failed,
       );
     } catch (err) {
@@ -130,7 +130,7 @@ export function startMdnsAdvertiser(
       begin(interfaces);
     } else {
       warn(
-        `[mDNS] host=${opts.host} で待ち受けている LAN のインターフェースがありません。現れるまで待ちます（Android からは、それまで自動で見つけられません）`,
+        `[mDNS] host=${opts.host} has no LAN interface to listen on. Waiting for one to appear (Android cannot discover the server automatically until then)`,
       );
       timer = setInterval(() => {
         const found = currentInterfaces();
@@ -152,7 +152,7 @@ export function startMdnsAdvertiser(
       try {
         await responder?.shutdown();
       } catch (err) {
-        warn(`[mDNS] 停止に失敗しました: ${String(err)}`);
+        warn(`[mDNS] Failed to stop: ${String(err)}`);
       }
     },
   };

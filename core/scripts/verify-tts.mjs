@@ -384,7 +384,7 @@ try {
     const record = enqueue("話者 ID を間違えたときの発言です。");
     await until(() => client.frames.some((f) => f.seq === record.seq), 5000);
 
-    check("★ 起動時の診断が値を名指しする", serverLogs().includes("声 ID 999999（"), serverLogs());
+    check("★ 起動時の診断が値を名指しする", serverLogs().includes("Voice ID 999999 ("), serverLogs());
     check(
       "★ 実在する話者 ID を候補として並べる（直せる形で出す）",
       serverLogs().includes(String(SPEAKER_ID)),
@@ -419,13 +419,13 @@ try {
     // 開発機（macOS）では代わりに**本物の AivisSpeech** が黙って起動する。
     // ★ このスクリプトに CHATTER_AGENT_TTS_SPAWN=0 を入れないこと —— 入れると
     //   条件3が壊れても素通りしてしまい、この検査の意味が無くなる
-    check("★ [Engine] 起動しました が1度も出ていない", !serverLogs().includes("[Engine] 起動しました"), serverLogs());
+    check("★ [Engine] 起動しました が1度も出ていない", !serverLogs().includes("[Engine] Started"), serverLogs());
     // ★ スキップ理由が増えるたびにここを足さないと、否定検査は落ちるのではなく
-    //   **黙って空振りする**（vacuous pass）。全変種が「起こせません」か「見つかりません」を
+    //   **黙って空振りする**（vacuous pass）。全変種が「cannot be started」か「Could not find」を
     //   含むことは describeEngineSkip の単体テスト側で固定してある
     check(
       "★ ttsSpeakerId が違っても（⑫）疎通は成立しているので起こさない",
-      !serverLogs().includes("合成エンジンが見つかりません") && !serverLogs().includes("起こせません"),
+      !serverLogs().includes("Could not find") && !serverLogs().includes("cannot be started"),
       serverLogs(),
     );
   }
@@ -447,19 +447,19 @@ try {
         CHATTER_AGENT_TTS_SPAWN_COMMAND: fakeEngine,
       }),
     );
-    await until(() => (server?.log ?? "").includes("[Engine] 起動しました"), 5000);
+    await until(() => (server?.log ?? "").includes("[Engine] Started"), 5000);
 
     // ★ **累積ログ（serverLogs()）で判定しないこと。** 前のシナリオが出した行を拾ってしまう
     const spawnLog = server?.log ?? "";
-    check("★ 起こす前の観測は残る（原因が消えない）", spawnLog.includes("音声合成エンジンに繋がりません"), spawnLog);
-    check("★ エンジンを起こした", spawnLog.includes("[Engine] 起動しました"), spawnLog);
+    check("★ 起こす前の観測は残る（原因が消えない）", spawnLog.includes("Cannot connect to the TTS engine"), spawnLog);
+    check("★ エンジンを起こした", spawnLog.includes("[Engine] Started"), spawnLog);
     check(
       "★ 直後の行が否定する警告を出さない（帰結は起こさないと決めた側だけが出す）",
-      !spawnLog.includes("音声の GET は 503 を返します"),
+      !spawnLog.includes("Audio GET requests will return 503"),
       spawnLog,
     );
 
-    const enginePid = Number(/\[Engine\] 起動しました \(pid=(\d+)\)/.exec(spawnLog)?.[1]);
+    const enginePid = Number(/\[Engine\] Started \(pid=(\d+)\)/.exec(spawnLog)?.[1]);
     check("起動ログに pid が載っている", Number.isInteger(enginePid) && enginePid > 0, String(enginePid));
 
     await stopServer();
@@ -492,7 +492,7 @@ try {
     //   同じストリーム（stderr）上で先に書かれた行がすべて届いていることを保証する
     //   （単一の書き手の単一パイプは順序を保つ）。先頭の行で待つと、サーバー起動時に走る
     //   他の非同期処理と競合して手前で止まったスナップショットを掴みうる。
-    await until(() => (server?.log ?? "").includes("音声の GET は 503 を返します"), 5000);
+    await until(() => (server?.log ?? "").includes("Audio GET requests will return 503"), 5000);
 
     const missLog = server?.log ?? "";
     check(
@@ -500,9 +500,9 @@ try {
       /\n?\[Server\] {2}\/.*chatter-agent-no-such-engine-xyz/.test(missLog),
       missLog,
     );
-    check("★ 実行ビットの注意も出す", missLog.includes("実行ビット"), missLog);
-    check("エンジンは起こしていない", !missLog.includes("[Engine] 起動しました"), missLog);
-    check("★ ここでは帰結（503）まで言う", missLog.includes("音声の GET は 503 を返します"), missLog);
+    check("★ 実行ビットの注意も出す", missLog.includes("executable bit"), missLog);
+    check("エンジンは起こしていない", !missLog.includes("[Engine] Started"), missLog);
+    check("★ ここでは帰結（503）まで言う", missLog.includes("Audio GET requests will return 503"), missLog);
   }
 
   {
@@ -562,7 +562,7 @@ try {
     await until(() => client.frames.some((f) => f.seq === record.seq), 5000);
 
     const diagLog = server?.log ?? "";
-    check("★ 起動時の診断が値を名指しする", diagLog.includes("声 ID no-such-voice（"), diagLog);
+    check("★ 起動時の診断が値を名指しする", diagLog.includes("Voice ID no-such-voice ("), diagLog);
     check("★ 実在する声 ID を候補として並べる", diagLog.includes(OPENAI_VOICE_ID), diagLog);
 
     const res = await fetch(`${base}${audioPath(record)}`);
@@ -582,11 +582,11 @@ try {
       }),
     );
     // ★ 疎通の確認は Ready の後に走る。結論が出るまで待たないと、否定検査が空振りする
-    const probed = await until(() => (server?.log ?? "").includes("音声合成エンジンに繋がりました"), 5000);
+    const probed = await until(() => (server?.log ?? "").includes("Connected to the TTS engine"), 5000);
     check("疎通の確認が済んだ", probed, server?.log ?? "");
     // ★ この起動ぶんのログだけで見る（累積だと ⑮ が出した「[Engine] 起動しました」を拾う）
     const freshLog = server?.log ?? "";
-    check("★ [Engine] 起動しました が出ていない", !freshLog.includes("[Engine] 起動しました"), freshLog);
+    check("★ [Engine] 起動しました が出ていない", !freshLog.includes("[Engine] Started"), freshLog);
 
     show("㉑ ★ 制御 API: GET /v1/speakers が openai の声一覧を返す");
     const speakersRes = await fetch(`${base}/v1/speakers`);
@@ -661,13 +661,13 @@ try {
       }),
     );
 
-    const warned = await until(() => (server?.log ?? "").includes("音声合成エンジンは応答しましたが"), 5000);
+    const warned = await until(() => (server?.log ?? "").includes("The TTS engine responded but"), 5000);
     check("★ 応答はあったという警告が出る", warned, server?.log ?? "");
     const freshLog = server?.log ?? "";
     check("★ 警告に status が載る（404）", freshLog.includes("status=404"), freshLog);
     check(
       "★ 応答はあるので unreachable 扱いにせず、エンジンを起こさない",
-      !freshLog.includes("[Engine] 起動しました"),
+      !freshLog.includes("[Engine] Started"),
       freshLog,
     );
 
@@ -728,12 +728,12 @@ http
         CHATTER_AGENT_TTS_SPAWN_COMMAND: stubVoicevox,
       }),
     );
-    const spawnedAtStart = await until(() => (server?.log ?? "").includes("[Engine] 起動しました"), 10_000);
+    const spawnedAtStart = await until(() => (server?.log ?? "").includes("[Engine] Started"), 10_000);
     check("★ 起動時に AivisSpeech のスタブを起こした", spawnedAtStart, server?.log ?? "");
-    const pidOf = (log) => Number(/\[Engine\] 起動しました \(pid=(\d+)\)/.exec(log)?.[1]);
+    const pidOf = (log) => Number(/\[Engine\] Started \(pid=(\d+)\)/.exec(log)?.[1]);
     const pidA = pidOf(server?.log ?? "");
     check("起こしたエンジンの pid がログに出る", Number.isInteger(pidA), server?.log ?? "");
-    const spawnCount = () => (server?.log ?? "").split("[Engine] 起動しました").length - 1;
+    const spawnCount = () => (server?.log ?? "").split("[Engine] Started").length - 1;
     const alive = (pid) => {
       try {
         process.kill(pid, 0);
@@ -783,7 +783,7 @@ http
     check("★ PATCH {ttsEngine:voicevox} が通る", toVoicevox.status === 200, `status=${toVoicevox.status}`);
     const respawned = await until(() => spawnCount() === 2, 10_000);
     check("★ 切り替えで AivisSpeech を起こし直す", respawned, server?.log ?? "");
-    const pidB = pidOf((server?.log ?? "").slice((server?.log ?? "").lastIndexOf("[Engine] 起動しました") - 1));
+    const pidB = pidOf((server?.log ?? "").slice((server?.log ?? "").lastIndexOf("[Engine] Started") - 1));
     check("新しい pid は前と違う", Number.isInteger(pidB) && pidB !== pidA, `A=${pidA} B=${pidB}`);
 
     const recordB = enqueue("voicevox に戻した後の発言です。");
@@ -815,7 +815,7 @@ http
     await patchEngine("openai");
     await patchEngine("voicevox");
     check("★ 切り替え直せば起こし直す", await until(() => spawnCount() === 3, 10_000), server?.log ?? "");
-    const pidC = pidOf((server?.log ?? "").slice((server?.log ?? "").lastIndexOf("[Engine] 起動しました") - 1));
+    const pidC = pidOf((server?.log ?? "").slice((server?.log ?? "").lastIndexOf("[Engine] Started") - 1));
 
     await client.close();
     await stopServer();

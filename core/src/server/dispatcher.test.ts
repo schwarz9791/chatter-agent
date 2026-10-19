@@ -196,7 +196,7 @@ describe("catchUp", () => {
 
     expect(sent).toEqual([1, 2]);
     expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(String(warnSpy.mock.calls[0]?.[0])).toMatch(/打ち切/);
+    expect(String(warnSpy.mock.calls[0]?.[0])).toMatch(/Stopped catching up/);
 
     warnSpy.mockRestore();
   });
@@ -356,7 +356,7 @@ describe("epoch（採番の世代。#29）", () => {
     queue.enqueue([record(1, "A1。")]);
     dispatcher.poll();
 
-    const detected = () => warnSpy.mock.calls.filter((c) => String(c[0]).includes("採番のやり直し")).length;
+    const detected = () => warnSpy.mock.calls.filter((c) => String(c[0]).includes("Renumbering detected")).length;
     expect(detected()).toBe(0); // 初回の採用は「やり直し」ではない
 
     queue.clear();

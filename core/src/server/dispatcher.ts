@@ -174,7 +174,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
     resolveBackoffUntil = Number.NEGATIVE_INFINITY;
 
     if (currentEpoch !== null) {
-      console.warn(`[Server] 採番のやり直しを検出しました（epoch=${best.epoch}）`);
+      console.warn(`[Server] Renumbering detected (epoch=${best.epoch})`);
     }
     currentEpoch = best.epoch;
     // 旧世代について覚えていたことを全部捨てる。`warnedEpochs` も落とさないと、
@@ -237,7 +237,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
           // 読めない entry は配信できない（protocol.md の「SpeechRecord の JSON 以外は
           // 送らない」を破れない）。配信済み扱いにしておかないと、毎 poll（20回/秒）
           // 同じ entry を見て警告し続ける
-          console.warn(`[Server] seq=${seq} を読めなかったのでスキップします`);
+          console.warn(`[Server] Skipping seq=${seq} because it could not be read`);
           delivered.add(seq);
           continue;
         }
@@ -252,9 +252,9 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
           //   サーバー起動時の `dropOlderThan` が行う
           warnOnce(
             record.epoch,
-            `[Server] 旧世代（epoch=${record.epoch}）の entry は配信しません。` +
-              "サーバーを再起動するまで残ります（trim は seq 昇順なので、" +
-              "旧世代が高い seq を占めている間は新しい entry から先に捨てられます）",
+            `[Server] Not delivering entries of the older epoch (epoch=${record.epoch}). ` +
+              "They remain until the server restarts (trim goes in ascending seq order, " +
+              "so while the older epoch holds the higher seqs, newer entries are dropped first)",
           );
           skipped.add(seq);
           continue;
@@ -294,9 +294,9 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
         // 旧文言（「最後の seq から接続し直すこと」）は ?since= の廃止で実行不能。
         // バックプレッシャでは wsServer 側が接続を切るので、繋ぎ直せば未 ack 分が
         // 接続直後の追いつきで再送される、というのが今の実態
-        console.warn(`[Server] 追いつきを ${sent} 件で打ち切りました。繋ぎ直せば未 ack 分が再送されます`);
+        console.warn(`[Server] Stopped catching up after ${sent} entries. Reconnecting resends the unacked ones`);
       } else if (sent > 0) {
-        console.log(`[Server] 未読 ${sent} 件を送りました`);
+        console.log(`[Server] Sent ${sent} unread entries`);
       }
     },
 
@@ -309,7 +309,10 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
       // ★ 黙って捨てないこと。捨てられた ack はキューを減らさないので、症状は
       //   「上限まで溜まって古い方から捨てられ続ける」になり、エラーが1行も出ない
       if (epoch !== null && currentEpoch !== null && epoch !== currentEpoch) {
-        warnOnce(`ack:${epoch}`, `[Server] 旧世代（epoch=${epoch}）の ack は無視します。現在は epoch=${currentEpoch}`);
+        warnOnce(
+          `ack:${epoch}`,
+          `[Server] Ignoring ack of the older epoch (epoch=${epoch}). Current epoch=${currentEpoch}`,
+        );
         return;
       }
 
@@ -321,7 +324,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
       if (upTo === 0) return;
 
       const removed = deps.queue.ackUpTo(upTo);
-      if (removed > 0) console.log(`[Server] seq<=${upTo} を ${removed} 件消しました`);
+      if (removed > 0) console.log(`[Server] Removed ${removed} entries with seq<=${upTo}`);
     },
   };
 }

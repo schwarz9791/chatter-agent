@@ -127,13 +127,13 @@ describe("play", () => {
   it("異常終了は理由つきで reject する", async () => {
     const p = player("/usr/bin/false", ["{file}"]);
     const file = p.write(0, 1, wav(0.1));
-    await expect(p.play(file, 5000)).rejects.toThrow("異常終了");
+    await expect(p.play(file, 5000)).rejects.toThrow("exited abnormally");
   });
 
   it("★ コマンドが無ければ error イベントで決着する（exit だけ待つと永久に止まる）", async () => {
     const p = player("/nonexistent/player", ["{file}"]);
     const file = p.write(0, 1, wav(0.1));
-    await expect(p.play(file, 5000)).rejects.toThrow("起動できません");
+    await expect(p.play(file, 5000)).rejects.toThrow("cannot start the playback command");
   });
 
   it("★ ハングしたらタイムアウトして次へ進める", async () => {
@@ -141,7 +141,7 @@ describe("play", () => {
     // 1回のハングで以後すべてが無音になる
     const p = player("/bin/sleep", ["30"]);
     const file = p.write(0, 1, wav(0.1));
-    await expect(p.play(file, 200)).rejects.toThrow("終わりませんでした");
+    await expect(p.play(file, 200)).rejects.toThrow("did not finish");
   });
 
   it("{file} が実際のパスに置換される", async () => {
@@ -159,7 +159,7 @@ describe("play", () => {
     // 起動を待ってから止める
     await new Promise((r) => setTimeout(r, 50));
     p.stopAll();
-    await expect(playing).rejects.toThrow("異常終了");
+    await expect(playing).rejects.toThrow("exited abnormally");
   });
 });
 

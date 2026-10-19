@@ -35,6 +35,6 @@ export function createThrottledWarn(intervalMs = DEFAULT_INTERVAL_MS): (message:
 
     const suppressed = last?.suppressed ?? 0;
     seen.set(message, { at: now, suppressed: 0 });
-    console.warn(suppressed > 0 ? `${message}（同じ警告を ${suppressed} 件省略しました）` : message);
+    console.warn(suppressed > 0 ? `${message} (${suppressed} identical warnings suppressed)` : message);
   };
 }

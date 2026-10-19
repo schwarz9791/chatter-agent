@@ -255,7 +255,7 @@ export function createWsServer(options: WsServerOptions): Promise<WsServer> {
         if (ack === null) {
           if (!warnedBadAck) {
             warnedBadAck = true;
-            console.warn(`[WS] 読めない ack を捨てました (${peer}): ${String(data).slice(0, 120)}`);
+            console.warn(`[WS] Discarded an unreadable ack (${peer}): ${String(data).slice(0, 120)}`);
           }
           return;
         }

@@ -19,7 +19,7 @@ function isEmotionKey(key: string): key is keyof EmotionKeywords {
  */
 export function parseEmotionKeywords(raw: unknown, warn: (message: string) => void): EmotionKeywords {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    warn("[EmotionKeywords] トップレベルがオブジェクトではありません。既定値を使います");
+    warn("[EmotionKeywords] The top level is not an object. Using defaults");
     return { ...DEFAULT_EMOTION_KEYWORDS };
   }
 
@@ -28,21 +28,21 @@ export function parseEmotionKeywords(raw: unknown, warn: (message: string) => vo
 
   for (const key of Object.keys(record)) {
     if (key === "neutral") {
-      warn('[EmotionKeywords] "neutral" は指定できません。無視します');
+      warn('[EmotionKeywords] "neutral" cannot be specified. Ignoring it');
       continue;
     }
     if (!isEmotionKey(key)) {
-      warn(`[EmotionKeywords] 未知のキー "${key}" は無視されます`);
+      warn(`[EmotionKeywords] Unknown key "${key}" is ignored`);
       continue;
     }
 
     const value = record[key];
     if (!Array.isArray(value)) {
-      warn(`[EmotionKeywords] ${key} は配列である必要があります。既定値を使います`);
+      warn(`[EmotionKeywords] ${key} must be an array. Using defaults`);
       continue;
     }
     if (value.some((item) => typeof item !== "string")) {
-      warn(`[EmotionKeywords] ${key} の要素に文字列以外が含まれています。既定値を使います`);
+      warn(`[EmotionKeywords] ${key} contains non-string elements. Using defaults`);
       continue;
     }
 
@@ -56,7 +56,7 @@ export function parseEmotionKeywords(raw: unknown, warn: (message: string) => vo
     }
 
     if (deduped.length > MAX_KEYWORDS_PER_EMOTION) {
-      warn(`[EmotionKeywords] ${key} の語数が上限（${MAX_KEYWORDS_PER_EMOTION}）を超えています。既定値を使います`);
+      warn(`[EmotionKeywords] ${key} exceeds the keyword limit (${MAX_KEYWORDS_PER_EMOTION}). Using defaults`);
       continue;
     }
 
@@ -75,7 +75,7 @@ export function readEmotionKeywords(filePath: string, warn: (message: string) =>
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       return { ...DEFAULT_EMOTION_KEYWORDS };
     }
-    warn(`[EmotionKeywords] ${filePath} を読めませんでした: ${String(err)}。既定値を使います`);
+    warn(`[EmotionKeywords] Failed to read ${filePath}: ${String(err)}. Using defaults`);
     return { ...DEFAULT_EMOTION_KEYWORDS };
   }
 
@@ -83,7 +83,7 @@ export function readEmotionKeywords(filePath: string, warn: (message: string) =>
   try {
     parsed = JSON.parse(text);
   } catch (err) {
-    warn(`[EmotionKeywords] ${filePath} のJSONが壊れています: ${String(err)}。既定値を使います`);
+    warn(`[EmotionKeywords] ${filePath} contains invalid JSON: ${String(err)}. Using defaults`);
     return { ...DEFAULT_EMOTION_KEYWORDS };
   }
 

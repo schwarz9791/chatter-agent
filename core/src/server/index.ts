@@ -131,10 +131,10 @@ async function step(label: string, work: () => Promise<unknown>): Promise<void> 
   await Promise.race([
     work().then(
       () => undefined,
-      (err: unknown) => console.error(`[Server] ${label} の終了処理に失敗:`, err),
+      (err: unknown) => console.error(`[Server] Failed to shut down ${label}:`, err),
     ),
     deadline.then(() =>
-      console.warn(`[Server] ${label} の終了処理が ${SHUTDOWN_STEP_TIMEOUT_MS}ms で返りませんでした`),
+      console.warn(`[Server] Shutting down ${label} did not finish within ${SHUTDOWN_STEP_TIMEOUT_MS}ms`),
     ),
   ]);
 }
@@ -148,10 +148,10 @@ function installShutdown(cleanup: () => Promise<void>): void {
       return;
     }
     shuttingDown = true;
-    console.log(`[Server] ${signal} を受信。終了します`);
+    console.log(`[Server] Received ${signal}. Shutting down`);
 
     setTimeout(() => {
-      console.warn("[Server] 終了処理が長引いたため強制終了します");
+      console.warn("[Server] Shutdown is taking too long, forcing exit");
       process.exit(1);
     }, SHUTDOWN_TIMEOUT_MS).unref();
 
@@ -182,17 +182,17 @@ function installShutdown(cleanup: () => Promise<void>): void {
  */
 function logLanReachability(host: string, port: number, tokenPath: string): void {
   if (isLoopbackBind(host)) {
-    console.log(`[Server] LAN からは繋げません（host=${host}）。Android から繋ぐなら host を 0.0.0.0 に`);
+    console.log(`[Server] Not reachable from the LAN (host=${host}). To connect from Android, set host to 0.0.0.0`);
     return;
   }
 
   const candidates = lanIPv4Addresses();
   if (candidates.length > 0) {
-    console.log("[Server] LAN からの接続先候補:");
+    console.log("[Server] Candidate addresses for LAN connections:");
     for (const ip of candidates) console.log(`[Server]   ws://${ip}:${port}`);
   }
   console.log(
-    `[Server] LAN からの接続にはトークンが要ります: ${tokenPath}（ChatterAgent のメニュー「Android とペアリング…」か configure-android.sh で端末へ渡せます）`,
+    `[Server] A token is required for LAN connections: ${tokenPath} (hand it to the device via the ChatterAgent menu "Pair with Android…" or configure-android.sh)`,
   );
 }
 
@@ -215,7 +215,7 @@ async function main(): Promise<void> {
   //   工夫では、同じポートでの衝突にしか効かない。キューを所有できるサーバーを1台に絞る
   const serverLock = acquireLock(getServerLockDir());
   if (!serverLock) {
-    console.error("[Server] 既に別の chatter-agent-server が動いています");
+    console.error("[Server] Another chatter-agent-server is already running");
     process.exit(1);
   }
 
@@ -234,11 +234,11 @@ async function main(): Promise<void> {
   const { token, created } = ensureServerToken(tokenPath);
   if (created === "new") {
     console.log(
-      `[Server] トークンを新しく作りました: ${tokenPath}（LAN から繋ぐ端末を設定済みなら、ChatterAgent のメニュー「Android とペアリング…」か configure-android.sh で設定し直してください）`,
+      `[Server] Created a new token: ${tokenPath} (if you have already set up a device that connects over the LAN, set it up again via the ChatterAgent menu "Pair with Android…" or configure-android.sh)`,
     );
   } else if (created === "replaced") {
     console.warn(
-      `[Server] ${tokenPath} の内容が壊れていたので作り直しました。設定済みの端末は ChatterAgent のメニュー「Android とペアリング…」か configure-android.sh で設定し直してください`,
+      `[Server] ${tokenPath} was corrupted, so it was recreated. Set up any already-configured devices again via the ChatterAgent menu "Pair with Android…" or configure-android.sh`,
     );
   }
 
@@ -296,7 +296,7 @@ async function main(): Promise<void> {
    * 起動時のプローブは直後に spawn するかもしれないので、結論を出せるのは状況を知っている側だけ。
    */
   const warnAudioUnavailable = (): void => {
-    console.warn("[Server] 音声の GET は 503 を返します。テキストの配信は続きます");
+    console.warn("[Server] Audio GET requests will return 503. Text delivery continues");
   };
 
   /** 合成が失敗したときの診断。`ENGINE_RECHECK_INTERVAL_MS` に1回だけ実際に走る */
@@ -340,7 +340,7 @@ async function main(): Promise<void> {
 
     if (!config.get("ttsSpawn")) {
       // ★ 黙らない。切ったまま忘れた人の症状が「無音」だけになるのが最悪の失敗の仕方
-      console.log("[Server] ttsSpawn=false: 合成エンジンは起こしません");
+      console.log("[Server] ttsSpawn=false: not starting the TTS engine");
       warnAudioUnavailable();
       return;
     }
@@ -372,8 +372,8 @@ async function main(): Promise<void> {
     //   別のバイナリに当たりうる。禁止はしない（`ttsSpawnCommand: "docker"` でコンテナの
     //   エンジンを起こす運用が潰れる）が、**黙って読み替えない**（→ PR #52 のレビュー）
     if (plan.resolvedFrom !== undefined) {
-      console.warn(`[Server] ttsSpawnCommand "${plan.resolvedFrom}" を名前から解決しました: ${plan.command}`);
-      console.warn("[Server]   意図した実行ファイルでなければ、絶対パスで指定してください");
+      console.warn(`[Server] Resolved ttsSpawnCommand "${plan.resolvedFrom}" by name: ${plan.command}`);
+      console.warn("[Server]   If this is not the intended executable, specify an absolute path");
     }
 
     if (stopping) return;
@@ -418,7 +418,7 @@ async function main(): Promise<void> {
   const queueEngineTask = (task: () => Promise<void>): void => {
     engineTask = engineTask
       .then(task)
-      .catch((err: unknown) => console.error("[Server] 合成エンジンの起動判定に失敗:", err));
+      .catch((err: unknown) => console.error("[Server] Failed to decide whether to start the TTS engine:", err));
   };
 
   /**
@@ -445,7 +445,7 @@ async function main(): Promise<void> {
 
     const baseUrl = config.get("ollayaBaseUrl");
     if ((await probeOllaya(baseUrl)) === "reachable") {
-      console.log(`[Server] Ollaya に繋がりました (${baseUrl})`);
+      console.log(`[Server] Connected to Ollaya (${baseUrl})`);
       return; // 条件3
     }
 
@@ -460,7 +460,10 @@ async function main(): Promise<void> {
     // ★ 自分が起こしたものが生きていれば起こさない。listen 前は疎通確認を素通りするので、
     //   設定の切り替えで呼び直されると二重に起こし、先の方を道連れにできなくなる
     if (ollayaEngine !== null && !ollayaEngine.exited()) return;
-    ollayaEngine = startEngine(plan, { label: "[Ollaya]", unavailableNote: "感情判定は辞書式になります" });
+    ollayaEngine = startEngine(plan, {
+      label: "[Ollaya]",
+      unavailableNote: "emotion classification falls back to the dictionary",
+    });
   };
 
   const audioStore = createAudioStore({
@@ -508,7 +511,9 @@ async function main(): Promise<void> {
     onConfigPatched: (keys) => {
       if (keys.includes("ttsEngine")) queueEngineTask(switchEngine);
       if (keys.includes("emotionClassifier") || keys.includes("ollayaSpawn")) {
-        void startOllayaIfNeeded().catch((err: unknown) => console.error("[Server] Ollaya の起動判定に失敗:", err));
+        void startOllayaIfNeeded().catch((err: unknown) =>
+          console.error("[Server] Failed to decide whether to start Ollaya:", err),
+        );
       }
     },
   });
@@ -557,7 +562,7 @@ async function main(): Promise<void> {
   if (config.get("ttsEnabled")) {
     console.log(`[Server] audio: http://${bound.host}:${bound.port}/audio/ (engine: ${currentVoice().baseUrl})`);
   } else {
-    console.log("[Server] ttsEnabled=false: 音声は配りません（クライアントは無音で ack します）");
+    console.log("[Server] ttsEnabled=false: not serving audio (clients ack silently)");
   }
   lan = !isLoopbackBind(bound.host);
   logLanReachability(bound.host, bound.port, tokenPath);
@@ -569,7 +574,7 @@ async function main(): Promise<void> {
   //   （全消し clear() ではない。落ちている間に書かれた古い entry だけを捨てる。
   //   理由は STARTUP_KEEP_MS のコメント参照）
   const wiped = queue.dropOlderThan(STARTUP_KEEP_MS);
-  if (wiped > 0) console.log(`[Server] 起動前に溜まっていた ${wiped} 件を捨てました`);
+  if (wiped > 0) console.log(`[Server] Discarded ${wiped} entries left over from before startup`);
 
   // ★ poll を握ること。1接続の送信で throw すると、そのポールの残り entry が
   //   `delivered` に入らないまま抜け、**次のポールで他のクライアントへ二重送信される**。
@@ -578,7 +583,7 @@ async function main(): Promise<void> {
     try {
       dispatcher.poll();
     } catch (err) {
-      console.error("[Server] ポーリングに失敗しました:", err);
+      console.error("[Server] Polling failed:", err);
     }
   }, POLL_INTERVAL_MS);
   poll.unref();
@@ -597,7 +602,9 @@ async function main(): Promise<void> {
   //   起動が疎通待ちで伸び、上の理由がそのまま当てはまる状態に戻る
   queueEngineTask(startEngineIfNeeded);
   // ★ Ollaya も同じ理由で Ready より後ろ・起動を待たない
-  void startOllayaIfNeeded().catch((err: unknown) => console.error("[Server] Ollaya の起動判定に失敗:", err));
+  void startOllayaIfNeeded().catch((err: unknown) =>
+    console.error("[Server] Failed to decide whether to start Ollaya:", err),
+  );
 
   installShutdown(async () => {
     // ★ 先に立てること。起動判定がまだ走っていれば、spawn する直前で引き返す
@@ -612,7 +619,7 @@ async function main(): Promise<void> {
     //   `SHUTDOWN_TIMEOUT_MS`(6000) の内側に収まるが、3つ目を足すと 7500ms になって
     //   watchdog に食われる。この Issue で枠を使い切った。
     //   ★ Ollaya と mDNS の goodbye も同じ枠に同居させる（並行に stop する。named step にしない）
-    await step("合成エンジン / Ollaya / mDNS", async () => {
+    await step("TTS engine / Ollaya / mDNS", async () => {
       await Promise.all([engine?.stop(), ollayaEngine?.stop(), advertiser?.stop()]);
     });
     // ★ isStale() は所有印が読めるなら pid の生死だけで判定する（core/lock.ts）。
@@ -644,12 +651,12 @@ async function checkEngine(tts: TtsEngine, speakerId: string): Promise<EnginePro
     //   ここで起こすと bind に失敗するか、既に居るものと二重に起こすことになる
     if (err instanceof TtsHttpError) {
       console.warn(
-        `[Server] 音声合成エンジンは応答しましたが声の一覧を返しません (${tts.baseUrl}, status=${err.status})。` +
-          "ttsEngine と接続先（ttsBaseUrl / kokoroBaseUrl）を確認してください",
+        `[Server] The TTS engine responded but returned no voice list (${tts.baseUrl}, status=${err.status}). ` +
+          "Check ttsEngine and the address (ttsBaseUrl / kokoroBaseUrl)",
       );
       return "reachable";
     }
-    console.warn(`[Server] 音声合成エンジンに繋がりません (${tts.baseUrl}): ${String(err)}`);
+    console.warn(`[Server] Cannot connect to the TTS engine (${tts.baseUrl}): ${String(err)}`);
     // ★ **「503 になる」の結論はここで出さない。** 起動時のプローブから呼ばれたときは、
     //   直後にエンジンを起こすかもしれず、その場合この行は嘘になる（実機ログで、
     //   spawn する経路でだけ必ず出ていた）。結論は状況を知っている呼び出し側が出す
@@ -660,12 +667,12 @@ async function checkEngine(tts: TtsEngine, speakerId: string): Promise<EnginePro
   // ★ 一致の取り方はエンジンごとに違う（Kokoro-FastAPI の `a+b` のような合成指定）ので、
   //   ここでは完全一致を書かず `TtsEngine` 自身に委ねる（→ `tts/ttsEngine.ts` の `hasVoice`）
   if (tts.hasVoice(voices, speakerId)) {
-    console.log(`[Server] 音声合成エンジンに繋がりました (${tts.baseUrl}, speaker=${speakerId})`);
+    console.log(`[Server] Connected to the TTS engine (${tts.baseUrl}, speaker=${speakerId})`);
     return "reachable";
   }
 
   console.warn(
-    `[Server] 声 ID ${speakerId}（ttsSpeakerId / kokoroVoiceId）はこのエンジンに存在しません。音声は 503 になります`,
+    `[Server] Voice ID ${speakerId} (ttsSpeakerId / kokoroVoiceId) does not exist in this engine. Audio requests will return 503`,
   );
   for (const voice of voices.slice(0, SPEAKER_HINT_LIMIT)) {
     console.warn(`[Server]   ${voice.id}  ${voice.label}`);
@@ -678,9 +685,9 @@ async function checkEngine(tts: TtsEngine, speakerId: string): Promise<EnginePro
 
 main().catch((err: unknown) => {
   if ((err as NodeJS.ErrnoException)?.code === "EADDRINUSE") {
-    console.error("[Server] ポートが使用中です。config.json の port か CHATTER_AGENT_PORT を変えてください");
+    console.error("[Server] The port is in use. Change port in config.json or CHATTER_AGENT_PORT");
   } else {
-    console.error("[Server] 起動に失敗しました:", err);
+    console.error("[Server] Failed to start:", err);
   }
   process.exit(1);
 });

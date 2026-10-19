@@ -87,7 +87,7 @@ export function createAudioFetcher(options: AudioFetcherOptions): AudioFetcher {
         res = await fetch(`${baseUrl}${audioPath}`, { signal: AbortSignal.timeout(timeoutMs), headers });
       } catch (err) {
         const timedOut = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
-        return { kind: "failed", reason: timedOut ? `${timeoutMs}ms で返りませんでした` : String(err) };
+        return { kind: "failed", reason: timedOut ? `no response within ${timeoutMs}ms` : String(err) };
       }
 
       // ★ **ボディを読むこと。** 目的は接続の再利用ではなく**診断**。
@@ -99,22 +99,22 @@ export function createAudioFetcher(options: AudioFetcherOptions): AudioFetcher {
       //     2 接続**だった（58〜59 本になるのは 2MB のボディに `cancel()` したとき）。
       //     接続数を理由にしない。
       if (res.status === 401) {
-        return { kind: "unavailable", reason: await reason(res, "トークンが無いか違います (401)") };
+        return { kind: "unavailable", reason: await reason(res, "the token is missing or wrong (401)") };
       }
       if (res.status === 503) {
-        return { kind: "unavailable", reason: await reason(res, "サーバーが音声を用意できていません (503)") };
+        return { kind: "unavailable", reason: await reason(res, "the server has no audio ready (503)") };
       }
       if (res.status === 404) {
-        return { kind: "gone", reason: await reason(res, "音声がありません (404)") };
+        return { kind: "gone", reason: await reason(res, "no such audio (404)") };
       }
       if (!res.ok) {
-        return { kind: "failed", reason: await reason(res, `想定外のステータス ${res.status}`) };
+        return { kind: "failed", reason: await reason(res, `unexpected status ${res.status}`) };
       }
 
       try {
         return { kind: "ready", wav: await res.arrayBuffer() };
       } catch (err) {
-        return { kind: "failed", reason: `本体の読み取りに失敗しました: ${String(err)}` };
+        return { kind: "failed", reason: `failed to read the body: ${String(err)}` };
       }
     },
   };

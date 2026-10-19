@@ -113,7 +113,7 @@ export function createSpeechClient(options: SpeechClientOptions): SpeechClient {
     clearWatchdog();
     if (watchdogMs <= 0) return;
     watchdog = setTimeout(() => {
-      console.warn("[Player] サーバーからの ping が途切れました。接続し直します");
+      console.warn("[Player] No ping from the server. Reconnecting");
       // close ではなく terminate。half-open では close ハンドシェイクが返ってこない
       socket?.terminate();
     }, watchdogMs);
@@ -166,7 +166,7 @@ export function createSpeechClient(options: SpeechClientOptions): SpeechClient {
 
     next.on("open", () => {
       openedAt = Date.now();
-      console.log(`[Player] 接続しました: ${options.url}`);
+      console.log(`[Player] Connected: ${options.url}`);
       armWatchdog();
       options.onConnected();
 
@@ -189,8 +189,8 @@ export function createSpeechClient(options: SpeechClientOptions): SpeechClient {
       // 401 は Origin 検査、またはトークン認証（非ループバックのみ）。ネイティブから
       // ループバックへ張っている限り起きないが、理由が分からないと詰まる
       const hint =
-        res.statusCode === 401 ? "（allowedOrigins に弾かれたか、CHATTER_AGENT_PLAYER_TOKEN が無いか違います）" : "";
-      console.error(`[Player] ハンドシェイクに失敗しました: ${res.statusCode}${hint}`);
+        res.statusCode === 401 ? "(rejected by allowedOrigins, or CHATTER_AGENT_PLAYER_TOKEN is missing or wrong)" : "";
+      console.error(`[Player] Handshake failed: ${res.statusCode}${hint}`);
 
       // ★ このハンドラを張ったら、自分で接続を畳むこと。
       //   ws は `emit("unexpected-response", …)` が **false を返したときだけ**（＝リスナが1つも
@@ -204,7 +204,7 @@ export function createSpeechClient(options: SpeechClientOptions): SpeechClient {
 
     next.on("error", (err) => {
       // 起動直後にサーバーが居ないのは通常のこと。毎回スタックを出さない
-      console.warn(`[Player] 接続エラー: ${err.message}`);
+      console.warn(`[Player] Connection error: ${err.message}`);
     });
 
     next.on("close", (code, reason) => {
@@ -217,7 +217,7 @@ export function createSpeechClient(options: SpeechClientOptions): SpeechClient {
       openedAt = 0;
 
       const detail = reason.length > 0 ? ` ${String(reason)}` : "";
-      console.warn(`[Player] 切断されました (code=${code})${detail}。繋ぎ直します`);
+      console.warn(`[Player] Disconnected (code=${code})${detail}. Reconnecting`);
       options.onDisconnected();
       scheduleReconnect();
     });

@@ -102,11 +102,11 @@ export function createOpenAiEngine(options: TtsEngineOptions): TtsEngine {
       try {
         wav = await res.arrayBuffer();
       } catch (err) {
-        throw describe("audio.speech の読み取り", err);
+        throw describe("reading audio.speech", err);
       }
 
       if (!looksLikeWav(wav)) {
-        throw new TtsHttpError("audio.speech", res.status, `WAV ではない応答が返りました（${wav.byteLength} バイト）`);
+        throw new TtsHttpError("audio.speech", res.status, `response is not a WAV (${wav.byteLength} bytes)`);
       }
       return wav;
     },
@@ -117,10 +117,10 @@ export function createOpenAiEngine(options: TtsEngineOptions): TtsEngine {
       try {
         parsed = await res.json();
       } catch (err) {
-        throw describe("audio.voices の読み取り", err);
+        throw describe("reading audio.voices", err);
       }
       const list = (parsed as { voices?: unknown } | null)?.voices;
-      if (!Array.isArray(list)) throw new Error("voices が配列を返しませんでした");
+      if (!Array.isArray(list)) throw new Error("voices did not return an array");
       return normalizeVoices(list);
     },
   };

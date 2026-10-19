@@ -352,7 +352,7 @@ export function resolveKokoroSpawn(deps: ResolveKokoroSpawnDeps): EngineSpawnRes
       kokoroEnv.ESPEAK_DATA_PATH = espeakDataDir;
     } else {
       warnings.push(
-        `${LOG_PREFIX} espeak-ng のデータが見つかりません（brew install espeak-ng）。Kokoro は起動の途中で落ちます。探した場所:`,
+        `${LOG_PREFIX} espeak-ng data not found (brew install espeak-ng). Kokoro will crash partway through startup. Searched:`,
         ...ESPEAK_DATA_CANDIDATES.map((candidate) => `${LOG_PREFIX}${ITEM_INDENT}${candidate}`),
       );
     }
@@ -370,7 +370,7 @@ export function resolveKokoroSpawn(deps: ResolveKokoroSpawnDeps): EngineSpawnRes
 /**
  * `not-found` のときに「どこを探したか」を返す。
  *
- * ★ **生のコマンド名だけを返さないこと。** `合成エンジンが見つかりません: aivis-run` だけでは、
+ * ★ **生のコマンド名だけを返さないこと。** `Could not find the TTS engine: aivis-run` だけでは、
  *   PATH を直すのか・ファイル名を直すのか・実行ビットを立てるのか判断できない。
  *   既知候補の経路がフルパスを全部載せているのに対して非対称でもある（→ PR #52 のレビュー）。
  */
@@ -434,36 +434,36 @@ const TRIED_HINT_LIMIT = 12;
  * @param subject 文中で名指しする対象。既定は合成エンジン向けの文言（呼び出し側を変えずに
  *   済ませるため）。Ollaya には `"Ollaya"` を渡す（→ `resolveOllayaSpawn` の呼び出し側）。
  */
-export function describeEngineSkip(skip: EngineSpawnSkip, subject = "合成エンジン"): string[] {
+export function describeEngineSkip(skip: EngineSpawnSkip, subject = "the TTS engine"): string[] {
   switch (skip.skip) {
     case "not-loopback":
-      return [`${LOG_PREFIX} ${skip.host} はループバックではないので${subject}を起こせません`];
+      return [`${LOG_PREFIX} ${skip.host} is not a loopback address, so ${subject} cannot be started`];
 
     case "not-http":
-      return [`${LOG_PREFIX} ${skip.protocol} の${subject}は起こせません（起こせるのは平文の http: だけ）`];
+      return [`${LOG_PREFIX} ${skip.protocol} is not plaintext http:, so ${subject} cannot be started`];
 
     case "not-found": {
       const name = skip.subject ?? subject;
       const shown = skip.tried.slice(0, TRIED_HINT_LIMIT);
       const rest = skip.tried.length - shown.length;
       return [
-        `${LOG_PREFIX} ${name}が見つかりません。探した場所:`,
+        `${LOG_PREFIX} Could not find ${name}. Searched:`,
         ...shown.map((candidate) => `${LOG_PREFIX}${ITEM_INDENT}${candidate}`),
-        ...(rest > 0 ? [`${LOG_PREFIX}${ITEM_INDENT}…ほか ${rest} 件`] : []),
+        ...(rest > 0 ? [`${LOG_PREFIX}${ITEM_INDENT}... and ${rest} more`] : []),
         // ★ 実行ビットまで見ていることを言う。`ls` で見えるファイルが「探した場所」に並ぶので、
         //   これが無いと「在るのに見つからない」の原因（0644）に辿り着けない
-        `${LOG_PREFIX} ファイルが在っても実行ビット（chmod +x）が無いと候補から外れます`,
+        `${LOG_PREFIX} A file that exists is still skipped unless it has the executable bit (chmod +x)`,
       ];
     }
 
     case "not-configured":
-      // ★ 「起こせません」で揃える。verify-tts の否定検査はこの語で全変種を拾っている
-      return [`${LOG_PREFIX} kokoroDir が未設定なので${subject}を起こせません`];
+      // ★ 「cannot be started」で揃える。verify-tts の否定検査はこの語で全変種を拾っている
+      return [`${LOG_PREFIX} kokoroDir is not set, so ${subject} cannot be started`];
 
     case "kokoro-dir-not-found":
       // ★ 実行ファイルの探索（chmod の助言・PATH の一覧）は無い —— ディレクトリの指定ミスなので
-      //   言うことが違う。「見つかりません」で verify-tts の否定検査に拾わせる
-      return [`${LOG_PREFIX} kokoroDir が見つかりません: ${skip.path}`];
+      //   言うことが違う。「Could not find」で verify-tts の否定検査に拾わせる
+      return [`${LOG_PREFIX} Could not find kokoroDir: ${skip.path}`];
   }
 }
 
@@ -499,7 +499,7 @@ export interface StartEngineDeps {
   label?: string;
   /**
    * 起こせなかった／落ちたときの帰結を1行で言い切る文言。既定は合成エンジン向け
-   * （`"音声は 503 になります"`）。Ollaya には `"感情判定は辞書式になります"` を渡す。
+   * （`"audio requests will return 503"`）。Ollaya には `"emotion classification falls back to the dictionary"` を渡す。
    */
   unavailableNote?: string;
 }
@@ -525,7 +525,7 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
   const log = deps.log ?? ((m: string) => console.log(m));
   const warn = deps.warn ?? ((m: string) => console.warn(m));
   const label = deps.label ?? "[Engine]";
-  const unavailableNote = deps.unavailableNote ?? "音声は 503 になります";
+  const unavailableNote = deps.unavailableNote ?? "audio requests will return 503";
 
   const child = spawnFn(plan.command, plan.args, {
     // ★ shell は噛ませない。パスに空白が入るだけで壊れるし、設定ファイル経由の
@@ -573,7 +573,7 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
     stderrTail = (stderrTail + chunk).slice(-OUTPUT_TAIL_CHARS);
   });
 
-  log(`${label} 起動しました (pid=${child.pid ?? "?"}): ${plan.command} ${plan.args.join(" ")}`);
+  log(`${label} Started (pid=${child.pid ?? "?"}): ${plan.command} ${plan.args.join(" ")}`);
 
   // ★ spawn の失敗（ENOENT / EACCES）は `exit` ではなく `error` で来る。`exit` だけを見る実装は
   //   「起動したつもりで永久に繋がらない」状態になる（→ `player/audioPlayer.ts`）
@@ -582,7 +582,7 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
     // ★ 帰結までここで言い切る。`index.ts` の `warnAudioUnavailable` は「起こさないと決めた」
     //   経路の行なので、**起こしてから失敗した**この経路には届かない。
     //   ENOENT / EACCES は `ttsSpawnCommand` を書き間違えた人が最も踏む経路
-    warn(`${label} 起動できません (${plan.command}): ${String(err)}。${unavailableNote}`);
+    warn(`${label} Failed to start (${plan.command}): ${String(err)}. ${unavailableNote}`);
   });
 
   child.on("exit", (code, signal) => {
@@ -590,15 +590,15 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
     // ★ 自分で止めたときに stderr を出さないこと。SIGTERM で殺すと `code` は `null` になり、
     //   `code !== 0` の条件に引っかかるので、**終了のたびに 2KB のログが落ちる**
     if (stopRequested) {
-      log(`${label} 停止しました (signal=${signal})`);
+      log(`${label} Stopped (signal=${signal})`);
       return;
     }
-    warn(`${label} 終了しました (code=${code} signal=${signal})。再起動はしません（${unavailableNote}）`);
+    warn(`${label} Exited (code=${code} signal=${signal}). Not restarting (${unavailableNote})`);
     // ★ これが無いと「起動したはずなのに繋がらない」の原因が1文字も残らない
     if (code === 0) return;
     // stderr を優先。エンジンによっては全部 stdout に出す（uvicorn がそう）ので、その場合は stdout
     const tail = stderrTail.trim() || stdoutTail.trim();
-    if (tail) warn(`${label} 出力(末尾):\n${tail}`);
+    if (tail) warn(`${label} Output (tail):\n${tail}`);
   });
 
   const waitExit = (ms: number): Promise<boolean> =>
@@ -628,7 +628,7 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
     } catch (err) {
       // ESRCH = そのグループはもう居ない。止めるという目的は達している
       if ((err as NodeJS.ErrnoException).code === "ESRCH") return "gone";
-      warn(`${label} ${signal} を送れませんでした (pid=${pid}): ${String(err)}`);
+      warn(`${label} Failed to send ${signal} (pid=${pid}): ${String(err)}`);
       return "failed";
     }
   };
@@ -655,7 +655,7 @@ export function startEngine(plan: EngineSpawnPlan, deps: StartEngineDeps = {}): 
     //     **既存の入口ガードと区別できる単体テストは書けない**ので、意図をここに残す
     if (exited) return;
 
-    warn(`${label} SIGTERM で終わらないので SIGKILL します (pid=${child.pid})`);
+    warn(`${label} Did not exit on SIGTERM, sending SIGKILL (pid=${child.pid})`);
     signalGroup("SIGKILL");
     await waitExit(killWaitMs);
   };

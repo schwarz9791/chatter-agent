@@ -71,7 +71,7 @@ function generateEpoch(): SpeechEpoch {
   //   推測しにくさが LAN 上での実質的な最後の防御になっている。
   //   WebCrypto は Node 19 以降グローバルにあり、`engines` は >=24.11 なので、
   //   ここに来る時点でサポート外のランタイム。黙って弱い値を配るより、理由を出して止まる
-  throw new Error("globalThis.crypto.randomUUID がありません（Node 24.11 以上が必要です）");
+  throw new Error("globalThis.crypto.randomUUID is not available (Node 24.11 or later is required)");
 }
 
 /**

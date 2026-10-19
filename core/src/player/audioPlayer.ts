@@ -179,14 +179,14 @@ export function createAudioPlayer(options: AudioPlayerOptions): AudioPlayer {
           child.kill("SIGTERM");
           killTimer = setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
           killTimer.unref();
-          finish(new Error(`再生が ${timeoutMs}ms で終わりませんでした`));
+          finish(new Error(`playback did not finish within ${timeoutMs}ms`));
         }, timeoutMs);
         timer.unref();
 
         child.on("error", (err) => {
           // spawn に失敗した子は exit を出さないので、ここで外すしかない
           running.delete(child);
-          finish(new Error(`再生コマンドを起動できません (${command}): ${String(err)}`));
+          finish(new Error(`cannot start the playback command (${command}): ${String(err)}`));
         });
 
         child.on("exit", (code, signal) => {
@@ -198,7 +198,7 @@ export function createAudioPlayer(options: AudioPlayerOptions): AudioPlayer {
             return;
           }
           const detail = stderr.trim() ? `: ${stderr.trim()}` : "";
-          finish(new Error(`再生コマンドが異常終了しました (code=${code} signal=${signal})${detail}`));
+          finish(new Error(`the playback command exited abnormally (code=${code} signal=${signal})${detail}`));
         });
       });
     },
@@ -207,7 +207,7 @@ export function createAudioPlayer(options: AudioPlayerOptions): AudioPlayer {
       try {
         fs.rmSync(file, { force: true });
       } catch (err) {
-        console.warn(`[Player] 一時ファイルを消せませんでした (${file}):`, err);
+        console.warn(`[Player] Failed to delete temporary file (${file}):`, err);
       }
     },
 

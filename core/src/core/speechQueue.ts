@@ -157,7 +157,7 @@ export function createSpeechQueue(queueDir: string): SpeechQueue {
           written++;
         } catch (err) {
           // 1件の fs エラーで残り全部を落とさない。呼び出し側が握り潰さないよう件数で伝える
-          console.error(`[SpeechQueue] seq=${record.seq} の書き込みに失敗しました:`, err);
+          console.error(`[SpeechQueue] Failed to write seq=${record.seq}:`, err);
         }
       }
       return written;

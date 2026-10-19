@@ -224,7 +224,7 @@ export function createAudioStore(deps: AudioStoreDeps): AudioStore {
 
       if (inFlight.size >= maxInFlight) {
         throw new SynthesisUnavailableError(
-          `合成が同時に ${inFlight.size} 件走っているので受け付けません（上限 ${maxInFlight}）`,
+          `${inFlight.size} syntheses are already running at once, so no more are accepted (limit ${maxInFlight})`,
         );
       }
 

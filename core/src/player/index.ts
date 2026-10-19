@@ -56,10 +56,10 @@ async function step(label: string, work: () => Promise<unknown>): Promise<void> 
   await Promise.race([
     work().then(
       () => undefined,
-      (err: unknown) => console.error(`[Player] ${label} の終了処理に失敗:`, err),
+      (err: unknown) => console.error(`[Player] Failed to shut down ${label}:`, err),
     ),
     deadline.then(() =>
-      console.warn(`[Player] ${label} の終了処理が ${SHUTDOWN_STEP_TIMEOUT_MS}ms で返りませんでした`),
+      console.warn(`[Player] Shutting down ${label} did not finish within ${SHUTDOWN_STEP_TIMEOUT_MS}ms`),
     ),
   ]);
 }
@@ -73,10 +73,10 @@ function installShutdown(cleanup: () => Promise<void>): void {
       return;
     }
     shuttingDown = true;
-    console.log(`[Player] ${signal} を受信。終了します`);
+    console.log(`[Player] Received ${signal}. Shutting down`);
 
     setTimeout(() => {
-      console.warn("[Player] 終了処理が長引いたため強制終了します");
+      console.warn("[Player] Shutdown is taking too long, forcing exit");
       process.exit(1);
     }, SHUTDOWN_TIMEOUT_MS).unref();
 
@@ -95,7 +95,7 @@ async function main(): Promise<void> {
   //   ファイル名で範囲削除する。2台目の速い ack が、1台目のまだ喋っていない entry を消す
   const lock = acquireLock(getPlayerLockDir());
   if (!lock) {
-    console.error("[Player] 既に別の chatter-agent-player が動いています");
+    console.error("[Player] Another chatter-agent-player is already running");
     process.exit(1);
   }
 
@@ -182,7 +182,7 @@ async function main(): Promise<void> {
         // 知らない形は捨てる。接続は切らない（server の parseAck と対称）
         if (!warnedBadFrame) {
           warnedBadFrame = true;
-          console.warn("[Player] 読めないフレームを捨てました");
+          console.warn("[Player] Discarded an unreadable frame");
         }
         return;
       }
@@ -190,8 +190,8 @@ async function main(): Promise<void> {
       if (!audioDeclarationChecked) {
         audioDeclarationChecked = true;
         if (isAudioUndeclared(raw)) {
-          console.warn("[Player] サーバーのフレームに audio がありません（#29 より前のサーバー？）");
-          console.warn("[Player] 音声は鳴らず、すべての発話が無音のまま ack されます");
+          console.warn("[Player] The server frame has no audio (a server older than #29?)");
+          console.warn("[Player] No audio will play, and every utterance will be acked silently");
         }
       }
       dispatch({ kind: "received", record });
@@ -299,6 +299,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
-  console.error("[Player] 起動に失敗しました:", err);
+  console.error("[Player] Failed to start:", err);
   process.exit(1);
 });

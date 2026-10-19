@@ -60,11 +60,13 @@ export function createPublisher(deps: PublisherDeps): (entries: SpeechEntry[]) =
       // ★ 成功してから立てる。失敗したら次の publish でもう一度試す
       staleQueueCleared = true;
       if (stale > 0) {
-        console.error(`[chatter-agent-speak] 採番がやり直されたため、旧世代の配信キュー ${stale} 件を捨てました`);
+        console.error(
+          `[chatter-agent-speak] Renumbering detected. Discarded ${stale} entries of the older epoch from the delivery queue`,
+        );
       }
     } catch (err) {
       // 掃除に失敗しても発話は止めない（append の後で throw しないのと同じ理由）
-      console.error("[chatter-agent-speak] 旧世代の配信キューの掃除に失敗しました:", err);
+      console.error("[chatter-agent-speak] Failed to clean up the older epoch's delivery queue:", err);
     }
   }
 
@@ -80,12 +82,12 @@ export function createPublisher(deps: PublisherDeps): (entries: SpeechEntry[]) =
       const written = speechQueue.enqueue(records);
       if (written !== records.length) {
         console.error(
-          `[chatter-agent-speak] 配信キューへの書き込みが ${records.length} 件中 ${written} 件しか成功しませんでした`,
+          `[chatter-agent-speak] Only ${written} of ${records.length} writes to the delivery queue succeeded`,
         );
       }
     } catch (err) {
       // hook 経路では stderr が握り潰される可能性が高いが、手動実行時の手がかりに残す
-      console.error("[chatter-agent-speak] 配信キューへの書き込みに失敗しました:", err);
+      console.error("[chatter-agent-speak] Failed to write to the delivery queue:", err);
     }
 
     try {
@@ -93,10 +95,10 @@ export function createPublisher(deps: PublisherDeps): (entries: SpeechEntry[]) =
       // 捨てた件数はどのログにも出ないと seq の飛びとしてしか症状が出ないので、ここで出す
       const dropped = speechQueue.trim(maxEntries());
       if (dropped > 0) {
-        console.error(`[chatter-agent-speak] 配信キューの上限を超えたため ${dropped} 件を破棄しました`);
+        console.error(`[chatter-agent-speak] Dropped ${dropped} entries because the delivery queue limit was exceeded`);
       }
     } catch (err) {
-      console.error("[chatter-agent-speak] 配信キューの上限チェックに失敗しました:", err);
+      console.error("[chatter-agent-speak] Failed to check the delivery queue limit:", err);
     }
 
     return records;

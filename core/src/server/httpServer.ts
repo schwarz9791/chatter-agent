@@ -373,7 +373,7 @@ export function createHttpServer(deps: HttpServerDeps): http.Server {
     // ★ ハンドラ全体を握ること。ここで throw すると `uncaughtException` ガードが
     //   プロセスは守るが、**レスポンスが終わらずクライアントがハングする**
     void handle(req, res).catch((err: unknown) => {
-      console.error("[HTTP] リクエストの処理に失敗しました:", err);
+      console.error("[HTTP] Failed to handle request:", err);
       endWith(res, 500, "internal error\n");
     });
   });
@@ -496,8 +496,8 @@ export function createHttpServer(deps: HttpServerDeps): http.Server {
     const response = deps.control.claimPairing(body);
     const peer = req.socket.remoteAddress ?? "unknown";
     // ★ 相手のアドレスだけ。PIN とトークンはログに出さない
-    if (response.status === 200) console.log(`[HTTP] ペアリングが完了しました: ${peer}`);
-    else warn(`[HTTP] ペアリングに失敗しました: ${peer} (${response.status})`);
+    if (response.status === 200) console.log(`[HTTP] Pairing completed: ${peer}`);
+    else warn(`[HTTP] Pairing failed: ${peer} (${response.status})`);
     return endWithJson(res, response.status, response.body, {}, false);
   }
 
@@ -592,16 +592,16 @@ export function createHttpServer(deps: HttpServerDeps): http.Server {
       // ★ 規則7の唯一の例外。同じ声・世代で後ろの seq が現に合成できているときだけ
       //   404 に落とす（→ `server/audioStore.ts` の `SynthesisRejectedError`）
       if (err instanceof SynthesisRejectedError) {
-        warn(`[HTTP] seq=${key.seq} はエンジンに拒否されました（後続の合成は成功しています）: ${err.message}`);
+        warn(`[HTTP] seq=${key.seq} was rejected by the engine (later syntheses succeeded): ${err.message}`);
         return endWith(res, 404, `rejected by engine: ${err.message}\n`);
       }
       if (err instanceof SynthesisUnavailableError) {
         deps.onSynthesisFailed?.();
-        warn(`[HTTP] seq=${key.seq} の合成に失敗しました（あとで取りに来てもらいます）: ${err.message}`);
+        warn(`[HTTP] Synthesis of seq=${key.seq} failed (the client will fetch it again later): ${err.message}`);
         return endWith(res, 503, `synthesis unavailable: ${err.message}\n`);
       }
       if (err instanceof ResponseDeadlineError) {
-        warn(`[HTTP] 合成が ${deadlineMs}ms で終わらないので一旦返します（合成は続行中）`);
+        warn(`[HTTP] Synthesis did not finish within ${deadlineMs}ms, responding for now (synthesis continues)`);
         return endWith(res, 503, "synthesis in progress\n");
       }
       throw err;
@@ -674,7 +674,7 @@ export function createHttpServer(deps: HttpServerDeps): http.Server {
     //   破棄済みの応答に writeHead しない）
     pipeline(fs.createReadStream(absolute, range === null ? undefined : { start }), res, (err) => {
       if (err === null || err === undefined) return;
-      warn(`[HTTP] ${pathname} の送出に失敗しました: ${String(err)}`);
+      warn(`[HTTP] Failed to send ${pathname}: ${String(err)}`);
     });
   }
 }

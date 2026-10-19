@@ -91,7 +91,7 @@ export function createVoicevoxEngine(options: TtsEngineOptions): TtsEngine {
       try {
         query = (await queryRes.json()) as AudioQuery;
       } catch (err) {
-        throw describe("audio_query の読み取り", err);
+        throw describe("reading audio_query", err);
       }
 
       const synthRes = await request("synthesis", `${baseUrl}/synthesis?speaker=${speaker}`, {
@@ -104,7 +104,7 @@ export function createVoicevoxEngine(options: TtsEngineOptions): TtsEngine {
       try {
         wav = await synthRes.arrayBuffer();
       } catch (err) {
-        throw describe("synthesis の読み取り", err);
+        throw describe("reading synthesis", err);
       }
 
       // ★ 200 でも WAV とは限らない。`ttsBaseUrl` が別サービス（開発サーバー、
@@ -112,11 +112,7 @@ export function createVoicevoxEngine(options: TtsEngineOptions): TtsEngine {
       //   「再生に失敗しました」で ack される。**症状が原因からいちばん遠いところに出る**ので、
       //   ここで名指ししておく
       if (!looksLikeWav(wav)) {
-        throw new TtsHttpError(
-          "synthesis",
-          synthRes.status,
-          `WAV ではない応答が返りました（${wav.byteLength} バイト）`,
-        );
+        throw new TtsHttpError("synthesis", synthRes.status, `response is not a WAV (${wav.byteLength} bytes)`);
       }
       return wav;
     },
@@ -127,9 +123,9 @@ export function createVoicevoxEngine(options: TtsEngineOptions): TtsEngine {
       try {
         parsed = await res.json();
       } catch (err) {
-        throw describe("speakers の読み取り", err);
+        throw describe("reading speakers", err);
       }
-      if (!Array.isArray(parsed)) throw new Error("speakers が配列を返しませんでした");
+      if (!Array.isArray(parsed)) throw new Error("speakers did not return an array");
       return flattenStyles(parsed as Speaker[]);
     },
   };

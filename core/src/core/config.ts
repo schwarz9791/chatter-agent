@@ -795,7 +795,7 @@ export function createConfigStore(deps: ConfigStoreDeps = {}): ConfigStore {
       if (parsed === undefined) {
         warnOnce(
           `${origin}:${key}`,
-          `[Config] ${origin} の ${key} が不正です (${JSON.stringify(raw)})。既定値を使います`,
+          `[Config] ${key} in ${origin} is invalid (${JSON.stringify(raw)}). Using the default`,
         );
         continue;
       }
@@ -813,7 +813,7 @@ export function createConfigStore(deps: ConfigStoreDeps = {}): ConfigStore {
     const raw = envSource[SPECS[key].env];
     if (raw !== undefined) envValues[key] = raw;
   }
-  const overrides = collect(envValues, "環境変数");
+  const overrides = collect(envValues, "environment variable");
 
   let fileValues: Partial<ChatterAgentConfig> = {};
   let merged: ChatterAgentConfig = { ...defaults, ...overrides };
@@ -826,7 +826,7 @@ export function createConfigStore(deps: ConfigStoreDeps = {}): ConfigStore {
     try {
       text = fs.readFileSync(filePath, "utf-8");
     } catch (err) {
-      warnOnce("file:read", `[Config] ${filePath} を読めませんでした: ${String(err)}`);
+      warnOnce("file:read", `[Config] Failed to read ${filePath}: ${String(err)}`);
       return undefined;
     }
 
@@ -834,21 +834,21 @@ export function createConfigStore(deps: ConfigStoreDeps = {}): ConfigStore {
     try {
       parsed = JSON.parse(text);
     } catch (err) {
-      warnOnce("file:json", `[Config] ${filePath} のJSONが壊れています: ${String(err)}。直前の値を使い続けます`);
+      warnOnce("file:json", `[Config] ${filePath} contains invalid JSON: ${String(err)}. Keeping the previous values`);
       return undefined;
     }
 
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
       // undefined を返すと呼び出し側は fileValues を触らない＝直前の値が残る。
       // メッセージも実態に合わせる（「既定値を使います」ではない）
-      warnOnce("file:shape", `[Config] ${filePath} のトップレベルがオブジェクトではありません。直前の値を使い続けます`);
+      warnOnce("file:shape", `[Config] The top level of ${filePath} is not an object. Keeping the previous values`);
       return undefined;
     }
 
     const record = parsed as Record<string, unknown>;
     for (const key of Object.keys(record)) {
       if (!CONFIG_KEYS.includes(key as ConfigKey)) {
-        warnOnce(`file:unknown:${key}`, `[Config] ${filePath} の未知のキー "${key}" は無視されます`);
+        warnOnce(`file:unknown:${key}`, `[Config] Unknown key "${key}" in ${filePath} is ignored`);
       }
     }
     return collect(record, "config.json");

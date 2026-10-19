@@ -63,7 +63,7 @@ describe("startMdnsAdvertiser", () => {
       txt: { version: "1.2.3" },
       disabledIpv6: true,
     });
-    expect(log).toHaveBeenCalledWith("[mDNS] 広告を始めました: my-mac._chatter-agent._tcp.local. (port 8765, en0)");
+    expect(log).toHaveBeenCalledWith("[mDNS] Started advertising: my-mac._chatter-agent._tcp.local. (port 8765, en0)");
   });
 
   describe("インターフェースが無いまま起動したとき", () => {
@@ -112,7 +112,7 @@ describe("startMdnsAdvertiser", () => {
     const { warn, start } = setup(() => Promise.reject(new Error("boom")));
     start();
     await flush();
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("[mDNS] 広告できませんでした: Error: boom"));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("[mDNS] Failed to advertise: Error: boom"));
   });
 
   it("createService が投げても起動を止めない", () => {
@@ -121,7 +121,7 @@ describe("startMdnsAdvertiser", () => {
       throw new Error("no iface");
     });
     expect(() => start()).not.toThrow();
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("広告できませんでした"));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("Failed to advertise"));
   });
 
   it("stop は shutdown を呼び、失敗しても reject しない", async () => {
@@ -129,6 +129,6 @@ describe("startMdnsAdvertiser", () => {
     const adv = start();
     await expect(adv.stop()).resolves.toBeUndefined();
     expect(responder.shutdown).toHaveBeenCalledTimes(1);
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("[mDNS] 停止に失敗しました"));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("[mDNS] Failed to stop"));
   });
 });

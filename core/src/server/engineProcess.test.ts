@@ -470,36 +470,36 @@ describe("resolveKokoroSpawn", () => {
 describe("describeEngineSkip", () => {
   it("subject を渡すと文中の対象を差し替えられる（Ollaya 用）", () => {
     expect(describeEngineSkip({ skip: "not-loopback", host: "example.com" }, "Ollaya")).toEqual([
-      "[Server] example.com はループバックではないのでOllayaを起こせません",
+      "[Server] example.com is not a loopback address, so Ollaya cannot be started",
     ]);
     expect(describeEngineSkip({ skip: "not-found", tried: ["/a/ollaya"] }, "Ollaya")[0]).toContain(
-      "Ollayaが見つかりません",
+      "Could not find Ollaya",
     );
   });
 
   it("ループバックでない理由はホスト名を名指しする", () => {
     expect(describeEngineSkip({ skip: "not-loopback", host: "example.com" })).toEqual([
-      "[Server] example.com はループバックではないので合成エンジンを起こせません",
+      "[Server] example.com is not a loopback address, so the TTS engine cannot be started",
     ]);
   });
 
-  /** ★ verify-tts の否定検査は「起こせません」「見つかりません」で全変種を拾う */
-  it("★ not-configured も「起こせません」で言う", () => {
+  /** ★ verify-tts の否定検査は「cannot be started」「Could not find」で全変種を拾う */
+  it("★ not-configured も「cannot be started」で言う", () => {
     expect(describeEngineSkip({ skip: "not-configured" })).toEqual([
-      "[Server] kokoroDir が未設定なので合成エンジンを起こせません",
+      "[Server] kokoroDir is not set, so the TTS engine cannot be started",
     ]);
   });
 
   /** ★ `resolveKokoroSpawn` が uv の not-found にこれを積む（合成エンジン全般ではなく uv が要ることを言う） */
   it("★ not-found は skip.subject があれば呼び出し側の subject より優先する", () => {
     const lines = describeEngineSkip({ skip: "not-found", tried: ["uv"], subject: "uv" });
-    expect(lines[0]).toContain("uvが見つかりません");
+    expect(lines[0]).toContain("Could not find uv");
   });
 
   /** ★ ディレクトリの指定ミスは実行ファイルの探索（chmod の助言・PATH の一覧）と文面を分ける */
-  it("★ kokoro-dir-not-found はパスを名指しし、「見つかりません」を含む（chmod の助言は出さない）", () => {
+  it("★ kokoro-dir-not-found はパスを名指しし、「Could not find」を含む（chmod の助言は出さない）", () => {
     const lines = describeEngineSkip({ skip: "kokoro-dir-not-found", path: "/opt/Kokoro-FastAPI" });
-    expect(lines).toEqual(["[Server] kokoroDir が見つかりません: /opt/Kokoro-FastAPI"]);
+    expect(lines).toEqual(["[Server] Could not find kokoroDir: /opt/Kokoro-FastAPI"]);
     expect(lines.some((l) => l.includes("chmod"))).toBe(false);
   });
 
@@ -518,19 +518,19 @@ describe("describeEngineSkip", () => {
   /** ★ `ls` で見えるファイルが「探した場所」に並ぶので、これが無いと 0644 に辿り着けない */
   it("★ 実行ビットを見ていることを伝える", () => {
     const lines = describeEngineSkip({ skip: "not-found", tried: ["/a/run"] });
-    expect(lines.some((l) => l.includes("実行ビット"))).toBe(true);
+    expect(lines.some((l) => l.includes("executable bit"))).toBe(true);
   });
 
   it("★ 上限で切ったら残件数を出す（黙って truncate しない）", () => {
     const tried = Array.from({ length: 30 }, (_, i) => `/dir${i}/run`);
     const lines = describeEngineSkip({ skip: "not-found", tried });
-    expect(lines.some((l) => l.includes("ほか 18 件"))).toBe(true);
+    expect(lines.some((l) => l.includes("and 18 more"))).toBe(true);
     expect(lines.some((l) => l.includes("/dir29/run"))).toBe(false);
   });
 
   it("上限以内なら残件数の行を出さない", () => {
     const lines = describeEngineSkip({ skip: "not-found", tried: ["/a/run", "/b/run"] });
-    expect(lines.some((l) => l.includes("ほか"))).toBe(false);
+    expect(lines.some((l) => l.includes("... and"))).toBe(false);
   });
 
   /** ★ 帰結（503）を知っているのは呼び出し側だけ。ここで言うと spawn する経路で嘘になる */
@@ -639,7 +639,7 @@ describe("startEngine", () => {
     });
 
     expect(await until(() => engine.exited())).toBe(true);
-    const dump = warnings.find((m) => m.includes("出力(末尾)")) ?? "";
+    const dump = warnings.find((m) => m.includes("Output (tail)")) ?? "";
     expect(dump).toContain("-LAST-");
     expect(dump.length).toBeLessThan(2_200);
   });
@@ -669,7 +669,7 @@ describe("startEngine", () => {
     });
 
     expect(await until(() => engine.exited())).toBe(true);
-    const dump = warnings.find((m) => m.includes("出力(末尾)")) ?? "";
+    const dump = warnings.find((m) => m.includes("Output (tail)")) ?? "";
     expect(dump).toContain("本当の原因");
   });
 
@@ -683,7 +683,7 @@ describe("startEngine", () => {
     await engine.stop();
     expect(await until(() => engine.exited())).toBe(true);
     expect(warnings.some((m) => m.includes("stderr"))).toBe(false);
-    expect(warnings.some((m) => m.includes("終了しました"))).toBe(false);
+    expect(warnings.some((m) => m.includes("Exited"))).toBe(false);
   });
 
   it("起動できないコマンドは error 経路で warn し、exited() が true になる", async () => {
@@ -691,7 +691,7 @@ describe("startEngine", () => {
     const engine = start("/definitely/not/a/real/binary", [], { warn: (m) => void warnings.push(m) });
 
     expect(await until(() => engine.exited())).toBe(true);
-    expect(warnings.some((m) => m.includes("起動できません"))).toBe(true);
+    expect(warnings.some((m) => m.includes("Failed to start"))).toBe(true);
   });
 
   /**
@@ -704,14 +704,14 @@ describe("startEngine", () => {
     const engine = start("/definitely/not/a/real/binary", [], {
       warn: (m) => void warnings.push(m),
       label: "[Ollaya]",
-      unavailableNote: "感情判定は辞書式になります",
+      unavailableNote: "emotion classification falls back to the dictionary",
     });
 
     expect(await until(() => engine.exited())).toBe(true);
-    expect(warnings.some((m) => m.startsWith("[Ollaya] 起動できません"))).toBe(true);
-    expect(warnings.some((m) => m.includes("感情判定は辞書式になります"))).toBe(true);
+    expect(warnings.some((m) => m.startsWith("[Ollaya] Failed to start"))).toBe(true);
+    expect(warnings.some((m) => m.includes("emotion classification falls back to the dictionary"))).toBe(true);
     expect(warnings.some((m) => m.includes("[Engine]"))).toBe(false);
-    expect(warnings.some((m) => m.includes("音声は 503"))).toBe(false);
+    expect(warnings.some((m) => m.includes("audio requests will return 503"))).toBe(false);
   });
 
   it("★ 既に終わっている相手にはシグナルを送らない（pid の再利用を巻き添えにしない）", async () => {

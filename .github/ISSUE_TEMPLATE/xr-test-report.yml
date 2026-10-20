@@ -102,16 +102,6 @@ body:
         - Yes, both at once
         - No, starting one stops the other
 
-  - type: dropdown
-    id: colors
-    attributes:
-      label: Character colors
-      description: The bundled model wears a navy outfit. On the emulator it renders almost white (#110).
-      options:
-        - Navy, as expected
-        - Washed out or almost white
-        - Something else
-
   - type: input
     id: latency
     attributes:
@@ -127,6 +117,7 @@ body:
       options:
         - label: Released over the floor or a table, it stays in the air (`plane=none` in logcat)
         - label: Pinching, moving or placing it by hand is awkward or doesn't respond
+        - label: The colors look off (the bundled model's outfit is navy)
         - label: The body proportions look stretched or squashed
         - label: Seen from the side, the head tilts sideways when it nods
         - label: The eyes swing too far, too little, or jitter as they follow you

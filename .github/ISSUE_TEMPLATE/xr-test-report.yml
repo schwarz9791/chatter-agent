@@ -44,8 +44,8 @@ body:
   - type: input
     id: macos
     attributes:
-      label: macOS version and chip
-      placeholder: macOS 26.0.1, M2
+      label: macOS version
+      placeholder: macOS 26.0.1
     validations:
       required: true
 
@@ -73,7 +73,7 @@ body:
 
   - type: markdown
     attributes:
-      value: "## What happened"
+      value: "## What you saw"
 
   - type: dropdown
     id: progress
@@ -85,25 +85,6 @@ body:
         - It connected, but no sound played
         - It spoke Claude Code's replies
 
-  - type: textarea
-    id: summary
-    attributes:
-      label: Details
-      description: Anything that went wrong or surprised you, and what you did right before it.
-      placeholder: |
-        After pairing, the character read Claude Code's replies aloud. Then I took the glasses off for a few minutes, and when I put them back on the character was behind me and stopped speaking.
-
-  - type: markdown
-    attributes:
-      value: "## Basics"
-
-  - type: textarea
-    id: full-space
-    attributes:
-      label: Entering Full Space
-      description: What changed when the app started? For example, other apps' windows disappeared, the room stayed visible, the view went dark, a system prompt appeared.
-      placeholder: Other apps' windows disappeared and the character appeared about a meter in front of me. The room stayed visible through the lenses.
-
   - type: dropdown
     id: mac-screen
     attributes:
@@ -112,39 +93,14 @@ body:
         - Yes, comfortably
         - Yes, but it's dim or low-contrast
         - Hard to read
-        - Didn't check
 
   - type: dropdown
     id: external-display
     attributes:
       label: Can you use the Aura as the Mac's external display at the same time?
-      description: With the Aura working as a display for the Mac, start the app. Do both keep working?
       options:
         - Yes, both at once
         - No, starting one stops the other
-        - Didn't check
-
-  - type: dropdown
-    id: floor
-    attributes:
-      label: Does it land on the floor or a table?
-      description: >-
-        Pinch the character, hold it over the floor or a table, and let go.
-        In logcat, `[Mascot] XR grab: released plane=…` names the surface it landed on (`plane=none` means none was found).
-      options:
-        - It lands on the surface
-        - It stays in the air (plane=none)
-        - Didn't check
-
-  - type: textarea
-    id: basics-notes
-    attributes:
-      label: Notes on the basics
-      placeholder: The table was found, but the floor only after I walked around for a while.
-
-  - type: markdown
-    attributes:
-      value: "## Rendering and performance"
 
   - type: dropdown
     id: colors
@@ -154,78 +110,38 @@ body:
       options:
         - Navy, as expected
         - Washed out or almost white
-        - Something else (describe in the notes)
-        - Didn't check
+        - Something else
 
-  - type: dropdown
-    id: proportions
-    attributes:
-      label: Body proportions
-      options:
-        - Look right
-        - Stretched or squashed
-        - Didn't check
-
-  - type: textarea
-    id: performance
-    attributes:
-      label: Smoothness and heat
-      description: Does it move smoothly? How warm does the device get, and after how long?
-      placeholder: Smooth at first. After about 30 minutes left idle, the glasses felt warm and the motion stuttered now and then.
-
-  - type: textarea
+  - type: input
     id: latency
     attributes:
       label: Delay before it speaks
       description: From when a reply appears in Claude Code to when the voice starts on the Aura. A rough guess is fine.
-      placeholder: About 2 seconds for the first sentence. The rest followed without gaps.
+      placeholder: About 2 seconds
 
-  - type: dropdown
-    id: grab
+  - type: checkboxes
+    id: problems
     attributes:
-      label: Pinching, moving and placing it by hand
+      label: Did you notice any of these?
+      description: Tick only what you saw.
       options:
-        - Easy
-        - Works, but awkward (angle, reach, aim)
-        - It doesn't respond
-        - Didn't check
-
-  - type: dropdown
-    id: dimming
-    attributes:
-      label: Does the Aura's dimming darken the room through the lenses while the app runs?
-      options:
-        - "Yes"
-        - "No"
-        - Didn't check
-
-  - type: dropdown
-    id: neck
-    attributes:
-      label: Head tilt from the side
-      description: Walk around to the side while it speaks. When it nods, does the head tilt sideways oddly?
-      options:
-        - Looks natural
-        - Tilts oddly
-        - Didn't check
-
-  - type: dropdown
-    id: gaze
-    attributes:
-      label: Eye movement
-      description: The eyes follow you as you move. How far do they swing?
-      options:
-        - Looks natural
-        - Too far (a lot of white shows)
-        - Too little
-        - Jittery
-        - Didn't check
+        - label: Released over the floor or a table, it stays in the air (`plane=none` in logcat)
+        - label: Pinching, moving or placing it by hand is awkward or doesn't respond
+        - label: The body proportions look stretched or squashed
+        - label: Seen from the side, the head tilts sideways when it nods
+        - label: The eyes swing too far, too little, or jitter as they follow you
+        - label: The motion stutters
+        - label: The device gets uncomfortably warm
+        - label: Changing the Aura's dimming doesn't darken the room through the lenses
 
   - type: textarea
-    id: rendering-notes
+    id: details
     attributes:
-      label: Notes on rendering and performance
-      placeholder: Colors were right, but the hair outline flickered when I turned my head quickly.
+      label: Details
+      description: What changed when the app started (Full Space), anything that went wrong or surprised you, and what you did right before it.
+      placeholder: |
+        Other apps' windows disappeared and the character appeared about a meter in front of me. The room stayed visible through the lenses.
+        After about 30 minutes the glasses felt warm and the motion stuttered now and then.
 
   - type: markdown
     attributes:

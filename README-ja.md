@@ -166,6 +166,8 @@ curl -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8570/v1/pairin
 
 ### 6. 不具合報告のためのログ
 
+報告は [XREAL Aura test report](https://github.com/schwarz9791/chatter-agent/issues/new?template=xr-test-report.yml) のフォームからどうぞ（英語のフォームです）。必須は環境だけで、「動かなかった」報告も歓迎します。次のものを添えてください。
+
 - **Aura:** `adb logcat -s Unity ChatterMascot > aura.log`。アプリを起動する前に始め、症状を再現してから Ctrl-C で止めます。`ChatterMascot` は Java 側のタグで、mDNS の探索はこちらに出るので、両方要ります。
 - **Mac:** ChatterAgent のメニュー「ログを開く」（サーバーのログ）。
 - **どのビルドか:** 起動ログの `[Mascot] version:` の行、または XR 設定パネルの末尾。

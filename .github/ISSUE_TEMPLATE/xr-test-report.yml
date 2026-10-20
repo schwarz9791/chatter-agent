@@ -1,0 +1,254 @@
+name: XREAL Aura test report
+description: Tell us how the Android XR build runs on a real XREAL Aura, including when it doesn't work at all.
+title: "[Aura test] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for trying the XR build. It has only run on an emulator so far, so **"it didn't work" reports are just as useful as working ones.**
+
+        Only **Environment** is required. Fill in whatever you checked and leave the rest empty.
+        Setup steps: [Try it on XREAL Aura](https://github.com/schwarz9791/chatter-agent#try-it-on-xreal-aura-android-xr).
+
+  - type: markdown
+    attributes:
+      value: "## Environment"
+
+  - type: input
+    id: aura-build
+    attributes:
+      label: Aura OS build
+      description: The output of `adb shell getprop ro.build.fingerprint`.
+      placeholder: brand/product/device:14/BUILD_ID/1234567:user/release-keys
+    validations:
+      required: true
+
+  - type: input
+    id: mascot-version
+    attributes:
+      label: Chatter Mascot version
+      description: The `[Mascot] version:` line in logcat, or "Version …" at the end of the XR settings panel.
+      placeholder: 0.1.2
+    validations:
+      required: true
+
+  - type: input
+    id: agent-version
+    attributes:
+      label: ChatterAgent version
+      description: ChatterAgent → Settings… → About Chatter Agent → Version.
+      placeholder: 0.2.1
+    validations:
+      required: true
+
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and chip
+      placeholder: macOS 26.0.1, M2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: tts
+    attributes:
+      label: Synthesis engine
+      options:
+        - Kokoro-FastAPI (ttsEngine "openai")
+        - AivisSpeech (the default)
+        - None installed
+    validations:
+      required: true
+
+  - type: dropdown
+    id: connection
+    attributes:
+      label: How the Aura connected
+      options:
+        - Pairing with a PIN from ChatterAgent
+        - configure-android.sh
+        - It never connected
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: "## What happened"
+
+  - type: dropdown
+    id: progress
+    attributes:
+      label: How far did it get?
+      options:
+        - The app didn't start, or closed right away
+        - It started, but never connected to the Mac
+        - It connected, but no sound played
+        - It spoke Claude Code's replies
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Details
+      description: Anything that went wrong or surprised you, and what you did right before it.
+      placeholder: |
+        After pairing, the character read Claude Code's replies aloud. Then I took the glasses off for a few minutes, and when I put them back on the character was behind me and stopped speaking.
+
+  - type: markdown
+    attributes:
+      value: "## Basics"
+
+  - type: textarea
+    id: full-space
+    attributes:
+      label: Entering Full Space
+      description: What changed when the app started? For example, other apps' windows disappeared, the room stayed visible, the view went dark, a system prompt appeared.
+      placeholder: Other apps' windows disappeared and the character appeared about a meter in front of me. The room stayed visible through the lenses.
+
+  - type: dropdown
+    id: mac-screen
+    attributes:
+      label: Can you read the Mac's screen through the lenses while the app runs?
+      options:
+        - Yes, comfortably
+        - Yes, but it's dim or low-contrast
+        - Hard to read
+        - Didn't check
+
+  - type: dropdown
+    id: external-display
+    attributes:
+      label: Can you use the Aura as the Mac's external display at the same time?
+      description: With the Aura working as a display for the Mac, start the app. Do both keep working?
+      options:
+        - Yes, both at once
+        - No, starting one stops the other
+        - Didn't check
+
+  - type: dropdown
+    id: floor
+    attributes:
+      label: Does it land on the floor or a table?
+      description: >-
+        Pinch the character, hold it over the floor or a table, and let go.
+        In logcat, `[Mascot] XR grab: released plane=…` names the surface it landed on (`plane=none` means none was found).
+      options:
+        - It lands on the surface
+        - It stays in the air (plane=none)
+        - Didn't check
+
+  - type: textarea
+    id: basics-notes
+    attributes:
+      label: Notes on the basics
+      placeholder: The table was found, but the floor only after I walked around for a while.
+
+  - type: markdown
+    attributes:
+      value: "## Rendering and performance"
+
+  - type: dropdown
+    id: colors
+    attributes:
+      label: Character colors
+      description: The bundled model wears a navy outfit. On the emulator it renders almost white (#110).
+      options:
+        - Navy, as expected
+        - Washed out or almost white
+        - Something else (describe in the notes)
+        - Didn't check
+
+  - type: dropdown
+    id: proportions
+    attributes:
+      label: Body proportions
+      options:
+        - Look right
+        - Stretched or squashed
+        - Didn't check
+
+  - type: textarea
+    id: performance
+    attributes:
+      label: Smoothness and heat
+      description: Does it move smoothly? How warm does the device get, and after how long?
+      placeholder: Smooth at first. After about 30 minutes left idle, the glasses felt warm and the motion stuttered now and then.
+
+  - type: textarea
+    id: latency
+    attributes:
+      label: Delay before it speaks
+      description: From when a reply appears in Claude Code to when the voice starts on the Aura. A rough guess is fine.
+      placeholder: About 2 seconds for the first sentence. The rest followed without gaps.
+
+  - type: dropdown
+    id: grab
+    attributes:
+      label: Pinching, moving and placing it by hand
+      options:
+        - Easy
+        - Works, but awkward (angle, reach, aim)
+        - It doesn't respond
+        - Didn't check
+
+  - type: dropdown
+    id: dimming
+    attributes:
+      label: Does the Aura's dimming darken the room through the lenses while the app runs?
+      options:
+        - "Yes"
+        - "No"
+        - Didn't check
+
+  - type: dropdown
+    id: neck
+    attributes:
+      label: Head tilt from the side
+      description: Walk around to the side while it speaks. When it nods, does the head tilt sideways oddly?
+      options:
+        - Looks natural
+        - Tilts oddly
+        - Didn't check
+
+  - type: dropdown
+    id: gaze
+    attributes:
+      label: Eye movement
+      description: The eyes follow you as you move. How far do they swing?
+      options:
+        - Looks natural
+        - Too far (a lot of white shows)
+        - Too little
+        - Jittery
+        - Didn't check
+
+  - type: textarea
+    id: rendering-notes
+    attributes:
+      label: Notes on rendering and performance
+      placeholder: Colors were right, but the hair outline flickered when I turned my head quickly.
+
+  - type: markdown
+    attributes:
+      value: "## Attachments"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Drag the files into this box.
+        - **Aura:** run `adb logcat -s Unity ChatterMascot > aura.log` before launching the app, reproduce the problem, then stop it with Ctrl-C.
+        - **Mac:** ChatterAgent → Open Log.
+
+        If you paste instead, the most useful lines are `[Mascot] version:`, `[Mascot] graphics:`, `[Mascot] XR: requested environment blend mode` (or `… has only OPAQUE`), and any warning or error.
+        The logs contain your LAN addresses and file paths. Remove anything you don't want public.
+      placeholder: |
+        [Mascot] version: 0.1.2
+        [Mascot] graphics: Vulkan / …
+        [Mascot] XR: requested environment blend mode …
+
+  - type: textarea
+    id: media
+    attributes:
+      label: Photos or videos through the lenses
+      description: Drag the files into this box. A phone camera held up to the lens works.

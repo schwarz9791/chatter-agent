@@ -166,6 +166,8 @@ Check these in order.
 
 ### 6. Logs for a bug report
 
+Report with the [XREAL Aura test report](https://github.com/schwarz9791/chatter-agent/issues/new?template=xr-test-report.yml) form. Only the environment is required, and "it didn't work" reports are welcome too. Attach these:
+
 - **Aura:** `adb logcat -s Unity ChatterMascot > aura.log`. Start it before launching the app, reproduce the problem, then stop it with Ctrl-C. `ChatterMascot` is the Java-side tag, and the mDNS discovery logs under it, so you need both.
 - **Mac:** choose "Open Log" in ChatterAgent's menu (the server log).
 - **Which build:** the `[Mascot] version:` line in the startup log, or the end of the XR settings panel.

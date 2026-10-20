@@ -123,7 +123,6 @@ body:
         - label: The eyes swing too far, too little, or jitter as they follow you
         - label: The motion stutters
         - label: The device gets uncomfortably warm
-        - label: Changing the Aura's dimming doesn't darken the room through the lenses
 
   - type: textarea
     id: details

@@ -296,7 +296,6 @@ npm run verify:assets    # マニフェスト → GET /v1/assets/ → Range で�
 - 空間アンカー対応（置き直した位置を再起動しても保つ）
 - CI 整備と各種アプリストアへの配信
 - Android XR で Home Scene アプリと同居できるようにする
-- Android グラス（INAIR Pod / Viture Neckband など）で動くようにする
 
 ## ライセンス
 

@@ -358,6 +358,8 @@ Settings and assets live under `~/.config/chatter-agent/` (or under `XDG_CONFIG_
 
 The model can be swapped from ChatterAgent's settings panel, and motions can be previewed in its "Motion" section, but **there's no UI for placing motions.** Create the directory, drop a `.vrma` file in, and it's picked up on the next launch. There's no directory for `neutral` (the default behavior is not to play an emotion motion).
 
+**Models must be VRM 1.0.** A VRM 0.x model can't be loaded, so the bundled model is shown instead, and the log says why (`Failed to load as VRM 1.0`).
+
 **Android XR uses the same directories** (under `Android/data/tech.sukima.chattermascot/files/` on the
 device), but **you don't need `adb push`.** Once the connection target and token are configured
 (pairing, or `configure-android.sh`), it fetches automatically from the server's `GET /v1/assets` on every launch

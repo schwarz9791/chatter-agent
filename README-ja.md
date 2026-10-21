@@ -356,6 +356,8 @@ Android の C は、[XREAL Aura で試す](#xreal-aura-で試すandroid-xr)に�
 
 モデルの差し替えは ChatterAgent の設定パネルからでき、モーションは「モーション」節で再生して確認できますが、**モーションを置く UI はありません。** ディレクトリを掘って `.vrma` を置くと、次の起動で拾います。`neutral` に対応するディレクトリはありません（感情モーションを出さない、が既定の振る舞いです）。
 
+**モデルは VRM 1.0 だけに対応しています。** VRM 0.x のモデルは読めないので、代わりに同梱のモデルが出ます。理由はログに出ます（`Failed to load as VRM 1.0`）。
+
 **Android XR もディレクトリは同じです**（端末の `Android/data/tech.sukima.chattermascot/files/` の下）が、
 **`adb push` は要りません。** 接続先とトークンを設定すれば（ペアリング、または `configure-android.sh`）、起動のたびに
 サーバーの `GET /v1/assets` から自動で取りに行きます（既定 `auto`。反映は次回の起動から）。

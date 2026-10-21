@@ -70,15 +70,14 @@ namespace ChatterMascot.Vrm
         /// <c>env.ListFiles(Join(root, カテゴリ名), "*.vrma")</c> で舐めて組み立てる。
         ///
         /// ★★ <b>同じ <see cref="MotionClip.FileName"/> は先のルートが勝つ。</b> ルートの優先順は
-        ///   <c>persistentDataPath</c> → ユーザー設定 → 同梱（<see cref="AssetPath.AnimationRoots"/>）
-        ///   なので、ユーザー拡張が同梱の同名ファイルを覆せる。後のルートで見つかった同名は捨てる。
+        ///   <c>persistentDataPath</c> → 同期 → ユーザー設定（<see cref="AssetPath.AnimationRoots"/>）
+        ///   なので、前の段の置き場がそれより後の段の同名ファイルを覆せる。後のルートで見つかった同名は捨てる。
         /// ★ 同じルート・同じカテゴリ内は <c>Ordinal</c> でソートしてから採る
         ///   （既存の <c>models/*.vrm</c> 走査と同じ理由——既定の比較はカルチャ依存でマシンによって
         ///   選ばれるファイルが変わる）。
-        /// ★ <paramref name="bundled"/> は最後のルート（同梱）の<b>後ろ</b>に同じ規則
-        ///   （先勝ち・<c>FileName</c> で同名判定）でマージする。<b>今回は誰も渡さない</b>
-        ///   （#97 で Android 向けの同梱マニフェスト JSON が入るまで空）——それでも
-        ///   引数だけは先に空けておく設計。
+        /// ★★ <paramref name="bundled"/> は、走査で1本も見つからなかったカテゴリにだけ足す。
+        ///   ユーザーが自分のモーションを置いたカテゴリは本人が選んだ内容なので、
+        ///   同梱を混ぜて抽選を薄めない（同梱の待機ループを <c>idle.vrma</c> が置き換えるのと同じ考え方）。
         /// </summary>
         public static AnimationManifest Build(AssetEnv env, IReadOnlyList<MotionClip> bundled = null)
         {
@@ -109,13 +108,53 @@ namespace ChatterMascot.Vrm
 
             if (bundled != null)
             {
+                var emptyCategories = new HashSet<MotionCategory>();
+                foreach (var category in MotionCategories.All)
+                {
+                    if (clips[category].Count == 0) emptyCategories.Add(category);
+                }
+
                 foreach (var clip in bundled)
                 {
-                    AddBundledIfNew(clips, seenFileNames, clip);
+                    if (clip != null && emptyCategories.Contains(clip.Category))
+                    {
+                        AddBundledIfNew(clips, seenFileNames, clip);
+                    }
                 }
             }
 
             return new AnimationManifest(clips);
+        }
+
+        /// <summary>
+        /// <see cref="AssetPath.BundledMotions"/> から同梱クリップを作る。カテゴリは先頭のディレクトリ名で決める。
+        /// <c>env</c> が <c>null</c> か同梱の基準パスが空なら空。
+        /// </summary>
+        public static IReadOnlyList<MotionClip> BundledClips(AssetEnv env)
+        {
+            var result = new List<MotionClip>();
+            var root = env == null
+                ? null
+                : AssetPath.Join(env.StreamingAssetsPath, AssetPath.AnimationsDirectory);
+            if (string.IsNullOrEmpty(root)) return result;
+
+            foreach (var relative in AssetPath.BundledMotions)
+            {
+                var slash = relative.IndexOf('/');
+                if (slash < 0) continue;
+
+                var directory = relative.Substring(0, slash);
+                foreach (var category in MotionCategories.All)
+                {
+                    if (!string.Equals(MotionCategories.DirectoryName(category), directory, StringComparison.Ordinal)) continue;
+
+                    var fileName = FileNameOf(relative);
+                    result.Add(new MotionClip(category, AssetPath.Join(root, relative), fileName, StyleOf(fileName)));
+                    break;
+                }
+            }
+
+            return result;
         }
 
         private static void AddScannedIfNew(

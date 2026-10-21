@@ -90,7 +90,7 @@ Settings and assets live under `~/.config/chatter-agent/` (or under `XDG_CONFIG_
 └── animations/               motion (placed by hand)
 ```
 
-**Only one CC0 model and one idle-loop motion are bundled.** Emotion motions aren't bundled because there's no redistributable asset for them — **place `.vrma` files by hand.**
+**Bundled are one CC0 model, the idle loop, and one self-made motion (CC0) per category for emotions, idle extras and walking.** A category with no `.vrma` of your own plays the bundled one. **Once you put your own `.vrma` in a category, the bundled one is no longer used there.** To keep it alongside yours, copy it from `chatter-mascot/motions/dist/<category>/` into `animations/<category>/`.
 
 | Where to put it | What plays |
 |---|---|

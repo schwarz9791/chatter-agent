@@ -217,7 +217,8 @@ namespace ChatterMascot.Vrm
             {
                 try
                 {
-                    Manifest = AnimationManifest.Build(AssetEnvFactory.Current());
+                    var env = AssetEnvFactory.Current();
+                    Manifest = AnimationManifest.Build(env, AnimationManifest.BundledClips(env));
 
                     var loadedCount = 0;
                     foreach (var category in MotionCategories.All)

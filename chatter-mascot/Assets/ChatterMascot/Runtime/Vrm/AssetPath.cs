@@ -185,6 +185,23 @@ namespace ChatterMascot.Vrm
         public const string AnimationsDirectory = "animations";
 
         /// <summary>
+        /// 同梱モーションの <c>animations/</c> からの相対パス（<c>&lt;カテゴリ名&gt;/&lt;ファイル名&gt;</c>）。
+        ///
+        /// ★ Android は APK 内のディレクトリを列挙できないので、同梱は固定リストで持つ。
+        ///   フォルダの中身との一致はテスト（<c>BundledMotionsTests</c>）が見る。
+        /// </summary>
+        public static readonly IReadOnlyList<string> BundledMotions = new[]
+        {
+            "happy/cheer.vrma",
+            "sad/droop.vrma",
+            "angry/stomp.vrma",
+            "relaxed/sway.vrma",
+            "surprised/startle.vrma",
+            "idle/think.vrma",
+            "walk/model-walk.vrma",
+        };
+
+        /// <summary>
         /// サーバーから取得したファイルの置き場所（<c>persistentDataPath/</c> 直下。#117）。
         ///
         /// ★★ <see cref="ModelsDirectory"/> と同じ理由でリテラルで持たない。探索
@@ -377,13 +394,16 @@ namespace ChatterMascot.Vrm
         /// | 1 | <c>persistentDataPath/animations/</c> | 全 |
         /// | 2 | <c>persistentDataPath/synced/animations/</c>（#117） | 全 |
         /// | 3 | <c>${XDG_CONFIG_HOME:-~/.config}/chatter-agent/animations/</c> | デスクトップのみ |
-        /// | 4 | <c>streamingAssetsPath/animations/</c>（同梱） | 全 |
         ///
         /// ★ <see cref="Enumerate"/> と違い、ここは「ファイル1本」ではなく「ルートディレクトリ」を
         ///   返す。<c>AnimationManifest.Build</c> が各ルート × 全カテゴリ（<c>MotionCategories.All</c>）で
         ///   <c>ListFiles(Join(root, カテゴリ名), "*.vrma")</c> を呼ぶ。
         /// ★ <c>env == null</c> は空。<c>Join</c> が <c>null</c> を返した段（基準が空）は飛ばす——
         ///   <see cref="Enumerate"/> の <c>Add</c> と同じ思想。
+        /// ★ <b>同梱（<c>streamingAssetsPath/animations/</c>）はここに含めない。</b> 同梱は
+        ///   <see cref="BundledMotions"/> の固定リストから <c>AnimationManifest.BundledClips</c> が作り、
+        ///   ユーザーのクリップが無いカテゴリにだけ足される。ルートに混ぜると
+        ///   デスクトップでユーザーのクリップと同梱が同じ抽選に入ってしまう。
         /// ★ ユーザー段（3）は <see cref="AssetEnv.HasUserConfigDirectory"/> のときだけ。
         ///   Android には共有ファイルシステムが無い。同期の段（2）はこれを見ない——
         ///   <see cref="Enumerate"/> の <c>Synced</c> と同じく、探索順はどちらの
@@ -400,7 +420,6 @@ namespace ChatterMascot.Vrm
             {
                 AddRoot(result, Join(RuntimeDirectory(env), AnimationsDirectory));
             }
-            AddRoot(result, Join(env.StreamingAssetsPath, AnimationsDirectory));
             return result;
         }
 

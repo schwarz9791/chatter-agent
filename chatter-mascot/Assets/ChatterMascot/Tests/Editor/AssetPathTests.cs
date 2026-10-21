@@ -468,10 +468,10 @@ namespace ChatterMascot.Tests
 
         /// <summary>
         /// <see cref="AssetPath.Enumerate"/> と違い、ここは「ファイル1本」ではなく
-        /// 「カテゴリ別ディレクトリの親」を返す。順序は persistentDataPath → ユーザー設定 → 同梱。
+        /// 「カテゴリ別ディレクトリの親」を返す。順序は persistentDataPath → 同期 → ユーザー設定。同梱は含まない。
         /// </summary>
         [Test]
-        public void AnimationRootsAreOrderedPersistentThenUserThenBundled()
+        public void AnimationRootsAreOrderedPersistentThenSyncedThenUser()
         {
             var env = Env();
             Assert.That(AssetPath.AnimationRoots(env), Is.EqualTo(new[]
@@ -479,7 +479,6 @@ namespace ChatterMascot.Tests
                 "/persist/animations",
                 "/persist/synced/animations",
                 "/home/u/.config/chatter-agent/animations",
-                "/streaming/animations",
             }));
         }
 
@@ -495,7 +494,6 @@ namespace ChatterMascot.Tests
             {
                 "/persist/animations",
                 "/persist/synced/animations",
-                "/streaming/animations",
             }));
         }
 
@@ -509,7 +507,6 @@ namespace ChatterMascot.Tests
                 "/persist/animations",
                 "/persist/synced/animations",
                 "/xdg/chatter-agent/animations",
-                "/streaming/animations",
             }));
         }
 

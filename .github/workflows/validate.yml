@@ -113,6 +113,16 @@ jobs:
             exit 1
           fi
 
+      # motions/dist は利用者が持っていくコピー、StreamingAssets 側は同梱される実体。
+      # このワークフローに Unity ジョブが無いので、ズレはここで落とす
+      - name: Verify bundled motions match motions/dist
+        run: |
+          list() { (cd "$1" && find . -name '*.vrma' -type f -print0 | sort -z | xargs -0 sha256sum); }
+          if ! diff <(list ../chatter-mascot/motions/dist) <(list ../chatter-mascot/Assets/StreamingAssets/animations); then
+            echo "::error::The .vrma files under chatter-mascot/motions/dist differ from chatter-mascot/Assets/StreamingAssets/animations. Keep the two in sync."
+            exit 1
+          fi
+
   test:
     name: Test
     runs-on: ubuntu-latest

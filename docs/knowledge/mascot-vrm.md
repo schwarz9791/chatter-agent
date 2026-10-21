@@ -1191,13 +1191,13 @@ ChatterAgent への依頼は結果を返さないので、`playMotion` が始ま
 `[Mascot] Motion started: Emotion WIN00.vrma (happy, 4.0s)` / `Motion ended`。
 
 **残した宿題**: `idle/` の 8.8〜18.2秒が小ネタとして長いかは耳と目で判断する（Issue #70に
-持ち越し）。Android の同梱マニフェスト JSON は #97（`AnimationManifest.Build` の `bundled` 引数が
-口）。`__cool` / `__cute` は分類だけで設定なし。
+持ち越し）。Android の同梱モーションはマニフェスト JSON ではなく固定の一覧（`AssetPath.BundledMotions`）で
+解決した（APK の中は列挙できないため）。`__cool` / `__cute` は分類だけで設定なし。
 
 ## ワンショット再生とクロスフェードの仕組み（#70）
 
-起動時に `animations/<category>/*.vrma`（探索順は `persistentDataPath` → `~/.config/chatter-agent` →
-同梱、同名ファイルは先勝ち）を**全部プリロード**して `Animation.Stop()` で寝かせておく（`enabled = false` ではない。下の罠）。
+起動時に `animations/<category>/*.vrma`（探索順は `persistentDataPath` → `~/.config/chatter-agent`、
+同名ファイルは先勝ち。同梱は一覧から、これらに1本も無いカテゴリだけ）を**全部プリロード**して `Animation.Stop()` で寝かせておく（`enabled = false` ではない。下の罠）。
 発火したクリップは巻き戻して `Play()` + `Sample()`、`CrossFadeAnimation`（`IVrm10Animation` の自前実装。
 `ControlRig` のレベルで2本を混ぜる合成レイヤー）で待機から 0.5 秒かけて `Slerp` → フェードが終わったら
 クリップそのものを直に差す → `length - 0.5s` の地点で今度は待機へ 0.5 秒フェードして戻す。**発火すべきか
@@ -1221,11 +1221,14 @@ ChatterAgent への依頼は結果を返さないので、`playMotion` が始ま
 ## 素材の `.vrma` は別リポジトリで作る（#70）
 
 #70 の感情モーションと待機の小ネタは **VRoid Studio 2.14.0 の AnimationClip** を `.vrma` にして使う。
-VRoid Studio 由来なので**再配布できない** —— `.vrma` は同梱せず `~/.config/chatter-agent/animations/<category>/` にだけ置く。
+VRoid Studio 由来なので**再配布できない** —— この素材は同梱せず `~/.config/chatter-agent/animations/<category>/` にだけ置く。
 抽出と変換の道具（AssetRipper の headless API を叩く `rip.py` と、Humanoid の `.anim` を `vita.vrm` に当てて
 サンプリングし `.vrma` に書く Editor スクリプト）は、抽出そのものがグレーゾーンなので
 **このリポジトリには置かず、private の `vroid-motion-exporter`** に切り出してある（#91）。
 手順・AssetRipper の API の癖・`VrmAnimationExporter` の罠・同名クリップの扱いは、すべてそちらの README にある。
+
+★ **アプリに同梱しているモーションはこれとは別の、Blender で作った自作の一式**（CC0）。
+作り方と踏んだことは [`mascot-motion-authoring.md`](./mascot-motion-authoring.md)。
 
 このリポジトリ側に残る事実だけ書いておく:
 

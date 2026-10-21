@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using ChatterMascot.Vrm;
 using NUnit.Framework;
 
@@ -43,7 +44,7 @@ namespace ChatterMascot.Tests
         }
 
         [Test]
-        public void ScansAllSixCategories()
+        public void ScansAllCategories()
         {
             var files = new Dictionary<string, string[]>
             {
@@ -53,6 +54,7 @@ namespace ChatterMascot.Tests
                 ["/persist/animations/sad"] = new[] { "/persist/animations/sad/d.vrma" },
                 ["/persist/animations/relaxed"] = new[] { "/persist/animations/relaxed/e.vrma" },
                 ["/persist/animations/surprised"] = new[] { "/persist/animations/surprised/f.vrma" },
+                ["/persist/animations/walk"] = new[] { "/persist/animations/walk/g.vrma" },
             };
             var manifest = AnimationManifest.Build(Env(files));
 
@@ -62,7 +64,8 @@ namespace ChatterMascot.Tests
             Assert.That(manifest.Count(MotionCategory.Sad), Is.EqualTo(1));
             Assert.That(manifest.Count(MotionCategory.Relaxed), Is.EqualTo(1));
             Assert.That(manifest.Count(MotionCategory.Surprised), Is.EqualTo(1));
-            Assert.That(manifest.TotalCount, Is.EqualTo(6));
+            Assert.That(manifest.Count(MotionCategory.Walk), Is.EqualTo(1));
+            Assert.That(manifest.TotalCount, Is.EqualTo(7));
         }
 
         [Test]
@@ -79,7 +82,7 @@ namespace ChatterMascot.Tests
         }
 
         /// <summary>
-        /// ルートの優先順は <c>persistentDataPath</c> → ユーザー設定 → 同梱
+        /// ルートの優先順は <c>persistentDataPath</c> → 同期 → ユーザー設定
         /// （<see cref="AssetPath.AnimationRoots"/>）。同じルート内では <c>Ordinal</c> ソート。
         /// </summary>
         [Test]
@@ -88,16 +91,16 @@ namespace ChatterMascot.Tests
             var files = new Dictionary<string, string[]>
             {
                 ["/persist/animations/idle"] = new[] { "/persist/animations/idle/z.vrma" },
+                ["/persist/synced/animations/idle"] = new[] { "/persist/synced/animations/idle/m.vrma" },
                 [UserAnimations + "/idle"] = new[] { UserAnimations + "/idle/a.vrma" },
-                ["/streaming/animations/idle"] = new[] { "/streaming/animations/idle/m.vrma" },
             };
             var manifest = AnimationManifest.Build(Env(files));
             var clips = manifest.Clips(MotionCategory.Idle);
 
             Assert.That(clips.Count, Is.EqualTo(3));
             Assert.That(clips[0].Path, Is.EqualTo("/persist/animations/idle/z.vrma"), "persist が先");
-            Assert.That(clips[1].Path, Is.EqualTo(UserAnimations + "/idle/a.vrma"), "ユーザーが次");
-            Assert.That(clips[2].Path, Is.EqualTo("/streaming/animations/idle/m.vrma"), "同梱が最後");
+            Assert.That(clips[1].Path, Is.EqualTo("/persist/synced/animations/idle/m.vrma"), "同期が次");
+            Assert.That(clips[2].Path, Is.EqualTo(UserAnimations + "/idle/a.vrma"), "ユーザーが最後");
         }
 
         /// <summary>★ 既定の比較はカルチャ依存。マシンで採用順が変わらないよう Ordinal で揃える。</summary>
@@ -152,7 +155,7 @@ namespace ChatterMascot.Tests
             {
                 ["/persist/animations/idle"] = new[] { "/persist/animations/idle/x.vrma" },
                 [UserAnimations + "/idle"] = new[] { UserAnimations + "/idle/x.vrma" },
-                ["/streaming/animations/idle"] = new[] { "/streaming/animations/idle/x.vrma" },
+                ["/persist/synced/animations/idle"] = new[] { "/persist/synced/animations/idle/x.vrma" },
             };
             var manifest = AnimationManifest.Build(Env(files));
             var clips = manifest.Clips(MotionCategory.Idle);
@@ -183,28 +186,74 @@ namespace ChatterMascot.Tests
         }
 
         /// <summary>
-        /// ★ <c>bundled</c> は最後のルート（同梱）の後ろにマージされる。同名なら走査結果が勝つ
-        /// （<see cref="EarlierRootWinsForTheSameFileName"/> と同じ規則）。
+        /// ★ <c>bundled</c> は走査で1本も見つからなかったカテゴリだけを埋める。
         /// </summary>
         [Test]
-        public void BundledClipsAreAppendedAfterScannedOnes()
+        public void BundledClipsFillACategoryWithNoScannedClips()
+        {
+            var bundled = new[]
+            {
+                new MotionClip(MotionCategory.Idle, "bundle://idle/a.vrma", "a.vrma", MotionStyle.Natural),
+                new MotionClip(MotionCategory.Idle, "bundle://idle/b.vrma", "b.vrma", MotionStyle.Natural),
+            };
+
+            var manifest = AnimationManifest.Build(Env(), bundled);
+
+            Assert.That(manifest.Clips(MotionCategory.Idle).Select(c => c.Path),
+                Is.EqualTo(new[] { "bundle://idle/a.vrma", "bundle://idle/b.vrma" }));
+        }
+
+        [Test]
+        public void BundledClipsAreNotAddedToACategoryWithAScannedClip()
         {
             var files = new Dictionary<string, string[]>
             {
-                ["/persist/animations/idle"] = new[] { "/persist/animations/idle/scanned.vrma" },
+                ["/persist/animations/idle"] = new[] { "/persist/animations/idle/mine.vrma" },
             };
             var bundled = new[]
             {
-                new MotionClip(MotionCategory.Idle, "bundle://idle/scanned.vrma", "scanned.vrma", MotionStyle.Natural),
-                new MotionClip(MotionCategory.Idle, "bundle://idle/extra.vrma", "extra.vrma", MotionStyle.Natural),
+                new MotionClip(MotionCategory.Idle, "bundle://idle/a.vrma", "a.vrma", MotionStyle.Natural),
+                new MotionClip(MotionCategory.Happy, "bundle://happy/b.vrma", "b.vrma", MotionStyle.Natural),
             };
 
             var manifest = AnimationManifest.Build(Env(files), bundled);
-            var clips = manifest.Clips(MotionCategory.Idle);
 
-            Assert.That(clips.Count, Is.EqualTo(2), "scanned.vrma は同名なので bundled 側は捨てられる");
-            Assert.That(clips[0].Path, Is.EqualTo("/persist/animations/idle/scanned.vrma"), "走査結果が勝つ");
-            Assert.That(clips[1].Path, Is.EqualTo("bundle://idle/extra.vrma"), "bundled は最後に足される");
+            Assert.That(manifest.Clips(MotionCategory.Idle).Select(c => c.Path),
+                Is.EqualTo(new[] { "/persist/animations/idle/mine.vrma" }));
+            Assert.That(manifest.Clips(MotionCategory.Happy).Count, Is.EqualTo(1), "空のカテゴリには足される");
+        }
+
+        [Test]
+        public void CategoriesWithoutBundledClipsStayEmpty()
+        {
+            var bundled = new[]
+            {
+                new MotionClip(MotionCategory.Idle, "bundle://idle/a.vrma", "a.vrma", MotionStyle.Natural),
+            };
+
+            var manifest = AnimationManifest.Build(Env(), bundled);
+
+            Assert.That(manifest.Count(MotionCategory.Sad), Is.EqualTo(0));
+            Assert.That(manifest.TotalCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void BundledClipsAreBuiltUnderStreamingAssetsAnimations()
+        {
+            var clips = AnimationManifest.BundledClips(Env());
+
+            Assert.That(clips.Count, Is.EqualTo(AssetPath.BundledMotions.Count));
+            var walk = clips.Single(c => c.Category == MotionCategory.Walk);
+            Assert.That(walk.Path, Is.EqualTo("/streaming/animations/walk/model-walk.vrma"));
+            Assert.That(walk.FileName, Is.EqualTo("model-walk.vrma"));
+            Assert.That(clips.Select(c => c.Category).Distinct().Count(), Is.EqualTo(MotionCategories.All.Count));
+        }
+
+        [Test]
+        public void BundledClipsAreEmptyWithoutAStreamingAssetsPath()
+        {
+            Assert.That(AnimationManifest.BundledClips(Env(streamingAssetsPath: "")), Is.Empty);
+            Assert.That(AnimationManifest.BundledClips(null), Is.Empty);
         }
 
         [Test]

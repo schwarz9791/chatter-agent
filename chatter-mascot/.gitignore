@@ -57,7 +57,7 @@ mono_crash.*.blob
 /[Aa]ssets/[Ss]treamingAssets/aa/*
 
 # VRM / VRMA
-# ★ 同梱するのは Assets/StreamingAssets/ の下だけ。それ以外は落とす。
+# ★ 同梱するのは Assets/StreamingAssets/ の下（と、その写しの motions/dist/）だけ。それ以外は落とす。
 #   再配布禁止のモデル（AvatarSample_A など）を差し替え検証のあと
 #   うっかりコミットする導線を塞ぐため。差し替えは -vrm 起動引数か
 #   ~/.config/chatter-agent/models/ から読ませること（→ docs/mascot.md「モデルとアニメーションの探索順」）。
@@ -65,6 +65,14 @@ mono_crash.*.blob
 *.vrma
 !/[Aa]ssets/[Ss]treamingAssets/*.vrm
 !/[Aa]ssets/[Ss]treamingAssets/*.vrma
+# 同梱モーション（自作）と、使う人がコピーするための同じもの（→ motions/build.sh）
+!/[Aa]ssets/[Ss]treamingAssets/animations/*/*.vrma
+!/motions/dist/
+!/motions/dist/*/*.vrma
+
+# 同梱モーションを作り直したときのプレビュー
+/motions/out/
+/motions/__pycache__/
 
 # VRoid Studio 由来の .anim を Assets/ 配下に置いても絶対にコミットしない（保険。抽出は private の vroid-motion-exporter で行う）
 /[Aa]ssets/**/*.anim

@@ -60,6 +60,9 @@ macOS のバンドルが混ざって落ちる。
 Assets/StreamingAssets/
   vita.vrm                          同梱モデル（CC0。→ ../NOTICE）
   idle_loop.vrma                    同梱アイドル
+  animations/<category>/*.vrma      同梱モーション（自作。CC0。→ 同梱モーションを作り直す）
+
+motions/                            同梱モーションの生成スクリプト（Blender）と dist/
 
 Assets/ChatterMascot/
   Runtime/                          ChatterMascot.Runtime — 描画に依存しない層
@@ -266,12 +269,16 @@ EditMode テストで固定するため。ログと XR の同期結果の通知�
 | 1 | `persistentDataPath/animations/`（手置き） | 全 |
 | 2 | `persistentDataPath/synced/animations/`（サーバーから自動取得。[#117](https://github.com/schwarz9791/chatter-agent/issues/117)） | 全 |
 | 3 | `${XDG_CONFIG_HOME:-~/.config}/chatter-agent/animations/` | デスクトップのみ |
-| 4 | 同梱（`StreamingAssets/animations/`） | 全 |
 
-`animations/<category>/*.vrma` は **VRoid Studio の AnimationClip** を `.vrma` にしたもので、
-VRoid Studio 由来のため再配布できない——同梱せず `~/.config/chatter-agent/animations/<category>/`
-にだけ置く。抽出と変換の道具は抽出そのものがグレーゾーンなので、このリポジトリには置かず
-private の `vroid-motion-exporter` に切り出してある。
+同梱のモーションはこの走査に載らない。固定の一覧 `AssetPath.BundledMotions` から読み、
+**上の3つのルートに1本も無いカテゴリだけ**を埋める（`AnimationManifest.Build` の `bundled` 引数）。
+一覧が固定なのは、Android が APK の中のディレクトリを列挙できないため。カテゴリ単位で埋めるのは、
+自分で置いたクリップが同梱のものに薄められないようにするため。
+
+VRoid Studio の AnimationClip を `.vrma` にしたものは再配布できないので同梱せず、
+`~/.config/chatter-agent/animations/<category>/` にだけ置く。同梱しているのは別物の自作で、
+作り方は下の「同梱モーションを作り直す」。VRoid 由来の抽出と変換の道具は、抽出そのものが
+グレーゾーンなので、このリポジトリには置かず private の `vroid-motion-exporter` に切り出してある。
 
 起動時に `animations/<category>/*.vrma` を全部プリロードして寝かせておき、文の emotion で
 1本ワンショット再生してから 0.5 秒のクロスフェードで待機へ戻す。発火は cc-mascot と同じく
@@ -282,6 +289,27 @@ private の `vroid-motion-exporter` に切り出してある。
 
 歩行（`walk/`）だけは XR で使い、**止めるまでループする**（→ [`knowledge/mascot-vrm.md`](./knowledge/mascot-vrm.md)）。
 発火は平面に置き直した後の徘徊だけで、macOS では使わない（→ 下「Android / XR」）。
+
+### 同梱モーションを作り直す
+
+同梱の7本（`StreamingAssets/animations/<category>/`）は Blender で組んだ自作で、CC0。
+道具は `chatter-mascot/motions/`（`vrmalib.py` が共通部品、カテゴリごとに1本のスクリプト）。
+
+- **要るもの**: Blender（5.2 LTS で確認）と VRM Add-on for Blender（4.7 で確認）
+- **作り直し**: `cd chatter-mascot/motions && ./build.sh`（カテゴリを指定すれば一部だけ。Blender の場所は
+  `BLENDER=/path/to/blender ./build.sh [category...]`）。出力は `motions/dist/<category>/` と
+  `StreamingAssets/animations/<category>/` の2か所で、確認用のプレビューは `motions/out/`（git 管理外）
+- **一覧の同期**: 本数やファイル名を変えたら `AssetPath.BundledMotions` も揃える
+  （`BundledMotionsTests` がフォルダとの不一致で落ちる）
+- **他のモデルで見る**: `on_model.py` が別の VRM にモーションを当てて描画する。再取り込みした
+  アクションはフレーム 1 から始まるので、指定するフレームは +1 する。`inspect_vrma.py` は `.vrma` の要約
+- **アプリで見る**: `-motionProbe <category>`（→ [`knowledge/mascot-vrm.md`](./knowledge/mascot-vrm.md)）
+  と、ChatterAgent の設定パネルの「モーションを確認」
+- **作り直したらアプリもビルドし直す。** ビルド済みの `.app` は自分の `StreamingAssets` の
+  コピーを読み続ける
+
+踏んだこと（手の位置のモデル差・補間の行き過ぎ・歩行の滑りなど）は
+[`knowledge/mascot-motion-authoring.md`](./knowledge/mascot-motion-authoring.md)。
 
 ## 動かす
 

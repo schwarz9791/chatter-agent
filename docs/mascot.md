@@ -300,7 +300,7 @@ VRoid Studio の AnimationClip を `.vrma` にしたものは再配布できな�
   `BLENDER=/path/to/blender ./build.sh [category...]`）。出力は
   `StreamingAssets/animations/<category>/`、確認用のプレビューは `motions/out/`（git 管理外）
 - **一覧の同期**: 本数やファイル名を変えたら `AssetPath.BundledMotions` も揃える
-  （フォルダとの不一致は `BundledMotionsTests` と、CI の「Bundled motions are listed」が落とす）
+  （フォルダとの不一致は `BundledMotionsTests` が落とす。一覧に無いファイルは CI の「Bundled motions are listed」でも落ちる）
 - **他のモデルで見る**: `on_model.py` が別の VRM にモーションを当てて描画する。再取り込みした
   アクションはフレーム 1 から始まるので、指定するフレームは +1 する。`inspect_vrma.py` は `.vrma` の要約
 - **アプリで見る**: `-motionProbe <category>`（→ [`knowledge/mascot-vrm.md`](./knowledge/mascot-vrm.md)）

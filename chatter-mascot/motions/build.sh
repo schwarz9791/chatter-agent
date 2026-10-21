@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 同梱モーションを作り直す。カテゴリごとのスクリプトを Blender で回し、書き出した .vrma を
-# dist/<category>/（使う人がコピーする分）と StreamingAssets/animations/<category>/（同梱する分）に置く。
+# StreamingAssets/animations/<category>/ に置く。
 # プレビュー（sheet.png・preview.mp4）は out/<category>/ に残る。
 #
 # ./build.sh                 7本すべて
@@ -33,10 +33,9 @@ for category in "$@"; do
     echo "Expected exactly one .vrma in $out" >&2
     exit 1
   fi
-  for dest in "$here/dist/$category" "$bundled/$category"; do
-    mkdir -p "$dest"
-    rm -f "$dest"/*.vrma
-    cp "${vrma[0]}" "$dest/"
-  done
-  echo "    $(basename "${vrma[0]}") -> dist/$category/, StreamingAssets/animations/$category/"
+  dest="$bundled/$category"
+  mkdir -p "$dest"
+  rm -f "$dest"/*.vrma
+  cp "${vrma[0]}" "$dest/"
+  echo "    $(basename "${vrma[0]}") -> StreamingAssets/animations/$category/"
 done

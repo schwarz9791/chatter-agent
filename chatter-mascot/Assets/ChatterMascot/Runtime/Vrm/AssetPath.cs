@@ -185,20 +185,21 @@ namespace ChatterMascot.Vrm
         public const string AnimationsDirectory = "animations";
 
         /// <summary>
-        /// 同梱モーションの <c>animations/</c> からの相対パス（<c>&lt;カテゴリ名&gt;/&lt;ファイル名&gt;</c>）。
+        /// 同梱モーション（カテゴリ, ファイル名）。パスは <c>animations/&lt;DirectoryName(category)&gt;/&lt;FileName&gt;</c>。
         ///
         /// ★ Android は APK 内のディレクトリを列挙できないので、同梱は固定リストで持つ。
-        ///   フォルダの中身との一致はテスト（<c>BundledMotionsTests</c>）が見る。
+        ///   フォルダの中身との一致はテスト（<c>BundledMotionsTests</c>）と CI が見る。
+        /// ★ CI が <c>(MotionCategory.X, "file.vrma")</c> の形で grep するので、この書式を崩さない。
         /// </summary>
-        public static readonly IReadOnlyList<string> BundledMotions = new[]
+        public static readonly IReadOnlyList<(MotionCategory Category, string FileName)> BundledMotions = new[]
         {
-            "happy/cheer.vrma",
-            "sad/droop.vrma",
-            "angry/stomp.vrma",
-            "relaxed/sway.vrma",
-            "surprised/startle.vrma",
-            "idle/think.vrma",
-            "walk/model-walk.vrma",
+            (MotionCategory.Happy, "cheer.vrma"),
+            (MotionCategory.Sad, "droop.vrma"),
+            (MotionCategory.Angry, "stomp.vrma"),
+            (MotionCategory.Relaxed, "sway.vrma"),
+            (MotionCategory.Surprised, "startle.vrma"),
+            (MotionCategory.Idle, "think.vrma"),
+            (MotionCategory.Walk, "model-walk.vrma"),
         };
 
         /// <summary>

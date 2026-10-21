@@ -188,7 +188,7 @@ namespace ChatterMascot.Vrm
         /// 同梱モーション（カテゴリ, ファイル名）。パスは <c>animations/&lt;DirectoryName(category)&gt;/&lt;FileName&gt;</c>。
         ///
         /// ★ Android は APK 内のディレクトリを列挙できないので、同梱は固定リストで持つ。
-        ///   フォルダの中身との一致はテスト（<c>BundledMotionsTests</c>）と CI が見る。
+        ///   フォルダの中身との一致はテスト（<c>BundledMotionsTests</c>）が見る。一覧に無いファイルは CI でも落ちる。
         /// ★ CI が <c>(MotionCategory.X, "file.vrma")</c> の形で grep するので、この書式を崩さない。
         /// </summary>
         public static readonly IReadOnlyList<(MotionCategory Category, string FileName)> BundledMotions = new[]

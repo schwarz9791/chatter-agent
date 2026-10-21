@@ -260,7 +260,8 @@ namespace ChatterMascot.Vrm
                         }
                     }
 
-                    // ★ 0本は正常（ユーザーが同梱以外に何も置いていない）。LogError にしない
+                    // ★ 同梱が空のカテゴリを埋めるので、0本になるのは同梱も読めなかったとき（LFS のポインタファイルでビルドした等）だけ。
+                    //   失敗は上で1本ずつ警告済みなので、ここは LogError にしない
                     Debug.Log($"[Mascot] Motions: {Manifest.Describe()} (loaded {loadedCount}/{Manifest.TotalCount})");
                 }
                 catch (OperationCanceledException)

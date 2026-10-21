@@ -28,22 +28,11 @@ namespace ChatterMascot.Tests
                 .Select(f => Path.GetRelativePath(AnimationsRoot, f).Replace('\\', '/'))
                 .OrderBy(f => f, StringComparer.Ordinal)
                 .ToList();
-            var listed = AssetPath.BundledMotions.OrderBy(f => f, StringComparer.Ordinal).ToList();
+            var listed = AssetPath.BundledMotions
+                .Select(m => MotionCategories.DirectoryName(m.Category) + "/" + m.FileName)
+                .OrderBy(f => f, StringComparer.Ordinal).ToList();
 
             Assert.That(listed, Is.EqualTo(onDisk));
-        }
-
-        [Test]
-        public void EveryEntryLivesInAKnownCategoryDirectory()
-        {
-            var known = MotionCategories.All.Select(MotionCategories.DirectoryName).ToList();
-
-            foreach (var relative in AssetPath.BundledMotions)
-            {
-                var parts = relative.Split('/');
-                Assert.That(parts.Length, Is.EqualTo(2), relative);
-                Assert.That(known, Does.Contain(parts[0]), relative);
-            }
         }
     }
 }

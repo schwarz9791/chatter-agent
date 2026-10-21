@@ -25,7 +25,7 @@ namespace ChatterMascot.Vrm
         /// <summary>どのカテゴリで見つかった／宣言されたか。</summary>
         public readonly MotionCategory Category;
 
-        /// <summary><c>ListFiles</c> が返したままのフルパス。読み込みに使う。</summary>
+        /// <summary>読み込みに使うフルパス。走査したクリップは <c>ListFiles</c> が返したまま、同梱は <c>BundledClips</c> が組んだもの。</summary>
         public readonly string Path;
 
         /// <summary><see cref="Path"/> の最後の <c>/</c> または <c>\</c> の後ろ。同名判定のキー。</summary>
@@ -127,7 +127,7 @@ namespace ChatterMascot.Vrm
         }
 
         /// <summary>
-        /// <see cref="AssetPath.BundledMotions"/> から同梱クリップを作る。カテゴリは先頭のディレクトリ名で決める。
+        /// <see cref="AssetPath.BundledMotions"/> から同梱クリップを作る。
         /// <c>env</c> が <c>null</c> か同梱の基準パスが空なら空。
         /// </summary>
         public static IReadOnlyList<MotionClip> BundledClips(AssetEnv env)
@@ -138,20 +138,10 @@ namespace ChatterMascot.Vrm
                 : AssetPath.Join(env.StreamingAssetsPath, AssetPath.AnimationsDirectory);
             if (string.IsNullOrEmpty(root)) return result;
 
-            foreach (var relative in AssetPath.BundledMotions)
+            foreach (var (category, fileName) in AssetPath.BundledMotions)
             {
-                var slash = relative.IndexOf('/');
-                if (slash < 0) continue;
-
-                var directory = relative.Substring(0, slash);
-                foreach (var category in MotionCategories.All)
-                {
-                    if (!string.Equals(MotionCategories.DirectoryName(category), directory, StringComparison.Ordinal)) continue;
-
-                    var fileName = FileNameOf(relative);
-                    result.Add(new MotionClip(category, AssetPath.Join(root, relative), fileName, StyleOf(fileName)));
-                    break;
-                }
+                var path = AssetPath.Join(AssetPath.Join(root, MotionCategories.DirectoryName(category)), fileName);
+                result.Add(new MotionClip(category, path, fileName, StyleOf(fileName)));
             }
 
             return result;

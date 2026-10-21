@@ -90,7 +90,7 @@ Android の C は、[XREAL Aura で試す](../README-ja.md#xreal-aura-で試すa
 └── animations/               モーション（手で置きます）
 ```
 
-**同梱しているのは CC0 のモデル1体、待機ループ、そして感情・待機の小ネタ・歩行の各カテゴリに1本ずつの自作モーション（CC0）です。** 自分の `.vrma` が1本も無いカテゴリでは、同梱の1本が再生されます。**カテゴリに自分の `.vrma` を置くと、そのカテゴリで同梱のモーションは使われなくなります。** 同梱のものも残したいときは、`chatter-mascot/motions/dist/<category>/` から `animations/<category>/` にコピーしてください。
+**同梱しているのは CC0 のモデル1体、待機ループ、そして感情・待機の小ネタ・歩行の各カテゴリに1本ずつの自作モーション（CC0）です。** 自分の `.vrma` が1本も無いカテゴリでは、同梱の1本が再生されます。**カテゴリに自分の `.vrma` を置くと、そのカテゴリで同梱のモーションは使われなくなります。** 同梱のものも残したいときは、[GitHub のフォルダ](https://github.com/schwarz9791/chatter-agent/tree/main/chatter-mascot/Assets/StreamingAssets/animations)から `.vrma`（`.meta` は不要）をダウンロードして `animations/<category>/` に置いてください（Git LFS で保管していますが、GitHub のページからなら実体が落ちます）。
 
 | 置き場所 | 何が再生されるか |
 |---|---|

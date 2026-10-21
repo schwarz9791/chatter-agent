@@ -62,7 +62,7 @@ Assets/StreamingAssets/
   idle_loop.vrma                    同梱アイドル
   animations/<category>/*.vrma      同梱モーション（自作。CC0。→ 同梱モーションを作り直す）
 
-motions/                            同梱モーションの生成スクリプト（Blender）と dist/
+motions/                            同梱モーションの生成スクリプト（Blender）
 
 Assets/ChatterMascot/
   Runtime/                          ChatterMascot.Runtime — 描画に依存しない層
@@ -297,10 +297,10 @@ VRoid Studio の AnimationClip を `.vrma` にしたものは再配布できな�
 
 - **要るもの**: Blender（5.2 LTS で確認）と VRM Add-on for Blender（4.7 で確認）
 - **作り直し**: `cd chatter-mascot/motions && ./build.sh`（カテゴリを指定すれば一部だけ。Blender の場所は
-  `BLENDER=/path/to/blender ./build.sh [category...]`）。出力は `motions/dist/<category>/` と
-  `StreamingAssets/animations/<category>/` の2か所で、確認用のプレビューは `motions/out/`（git 管理外）
+  `BLENDER=/path/to/blender ./build.sh [category...]`）。出力は
+  `StreamingAssets/animations/<category>/`、確認用のプレビューは `motions/out/`（git 管理外）
 - **一覧の同期**: 本数やファイル名を変えたら `AssetPath.BundledMotions` も揃える
-  （`BundledMotionsTests` がフォルダとの不一致で落ちる）
+  （フォルダとの不一致は `BundledMotionsTests` と、CI の「Bundled motions are listed」が落とす）
 - **他のモデルで見る**: `on_model.py` が別の VRM にモーションを当てて描画する。再取り込みした
   アクションはフレーム 1 から始まるので、指定するフレームは +1 する。`inspect_vrma.py` は `.vrma` の要約
 - **アプリで見る**: `-motionProbe <category>`（→ [`knowledge/mascot-vrm.md`](./knowledge/mascot-vrm.md)）
@@ -604,7 +604,7 @@ $ADB shell am force-stop tech.sukima.chattermascot   # 起動時に1回だけ読
 
 - **円の中をつまむと、そこへ歩いて行く**（ハンドルにも体にも当たらないつまみ。足元に当たったつまみも床として扱う）
 - 体をタップすると、中心を動かさずに円を出し直す
-- 歩くには `animations/walk/` に `.vrma` が要る（→ 上「感情モーションと小ネタの素材」）。無ければ歩かない
+- 歩くときは `walk/` のモーションを使う。自分の `.vrma` が無ければ同梱の `model-walk.vrma` で歩く（→ 上「感情モーションと小ネタの素材」）
 - **平面に置き直すまでは歩かない**（起動直後は床が分からないため）。平面の無い所で離したときも、次に平面へ置くまで歩かない
 - 発話中・掴んでいる間は歩かない
 - **つまんで置き直しても、変えた半径は保たれる。** 既定（身長 25cm のとき 20cm）へ戻すのはパネルの「位置をリセット」だけ

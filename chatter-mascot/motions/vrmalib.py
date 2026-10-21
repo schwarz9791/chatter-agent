@@ -64,7 +64,7 @@ FINGER_CURL = {"Proximal": 18, "Intermediate": 22, "Distal": 15}
 def fingers(curl=1.0, spread=0.0, thumb=None):
     """両手の指。curl は丸めの倍率（0 で伸ばす）、spread は指を広げる角度（度）。
 
-    thumb: 親指の steps（左手）。None なら丸めない。
+    thumb: 親指の付け根（Metacarpal）の steps（左手）。None なら立ち姿のまま。
     """
     left = {}
     for i, name in enumerate(("Index", "Middle", "Ring", "Little")):
@@ -74,8 +74,10 @@ def fingers(curl=1.0, spread=0.0, thumb=None):
             if seg == "Proximal" and fan:
                 steps = (("z", fan),) + steps
             left[f"left{name}{seg}"] = steps
-    if thumb is not None:
-        left["leftThumbMetacarpal"] = thumb
+    # 親指も毎回キーにする。曲げたキーにしか値が無いと、その値が前後のフレームへそのまま伸びる
+    left["leftThumbMetacarpal"] = thumb if thumb is not None else ()
+    left["leftThumbProximal"] = ()
+    left["leftThumbDistal"] = ()
     return sym(left)
 
 

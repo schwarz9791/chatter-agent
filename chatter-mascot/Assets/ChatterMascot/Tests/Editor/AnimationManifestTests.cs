@@ -146,7 +146,7 @@ namespace ChatterMascot.Tests
 
         /// <summary>
         /// ★★ <b>同じ <c>FileName</c> は先のルートが勝つ。</b> 後のルートで見つかった同名は捨てる
-        /// （ユーザー拡張が同梱の同名ファイルを覆せるように）。
+        /// （前の段に置いたものが、後の段の同名を覆せるように）。
         /// </summary>
         [Test]
         public void EarlierRootWinsForTheSameFileName()

@@ -296,7 +296,6 @@ Mascot tests are in [`chatter-mascot/README.md`](./chatter-mascot/README.md#deve
 - Spatial anchor support (keeping a repositioned placement across restarts)
 - CI setup and distribution to various app stores
 - Letting it run alongside Home Scene apps on Android XR
-- Making it work on Android glasses (INAIR Pod / Viture Neckband, etc.)
 
 ## License
 

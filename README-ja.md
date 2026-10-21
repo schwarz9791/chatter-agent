@@ -49,8 +49,8 @@ Claude Code
 |---|---|
 | `plugin/` | Claude Code プラグイン。bash の hook が payload を置くだけ |
 | `core/` | サーバーと CLI（TypeScript）。Bun で1本の実行ファイルにして ChatterAgent に同梱します。`src/server/` `src/cli/` `src/player/` |
-| `chatter-mascot/` | 表示側アプリ（Unity + UniVRM）。macOS と Android XR を1プロジェクトから |
-| `chatter-agent-app/` | ChatterAgent（Tauri）。メニューバー常駐でサーバーを起動・停止し、設定パネルを持ち、マスコットの表示・ミュート・大きさ・モーションの確認を操作する |
+| [`chatter-mascot/`](./chatter-mascot/README-ja.md) | 表示側アプリ（Unity + UniVRM）。macOS と Android XR を1プロジェクトから |
+| [`chatter-agent-app/`](./chatter-agent-app/README-ja.md) | ChatterAgent（Tauri）。メニューバー常駐でサーバーを起動・停止し、設定パネルを持ち、マスコットの表示・ミュート・大きさ・モーションの確認を操作する |
 | `docs/` | 基本設計・ファイル構成・コマンド。実装で踏んだことは `docs/knowledge/` |
 
 ## 現在の状態
@@ -181,14 +181,6 @@ curl -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8570/v1/pairin
 ### 前提
 
 - **Node 24.11 以上**（`mise.toml` で 24.19.0 に固定しています）
-- **Bun**（`mise.toml` で固定しています）—— ChatterAgent をビルドするとき（core を1本の実行ファイルにして同梱します）
-- **Rust**（`chatter-agent-app/mise.toml` で固定しています）—— ChatterAgent をビルドするとき
-- **Unity 6000.3.14f1** —— macOS / Android のビルドサポートモジュールが必要です
-- **Unity CLI**（`unity` コマンド） —— `chatter-mascot/scripts/*.sh` がこれ経由で Editor を動かします
-- **Git LFS** —— マスコットの同梱モデル・モーション・アイコンは LFS 管理です。無しで clone するとポインタのままビルドされ、同梱モデルに頼っていれば Cube だけが出ます（clone 済みなら `git lfs install` → `git lfs pull` のあと、ビルドし直す）
-- **Android SDK の platform-tools**（`adb`）—— Android 版を端末へ入れるとき
-
-Unity プロジェクトのセットアップ手順は [`docs/mascot.md`](./docs/mascot.md) にあります。
 
 ### サーバーと CLI
 
@@ -202,34 +194,11 @@ npm run build
 
 ### ChatterAgent（macOS）
 
-```bash
-(cd core && npm install)
-cd chatter-agent-app
-npm install
-npm run build      # core を Bun で compile → build/ChatterAgent.app
-```
+ChatterAgent のビルド手順は [`chatter-agent-app/README-ja.md`](./chatter-agent-app/README-ja.md#ビルド) にあります。
 
-サーバーの起動・停止と設定パネルを受け持つメニューバー常駐アプリです。サーバーとプレーヤーはアプリに同梱されます。使い方は「実行」の「サーバー」にあります。
+### クライアント（macOS / Android XR）
 
-### macOS クライアント
-
-```bash
-cd chatter-mascot
-./scripts/build.sh           # → Build/ChatterMascot.app
-```
-
-ビルド済みのものは [Releases](https://github.com/schwarz9791/chatter-agent/releases) にあります。
-
-**クローンした直後は Unity を開く前に [`docs/mascot.md`](./docs/mascot.md) のセットアップを済ませてください。**
-マスコットは描画と再生だけで、設定パネル・メニューバー・ショートカットは持ちません（Dock にも出ません）。
-キャラクターを右クリックすると ChatterAgent の設定パネルが開きます（ChatterAgent が動いていなければ起動します）。
-
-### Android XR クライアント
-
-```bash
-cd chatter-mascot
-./scripts/build-android.sh   # → Build/ChatterMascot.apk
-```
+マスコット（macOS クライアント・Android XR クライアント）のビルド手順と、Unity などの前提は [`chatter-mascot/README-ja.md`](./chatter-mascot/README-ja.md#ビルド) にあります。
 
 ## 実行
 
@@ -281,93 +250,13 @@ tail -f "${XDG_CONFIG_HOME:-$HOME/.config}/chatter-agent/speech.jsonl"
 
 黙らせたいときは `CHATTER_AGENT_DISABLE=1` を付けて Claude Code を起動します。
 
-### サーバー
+### サーバーとクライアント
 
-macOS では、メニューバー常駐アプリ **ChatterAgent** を開くとサーバーが起動します（Releases のもの、または「ビルド」で作った
-`chatter-agent-app/build/ChatterAgent.app`）。同梱のサーバーをログインシェルと同じ環境で起こし、起動・停止・再起動も任せられます。
-メニューの「設定…」から、サーバーの設定とマスコットの設定（モデル・大きさ・音量・モーションなど）を変えられます。マスコットを右クリックするか、Finder などから ChatterAgent を開き直しても、設定窓が前面に出ます。
-
-ターミナルから手で起こすこともできます。サーバーは同時に1つしか動かないので、先に ChatterAgent のメニュー「終了」を選びます
-（ChatterAgent は「外で動いている」と表示するだけで、手を出しません）。
-
-```bash
-/Applications/ChatterAgent.app/Contents/MacOS/chatter-agent server
-```
-
-メニューの「マスコットを表示 / 隠す」と「ミュート」で、繋ぐクライアントも切り替わります。表示中は macOS アプリ、
-隠している間は CLI プレーヤーで声だけを鳴らし、隠してミュートしているときは何も繋ぎません（2つを同時に繋ぐと
-二重に鳴るので、ChatterAgent がどちらか一方だけを動かします）。macOS アプリは `/Applications` →
-`~/Applications` → `chatter-mascot/Build` の順に `ChatterMascot.app` を探します。ショートカット
-（既定は ⌃⌥M がミュート、⌃⌥H が表示切替。登録するのは ChatterAgent だけです）でも操作できます。詳細は [`docs/agent.md`](./docs/agent.md)。
-
-### クライアント
-
-サーバーとクライアントの組み合わせ方はケースで変わります。詳しくは
-[`docs/mascot.md`](./docs/mascot.md)「接続」。
-
-| ケース | サーバー | クライアント |
-|---|---|---|
-| A. Mac だけ | ChatterAgent を開く | macOS アプリ / CLI プレーヤー |
-| B. エミュレータ・USB 接続の実機を Mac のサーバーへ | そのまま起動（既定でループバックのみ listen） | `./scripts/run-android.sh`（`adb reverse` 経由。トークンも LAN 公開も要りません。端末の `connection` は空にしておきます —— `./scripts/configure-android.sh --clear`） |
-| C. LAN 越し（Wi-Fi の実機） | `config.json` に `"host": "0.0.0.0"` を足して、ChatterAgent の「サーバーを再起動」（→ [サーバーを LAN に公開する](#3-サーバーを-lan-に公開する)） | XR: 端末の設定パネルの「ペアリング…」に、XR なし: 繋がらないときに開くダイアログに、ChatterAgent の「Android とペアリング…」に出る4桁の PIN を入れます。mDNS が届かないとき: [繋がらないとき](#5-繋がらないとき)を見る |
-| D. Mac と Android を同時に動かす | 別のランタイムルート・別ポートでもう1本 | B か C をそのポートで |
-
-```bash
-# CLI プレーヤー（耳で聞くだけ。Unity を待たずに音が出ます）
-# ChatterAgent はマスコットを隠しているあいだ自分で起こします。手で起こすのは ChatterAgent を動かしていないときだけです（2つ繋ぐと文を取り合います）
-/Applications/ChatterAgent.app/Contents/MacOS/chatter-agent player
-```
-
-```bash
-# macOS
-open chatter-mascot/Build/ChatterMascot.app
-```
-
-```bash
-# Android（B: エミュレータ・USB 接続の実機を Mac のサーバーへ）
-cd chatter-mascot
-./scripts/run-android.sh
-```
-
-Android の C は、[XREAL Aura で試す](#xreal-aura-で試すandroid-xr)に手順をまとめています。
+サーバー（ChatterAgent）の使い方は [`chatter-agent-app/README-ja.md`](./chatter-agent-app/README-ja.md#実行)、クライアントの繋ぎ方は [`chatter-mascot/README-ja.md`](./chatter-mascot/README-ja.md#実行) にあります。
 
 ## モデルとモーション
 
-**主な設定は ChatterAgent の設定パネルから変えられます。** キャラクターを右クリック、または ChatterAgent のメニューバーのアイコンから開きます —— モデル・大きさ・音量・話す速さ・音声スタイル・モーションの確認・要約・ショートカット。マスコット自身は設定を書かず、読むだけです。
-
-設定と素材は `~/.config/chatter-agent/` に入ります（`XDG_CONFIG_HOME` を設定していればそちら）。
-
-```
-~/.config/chatter-agent/
-├── config.json               サーバーの設定
-├── emotion-keywords.json     感情判定のキーワード（消せば既定に戻ります）
-├── mascot/settings.json      クライアントの設定（大きさは `character.scale`。書くのは ChatterAgent だけ）
-├── mascot/window.json        ウィンドウの位置
-├── models/mascot.vrm         ChatterAgent の設定パネルで選んだモデル
-└── animations/               モーション（手で置きます）
-```
-
-**同梱しているのは CC0 のモデル1体と、待機ループのモーション1本だけです。** 感情モーションは再配布できる素材が無いので同梱していません —— **`.vrma` は手で置いてください。**
-
-| 置き場所 | 何が再生されるか |
-|---|---|
-| `animations/*.vrma`（直下） | 待機ループの差し替え（同梱のものの代わり） |
-| `animations/idle/` | 待機中の小ネタ（30〜60 秒ごとに1本） |
-| `animations/happy/` `angry/` `sad/` `relaxed/` `surprised/` | その感情の発言でワンショット再生 → 待機へ戻る |
-| `animations/walk/` | XR で歩き回るときの歩行モーション（ループ再生。macOS では使わない） |
-
-モデルの差し替えは ChatterAgent の設定パネルからでき、モーションは「モーション」節で再生して確認できますが、**モーションを置く UI はありません。** ディレクトリを掘って `.vrma` を置くと、次の起動で拾います。`neutral` に対応するディレクトリはありません（感情モーションを出さない、が既定の振る舞いです）。
-
-**モデルは VRM 1.0 だけに対応しています。** VRM 0.x のモデルは読めないので、代わりに同梱のモデルが出ます。理由はログに出ます（`Failed to load as VRM 1.0`）。
-
-**Android XR もディレクトリは同じです**（端末の `Android/data/tech.sukima.chattermascot/files/` の下）が、
-**`adb push` は要りません。** 接続先とトークンを設定すれば（ペアリング、または `configure-android.sh`）、起動のたびに
-サーバーの `GET /v1/assets` から自動で取りに行きます（既定 `auto`。反映は次回の起動から）。
-手置きもこれまでどおり使え、同期より優先されます。ただし**直下の2本は固定名で、
-`models/mascot.vrm` と `animations/idle.vrma` しか読みません** —— 上の表の任意名
-（`animations/*.vrma`）はここには効きません。**カテゴリ別（`animations/happy/` など）は
-同期・手置きのどちらでも任意名のままで効きます。** 手順は
-[`docs/mascot.md`](./docs/mascot.md)「モデルとモーションを入れる」。
+モデルとモーションの置き方は [`chatter-mascot/README-ja.md`](./chatter-mascot/README-ja.md#モデルとモーション) にあります。
 
 ## 開発
 
@@ -387,10 +276,7 @@ npm run verify:assets    # マニフェスト → GET /v1/assets/ → Range で�
 
 `verify:tts` と `verify:player` は合成エンジンと再生コマンドをスタブに差し替えるので、AivisSpeech もオーディオデバイスも要りません。
 
-```bash
-cd chatter-mascot
-./scripts/test.sh        # EditMode テスト
-```
+マスコットのテストは [`chatter-mascot/README-ja.md`](./chatter-mascot/README-ja.md#開発)、ChatterAgent の lint とテストは [`chatter-agent-app/README-ja.md`](./chatter-agent-app/README-ja.md#開発) にあります。
 
 | 文書 | 読むとき |
 |---|---|

@@ -421,7 +421,7 @@ adb shell pm grant|revoke tech.sukima.chattermascot android.permission.HAND_TRAC
 入っていれば、起動のたびに `chatter-agent-server` の `GET /v1/assets` からモデル・モーションを
 自動で取りに行く（`connection.assetSync`。既定 `"auto"`、`"off"` で止められる。→ 上の「macOS: 描画と再生だけ」）。
 Mac 側にファイルを置く場所はデスクトップと同じ `~/.config/chatter-agent/models/` /
-`~/.config/chatter-agent/animations/`（→ [`README-ja.md`](../README-ja.md)「モデルとモーション」）。
+`~/.config/chatter-agent/animations/`（→ [`chatter-mascot/README-ja.md`](../chatter-mascot/README-ja.md)「モデルとモーション」）。
 
 ```bash
 cd chatter-mascot

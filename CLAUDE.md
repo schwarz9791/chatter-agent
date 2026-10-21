@@ -7,7 +7,7 @@ Android XR）が鳴らして VRM に反映する。macOS では ChatterAgent が
 **対象は Claude Code のみ。** hook を持たない Codex / Gemini CLI / Antigravity は対象外なので、
 **`AGENTS.md` は置かない。**
 
-使い方・ビルド・実行は [`README-ja.md`](./README-ja.md)（英語版は [`README.md`](./README.md)）。
+使い方・ビルド・実行は [`README-ja.md`](./README-ja.md)（英語版は [`README.md`](./README.md)）。各アプリの使い方・ビルドは [`chatter-mascot/README-ja.md`](./chatter-mascot/README-ja.md) と [`chatter-agent-app/README-ja.md`](./chatter-agent-app/README-ja.md)。
 
 ## ディレクトリ構成
 

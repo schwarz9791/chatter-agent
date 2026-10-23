@@ -364,7 +364,9 @@ jobs:
 
       - name: THIRD_PARTY_LICENSES.txt matches Cargo.lock
         working-directory: chatter-agent-app
+        # cargo metadata は全ターゲットの依存を読むので、macOS のビルドでは落ちてこない分も先に取っておく
         run: |
+          (cd src-tauri && cargo fetch --locked)
           npm run licenses
           if ! git diff --exit-code -- src-tauri/THIRD_PARTY_LICENSES.txt; then
             echo "::error file=chatter-agent-app/src-tauri/THIRD_PARTY_LICENSES.txt::After changing Cargo.lock, run npm run licenses in chatter-agent-app to regenerate it, and commit THIRD_PARTY_LICENSES.txt"

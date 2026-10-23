@@ -3,7 +3,7 @@
 #
 #   ./scripts/build.sh                                        # 本番シーン
 #   ./scripts/build.sh Assets/Scenes/TransparencyProbe.unity Build/TransparencyProbe.app
-#   CHATTER_MASCOT_RELEASE=1 ./scripts/build.sh               # release。HEAD に mascot-v<版> タグが要る → Build/ChatterMascot-macOS.zip
+#   CHATTER_MASCOT_RELEASE=1 ./scripts/build.sh               # release。HEAD に mascot-v<版> タグと CHATTER_AGENT_UPDATER_KEY が要る → Build/ChatterMascot-macOS.zip と .sig
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/unity.sh"
 
@@ -38,8 +38,37 @@ unset CHATTER_MASCOT_RELEASE_TAG
 zip="$PROJECT_PATH/Build/ChatterMascot-macOS.zip"
 if [[ -n "$RELEASE" ]]; then
   require_release_tag
-  # 失敗したときに前回の zip が残っていると、それを配ってしまう
-  /bin/rm -f "$zip"
+
+  # updater の署名鍵の関門。chatter-agent-app/scripts/build-release.sh の同名のブロックと同じ形。直すときは両方を揃える。
+  # パスワードは argv に出さず、環境変数で子プロセスへ渡す。
+  if [[ -z "${CHATTER_AGENT_UPDATER_KEY:-}" ]]; then
+    echo "CHATTER_AGENT_UPDATER_KEY is not set. Set it to the absolute path of the updater private key (docs/release.md)" >&2
+    exit 1
+  fi
+  if [[ ! -f "$CHATTER_AGENT_UPDATER_KEY" ]]; then
+    echo "Updater key not found: $CHATTER_AGENT_UPDATER_KEY" >&2
+    exit 1
+  fi
+  CHATTER_AGENT_UPDATER_KEY="$(/bin/realpath "$CHATTER_AGENT_UPDATER_KEY")"
+  if [[ -z "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" ]]; then
+    if ! key_pass="$(security find-generic-password -a "$USER" -s chatter-agent-updater-key -w)"; then
+      echo "Could not read the chatter-agent-updater-key password from the keychain." \
+           "If the item does not exist, register it following docs/release.md, or set TAURI_SIGNING_PRIVATE_KEY_PASSWORD." >&2
+      exit 1
+    fi
+    export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$key_pass"
+    unset key_pass
+  fi
+
+  # macOS 版の zip の署名には ChatterAgent の tauri CLI を使う。
+  tauri_bin="$PROJECT_PATH/../chatter-agent-app/node_modules/.bin/tauri"
+  if [[ ! -x "$tauri_bin" ]]; then
+    echo "tauri CLI not found: $tauri_bin. Run npm --prefix ../chatter-agent-app ci" >&2
+    exit 1
+  fi
+
+  # 失敗したときに前回の zip と署名が残っていると、それを配ってしまう
+  /bin/rm -f "$zip" "$zip.sig"
 fi
 
 # release は ProjectSettings.asset に入れた版を残さないため、git から戻す（作業ツリーがきれいなことは確かめ済み）。
@@ -82,5 +111,7 @@ if [[ -n "$RELEASE" ]]; then
   # ★ 拡張属性を zip に入れない（--norsrc）。AppleDouble の ._* がバンドルの中に入ると、
   #   ditto 以外で展開したときに封印が壊れる。chatter-agent-app/scripts/build-release.sh と同じ。
   ditto -c -k --norsrc --keepParent "$app" "$zip"
-  echo "[Build] version=$version → Build/ChatterMascot-macOS.zip"
+  # ChatterAgent が更新を検証する署名。パスワードは環境変数で渡す。
+  "$tauri_bin" signer sign -f "$CHATTER_AGENT_UPDATER_KEY" "$zip"
+  echo "[Build] version=$version → Build/ChatterMascot-macOS.zip Build/ChatterMascot-macOS.zip.sig"
 fi

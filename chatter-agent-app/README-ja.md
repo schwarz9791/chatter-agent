@@ -50,6 +50,13 @@ macOS では、メニューバー常駐アプリ **ChatterAgent** を開くと�
 `~/Applications` → `chatter-mascot/Build` の順に `ChatterMascot.app` を探します。ショートカット
 （既定は ⌃⌥M がミュート、⌃⌥H が表示切替。登録するのは ChatterAgent だけです）でも操作できます。詳細は [`docs/agent.md`](../docs/agent.md)。
 
+### 更新
+
+Releases の新しい版を、起動時と6時間ごとに GitHub へ問い合わせて探します（設定窓の「Chatter Agent について」で切れます）。
+見つかるとメニューが「アップデートがあります…」に変わり、選ぶとダウンロード・署名の確認・入れ替え・再起動までを行います
+（マスコットも `/Applications` か `~/Applications` のものを入れ替えます）。切っていても「アップデートを確認…」は使えます。
+手元でビルドした版（`0.0.0-dev`）は対象外です。
+
 ## 開発
 
 **コマンドはリポジトリのルートから実行します。**

@@ -13,6 +13,10 @@ The app is ad-hoc signed and not notarized, so Gatekeeper blocks it after downlo
 - Run `xattr -dr com.apple.quarantine /Applications/ChatterAgent.app`
 - Open it once, then go to System Settings → Privacy & Security and click "Open Anyway". Click "Open Anyway" again in the dialog that follows, then authenticate with Touch ID or an administrator password
 
+## Updates
+
+Choose "Check for Updates…" in the menu to update ChatterAgent and the macOS mascot. The app also asks GitHub for new versions at startup and periodically; you can turn this off in About in the settings window. A version from before updates existed has to be replaced by hand once.
+
 ## Notes
 
 - The Claude Code plugin runs the CLI bundled in ChatterAgent. Open ChatterAgent once after installing or updating it; until then the plugin stays silent, and what Claude Code said in the meantime is read after you open the app.

@@ -27,6 +27,9 @@ import {
   mascotState,
   mascotVersion,
   pickVrm,
+  updateInfo,
+  updateSetAuto,
+  type UpdateInfo,
   serverJson,
   serverRequest,
 } from "./tauri.ts";
@@ -230,8 +233,15 @@ async function loadMascotVersion(): Promise<void> {
   ui.mascotVer.textContent = (await mascotVersion().catch(() => null)) ?? "—";
 }
 
+// 見つかった新しい版。読めなければ出さない。
+let updates: UpdateInfo = { agent: null, mascot: null, auto: true };
+
+async function loadUpdateInfo(): Promise<void> {
+  updates = await updateInfo().catch(() => updates);
+}
+
 async function reloadAll(): Promise<void> {
-  await Promise.all([loadConfig(), loadMascot(), loadMascotState(), loadMascotVersion()]);
+  await Promise.all([loadConfig(), loadMascot(), loadMascotState(), loadMascotVersion(), loadUpdateInfo()]);
   render();
 }
 
@@ -422,10 +432,20 @@ function build(): void {
   // について。節は常に出る。マスコットの行は .app が見つからなければ「—」。
   s = section(() => t.sectionAbout);
   const version = el("span", "val");
-  row(s, "aboutVersion", () => t.aboutVersion, [version]);
+  row(s, "aboutVersion", () => t.aboutVersion, [version], {
+    staticNote: () => (updates.agent ? t.aboutNewVersion(updates.agent) : ""),
+  });
   const mascotVer = el("span", "val");
   ui.mascotVer = mascotVer;
-  row(s, "aboutMascot", () => t.aboutMascot, [mascotVer]);
+  row(s, "aboutMascot", () => t.aboutMascot, [mascotVer], {
+    staticNote: () => (updates.mascot ? t.aboutNewVersion(updates.mascot) : ""),
+  });
+  const autoCheck = checkbox((on) => {
+    updates.auto = on;
+    void updateSetAuto(on).catch(() => void loadUpdateInfo().then(render));
+  });
+  ui.autoCheck = autoCheck;
+  row(s, "aboutAutoCheck", () => t.autoCheckUpdates, [autoCheck], { staticNote: () => t.autoCheckUpdatesNote });
   // 全文は長いので、ふだんは畳んでおく
   const license = el("details", "row");
   const summary = el("summary");
@@ -526,6 +546,7 @@ function render(): void {
   const volume = mascotGet(mascot, "audio.volume");
   setRange(ui.vol as HTMLInputElement, ui.volVal, volume, (x) => `${Math.round(x * 100)}%`);
 
+  (ui.autoCheck as HTMLInputElement).checked = updates.auto;
   (ui.idle as HTMLInputElement).checked = mascotGet(mascot, "character.idleMotion");
   (ui.gaze as HTMLInputElement).checked = mascotGet(mascot, "character.cursorGaze");
   (ui.blink as HTMLInputElement).checked = mascotGet(mascot, "character.blink");

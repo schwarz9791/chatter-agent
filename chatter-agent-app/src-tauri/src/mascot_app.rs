@@ -18,7 +18,7 @@ use crate::server::{lock, pid_alive};
 
 #[cfg(target_os = "macos")]
 const BUNDLE_ID: &str = "tech.sukima.chatter-mascot";
-const APP_NAME: &str = "ChatterMascot.app";
+pub(crate) const APP_NAME: &str = "ChatterMascot.app";
 
 /// 前回の `running_pids()` が返した pid。
 #[cfg(target_os = "macos")]
@@ -55,6 +55,11 @@ fn repo_of_build(app: &Path) -> Option<&Path> {
     (build.file_name()? == "build" && agent.file_name()? == "chatter-agent-app")
         .then(|| agent.parent())
         .flatten()
+}
+
+/// 更新で入れ替える先。`/Applications` と `~/Applications` だけで、開発用のビルドは含めない。
+pub fn update_target(home: &Path) -> Option<PathBuf> {
+    first_dir(candidates_from(None, None, home))
 }
 
 pub fn find_app(core: Option<&Path>, home: &Path) -> Option<PathBuf> {

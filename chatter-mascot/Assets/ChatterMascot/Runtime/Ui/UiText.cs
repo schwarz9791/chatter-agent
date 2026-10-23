@@ -92,6 +92,7 @@ namespace ChatterMascot.Ui
         public abstract string ServerUnreachableToast { get; }
         public abstract string ServerNotFoundToast { get; }
         public abstract string PairingNeededToast { get; }
+        public abstract string UpdateAvailableToast(string version);
         public abstract string PairingDialogMessage { get; }
         public abstract string Cancel { get; }
     }

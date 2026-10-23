@@ -6,8 +6,28 @@
 
 - release keystore がリポジトリの外にあり、パスワードがキーチェーン（サービス名 `chatter-mascot-keystore`）に
   入っていること。作り方とバックアップは [`mascot.md`](./mascot.md)「署名と版」
+- updater の秘密鍵がリポジトリの外にあり、パスワードがキーチェーン（サービス名 `chatter-agent-updater-key`）に
+  入っていること。ChatterAgent の更新（ChatterAgent 自身とマスコットの macOS 版）は、この鍵で署名したものだけを受け付ける。
+  作り方は下の「updater の鍵」
 - Unity のビルド環境（[`mascot.md`](./mascot.md)「環境」）
 - ネットワーク。release は Gradle の依存を毎回ダウンロードし直す（→ [`mascot.md`](./mascot.md)「署名と版」）
+
+## updater の鍵（一度だけ）
+
+```bash
+npx --yes @tauri-apps/cli@2.12.1 signer generate -w ~/.tauri/chatter-agent-updater.key
+#   → パスワードはプロンプトで入れる。標準出力に公開鍵が出る（~/.tauri/chatter-agent-updater.key.pub にも書かれる）
+
+# キーチェーンへ登録（-w だけ渡すとプロンプトで聞かれるので、値が argv に出ない）
+security add-generic-password -a "$USER" -s chatter-agent-updater-key -w
+```
+
+- 公開鍵は `chatter-agent-app/src-tauri/tauri.conf.json` の `plugins.updater.pubkey` に入っている。鍵を作り直したら、ここも更新する
+- 秘密鍵はリポジトリの外に置く。`CHATTER_AGENT_UPDATER_KEY=<秘密鍵の絶対パス>` で `build-release.sh` と
+  `chatter-mascot/scripts/build.sh`（release）に渡す。パスワードは `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`、無ければキーチェーンから読む。
+  どちらも Unity やビルドを始める前に確かめて、足りなければ止まる
+- ★ **秘密鍵とパスワードの両方をバックアップする（APK の keystore と同じ考え方。→ [`mascot.md`](./mascot.md)「署名と版」）。
+  失うと、その公開鍵を入れた版の利用者に更新を配れなくなる**（以後は手で入れ替えてもらう）。パスワードは鍵と同じ場所に置かない
 
 ## 版を決める
 
@@ -30,13 +50,14 @@
 git switch main && git pull          # origin と同じ main にする
 git status                           # 未追跡ファイルも含めて空であること
 git tag mascot-v0.2.0                # まだ push しない
+(cd chatter-agent-app && npm ci)     # macOS 版の zip の署名に tauri CLI を使う
 cd chatter-mascot
 CHATTER_MASCOT_KEYSTORE=<keystore の絶対パス> ./scripts/build-android.sh
 #   → [Build] version=0.2.0 versionCode=200 signing=release … が出る
 #   → Build/ChatterMascot.apk
 adb install -r Build/ChatterMascot.apk   # 端末で確かめる（手元ビルドが入っているなら先に下の注記）
-CHATTER_MASCOT_RELEASE=1 ./scripts/build.sh
-#   → [Build] version=0.2.0 → Build/ChatterMascot-macOS.zip が出る（版は .app から読んでタグと比べてある）
+CHATTER_AGENT_UPDATER_KEY=<updater の秘密鍵の絶対パス> CHATTER_MASCOT_RELEASE=1 ./scripts/build.sh
+#   → [Build] version=0.2.0 → Build/ChatterMascot-macOS.zip と .zip.sig が出る（版は .app から読んでタグと比べてある）
 git push origin mascot-v0.2.0        # 確かめてから
 ```
 
@@ -61,7 +82,8 @@ git switch main && git pull          # origin と同じ main にする
 git status                           # 未追跡ファイルも含めて空であること
 git tag agent-v0.2.0                 # まだ push しない
 cd chatter-agent-app && npm ci
-npm run build:release                # → build/ChatterAgent.zip
+CHATTER_AGENT_UPDATER_KEY=<updater の秘密鍵の絶対パス> npm run build:release
+#   → build/ChatterAgent.zip、更新用の build/ChatterAgent.app.tar.gz と build/latest.json
 git push origin agent-v0.2.0         # 版を確かめてから（下）
 ```
 
@@ -82,11 +104,15 @@ git push origin agent-v0.2.0         # 版を確かめてから（下）
 cd "$(git rev-parse --show-toplevel)"   # 上の節で chatter-mascot/ や chatter-agent-app/ に居るので戻る
 gh release create mascot-v0.2.0 --draft --verify-tag --title "ChatterMascot 0.2.0" \
   --notes-file .github/release-notes/mascot.md \
-  chatter-mascot/Build/ChatterMascot.apk chatter-mascot/Build/ChatterMascot-macOS.zip
+  chatter-mascot/Build/ChatterMascot.apk chatter-mascot/Build/ChatterMascot-macOS.zip \
+  chatter-mascot/Build/ChatterMascot-macOS.zip.sig
 gh release create agent-v0.2.0 --draft --verify-tag --title "ChatterAgent 0.2.0" \
-  --notes-file .github/release-notes/agent.md chatter-agent-app/build/ChatterAgent.zip
+  --notes-file .github/release-notes/agent.md chatter-agent-app/build/ChatterAgent.zip \
+  chatter-agent-app/build/ChatterAgent.app.tar.gz chatter-agent-app/build/latest.json
 ```
 
+- ★ ChatterAgent はこれらのアセットを Releases の API で名前を指して引く。**`ChatterMascot-macOS.zip` / `.zip.sig` /
+  `.app.tar.gz` / `latest.json` の名前を変えない**
 - draft に今回の変更点を書き足してから publish する
 - ★ **ChatterAgent とマスコットの macOS 版は publish の前に、別の Mac（無ければ同じ Mac の別ユーザー）でブラウザから
   draft の zip をダウンロードして**（quarantine が付く経路で）、ノートの開き方で開けることを確かめる。マスコットは

@@ -58,3 +58,10 @@ export const mascotVersion = () => invoke<string | null>("mascot_version");
 export const mascotRequest = (kind: "resetWindow" | "playMotion", id?: string) =>
   invoke<void>("mascot_request", { kind, id });
 export const about = () => invoke<{ version: string; notice: string }>("about");
+export interface UpdateInfo {
+  agent: string | null;
+  mascot: string | null;
+  auto: boolean;
+}
+export const updateInfo = () => invoke<UpdateInfo>("update_info");
+export const updateSetAuto = (on: boolean) => invoke<void>("update_set_auto", { on });

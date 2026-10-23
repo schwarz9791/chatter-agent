@@ -5,6 +5,7 @@
 //!   片方が止まったのを確かめてから、もう片方を起こす。
 
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
 use std::str::FromStr;
@@ -637,6 +638,24 @@ impl Clients {
             c.quit_mascot();
             then();
         });
+    }
+
+    /// マスコットを止めて `f` を呼び、表示中だったなら起こし直す。止まらなければ `f` は呼ばない。
+    /// 起こし直しは処理中の印を持ったまま行う（監視が「外で終了された」と取り違えないため）。
+    pub fn with_mascot_stopped(&self, f: impl FnOnce() -> io::Result<()>) -> io::Result<()> {
+        while self.0.serial.busy.swap(true, Ordering::SeqCst) {
+            thread::sleep(Duration::from_millis(100));
+        }
+        let result = if self.quit_mascot() {
+            f()
+        } else {
+            Err(io::Error::other("the mascot did not quit"))
+        };
+        self.reconcile();
+        self.0.serial.busy.store(false, Ordering::SeqCst);
+        // 握っていた間に来た要求の分。
+        self.request();
+        result
     }
 
     /// メニュー以外からの終了の保険。マスコットは要求を送るだけで待たない。

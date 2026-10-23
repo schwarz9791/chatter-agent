@@ -35,6 +35,18 @@ pub struct Text {
     pub mascot_unavailable_title: &'static str,
     mascot_not_found: fn(&str) -> String,
     mascot_launch_failed: fn(&str) -> String,
+    pub update_check: &'static str,
+    pub update_available: &'static str,
+    pub updating: &'static str,
+    pub update_title: &'static str,
+    pub update_up_to_date: &'static str,
+    pub update_ok: &'static str,
+    pub update_cancel: &'static str,
+    update_prompt: fn(&str) -> String,
+    update_check_failed: fn(&str) -> String,
+    update_failed: fn(&str) -> String,
+    mascot_update_failed: fn(&str) -> String,
+    pub update_translocated: &'static str,
 }
 
 pub const JA: Text = Text {
@@ -74,6 +86,22 @@ pub const JA: Text = Text {
     mascot_launch_failed: |e| {
         format!("ChatterMascot.app を起動できません（{e}）。\n\nマスコットは隠したままにします。")
     },
+    update_check: "アップデートを確認…",
+    update_available: "アップデートがあります…",
+    updating: "更新中…",
+    update_title: "アップデート",
+    update_up_to_date: "最新の版です。",
+    update_ok: "更新",
+    update_cancel: "キャンセル",
+    update_prompt: |lines| {
+        format!("新しい版があります。\n\n{lines}\n\n更新中は読み上げが止まり、ChatterAgent は再起動します。更新しますか？")
+    },
+    update_check_failed: |e| format!("アップデートを確認できません。\n\n{e}"),
+    update_failed: |e| format!("更新できませんでした。\n\n{e}"),
+    mascot_update_failed: |e| {
+        format!("マスコットを更新できませんでした。ChatterAgent の更新は続けます。\n\n{e}")
+    },
+    update_translocated: "ChatterAgent が隔離された場所から動いているため、自分を更新できません。/Applications に移してから開き直してください。",
 };
 
 pub const EN: Text = Text {
@@ -113,6 +141,22 @@ pub const EN: Text = Text {
     mascot_launch_failed: |e| {
         format!("Could not launch ChatterMascot.app ({e}).\n\nThe mascot stays hidden.")
     },
+    update_check: "Check for Updates…",
+    update_available: "Update Available…",
+    updating: "Updating…",
+    update_title: "Update",
+    update_up_to_date: "You are up to date.",
+    update_ok: "Update",
+    update_cancel: "Cancel",
+    update_prompt: |lines| {
+        format!("New versions are available.\n\n{lines}\n\nSpeech stops during the update, and ChatterAgent restarts. Update now?")
+    },
+    update_check_failed: |e| format!("Could not check for updates.\n\n{e}"),
+    update_failed: |e| format!("The update failed.\n\n{e}"),
+    mascot_update_failed: |e| {
+        format!("Could not update the mascot. Continuing with the ChatterAgent update.\n\n{e}")
+    },
+    update_translocated: "ChatterAgent is running from a quarantined location and cannot update itself. Move it to /Applications and open it again.",
 };
 
 /// OS のロケールが `ja` で始まるか。
@@ -158,6 +202,22 @@ impl Text {
 
     pub fn mascot_launch_failed(&self, e: &str) -> String {
         (self.mascot_launch_failed)(e)
+    }
+
+    pub fn update_prompt(&self, lines: &str) -> String {
+        (self.update_prompt)(lines)
+    }
+
+    pub fn update_check_failed(&self, e: &str) -> String {
+        (self.update_check_failed)(e)
+    }
+
+    pub fn update_failed(&self, e: &str) -> String {
+        (self.update_failed)(e)
+    }
+
+    pub fn mascot_update_failed(&self, e: &str) -> String {
+        (self.mascot_update_failed)(e)
     }
 
     /// 状態欄の文言（「サーバー: …」）。

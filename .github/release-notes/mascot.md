@@ -14,6 +14,8 @@ If you have an APK you built yourself (signed with a debug key) installed, the s
 adb uninstall tech.sukima.chattermascot
 ```
 
+On every launch the app shows a toast when a newer version exists (not when installed from Google Play). Updating is still `adb install -r`.
+
 To check the version, look at the end of the settings panel on XR, or the `[Mascot] version:` line in the startup log.
 
 ## Install (macOS)
@@ -25,7 +27,7 @@ To check the version, look at the end of the settings panel on XR, or the `[Masc
    - Double-click it (or choose "Show Mascot" in the ChatterAgent menu), then go to System Settings → Privacy & Security and click "Open Anyway". Click "Open Anyway" again in the dialog that follows, then authenticate with Touch ID or an administrator password
 4. If the mascot isn't showing, choose "Show Mascot" in the ChatterAgent menu.
 
-To check the version, look at the About section of the ChatterAgent settings window.
+To check the version, look at the About section of the ChatterAgent settings window. To update, choose "Check for Updates…" in the ChatterAgent menu.
 
 ## Requirements
 

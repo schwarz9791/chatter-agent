@@ -6,6 +6,7 @@ mod mascot;
 mod mascot_app;
 mod server;
 mod text;
+mod update;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -28,6 +29,11 @@ struct Settings {
     dev_core_dir: Option<PathBuf>,
     #[serde(default = "yes")]
     mascot_visible: bool,
+    #[serde(default = "yes")]
+    check_updates: bool,
+    /// 検証用に、更新の取得元を `owner/repo` で差し替える。
+    #[serde(default)]
+    dev_update_repo: Option<String>,
 }
 
 fn yes() -> bool {
@@ -39,6 +45,8 @@ impl Default for Settings {
         Settings {
             dev_core_dir: None,
             mascot_visible: true,
+            check_updates: true,
+            dev_update_repo: None,
         }
     }
 }
@@ -150,6 +158,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
@@ -166,6 +175,8 @@ fn main() {
             mascot::mascot_version,
             mascot::mascot_request,
             text::lang,
+            update::update_info,
+            update::update_set_auto,
             about,
         ])
         .setup(|app| {
@@ -191,6 +202,7 @@ fn main() {
             .build(app)?;
             let settings_item = MenuItemBuilder::with_id("settings", t.settings).build(app)?;
             let pairing_item = MenuItemBuilder::with_id("pairing", t.pairing).build(app)?;
+            let update_item = MenuItemBuilder::with_id("update", t.update_check).build(app)?;
             let restart_item = MenuItemBuilder::with_id("restart", t.start)
                 .enabled(false)
                 .build(app)?;
@@ -207,6 +219,7 @@ fn main() {
                 .item(&PredefinedMenuItem::separator(app)?)
                 .item(&settings_item)
                 .item(&pairing_item)
+                .item(&update_item)
                 .item(&restart_item)
                 .item(&open_log_item)
                 .item(&autostart_item)
@@ -264,6 +277,11 @@ fn main() {
             clients.attach(manager.clone());
             app.manage(manager.clone());
             app.manage(clients.clone());
+            app.manage(update::Updates::new(
+                app.handle(),
+                update_item,
+                settings_path.clone(),
+            ));
 
             // 2x を埋め込む。Retina でも等倍でもシステムが縮小して使う。
             let icon = Image::from_bytes(include_bytes!("../icons/tray/trayTemplate@2x.png"))?;
@@ -292,6 +310,10 @@ fn main() {
                     }
                     "settings" => open_settings(app, t.settings_title),
                     "pairing" => open_pairing(app, t.pairing_title),
+                    "update" => {
+                        let app = app.clone();
+                        thread::spawn(move || update::run_from_menu(app));
+                    }
                     "open_log" => {
                         // ファイルがまだ無ければディレクトリを開く。
                         let target = if log_path.exists() {
@@ -327,6 +349,7 @@ fn main() {
 
             manager.spawn_monitor();
             clients.spawn_monitor();
+            update::spawn_watcher(app.handle().clone());
             manager.start_or_restart();
             Ok(())
         })

@@ -1,4 +1,4 @@
-using ChatterMascot.EditorTools;
+using ChatterMascot.Net;
 using NUnit.Framework;
 
 namespace ChatterMascot.Tests
@@ -13,7 +13,7 @@ namespace ChatterMascot.Tests
         [TestCase("mascot-v0.0.1", "0.0.1", 1)]
         public void ParsesTheTag(string tag, string version, int versionCode)
         {
-            Assert.That(BuildScript.TryParseReleaseTag(tag, out var actualVersion, out var actualCode), Is.True);
+            Assert.That(ReleaseCheck.TryParseReleaseTag(tag, out var actualVersion, out var actualCode), Is.True);
             Assert.That(actualVersion, Is.EqualTo(version));
             Assert.That(actualCode, Is.EqualTo(versionCode));
         }
@@ -32,7 +32,7 @@ namespace ChatterMascot.Tests
         [TestCase("mascot-v0.1.0\n")]
         public void RejectsAnythingElse(string tag)
         {
-            Assert.That(BuildScript.TryParseReleaseTag(tag, out _, out _), Is.False);
+            Assert.That(ReleaseCheck.TryParseReleaseTag(tag, out _, out _), Is.False);
         }
     }
 }

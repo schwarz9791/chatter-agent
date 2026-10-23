@@ -75,6 +75,9 @@ export type Text = {
   aboutVersion: string;
   aboutMascot: string;
   aboutLicense: string;
+  aboutNewVersion(version: string): string;
+  autoCheckUpdates: string;
+  autoCheckUpdatesNote: string;
 
   settingsUnreadable(reason: string): string;
 
@@ -177,6 +180,9 @@ export const JA: Text = {
   aboutVersion: "バージョン",
   aboutMascot: "マスコット",
   aboutLicense: "ライセンス",
+  aboutNewVersion: (version) => `新しい版 ${version} があります（メニューの「アップデートがあります…」から）`,
+  autoCheckUpdates: "アップデートを自動で確認",
+  autoCheckUpdatesNote: "起動時と6時間ごとに GitHub へ問い合わせます。切ってもメニューの「アップデートを確認…」は使えます",
 
   settingsUnreadable: (reason) => `settings.json を読めません（${reason}）`,
 
@@ -279,6 +285,10 @@ export const EN: Text = {
   aboutVersion: "Version",
   aboutMascot: "Mascot",
   aboutLicense: "License",
+  aboutNewVersion: (version) => `Version ${version} is available (choose "Update Available…" in the menu).`,
+  autoCheckUpdates: "Check for updates automatically",
+  autoCheckUpdatesNote:
+    "Asks GitHub at launch and every 6 hours. \"Check for Updates…\" in the menu still works when this is off.",
 
   settingsUnreadable: (reason) => `Couldn't read settings.json (${reason}).`,
 

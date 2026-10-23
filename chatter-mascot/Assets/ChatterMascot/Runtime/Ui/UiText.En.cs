@@ -76,6 +76,8 @@ namespace ChatterMascot.Ui
         public override string PairingNeededToast =>
             "Can't reach the server\nShow a PIN from \"Pair with Android…\" in the ChatterAgent menu on your Mac,\n" +
             "then enter it from \"Pair…\" in the settings panel.";
+        public override string UpdateAvailableToast(string version) =>
+            $"A new version {version} is available\nInstall the APK from the Release page with adb install -r.";
         public override string PairingDialogMessage =>
             "Enter the 4-digit PIN shown from \"Pair with Android…\" in the ChatterAgent menu on your Mac.";
         public override string Cancel => "Cancel";

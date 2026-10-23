@@ -52,6 +52,13 @@ so ChatterAgent runs only one of them). The macOS app is looked up as `ChatterMa
 ⌃⌥M toggles mute and ⌃⌥H shows or hides the mascot; only ChatterAgent registers them). Details are in
 [`docs/agent.md`](../docs/agent.md).
 
+### Updates
+
+ChatterAgent asks GitHub for new releases at launch and every 6 hours (you can turn this off under "About Chatter Agent" in the settings window).
+When one is found the menu item becomes "Update Available…"; choosing it downloads, verifies the signature, swaps the apps in, and restarts
+(the mascot in `/Applications` or `~/Applications` is replaced too). "Check for Updates…" still works with the switch off.
+Local builds (`0.0.0-dev`) are not updated.
+
 ## Development
 
 **Run every command from the repository root.**

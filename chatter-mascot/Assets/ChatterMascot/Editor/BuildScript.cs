@@ -157,7 +157,7 @@ namespace ChatterMascot.EditorTools
             var release = !string.IsNullOrEmpty(releaseTag);
             if (release)
             {
-                if (!TryParseReleaseTag(releaseTag, out var releaseVersion, out _))
+                if (!ChatterMascot.Net.ReleaseCheck.TryParseReleaseTag(releaseTag, out var releaseVersion, out _))
                 {
                     Debug.LogError($"[Build] Release tag {ReleaseTagEnv}='{releaseTag}' is not in the form " +
                                    "mascot-v<MAJOR>.<MINOR>.<PATCH>. Aborting");
@@ -273,32 +273,6 @@ namespace ChatterMascot.EditorTools
         private const string ReleaseTagEnv = "CHATTER_MASCOT_RELEASE_TAG";
 
         /// <summary>
-        /// release タグ <c>mascot-v&lt;MAJOR&gt;.&lt;MINOR&gt;.&lt;PATCH&gt;</c> から版を決める。
-        /// 各数は 0〜99・先頭ゼロ不可で、プレリリース接尾辞は持たない。
-        /// <c>versionCode = MAJOR*10000 + MINOR*100 + PATCH</c> で、Android が要る 1 以上に
-        /// ならない 0.0.0 は受けない。版の規則はここ1か所にだけ置く。
-        /// </summary>
-        public static bool TryParseReleaseTag(string tag, out string version, out int versionCode)
-        {
-            version = null;
-            versionCode = 0;
-            if (tag == null) return false;
-
-            var match = System.Text.RegularExpressions.Regex.Match(
-                tag, @"\Amascot-v(0|[1-9][0-9]?)\.(0|[1-9][0-9]?)\.(0|[1-9][0-9]?)\z");
-            if (!match.Success) return false;
-
-            var major = int.Parse(match.Groups[1].Value);
-            var minor = int.Parse(match.Groups[2].Value);
-            var patch = int.Parse(match.Groups[3].Value);
-            versionCode = major * 10000 + minor * 100 + patch;
-            if (versionCode == 0) return false;
-
-            version = $"{major}.{minor}.{patch}";
-            return true;
-        }
-
-        /// <summary>
         /// release 用に署名と版を PlayerSettings へ入れる。署名は環境変数の keystore、版は
         /// release タグから決める。パスワードは argv に出さないため環境変数から読む。PKCS12 は
         /// ストアと鍵のパスワードが同一なので、同じ値を両方に入れる。
@@ -308,7 +282,7 @@ namespace ChatterMascot.EditorTools
         /// </summary>
         private static bool TryUseReleaseSettings(string keystorePath, string tag)
         {
-            if (!TryParseReleaseTag(tag, out var version, out var versionCode))
+            if (!ChatterMascot.Net.ReleaseCheck.TryParseReleaseTag(tag, out var version, out var versionCode))
             {
                 Debug.LogError($"[Build] Release tag {ReleaseTagEnv}='{tag}' is not in the form " +
                                "mascot-v<MAJOR>.<MINOR>.<PATCH>. Aborting");

@@ -76,6 +76,8 @@ namespace ChatterMascot.Ui
         public override string PairingNeededToast =>
             "サーバーに繋がりません\nMac の ChatterAgent のメニュー「Android とペアリング…」で PIN を表示し、\n" +
             "設定パネルの「ペアリング…」で入力してください";
+        public override string UpdateAvailableToast(string version) =>
+            $"新しい版 {version} があります\nRelease ページの APK を adb install -r で入れてください";
         public override string PairingDialogMessage =>
             "Mac の ChatterAgent のメニュー「Android とペアリング…」に出る 4 桁の PIN を入力してください";
         public override string Cancel => "キャンセル";

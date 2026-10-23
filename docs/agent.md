@@ -15,6 +15,7 @@
 | `src-tauri/src/clients.rs` | 繋ぐクライアント（マスコット / player）を表示とミュートから1つに決める。切り替え・player の起動と停止・監視・ショートカット |
 | `src-tauri/src/mascot_app.rs` | Chatter Mascot（Unity アプリ）の探索・起動・終了要求・実行中の pid（macOS 依存部） |
 | `src-tauri/src/mascot.rs` | `mascot/settings.json`・VRM・マスコットへの依頼（`mascot/requests/`）・モーション一覧（`mascot/motions.json`）の読み取り |
+| `src-tauri/src/update.rs` | 新しい版の検知（GitHub Releases）・署名の検証・ChatterAgent（updater）とマスコット（自前）の入れ替え・自動確認の監視 |
 | `src-tauri/src/text.rs` | 日英の文言（OS のロケールが `ja` で始まれば日本語、それ以外は英語）と、画面へ渡す言語 |
 | `index.html` | 設定窓（CSS も中に持つ） |
 | `pairing.html` | ペアリング窓（Android とペアリング…。CSS も中に持つ） |
@@ -75,6 +76,11 @@ Dock にも ⌘Tab にも出ない。操作はメニューバーのアイコン�
 - ★ **`settings.json` が JSON として読めないときは、既定値で動かし、ファイルは書き換えない**（`[Agent]` ログに出す）。
   手で書いた内容を、表示状態の保存などで上書きして消さないため
 
+### 開発用の上書き（`devUpdateRepo`）
+
+同じ `settings.json` に `"devUpdateRepo": "<owner>/<repo>"` を書くと、更新の取得元の Releases をそのリポジトリに差し替える
+（検証用。メニューからは変えられない）。
+
 ## メニューと状態
 
 状態欄は「サーバー: …」の形で、次のどれかが入る。
@@ -95,6 +101,7 @@ Dock にも ⌘Tab にも出ない。操作はメニューバーのアイコン�
 | Android とペアリング… | ペアリング窓を前面に出す。無ければ作る（→「ペアリング窓」） |
 | 設定… | 設定窓を前面に出す。無ければ作る（次節）。マスコットの右クリックや Finder からの開き直しでも同じ（→「マスコットとのやり取り」） |
 | サーバーを再起動 / サーバーを起動 | 自分の server が動いていれば再起動、そうでなければ起動。外で動いている間と処理中は無効 |
+| アップデートを確認… / アップデートがあります… / 更新中… | 下記「更新」。手元ビルド（版に `-dev` が付く）では無効 |
 | ログを開く | `server.log` を開く。無ければディレクトリを開く |
 | ログイン時に起動 | 下記 |
 | 終了 | player → マスコット → server の順に止めてから終わる |
@@ -236,6 +243,7 @@ Finder から起動したアプリは薄い環境しか持たないので、同�
 
 ## 停止の仕組み
 
+- **更新後の再起動も「終了」と同じ順（player → マスコット → server）で止めてから** `request_restart()` する。先に止めないと、新しいプロセスが古いマスコットの終了を「外で終了された」と見て非表示にする（→「更新」）
 - **server の pid へ SIGTERM を1回だけ送る。** 2回目を送ると server が後始末を飛ばして終わる
   ので、送るのは1回に限る
 - 合成エンジンは server が**別のプロセスグループ**で起こしている。ChatterAgent が止めるのは server
@@ -243,6 +251,34 @@ Finder から起動したアプリは薄い環境しか持たないので、同�
 - **10秒待っても終わらなければ SIGKILL する。** このときエンジンが残りうる（ログの `[Agent]` 行に
   警告が出る）。残ったエンジンは次の起動の疎通確認で見つかって再利用される
   （→ [`knowledge/core.md`](./knowledge/core.md)「エンジンを起こす」）
+
+## 更新
+
+メニューで選んだときだけ、その場でダウンロード・検証・入れ替え・再起動まで進める。裏で落としておくことはしない。
+
+- **検知:** `GET /repos/<repo>/releases?per_page=100` を1回引き、`agent-v*` と `mascot-v*` の最新をタグの接頭辞ごとに取る
+  （draft・prerelease・版を読めないタグは数えない）。`releases/latest` は後から publish した系統に移るので使わない。
+  未認証の回数制限（403 / 429）に当たったら、ログに残して次の周期に回す
+- **自動確認:** 設定窓の「Chatter Agent について」のスイッチ（`settings.json` の `checkUpdates`。既定 ON）。
+  起動時と、その後は30分ごとに起きて、最後に成功してから6時間たっていれば確認する（壁時計で測る。失敗は数えない）。
+  OFF でもメニューの手動確認は使える。見つかった新しい版は、メニュー項目の文言と設定窓の「バージョン」「マスコット」の行に出る
+- **手元ビルドは対象外:** 今の版に pre-release 部（`0.0.0-dev`）があれば、検知も更新もしない。ChatterAgent が手元ビルドならメニュー項目ごと無効、
+  マスコットが手元ビルドならマスコットだけ対象外にする
+- **マスコットの比べ先:** `/Applications` → `~/Applications` の `ChatterMascot.app` の `Info.plist`。リポジトリの `Build/` は触らない
+- **流れ:** 確認 → 一覧のダイアログ → マスコット → ChatterAgent。**マスコットの更新に失敗しても警告を出して ChatterAgent の更新へ進む**
+  （`/Applications` のマスコットが書けなくても ChatterAgent は更新できるように）。失敗はどちらも理由付きのダイアログで見せる。
+  確認からダウンロード・入れ替えまで全体に処理中の印を掛け、その間はメニューを無効にして自動と手動が重ならないようにする
+- **ChatterAgent:** `tauri-plugin-updater`。エンドポイントは検知した Release の `latest.json` を実行時に渡す。
+  終わったら「終了」と同じ順（player → マスコット → server）で止めてから `request_restart()` で再起動する
+  （`ExitRequested` の code が `Some` なので `prevent_exit` には掛からない）。
+  ★ `download_and_install` はメインスレッドで呼ばない（管理者の認証を AppleScript で待つ）。
+  AppTranslocation の下から動いているときは自己更新を断り、`/Applications` へ移すよう案内する
+- **マスコット（macOS）:** `ChatterMascot-macOS.zip` と `.sig` を落とし、`tauri.conf.json` の `plugins.updater.pubkey`
+  （updater と同じ鍵。Rust には持たない）で minisign を検証してから、マスコットを止めて入れ替える。
+  検証に落ちたら何も触らない。入れ替えは `target` の隣に隠しディレクトリを作って `ditto` で展開し、版を確かめて
+  `renamex_np(RENAME_SWAP)` で1回で行う（途中で失敗しても元の `.app` が残る）。表示中だったなら起こし直す
+  （`Clients::with_mascot_stopped`。処理中の印を持ったまま起こすので、監視が「外で終了された」と取り違えない）
+- 添付するもの（`latest.json`、`ChatterAgent.app.tar.gz`、`ChatterMascot-macOS.zip`、`.sig`）と鍵は [`release.md`](./release.md)
 
 ## 設定パネル
 
@@ -300,6 +336,8 @@ Finder から起動したアプリは薄い環境しか持たないので、同�
   `CFBundleShortVersionString`。見つからない・読めないときは「—」。窓を開いたときとフォーカスを得たときに読み直す。
   マスコットの release ビルド（Android と macOS）はタグの版を入れ、手元ビルドは `0.0.0-dev` になる
   （→ [`mascot.md`](./mascot.md)「署名と版」）。XR 版の版はここには出ない（XR の設定パネルと起動ログで確かめる）
+- 自動で確認する: スイッチ（`settings.json` の `checkUpdates`）。切ると起動時と定期の確認が止まる（→「更新」）。
+  新しい版が見つかっていれば、バージョンとマスコットの行の注記に出る。フォーカスを得たときに読み直す
 - ライセンス: リポジトリ直下の `NOTICE` の全文。`include_str!` でビルド時に埋め込む（コピーを持たないので
   食い違わない。Rust の `about()`）。全文は長いので畳んでおく
 

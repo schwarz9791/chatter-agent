@@ -72,6 +72,7 @@ Assets/ChatterMascot/
                 PlaybackState.cs / PlaybackOptions.cs / PlaybackEvent.cs
     Net/        SpeechClient.cs     WebSocket。繋ぐ・繋ぎ直す・ack を送る
                 AudioFetcher.cs     GET /audio/<epoch>-<seq>.wav
+                ReleaseCheck.cs     release タグの版の規則と、起動時の新版確認（Play 以外の Android だけ）
     Audio/      WavDecoder.cs       WAV → AudioClip
                 AudioClipPlayer.cs  AudioSource で1件ずつ鳴らす
                 MuteState.cs        一時ミュートの状態
@@ -443,6 +444,13 @@ logcat に出るはずの行:
 adb shell pm grant|revoke tech.sukima.chattermascot android.permission.HAND_TRACKING
 ```
 
+### 起動時の新版トースト
+
+Play 以外（adb など）から入れた Android は、起動のたびに1回だけ GitHub の release 一覧を取得し、
+今の版より新しい `mascot-v*` があれば端末のトーストで知らせる（draft / prerelease / `agent-v*` は数えない）。
+取得に失敗してもログだけで、端末には出さない。`0.0.0-dev` の手元ビルドは比べない。Play から入れたときは
+出さない —— Play は審査を経て反映されるので、GitHub を見るとまだ Play に無い版を案内してしまう。
+
 ### モデルとモーションを入れる
 
 **`adb push` は要らない。** `connection.serverUrl` / `connection.token`（→ 下の「接続」の C）が
@@ -764,7 +772,7 @@ unset CHATTER_MASCOT_KEYSTORE_PASS
 プレリリース接尾辞は不可）。`bundleVersion`（Android の「アプリ情報」に出る、人が読む版）は
 `MAJOR.MINOR.PATCH`、versionCode は `MAJOR*10000 + MINOR*100 + PATCH`（下がると上書きインストールが
 拒まれるので、版は単調に上げる。`mascot-v0.0.0` は versionCode が 0 になるので不可）。規則は
-`BuildScript.TryParseReleaseTag` にある。`mascot-` を付けるのは、コンポーネントごとに版が別で、
+`ReleaseCheck.TryParseReleaseTag`（`Runtime/Net/`）にある。ビルドと起動時の新版確認が共有する。`mascot-` を付けるのは、コンポーネントごとに版が別で、
 素の `v` ではリポジトリ全体の版に見えるため。
 
 release ビルドは、作業ツリーがきれいで HEAD に `mascot-v*` タグがちょうど1つ付いているときだけ通る。

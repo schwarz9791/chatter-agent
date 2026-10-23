@@ -423,6 +423,21 @@ namespace ChatterMascot
 
             ResolveServerUrl();
             StartAssetSyncIfNeeded();
+            StartReleaseCheckIfNeeded();
+        }
+
+        /// <summary>起動のたびに1回だけ新版を確かめる。失敗しても <c>Awake</c> は止めない。</summary>
+        private void StartReleaseCheckIfNeeded()
+        {
+            try
+            {
+                if (!ReleaseCheck.ShouldCheck(Application.platform, Application.installerName)) return;
+                _ = ReleaseCheck.CheckAsync(Application.version);
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[Mascot] Failed to start release check: " + e.Message);
+            }
         }
 
         /// <summary>

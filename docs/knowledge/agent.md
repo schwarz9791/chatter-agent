@@ -42,10 +42,12 @@ ChatterAgent ごと終わり、server も止まる。→ `api.prevent_exit()` �
 
 - **WebView の `fetch` は使えない。** `Origin` が付き、server が 403 にする。この絞りは緩めず、
   Origin を持たない Rust から送る
-- **HTTP クライアントの crate は足さない。** reqwest は macOS では未コンパイルで、足すと hyper 一式が
-  乗る。std の `TcpStream` で HTTP/1.0 の要求を送り、`read_to_end` で読み切る
+- **server への HTTP は std の `TcpStream` のまま。** HTTP/1.0 の要求を送り、`read_to_end` で読み切る。
+  reqwest は `tauri-plugin-updater` が持ち込むので入っている。GitHub への HTTPS（更新の検知とマスコットの取得）はそれを使う。
+  ★ updater と reqwest は `default-features = false` + `native-tls` に絞ること。既定のままだと rustls + aws-lc
+  （C のビルドと、`about.toml` の `accepted` に無いライセンス）が入る。macOS の信頼ストアも使わなくなる
 - server の応答は `content-length` 付きで、HTTP/1.0 の要求には chunked で返さない。だから本文の切り出しは
-  ヘッダの終わりまでで済む。keep-alive / chunked / TLS が要るなら `ureq` を使う
+  ヘッダの終わりまでで済む。keep-alive / chunked が要るなら入っている reqwest を使う
 
 ## 同期の `#[tauri::command]` は使わない
 

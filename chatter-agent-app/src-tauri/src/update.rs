@@ -23,7 +23,7 @@ use tauri_plugin_dialog::{DialogExt as _, MessageDialogButtons, MessageDialogKin
 use tauri_plugin_updater::UpdaterExt as _;
 
 use crate::clients::Clients;
-use crate::mascot_app::{bundle_version, home_of, update_target};
+use crate::mascot_app::{bundle_version, home_of, running_pids, update_target};
 use crate::server::{lock, Manager};
 use crate::text;
 use crate::Settings;
@@ -254,7 +254,8 @@ fn auto_check(app: &AppHandle) {
     }
 }
 
-/// メニューの「アップデート…」。確認 → 一覧 → マスコット → ChatterAgent の順に進む。呼び出しはスレッドから。
+/// メニューの「アップデート…」。確認 → 一覧 → マスコットを落として確かめる → ChatterAgent を入れ替えて再起動、
+/// の順に進む。マスコットの入れ替えは止まったところで行い、止めるのは1回にする。呼び出しはスレッドから。
 pub fn run_from_menu(app: AppHandle) {
     let u = app.state::<Updates>();
     let Some(mut busy) = u.begin() else { return };
@@ -301,30 +302,44 @@ pub fn run_from_menu(app: AppHandle) {
         return;
     }
 
+    let mut download = None;
     if let Some(f) = &mascot {
-        match update_mascot(&app, f) {
-            Ok(()) => lock(&u.state).mascot = None,
-            Err(e) => {
-                log(&app, &format!("Mascot update failed: {e}"));
-                // マスコットが書けなくても ChatterAgent は更新できるので、続ける。
-                let msg = if agent.is_some() {
-                    t.mascot_update_failed(&e)
-                } else {
-                    t.update_failed(&e)
-                };
-                notice(&app, MessageDialogKind::Warning, msg);
-            }
+        match fetch_mascot(&app, f) {
+            Ok(d) => download = Some(d),
+            Err(e) => mascot_failed(&app, &e, agent.is_some()),
         }
     }
     if let Some(f) = &agent {
-        match update_agent(&app, f) {
-            Ok(()) => busy.keep = true,
+        match install_agent(&app, f) {
+            Ok(()) => {
+                busy.keep = true;
+                restart(&app, download);
+                return;
+            }
             Err(e) => {
                 log(&app, &format!("ChatterAgent update failed: {e}"));
                 notice(&app, MessageDialogKind::Warning, t.update_failed(&e));
             }
         }
     }
+    if let Some(d) = download {
+        match app.state::<Clients>().with_mascot_stopped(|| d.apply(&app)) {
+            Ok(()) => lock(&u.state).mascot = None,
+            Err(e) => mascot_failed(&app, &e.to_string(), false),
+        }
+    }
+}
+
+/// マスコットが書けなくても ChatterAgent は更新できるので、`continuing` なら続けることを添える。
+fn mascot_failed(app: &AppHandle, e: &str, continuing: bool) {
+    log(app, &format!("Mascot update failed: {e}"));
+    let t = text::current();
+    let msg = if continuing {
+        t.mascot_update_failed(e)
+    } else {
+        t.update_failed(e)
+    };
+    notice(app, MessageDialogKind::Warning, msg);
 }
 
 /// 隔離された場所（AppTranslocation）の下からは、入れ替える先を取り違える。
@@ -339,7 +354,8 @@ fn asset<'a>(f: &'a Found, name: &str) -> Result<&'a str, String> {
         .ok_or_else(|| format!("the release {} has no {name}", f.version))
 }
 
-fn update_agent(app: &AppHandle, f: &Found) -> Result<(), String> {
+/// ディスク上の `.app` を入れ替える。動いている ChatterAgent は再起動するまで古いまま。
+fn install_agent(app: &AppHandle, f: &Found) -> Result<(), String> {
     let url = asset(f, LATEST_JSON)?
         .parse::<tauri::Url>()
         .map_err(|e| e.to_string())?;
@@ -360,17 +376,65 @@ fn update_agent(app: &AppHandle, f: &Found) -> Result<(), String> {
             .await
             .map_err(|e| e.to_string())
     })?;
-    // 「終了」と同じ順に止めてから再起動する。先に止めないと、新しいプロセスが古いマスコットの
-    // 終了を「外で終了された」と見て非表示にする。
-    let (Some(cl), Some(m)) = (app.try_state::<Clients>(), app.try_state::<Manager>()) else {
-        return Err("the app state is not ready".into());
-    };
-    let (cl, m, app) = ((*cl).clone(), (*m).clone(), app.clone());
-    cl.shutdown(move || m.quit(move || app.request_restart()));
+    log(
+        app,
+        &format!("ChatterAgent updated to {}. Restarting", f.version),
+    );
     Ok(())
 }
 
-fn update_mascot(app: &AppHandle, f: &Found) -> Result<(), String> {
+/// 「終了」と同じ順に止めてから再起動する。先に止めないと、新しいプロセスが古いマスコットの
+/// 終了を「外で終了された」と見て非表示にする。マスコットはここで止まったところで入れ替え、
+/// 起こすのは再起動後の1回だけにする。
+fn restart(app: &AppHandle, mascot: Option<MascotDownload>) {
+    let (cl, m, app) = (
+        (*app.state::<Clients>()).clone(),
+        (*app.state::<Manager>()).clone(),
+        app.clone(),
+    );
+    cl.shutdown(move || {
+        if let Some(d) = mascot {
+            // 止めきれていなければ、動いているものの下を差し替えない。
+            let result = if running_pids().is_empty() {
+                d.apply(&app)
+            } else {
+                Err(io::Error::other("the mascot did not quit"))
+            };
+            if let Err(e) = result {
+                mascot_failed(&app, &e.to_string(), true);
+            }
+        }
+        m.quit(move || app.request_restart());
+    });
+}
+
+/// 落としたマスコットの zip と署名。入れ替えはマスコットが止まっている間に `apply` する。
+struct MascotDownload {
+    zip: Vec<u8>,
+    sig: String,
+    pubkey: String,
+    target: PathBuf,
+    version: String,
+}
+
+impl MascotDownload {
+    fn apply(&self, app: &AppHandle) -> io::Result<()> {
+        let warn = |m: &str| log(app, m);
+        apply_mascot(
+            &self.zip,
+            &self.sig,
+            &self.pubkey,
+            &self.target,
+            &self.version,
+            &warn,
+        )?;
+        log(app, &format!("Mascot updated to {}", self.version));
+        Ok(())
+    }
+}
+
+/// 止める前に落として署名まで確かめる。合わなければ何も止めない。
+fn fetch_mascot(app: &AppHandle, f: &Found) -> Result<MascotDownload, String> {
     let pubkey = pubkey(app)?;
     let (target, _) = mascot_current(app)
         .ok_or_else(|| "ChatterMascot.app is not in /Applications or ~/Applications".to_string())?;
@@ -384,13 +448,14 @@ fn update_mascot(app: &AppHandle, f: &Found) -> Result<(), String> {
             sig.map_err(|e| e.to_string())?,
         ))
     })?;
-    let cl = app
-        .try_state::<Clients>()
-        .ok_or_else(|| "the app state is not ready".to_string())?;
-    let version = f.version.to_string();
-    let warn = |m: &str| log(app, m);
-    cl.with_mascot_stopped(|| apply_mascot(&zip, &sig, &pubkey, &target, &version, &warn))
-        .map_err(|e| e.to_string())
+    verify(&zip, &sig, &pubkey)?;
+    Ok(MascotDownload {
+        zip: zip.to_vec(),
+        sig,
+        pubkey,
+        target,
+        version: f.version.to_string(),
+    })
 }
 
 /// updater と同じ公開鍵（`tauri.conf.json`）。
@@ -670,6 +735,30 @@ mod tests {
             "new"
         );
         assert!(!dest.join(".ChatterMascot.update").exists());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn install_mascot_reports_an_unwritable_directory_and_keeps_the_original() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let d = scratch("install-readonly");
+        let src = d.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        zip_of(&write_app(&src, "0.2.0", "new"), &d.join("m.zip"));
+        let dest = d.join("dest");
+        std::fs::create_dir_all(&dest).unwrap();
+        let target = write_app(&dest, "0.1.0", "old");
+        std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        let err = install_mascot(&d.join("m.zip"), &target, "0.2.0", &|_| {}).unwrap_err();
+        std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+        assert!(err.to_string().contains("cannot write to"));
+        assert_eq!(
+            std::fs::read_to_string(target.join("marker")).unwrap(),
+            "old"
+        );
         let _ = std::fs::remove_dir_all(&d);
     }
 

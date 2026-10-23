@@ -255,3 +255,24 @@ Gatekeeper に止められる。マスコットの macOS 版も同じ。開き�
 - ★ **ビルドした Mac でも確かめられる。** 止めるかどうかは quarantine と署名で決まり、どの Mac でビルドしたかは
   関係しない。ブラウザでダウンロードし直したものは、ビルドした Mac でも止められた。開発用のビルドや設定が
   混ざらないよう、別ユーザーで試す。`spctl --status` が `assessments enabled` であること（無効なら何も止めない）
+
+## 更新で入れ替えた `.app` は Gatekeeper にも「ローカルネットワーク」にも聞かれない
+
+ChatterAgent（`tauri-plugin-updater`）もマスコット（reqwest で落として `ditto` で展開）も、自分で落としたファイルには
+quarantine が付かない。入れ替えた `.app` は Gatekeeper の評価を通らずに起動する（`spctl --assess` 自体は
+ad-hoc で公証していないので rejected と答える）。
+
+- 2026-10-23（macOS 27.0.1。管理者ユーザー。server は `"host": "0.0.0.0"`。`devUpdateRepo` で検証用の公開リポジトリに向け、
+  手元でビルドした `0.0.1` → `0.0.2`、`0.0.3` → `0.0.4` と、版だけ書き換えて ad-hoc で署名し直したマスコット
+  `0.2.0` → `0.99.0` → `0.99.1` を、メニューの「アップデート…」から入れ替えた）:
+  - 入れ替えた2つとも `xattr` は `com.apple.provenance` だけで、`codesign --verify --deep --strict` は通った。
+    Gatekeeper の警告は出ず、そのまま起動した
+  - 「ローカルネットワーク」の許可を求められなかった（→「「ローカルネットワーク」の許可は署名の識別子とパスで引かれる」）
+  - `/Applications` に書けるユーザーなので、管理者の認証は求められなかった。書けないユーザーで updater が
+    AppleScript で昇格するところは試していない
+  - `bin-path` は入れ替えの前後とも `/Applications/ChatterAgent.app/Contents/MacOS/chatter-agent`
+  - 再起動は「終了」と同じ順に止めてから `request_restart()` で通った。マスコットは表示状態のまま起き直した
+- ★ **自分で入れた ChatterAgent が AppTranslocation の下から動いていることがある。** 同じ Mac で常用していた
+  `agent-v0.2.1` は `/Applications` に置いてあったのに、quarantine が残っていて
+  `/private/var/folders/…/AppTranslocation/…` から動いていた。この状態では入れ替える先を取り違えるので自己更新を断り、
+  quarantine を外して開き直すよう案内する。案内の画面そのものは試していない

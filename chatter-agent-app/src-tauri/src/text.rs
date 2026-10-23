@@ -101,7 +101,7 @@ pub const JA: Text = Text {
     mascot_update_failed: |e| {
         format!("マスコットを更新できませんでした。ChatterAgent の更新は続けます。\n\n{e}")
     },
-    update_translocated: "ChatterAgent が隔離された場所から動いているため、自分を更新できません。/Applications に移してから開き直してください。",
+    update_translocated: "ChatterAgent が隔離された一時的な場所（App Translocation）から動いているため、自分を更新できません。\n\nダウンロードしたときの印が残っています。ターミナルで次を実行してから、ChatterAgent を終了して開き直してください。\n\nxattr -dr com.apple.quarantine /Applications/ChatterAgent.app",
 };
 
 pub const EN: Text = Text {
@@ -156,7 +156,7 @@ pub const EN: Text = Text {
     mascot_update_failed: |e| {
         format!("Could not update the mascot. Continuing with the ChatterAgent update.\n\n{e}")
     },
-    update_translocated: "ChatterAgent is running from a quarantined location and cannot update itself. Move it to /Applications and open it again.",
+    update_translocated: "ChatterAgent is running from a temporary isolated location (App Translocation) and cannot update itself.\n\nThe download mark is still on the app. Run the following in Terminal, then quit ChatterAgent and open it again.\n\nxattr -dr com.apple.quarantine /Applications/ChatterAgent.app",
 };
 
 /// OS のロケールが `ja` で始まるか。

@@ -265,18 +265,22 @@ Finder から起動したアプリは薄い環境しか持たないので、同�
 - **手元ビルドは対象外:** 今の版に pre-release 部（`0.0.0-dev`）があれば、検知も更新もしない。ChatterAgent が手元ビルドならメニュー項目ごと無効、
   マスコットが手元ビルドならマスコットだけ対象外にする
 - **マスコットの比べ先:** `/Applications` → `~/Applications` の `ChatterMascot.app` の `Info.plist`。リポジトリの `Build/` は触らない
-- **流れ:** 確認 → 一覧のダイアログ → マスコット → ChatterAgent。**マスコットの更新に失敗しても警告を出して ChatterAgent の更新へ進む**
+- **流れ:** 確認 → 一覧のダイアログ → マスコットを落として署名を確かめる → ChatterAgent を入れ替える → 止めて再起動。
+  両方を更新するときは、再起動のために止めたところでマスコットを入れ替え、マスコットを止めるのを1回にする。
+  **マスコットの更新に失敗しても警告を出して ChatterAgent の更新へ進む**
   （`/Applications` のマスコットが書けなくても ChatterAgent は更新できるように）。失敗はどちらも理由付きのダイアログで見せる。
   確認からダウンロード・入れ替えまで全体に処理中の印を掛け、その間はメニューを無効にして自動と手動が重ならないようにする
 - **ChatterAgent:** `tauri-plugin-updater`。エンドポイントは検知した Release の `latest.json` を実行時に渡す。
   終わったら「終了」と同じ順（player → マスコット → server）で止めてから `request_restart()` で再起動する
   （`ExitRequested` の code が `Some` なので `prevent_exit` には掛からない）。
   ★ `download_and_install` はメインスレッドで呼ばない（管理者の認証を AppleScript で待つ）。
-  AppTranslocation の下から動いているときは自己更新を断り、`/Applications` へ移すよう案内する
+  AppTranslocation の下から動いているときは自己更新を断り、quarantine を外して開き直すよう案内する（`/Applications` に置いてあっても、
+  quarantine が残っていると translocate されることがある。→ [`knowledge/agent.md`](./knowledge/agent.md)「配った zip は Gatekeeper の「このまま開く」で開ける」）
 - **マスコット（macOS）:** `ChatterMascot-macOS.zip` と `.sig` を落とし、`tauri.conf.json` の `plugins.updater.pubkey`
   （updater と同じ鍵。Rust には持たない）で minisign を検証してから、マスコットを止めて入れ替える。
-  検証に落ちたら何も触らない。入れ替えは `target` の隣に隠しディレクトリを作って `ditto` で展開し、版を確かめて
-  `renamex_np(RENAME_SWAP)` で1回で行う（途中で失敗しても元の `.app` が残る）。表示中だったなら起こし直す
+  検証は止める前に行い、落ちたら何も止めず何も触らない。入れ替えは `target` の隣に隠しディレクトリを作って `ditto` で展開し、版を確かめて
+  `renamex_np(RENAME_SWAP)` で1回で行う（途中で失敗しても元の `.app` が残る）。
+  マスコットだけを更新するときは、表示中だったなら起こし直す
   （`Clients::with_mascot_stopped`。処理中の印を持ったまま起こすので、監視が「外で終了された」と取り違えない）
 - 添付するもの（`latest.json`、`ChatterAgent.app.tar.gz`、`ChatterMascot-macOS.zip`、`.sig`）と鍵は [`release.md`](./release.md)
 

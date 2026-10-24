@@ -47,15 +47,19 @@ pub struct Found {
     assets: BTreeMap<String, String>,
 }
 
-/// `prefix` の系統で最新の公開 Release。draft・prerelease・版を読めないタグは数えない。
-fn newest(releases: &Value, prefix: &str) -> Option<Found> {
+/// `prefix` の系統で最新の公開 Release。draft・prerelease・版を読めないタグ・semver の
+/// プレリリース版は数えない。更新に要る `required` のアセットが揃っていない Release も数えない。
+fn newest(releases: &Value, prefix: &str, required: &[&str]) -> Option<Found> {
     releases
         .as_array()?
         .iter()
         .filter(|r| r["draft"] != true && r["prerelease"] != true)
         .filter_map(|r| {
             let version = Version::parse(r["tag_name"].as_str()?.strip_prefix(prefix)?).ok()?;
-            let assets = r["assets"]
+            if is_dev(&version) {
+                return None;
+            }
+            let assets: BTreeMap<String, String> = r["assets"]
                 .as_array()?
                 .iter()
                 .filter_map(|a| {
@@ -65,7 +69,10 @@ fn newest(releases: &Value, prefix: &str) -> Option<Found> {
                     ))
                 })
                 .collect();
-            Some(Found { version, assets })
+            required
+                .iter()
+                .all(|name| assets.contains_key(*name))
+                .then_some(Found { version, assets })
         })
         .max_by(|a, b| a.version.cmp(&b.version))
 }
@@ -81,7 +88,14 @@ struct State {
     /// 最後に確認できた時刻。失敗は数えない。
     last_ok: Option<SystemTime>,
     /// 確認からダウンロード・入れ替えまでの全体に掛ける。
-    busy: bool,
+    busy: Option<Phase>,
+}
+
+/// 処理中の段階。メニューの文言を分ける。
+#[derive(Clone, Copy, PartialEq)]
+enum Phase {
+    Checking,
+    Updating,
 }
 
 pub struct Updates {
@@ -98,10 +112,18 @@ struct Busy<'a> {
     keep: bool,
 }
 
+impl Busy<'_> {
+    /// 確認が終わって入れ替えに進んだことを、メニューに出す。
+    fn updating(&self) {
+        lock(&self.updates.state).busy = Some(Phase::Updating);
+        self.updates.refresh_menu();
+    }
+}
+
 impl Drop for Busy<'_> {
     fn drop(&mut self) {
         if !self.keep {
-            lock(&self.updates.state).busy = false;
+            lock(&self.updates.state).busy = None;
             self.updates.refresh_menu();
         }
     }
@@ -121,7 +143,7 @@ impl Updates {
     }
 
     fn begin(&self) -> Option<Busy<'_>> {
-        if self.dev || std::mem::replace(&mut lock(&self.state).busy, true) {
+        if self.dev || lock(&self.state).busy.replace(Phase::Checking).is_some() {
             return None;
         }
         self.refresh_menu();
@@ -137,8 +159,11 @@ impl Updates {
             let s = lock(&self.state);
             if self.dev {
                 (t.update_check, false)
-            } else if s.busy {
-                (t.updating, false)
+            } else if let Some(phase) = s.busy {
+                match phase {
+                    Phase::Checking => (t.update_checking, false),
+                    Phase::Updating => (t.updating, false),
+                }
             } else if s.agent.is_some() || s.mascot.is_some() {
                 (t.update_available, true)
             } else {
@@ -220,9 +245,10 @@ fn check(app: &AppHandle, u: &Updates) -> Result<(), String> {
             .map_err(|e| e.to_string())
     })?;
     let current = app.package_info().version.clone();
-    let agent = newest(&releases, AGENT_PREFIX).filter(|f| f.version > current);
-    let mascot = mascot_current(app)
-        .and_then(|(_, cur)| newest(&releases, MASCOT_PREFIX).filter(|f| f.version > cur));
+    let agent = newest(&releases, AGENT_PREFIX, &[LATEST_JSON]).filter(|f| f.version > current);
+    let mascot = mascot_current(app).and_then(|(_, cur)| {
+        newest(&releases, MASCOT_PREFIX, &[MASCOT_ZIP, MASCOT_SIG]).filter(|f| f.version > cur)
+    });
     let mut s = lock(&u.state);
     s.agent = agent;
     s.mascot = mascot;
@@ -265,7 +291,18 @@ pub fn run_from_menu(app: AppHandle) {
         notice(&app, MessageDialogKind::Warning, t.update_check_failed(&e));
         return;
     }
-    let (agent, mascot) = u.pending();
+    let (mut agent, mascot) = u.pending();
+    // 隔離されたままでは自分を入れ替えられない。マスコットの更新は妨げない。
+    let mut translocated = false;
+    if agent.is_some() && is_translocated() {
+        notice(
+            &app,
+            MessageDialogKind::Warning,
+            t.update_translocated.into(),
+        );
+        agent = None;
+        translocated = true;
+    }
     let mut lines = Vec::new();
     if let Some(f) = &agent {
         lines.push(format!(
@@ -278,12 +315,14 @@ pub fn run_from_menu(app: AppHandle) {
         lines.push(format!("ChatterMascot {cur} → {}", f.version));
     }
     if lines.is_empty() {
-        notice(&app, MessageDialogKind::Info, t.update_up_to_date.into());
+        if !translocated {
+            notice(&app, MessageDialogKind::Info, t.update_up_to_date.into());
+        }
         return;
     }
     let go = app
         .dialog()
-        .message(t.update_prompt(&lines.join("\n")))
+        .message(t.update_prompt(&lines.join("\n"), agent.is_some()))
         .title(t.update_title)
         .buttons(MessageDialogButtons::OkCancelCustom(
             t.update_ok.into(),
@@ -293,14 +332,7 @@ pub fn run_from_menu(app: AppHandle) {
     if !go {
         return;
     }
-    if agent.is_some() && is_translocated() {
-        notice(
-            &app,
-            MessageDialogKind::Warning,
-            t.update_translocated.into(),
-        );
-        return;
-    }
+    busy.updating();
 
     let mut download = None;
     if let Some(f) = &mascot {
@@ -362,6 +394,12 @@ fn install_agent(app: &AppHandle, f: &Found) -> Result<(), String> {
     let updater = app
         .updater_builder()
         .endpoints(vec![url])
+        .map(|b| {
+            b.configure_client(|c| {
+                c.connect_timeout(CONNECT_TIMEOUT)
+                    .read_timeout(READ_TIMEOUT)
+            })
+        })
         .and_then(|b| b.build())
         .map_err(|e| e.to_string())?;
     // ★ メインスレッドで呼ばない。管理者の認証の AppleScript をここで待つ。
@@ -516,7 +554,15 @@ fn install_mascot(
         .parent()
         .ok_or_else(|| io::Error::other("the install target has no parent directory"))?;
     let tmp = parent.join(".ChatterMascot.update");
-    let _ = std::fs::remove_dir_all(&tmp);
+    // 前回の残骸が消せないまま進むと、`create_dir` の失敗が書き込み権限の問題に見える。
+    if let Err(e) = std::fs::remove_dir_all(&tmp) {
+        if e.kind() != io::ErrorKind::NotFound {
+            return Err(io::Error::new(
+                e.kind(),
+                format!("cannot remove {}: {e}", tmp.display()),
+            ));
+        }
+    }
     std::fs::create_dir(&tmp).map_err(|e| {
         io::Error::new(
             e.kind(),
@@ -618,11 +664,21 @@ mod tests {
     const OTHER_PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJEOTQ1QkY3REVBMTQ5MzQKUldRMFNhSGU5MXVVdlZHeHFiY25pcTJtUHk4SFFLWTh5SHBYMjdnN1R6S2FRODl0SUhBT3NIZzIK";
     const SIG: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUV0V1ZlVTSkRpZkdCZC8zSFBtSHVFdndLZHFpVmFJVnZVd3Z5Q2xQLzFKMm9VWHovZVJHU0c0Z1pHcFl6TDluRUpYVlhkdlMvbGRWSFVqeG9WZlNIb0d5UGV2VmswMFFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzQxODc4CWZpbGU6cGF5bG9hZC5iaW4KaDFpdi9xbWN0dmt6U1ZrdnBVOUdCSExxUk5Ic0c5L1BKSFNVcXVtaUpBQ2xadGI2Q0hDQXNUWCtFSFdDTGIrVW9MMHNpZFRBcG5PYWg4U0pDY2dYQ3c9PQo=";
 
+    fn release_with(tag: &str, draft: bool, prerelease: bool, names: &[&str]) -> Value {
+        let assets: Vec<Value> = names
+            .iter()
+            .map(|n| json!({"name": n, "browser_download_url": format!("https://x/{tag}/{n}")}))
+            .collect();
+        json!({"tag_name": tag, "draft": draft, "prerelease": prerelease, "assets": assets})
+    }
+
     fn release(tag: &str, draft: bool, prerelease: bool) -> Value {
-        json!({
-            "tag_name": tag, "draft": draft, "prerelease": prerelease,
-            "assets": [{"name": "latest.json", "browser_download_url": format!("https://x/{tag}/latest.json")}],
-        })
+        release_with(
+            tag,
+            draft,
+            prerelease,
+            &[LATEST_JSON, MASCOT_ZIP, MASCOT_SIG],
+        )
     }
 
     #[test]
@@ -637,19 +693,45 @@ mod tests {
             release("v3.0.0", false, false),
             release("agent-v0.9.0", false, false),
         ]);
-        let f = newest(&releases, AGENT_PREFIX).unwrap();
+        let f = newest(&releases, AGENT_PREFIX, &[LATEST_JSON]).unwrap();
         assert_eq!(f.version, Version::new(0, 10, 0));
         assert_eq!(
             f.assets["latest.json"],
             "https://x/agent-v0.10.0/latest.json"
         );
         assert_eq!(
-            newest(&releases, MASCOT_PREFIX).unwrap().version,
+            newest(&releases, MASCOT_PREFIX, &[MASCOT_ZIP, MASCOT_SIG])
+                .unwrap()
+                .version,
             Version::new(9, 0, 0)
         );
-        assert_eq!(newest(&json!([]), AGENT_PREFIX), None);
+        assert_eq!(newest(&json!([]), AGENT_PREFIX, &[]), None);
         assert_eq!(
-            newest(&json!({"message": "rate limit"}), AGENT_PREFIX),
+            newest(&json!({"message": "rate limit"}), AGENT_PREFIX, &[]),
+            None
+        );
+    }
+
+    #[test]
+    fn newest_skips_releases_without_the_required_assets_and_semver_prereleases() {
+        let releases = json!([
+            release_with("mascot-v0.1.0", false, false, &[MASCOT_ZIP, MASCOT_SIG]),
+            release_with("mascot-v0.2.0", false, false, &[MASCOT_ZIP]),
+            release_with("mascot-v0.3.0", false, false, &["ChatterMascot.apk"]),
+            release_with(
+                "mascot-v0.4.0-rc.1",
+                false,
+                false,
+                &[MASCOT_ZIP, MASCOT_SIG]
+            ),
+        ]);
+        let required = [MASCOT_ZIP, MASCOT_SIG];
+        assert_eq!(
+            newest(&releases, MASCOT_PREFIX, &required).unwrap().version,
+            Version::new(0, 1, 0)
+        );
+        assert_eq!(
+            newest(&json!([releases[1], releases[2]]), MASCOT_PREFIX, &required),
             None
         );
     }
@@ -755,6 +837,40 @@ mod tests {
         std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
         assert!(err.to_string().contains("cannot write to"));
+        assert_eq!(
+            std::fs::read_to_string(target.join("marker")).unwrap(),
+            "old"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn install_mascot_stops_with_a_reason_when_a_leftover_cannot_be_removed() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let d = scratch("install-leftover");
+        let src = d.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        zip_of(&write_app(&src, "0.2.0", "new"), &d.join("m.zip"));
+        let dest = d.join("dest");
+        std::fs::create_dir_all(&dest).unwrap();
+        let target = write_app(&dest, "0.1.0", "old");
+        let leftover = dest.join(".ChatterMascot.update");
+        std::fs::create_dir_all(leftover.join("stale")).unwrap();
+        std::fs::write(leftover.join("stale/file"), "x").unwrap();
+        std::fs::set_permissions(
+            leftover.join("stale"),
+            std::fs::Permissions::from_mode(0o555),
+        )
+        .unwrap();
+
+        let err = install_mascot(&d.join("m.zip"), &target, "0.2.0", &|_| {}).unwrap_err();
+        std::fs::set_permissions(
+            leftover.join("stale"),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+        assert!(err.to_string().contains("cannot remove"), "{err}");
         assert_eq!(
             std::fs::read_to_string(target.join("marker")).unwrap(),
             "old"

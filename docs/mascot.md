@@ -448,6 +448,7 @@ adb shell pm grant|revoke tech.sukima.chattermascot android.permission.HAND_TRAC
 
 Play 以外（adb など）から入れた Android は、起動のたびに1回だけ GitHub の release 一覧を取得し、
 今の版より新しい `mascot-v*` があれば端末のトーストで知らせる（draft / prerelease / `agent-v*` は数えない）。
+APK（`ChatterMascot.apk`）が付いている release だけを数える —— 付いていない release を案内しても、利用者に打てる手が無い。
 取得に失敗してもログだけで、端末には出さない。`0.0.0-dev` の手元ビルドは比べない。Play から入れたときは
 出さない —— Play は審査を経て反映されるので、GitHub を見るとまだ Play に無い版を案内してしまう。
 

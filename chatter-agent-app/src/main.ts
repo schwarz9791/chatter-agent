@@ -442,7 +442,18 @@ function build(): void {
   });
   const autoCheck = checkbox((on) => {
     updates.auto = on;
-    void updateSetAuto(on).catch(() => void loadUpdateInfo().then(render));
+    void updateSetAuto(on).then(
+      () => {
+        delete flash["aboutAutoCheck"];
+        render();
+      },
+      async (e) => {
+        flash["aboutAutoCheck"] = String(e);
+        warn.add("aboutAutoCheck");
+        await loadUpdateInfo();
+        render();
+      },
+    );
   });
   ui.autoCheck = autoCheck;
   row(s, "aboutAutoCheck", () => t.autoCheckUpdates, [autoCheck], { staticNote: () => t.autoCheckUpdatesNote });

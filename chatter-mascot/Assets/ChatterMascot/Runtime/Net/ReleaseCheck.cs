@@ -18,6 +18,7 @@ namespace ChatterMascot.Net
         private const string ReleasesUrl =
             "https://api.github.com/repos/schwarz9791/chatter-agent/releases?per_page=100";
         private const string PlayInstaller = "com.android.vending";
+        private const string ApkAssetName = "ChatterMascot.apk";
         private const int TimeoutSeconds = 10;
 
         /// <summary>
@@ -63,7 +64,8 @@ namespace ChatterMascot.Net
 
         /// <summary>
         /// release 一覧の JSON から、今の版より新しい最大の版を返す。無ければ・今の版が解釈できなければ・
-        /// JSON が読めなければ <c>null</c>。draft / prerelease / <c>mascot-v</c> 以外のタグは数えない。
+        /// JSON が読めなければ <c>null</c>。draft / prerelease / <c>mascot-v</c> 以外のタグ・APK が付いていない release は数えない
+        /// （案内しても入れる手が無い）。
         /// </summary>
         public static string Newer(string releasesJson, string currentVersion)
         {
@@ -82,6 +84,7 @@ namespace ChatterMascot.Net
                     var tag = o["tag_name"];
                     if (tag == null || tag.Type != JTokenType.String) continue;
                     if (!TryParseReleaseTag((string)tag, out var version, out var code)) continue;
+                    if (!HasApk(o["assets"])) continue;
                     if (code <= bestCode) continue;
                     best = version;
                     bestCode = code;
@@ -92,6 +95,17 @@ namespace ChatterMascot.Net
             {
                 return null;
             }
+        }
+
+        private static bool HasApk(JToken assets)
+        {
+            if (!(assets is JArray array)) return false;
+            foreach (var asset in array)
+            {
+                var name = (asset as JObject)?["name"];
+                if (name != null && name.Type == JTokenType.String && (string)name == ApkAssetName) return true;
+            }
+            return false;
         }
 
         private static bool IsTrue(JToken token) => token != null && token.Type == JTokenType.Boolean && (bool)token;

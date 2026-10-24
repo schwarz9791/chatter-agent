@@ -26,6 +26,8 @@ security add-generic-password -a "$USER" -s chatter-agent-updater-key -w
 - 秘密鍵はリポジトリの外に置く。`CHATTER_AGENT_UPDATER_KEY=<秘密鍵の絶対パス>` で `build-release.sh` と
   `chatter-mascot/scripts/build.sh`（release）に渡す。パスワードは `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`、無ければキーチェーンから読む。
   どちらも Unity やビルドを始める前に確かめて、足りなければ止まる
+- パスワードはシェル変数に持ち、署名のコマンド（`tauri signer sign`）にだけ環境変数で渡す。ビルドや依存の `npm ci` の子プロセスには見せない
+  （環境に `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` / `TAURI_SIGNING_PRIVATE_KEY` があっても、関門で読んで `unset` する）
 - ★ **秘密鍵とパスワードの両方をバックアップする（APK の keystore と同じ考え方。→ [`mascot.md`](./mascot.md)「署名と版」）。
   失うと、その公開鍵を入れた版の利用者に更新を配れなくなる**（以後は手で入れ替えてもらう）。パスワードは鍵と同じ場所に置かない
 
@@ -93,7 +95,9 @@ git push origin agent-v0.2.0         # 版を確かめてから（下）
   （→ [`agent.md`](./agent.md)「ビルドと起動」）。bun はルートの `mise.toml` で固定している
 - 版は `defaults read "$PWD/build/ChatterAgent.app/Contents/Info.plist" CFBundleShortVersionString` か、
   起動して設定窓の情報欄で確かめる
-- arm64 だけのビルドになる（Intel Mac 向けは作らない）
+- arm64 だけのビルドになる（Intel Mac 向けは作らない）。`build-release.sh` は `uname -m` が `arm64` でなければ止まる
+- `ChatterAgent.app.tar.gz` は `tauri build` の後で `build-release.sh` が自分で固めて `tauri signer sign` で署名する
+  （`createUpdaterArtifacts` は使わない。鍵を `tauri build` に渡さないため）
 - 署名は ad-hoc で、公証しない。開き方は Release ノート（`.github/release-notes/agent.md`）に書いてある
 
 ## GitHub Release

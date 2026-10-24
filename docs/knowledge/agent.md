@@ -276,3 +276,8 @@ ad-hoc で公証していないので rejected と答える）。
   `agent-v0.2.1` は `/Applications` に置いてあったのに、quarantine が残っていて
   `/private/var/folders/…/AppTranslocation/…` から動いていた。この状態では入れ替える先を取り違えるので自己更新を断り、
   quarantine を外して開き直すよう案内する。案内の画面そのものは試していない
+- 2026-10-24（同じ Mac・同じ条件）: `build-release.sh` と同じく、`tauri build` の後で
+  `COPYFILE_DISABLE=1 tar --no-mac-metadata` で固めて `tauri signer sign` で署名した tar.gz（`0.0.5` → `0.0.6`）も、updater が受け付けた。
+  `createUpdaterArtifacts` が作るものとはパスの集合が同じで、並び順だけが違う（updater は親を作りながら展開するので並びは効かない）
+- マスコットだけの更新では、「更新」を押してから zip を落として署名を確かめる間は読み上げが続き、止まるのはマスコットを閉じて
+  入れ替える間だけだった（話している途中の1文は言い切ってから閉じる）。起き直したマスコットは、止まっていた間の分から続きを読んだ

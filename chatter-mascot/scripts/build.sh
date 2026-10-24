@@ -40,7 +40,7 @@ if [[ -n "$RELEASE" ]]; then
   require_release_tag
 
   # updater の署名鍵の関門。chatter-agent-app/scripts/build-release.sh の同名のブロックと同じ形。直すときは両方を揃える。
-  # パスワードは argv に出さず、環境変数で子プロセスへ渡す。
+  # パスワードはシェル変数に持ち、署名のコマンドにだけ環境変数で渡す（Unity のビルドには見せない）。
   if [[ -z "${CHATTER_AGENT_UPDATER_KEY:-}" ]]; then
     echo "CHATTER_AGENT_UPDATER_KEY is not set. Set it to the absolute path of the updater private key (docs/release.md)" >&2
     exit 1
@@ -50,14 +50,15 @@ if [[ -n "$RELEASE" ]]; then
     exit 1
   fi
   CHATTER_AGENT_UPDATER_KEY="$(/bin/realpath "$CHATTER_AGENT_UPDATER_KEY")"
-  if [[ -z "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" ]]; then
+  unset key_pass
+  key_pass="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
+  unset TAURI_SIGNING_PRIVATE_KEY_PASSWORD TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PATH
+  if [[ -z "$key_pass" ]]; then
     if ! key_pass="$(security find-generic-password -a "$USER" -s chatter-agent-updater-key -w)"; then
       echo "Could not read the chatter-agent-updater-key password from the keychain." \
            "If the item does not exist, register it following docs/release.md, or set TAURI_SIGNING_PRIVATE_KEY_PASSWORD." >&2
       exit 1
     fi
-    export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$key_pass"
-    unset key_pass
   fi
 
   # macOS 版の zip の署名には ChatterAgent の tauri CLI を使う。
@@ -111,7 +112,7 @@ if [[ -n "$RELEASE" ]]; then
   # ★ 拡張属性を zip に入れない（--norsrc）。AppleDouble の ._* がバンドルの中に入ると、
   #   ditto 以外で展開したときに封印が壊れる。chatter-agent-app/scripts/build-release.sh と同じ。
   ditto -c -k --norsrc --keepParent "$app" "$zip"
-  # ChatterAgent が更新を検証する署名。パスワードは環境変数で渡す。
-  "$tauri_bin" signer sign -f "$CHATTER_AGENT_UPDATER_KEY" "$zip"
+  # ChatterAgent が更新を検証する署名。
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$key_pass" "$tauri_bin" signer sign -f "$CHATTER_AGENT_UPDATER_KEY" "$zip"
   echo "[Build] version=$version → Build/ChatterMascot-macOS.zip Build/ChatterMascot-macOS.zip.sig"
 fi

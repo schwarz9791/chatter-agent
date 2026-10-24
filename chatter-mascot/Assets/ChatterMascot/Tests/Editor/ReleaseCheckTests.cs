@@ -7,8 +7,10 @@ namespace ChatterMascot.Tests
     [TestFixture]
     public sealed class ReleaseCheckTests
     {
-        private static string Release(string tag, bool draft = false, bool prerelease = false) =>
-            $"{{\"tag_name\":\"{tag}\",\"draft\":{(draft ? "true" : "false")},\"prerelease\":{(prerelease ? "true" : "false")}}}";
+        private static string Release(
+            string tag, bool draft = false, bool prerelease = false, string asset = "ChatterMascot.apk") =>
+            $"{{\"tag_name\":\"{tag}\",\"draft\":{(draft ? "true" : "false")},\"prerelease\":{(prerelease ? "true" : "false")},"
+            + $"\"assets\":[{(asset == null ? "" : $"{{\"name\":\"{asset}\"}}")}]}}";
 
         private static string List(params string[] items) => "[" + string.Join(",", items) + "]";
 
@@ -44,6 +46,23 @@ namespace ChatterMascot.Tests
             var json = List(Release("mascot-v1.0"), Release("mascot-v0.3.0-rc1"), Release("mascot-v0.3.0"));
             Assert.That(ReleaseCheck.Newer(json, "0.2.0"), Is.EqualTo("0.3.0"));
         }
+
+        [Test]
+        public void IgnoresReleaseWithoutApk() =>
+            Assert.That(ReleaseCheck.Newer(List(Release("mascot-v0.3.0", asset: "ChatterMascot.zip")), "0.2.0"), Is.Null);
+
+        [Test]
+        public void PicksOlderReleaseWithApkOverNewerWithout()
+        {
+            var json = List(Release("mascot-v0.4.0", asset: null), Release("mascot-v0.3.0"));
+            Assert.That(ReleaseCheck.Newer(json, "0.2.0"), Is.EqualTo("0.3.0"));
+        }
+
+        [TestCase("{\"tag_name\":\"mascot-v0.3.0\"}")]
+        [TestCase("{\"tag_name\":\"mascot-v0.3.0\",\"assets\":\"ChatterMascot.apk\"}")]
+        [TestCase("{\"tag_name\":\"mascot-v0.3.0\",\"assets\":[{\"name\":5},null,1]}")]
+        public void IgnoresMalformedAssets(string release) =>
+            Assert.That(ReleaseCheck.Newer(List(release), "0.2.0"), Is.Null);
 
         [Test]
         public void NullWhenCurrentIsDevBuild() =>

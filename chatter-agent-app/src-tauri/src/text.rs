@@ -37,12 +37,13 @@ pub struct Text {
     mascot_launch_failed: fn(&str) -> String,
     pub update_check: &'static str,
     pub update_available: &'static str,
+    pub update_checking: &'static str,
     pub updating: &'static str,
     pub update_title: &'static str,
     pub update_up_to_date: &'static str,
     pub update_ok: &'static str,
     pub update_cancel: &'static str,
-    update_prompt: fn(&str) -> String,
+    update_prompt: fn(&str, bool) -> String,
     update_check_failed: fn(&str) -> String,
     update_failed: fn(&str) -> String,
     mascot_update_failed: fn(&str) -> String,
@@ -88,20 +89,26 @@ pub const JA: Text = Text {
     },
     update_check: "アップデートを確認…",
     update_available: "アップデートがあります…",
+    update_checking: "確認中…",
     updating: "更新中…",
     update_title: "アップデート",
     update_up_to_date: "最新の版です。",
     update_ok: "更新",
     update_cancel: "キャンセル",
-    update_prompt: |lines| {
-        format!("新しい版があります。\n\n{lines}\n\n更新中は読み上げが止まり、ChatterAgent は再起動します。更新しますか？")
+    update_prompt: |lines, agent| {
+        let effect = if agent {
+            "ChatterAgent は再起動します"
+        } else {
+            "マスコットを一度閉じて開き直します"
+        };
+        format!("新しい版があります。\n\n{lines}\n\n入れ替えの間は読み上げが止まり、{effect}。更新しますか？")
     },
     update_check_failed: |e| format!("アップデートを確認できません。\n\n{e}"),
     update_failed: |e| format!("更新できませんでした。\n\n{e}"),
     mascot_update_failed: |e| {
         format!("マスコットを更新できませんでした。ChatterAgent の更新は続けます。\n\n{e}")
     },
-    update_translocated: "ChatterAgent が隔離された一時的な場所（App Translocation）から動いているため、自分を更新できません。\n\nダウンロードしたときの印が残っています。ターミナルで次を実行してから、ChatterAgent を終了して開き直してください。\n\nxattr -dr com.apple.quarantine /Applications/ChatterAgent.app",
+    update_translocated: "ChatterAgent が隔離された一時的な場所（App Translocation）から動いているため、自分を更新できません。\n\nダウンロードしたときの印が残っています。ターミナルで次を実行してから、ChatterAgent を終了して開き直してください（別の場所に置いているなら、パスをその場所に読み替えてください）。\n\nxattr -dr com.apple.quarantine /Applications/ChatterAgent.app",
 };
 
 pub const EN: Text = Text {
@@ -143,20 +150,26 @@ pub const EN: Text = Text {
     },
     update_check: "Check for Updates…",
     update_available: "Update Available…",
+    update_checking: "Checking…",
     updating: "Updating…",
     update_title: "Update",
     update_up_to_date: "You are up to date.",
     update_ok: "Update",
     update_cancel: "Cancel",
-    update_prompt: |lines| {
-        format!("New versions are available.\n\n{lines}\n\nSpeech stops during the update, and ChatterAgent restarts. Update now?")
+    update_prompt: |lines, agent| {
+        let effect = if agent {
+            "ChatterAgent restarts"
+        } else {
+            "the mascot is closed and reopened"
+        };
+        format!("New versions are available.\n\n{lines}\n\nSpeech stops while the apps are replaced, and {effect}. Update now?")
     },
     update_check_failed: |e| format!("Could not check for updates.\n\n{e}"),
     update_failed: |e| format!("The update failed.\n\n{e}"),
     mascot_update_failed: |e| {
         format!("Could not update the mascot. Continuing with the ChatterAgent update.\n\n{e}")
     },
-    update_translocated: "ChatterAgent is running from a temporary isolated location (App Translocation) and cannot update itself.\n\nThe download mark is still on the app. Run the following in Terminal, then quit ChatterAgent and open it again.\n\nxattr -dr com.apple.quarantine /Applications/ChatterAgent.app",
+    update_translocated: "ChatterAgent is running from a temporary isolated location (App Translocation) and cannot update itself.\n\nThe download mark is still on the app. Run the following in Terminal (replace the path if the app is installed elsewhere), then quit ChatterAgent and open it again.\n\nxattr -dr com.apple.quarantine /Applications/ChatterAgent.app",
 };
 
 /// OS のロケールが `ja` で始まるか。
@@ -204,8 +217,9 @@ impl Text {
         (self.mascot_launch_failed)(e)
     }
 
-    pub fn update_prompt(&self, lines: &str) -> String {
-        (self.update_prompt)(lines)
+    /// `agent` は ChatterAgent 自身を入れ替えるか。
+    pub fn update_prompt(&self, lines: &str, agent: bool) -> String {
+        (self.update_prompt)(lines, agent)
     }
 
     pub fn update_check_failed(&self, e: &str) -> String {

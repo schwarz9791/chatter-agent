@@ -41,7 +41,11 @@ if [[ "$tags" != "$latest_tag" ]]; then
 fi
 
 # updater の署名鍵の関門。chatter-mascot/scripts/build.sh の同名のブロックと同じ形。直すときは両方を揃える。
-# パスワードは argv に出さず、環境変数で子プロセスへ渡す。
+# パスワードはシェル変数に持ち、署名のコマンドにだけ環境変数で渡す（ビルドの子プロセスには見せない）。
+if [[ "$(uname -m)" != "arm64" ]]; then
+  echo "Release builds run only on arm64 (latest.json is arm64 only)" >&2
+  exit 1
+fi
 if [[ -z "${CHATTER_AGENT_UPDATER_KEY:-}" ]]; then
   echo "CHATTER_AGENT_UPDATER_KEY is not set. Set it to the absolute path of the updater private key (docs/release.md)" >&2
   exit 1
@@ -51,36 +55,37 @@ if [[ ! -f "$CHATTER_AGENT_UPDATER_KEY" ]]; then
   exit 1
 fi
 CHATTER_AGENT_UPDATER_KEY="$(/bin/realpath "$CHATTER_AGENT_UPDATER_KEY")"
-if [[ -z "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" ]]; then
+unset key_pass
+key_pass="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
+unset TAURI_SIGNING_PRIVATE_KEY_PASSWORD TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PATH
+if [[ -z "$key_pass" ]]; then
   if ! key_pass="$(security find-generic-password -a "$USER" -s chatter-agent-updater-key -w)"; then
     echo "Could not read the chatter-agent-updater-key password from the keychain." \
          "If the item does not exist, register it following docs/release.md, or set TAURI_SIGNING_PRIVATE_KEY_PASSWORD." >&2
     exit 1
   fi
-  export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$key_pass"
-  unset key_pass
 fi
-export TAURI_SIGNING_PRIVATE_KEY="$CHATTER_AGENT_UPDATER_KEY"
 
 # 同梱するバイナリは配る .app のときだけ要る。tauri.conf.json に書かないのは、開発と CI をバイナリ無しで回すため。
 npm --prefix ../core ci
 npm --prefix ../core run build:bin
 
 # --config は設定にマージされ、package_info().version と Info.plist に入る。
-# createUpdaterArtifacts で ChatterAgent.app.tar.gz とその .sig ができる。
-npm run tauri -- build --config src-tauri/tauri.bundle.conf.json \
-  --config "{\"version\":\"$version\",\"bundle\":{\"createUpdaterArtifacts\":true}}"
+npm run tauri -- build --config src-tauri/tauri.bundle.conf.json --config "{\"version\":\"$version\"}"
 
 bundle=src-tauri/target/release/bundle/macos
-rm -rf build/ChatterAgent.app build/ChatterAgent.zip build/ChatterAgent.app.tar.gz build/latest.json
+rm -rf build/ChatterAgent.app build/ChatterAgent.zip build/ChatterAgent.app.tar.gz build/ChatterAgent.app.tar.gz.sig build/latest.json
 mkdir -p build
 cp -R "$bundle/ChatterAgent.app" build/
 # 拡張属性は zip に入れない。入れると AppleDouble（._*）がバンドルの中に並び、ditto 以外で展開すると署名の封が壊れる。
 ditto -c -k --norsrc --keepParent build/ChatterAgent.app build/ChatterAgent.zip
 
 # 更新の配布物。ChatterAgent は Releases の API でこの名前のアセットを引く。
-cp "$bundle/ChatterAgent.app.tar.gz" build/
-VERSION="$version" SIGNATURE="$(<"$bundle/ChatterAgent.app.tar.gz.sig")" node -e '
+# ビルドの後で自分で固めて署名する。鍵とパスワードはこの署名のコマンドにしか渡さない。
+COPYFILE_DISABLE=1 tar --no-mac-metadata -C build -czf build/ChatterAgent.app.tar.gz ChatterAgent.app
+TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$key_pass" node_modules/.bin/tauri signer sign \
+  -f "$CHATTER_AGENT_UPDATER_KEY" --app-version "$version" build/ChatterAgent.app.tar.gz
+VERSION="$version" SIGNATURE="$(<build/ChatterAgent.app.tar.gz.sig)" node -e '
 const v = process.env.VERSION;
 const latest = {
   version: v,

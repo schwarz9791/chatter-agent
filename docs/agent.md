@@ -81,6 +81,9 @@ Dock にも ⌘Tab にも出ない。操作はメニューバーのアイコン�
 同じ `settings.json` に `"devUpdateRepo": "<owner>/<repo>"` を書くと、更新の取得元の Releases をそのリポジトリに差し替える
 （検証用。メニューからは変えられない）。
 
+検証用リポジトリの Release に置く `latest.json` は、`build-release.sh` が作るものをそのまま使えない
+（`url` が本番のリポジトリを指す）。`url` をその検証用リポジトリの `ChatterAgent.app.tar.gz` へ向けて手で作る。
+
 ## メニューと状態
 
 状態欄は「サーバー: …」の形で、次のどれかが入る。

@@ -217,20 +217,20 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.xr.androidxr-openxr": {
-      "version": "1.4.1",
+      "version": "1.5.1",
       "depth": 0,
       "source": "registry",
       "dependencies": {
         "com.unity.xr.hands": "1.6.1",
-        "com.unity.xr.openxr": "1.18.0",
+        "com.unity.xr.openxr": "1.19.0",
         "com.unity.xr.management": "4.5.0",
-        "com.unity.xr.arfoundation": "6.6.0",
+        "com.unity.xr.arfoundation": "6.7.1",
         "com.unity.xr.compositionlayers": "2.3.0"
       },
       "url": "https://packages.unity.com"
     },
     "com.unity.xr.arfoundation": {
-      "version": "6.6.0",
+      "version": "6.7.1",
       "depth": 1,
       "source": "registry",
       "dependencies": {
@@ -303,7 +303,7 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.xr.openxr": {
-      "version": "1.18.0",
+      "version": "1.19.0",
       "depth": 1,
       "source": "registry",
       "dependencies": {

@@ -1167,12 +1167,13 @@ XR が起動したかどうかに関わらず効くので、XR の無い端末�
 
 Jetpack XR の SceneCore では **VRM を本来の見た目で扱えない**。
 
-| | SceneCore 1.0.0-beta02 時点 |
+| | SceneCore 1.0.0 時点（公開 API は 1.0.0-beta02 から変わっていない） |
 |---|---|
 | `VRMC_vrm` / `VRMC_materials_mtoon` / `VRMC_springBone` | いずれも**非対応**（[対応 glTF 拡張の公式リスト](https://developer.android.com/develop/xr/jetpack-xr-sdk/add-3d-models#gltf-extensions)） |
-| モーフターゲット操作 API | `morph` / `blendShape` / `setWeight` が**全ソースで0件** |
-| ボーン操作 | `GltfModelNodeFeature.localPose` / `localScale` に setter あり |
-| アニメーション制御 | `pauseAnimation()` / `seekAnimation(t)` / `setAnimationSpeed()` |
+| モーフターゲット操作 API | `morph` / `blendShape` / `setWeight` が**公開 API に0件** |
+| ボーン操作 | `GltfModelNode.localPose` / `localScale` に setter あり |
+| アニメーション制御 | `GltfAnimation.pause()` / `seekTo()` / `setSpeed()`（experimental） |
+| 自前メッシュ | `MeshEntity.setBoneTransforms()` でスキニングできる。ただし VRM の読み込み・MToon・spring bone・表情はすべて自作になる |
 
 VRM の表情（`happy` / `blink` / `aa` など）はモーフターゲット実装なので、SceneCore では直接操作できない。
 **UniVRM が expressions / spring bone / lookAt をすべて備える唯一のルート**であり、UniVRM は Unity 前提。

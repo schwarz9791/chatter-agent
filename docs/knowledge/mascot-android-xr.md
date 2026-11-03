@@ -1158,7 +1158,8 @@ XR が起動したかどうかに関わらず効くので、XR の無い端末�
 ## Android の必須設定はなぜその形か
 
 `XR_ACTIVITY_START_MODE` の値が **`XR_ACTIVITY_START_MODE_FULL_SPACE_UNMANAGED`** なのは、
-`MANAGED` が Jetpack XR 専用だから。OpenXR アプリ（本プロジェクト）は `UNMANAGED` を使う。
+Spatial Containers を使わないから。`MANAGED` は Jetpack XR 専用ではなく、Spatial Containers には
+[standalone の OpenXR アプリでも `MANAGED` が要る](https://developer.android.com/develop/xr/openxr/spatial-containers)。
 
 `uses-feature` は **`android.software.xr.api.openxr`**（`android.software.xr.immersive` ではない）。
 どちらも Unity 側で手書きしない（→「マニフェストは静的に置かず、Gradle 生成後に注入する」）。
@@ -1198,6 +1199,95 @@ Unity / OpenXR / WebXR アプリは[そもそも Full Space でしか動かな�
 Unity を **XR機能なしの通常 Android アプリ**としてビルドすれば Home Space の2Dパネルとして動き、
 Android版 Claude アプリ等と並べられる。引き換えに空間的な実在感は失われる（#97 の APK がまさにこの形）。
 パネルには `_ × [] [ ]` のタイトルバーが付く。実機での見え方は [#100](https://github.com/schwarz9791/chatter-agent/issues/100)。
+
+## Mac の画面を XR 側に出す（[#236](https://github.com/schwarz9791/chatter-agent/issues/236)）
+
+**Full Space のまま Composition Layer に映す道（道 A）は、エミュレータで最後まで動いた。** Spatial Containers で
+既製アプリと並べる道（道 B）は、試せるイメージが無く入口で止まった。**道 A を採る。** 検証のコードは main に入れず、
+[`spike/issue-236-surface`](https://github.com/schwarz9791/chatter-agent/tree/spike/issue-236-surface) に残してある。
+
+測定条件（2026-11-03。実機の代わりにしないこと）:
+
+| 項目 | 値 |
+|---|---|
+| Mac | MacBook Pro（Apple M1 Max） |
+| エミュレータ | 37.2.13 |
+| `XR_Glasses` | Google Play XR Preview API v4 rev.4（`spatial=3`、ADDITIVE） |
+| `XR_Headset_API_34` | Google Play XR API v3 rev.2（`spatial=3`、ALPHA_BLEND） |
+| パッケージ | Unity 6000.3.14f1、`androidxr-openxr` 1.5.1、`openxr` 1.19.0、`compositionlayers` 2.4.0 |
+| 映像 | 1920×1080、H.264、`h264_videotoolbox`、B フレームなし、30fps。デコーダーは `c2.goldfish.h264.decoder` |
+| 板 | 幅 1.2m の quad。視点から奥行き 1.1m、キャラの 0.5m 奥 |
+
+### 道 A: Composition Layer + Android Surface
+
+| 確認項目 | 結果 |
+|---|---|
+| ランタイムの対応 | 両 AVD が `XR_KHR_android_surface_swapchain`（Version 4）を返す。`Composition Layers Support` を有効にしても、マニフェストの差は版番号だけ |
+| 端末内の動画 | 両 AVD で出る。30fps で安定 |
+| キャラとの重なり | 順序だけで決まる（下の表）。穴あけの板で前後を合わせられる |
+| 背景の透過 | 両 AVD で両立する。キャラの描画と environment blend mode はそのまま |
+| Mac の画面 | `XR_Glasses` で動く。遅延の中央値 433ms（5回、416〜433ms）、30fps |
+| 空間固定 | 視点を動かしても板は部屋に固定されたまま（`XR_Headset_API_34`） |
+
+重なりは順序だけで決まり、板とキャラの位置は関係ない:
+
+| | 順序 −1（板が下） | 順序 +1（板が上） |
+|---|---|---|
+| 板がキャラの奥 | 正しい | キャラが板に隠れる |
+| 板がキャラの手前 | キャラが板の前に出る | 正しい |
+
+★ **順序 −1 に穴あけの板を足すと、どちらの前後でも正しくなる。** レイヤーと同じ位置に、深度とアルファ 0 だけを
+書く quad を `Geometry-1` で置く。奥のキャラは深度で隠れ、手前のキャラはアルファ 1 で板を隠す。`XR_Glasses` は
+両方の前後で、`XR_Headset_API_34` は板が手前のときだけ確認した。
+
+文字の読みやすさ:
+
+- 上の板のサイズで、映像の中の 16px は余裕、14px はやや小さい、12px は読みたくない（`XR_Glasses`、ダークの画面、エミュレータの窓を 4K ディスプレイに約 1870×1200 で表示した目視）
+- `XR_Glasses` のダークの画面は、背景が透けて文字だけが浮く。ライトの画面は白い板が部屋を覆い、文字は部屋の色で抜ける
+- `XR_Headset_API_34` は板が不透明なので、ダークもライトもそのまま読める
+
+★★ **OpenXR アプリが前面にいる間は、システムの減光が効かない。** `XR_Glasses` で Environment Visibility を動かしても
+「Dimmer is disabled」が出て変わらない（`PassthroughDimmerManager: Showing dimmer disabled toast due to current state pt=Disabled, vr=AppOpenXr(enabled=true, ...)`）。
+[`XR_ANDROID_global_passthrough_dimming`](https://developer.android.com/develop/xr/openxr/extensions/XR_ANDROID_global_passthrough_dimming)
+によると、アプリが減光を指定しなければ、パススルー有効時の既定は 0.0（透明）。Full Space を起動するとシェードが
+透明になるのは、この既定と合う。rev.4 はこの拡張を返すので、アプリから要求できる見込みはあるが、試していない
+（`XrFrameEndInfo` へ `XrGlobalDimmingFrameEndInfoANDROID` を繋ぐ必要がある）。`XR_Headset_API_34` は確かめていない。
+
+★ **Surface はアプリに戻ると作り直される。** Chrome を開いて戻ると別のオブジェクトになるので、渡し直す
+（渡し直してから 0.28 秒ほどで次のフレームが出た。`XR_Headset_API_34`）。離れている間もデコーダーは回り続けるので、
+止める処理が要る。
+
+★ **レイヤーはシーンを編集しなくても、実行時に組める。** `GameObject` を非アクティブのまま作り、`CompositionLayer`
+（`ChangeLayerDataType<QuadLayerData>`）と `TexturesExtension`（`sourceTexture = AndroidSurface`、`Resolution`）を
+設定してから有効にする。Surface は `CompositionLayerManager.TryGetLayerId` の後に
+`OpenXRLayerUtility.GetLayerAndroidSurfaceObject` で取る。取れるまで呼ぶとエラーログが出るので、間隔を空ける。
+
+★ **`adb exec-out screencap` にレイヤーも写る。** 見え方の確認は自動で撮れる（起動直後は黒いことがある）。
+
+遅延の測り方と、数字に含まれていないもの:
+
+- 検証ページのミリ秒時計とエミュレータの窓を同じ `screencapture` に写し、時計の差を読んだ
+- エミュレータは同じ Mac の上なので、ffmpeg を `127.0.0.1` で待ち受けて `10.0.2.2` から繋いだ。**LAN は通っていない。** LAN と実機の遅延は [#100](https://github.com/schwarz9791/chatter-agent/issues/100)
+- 受信側は次のフレームの先頭が届いてから今のフレームを送るので、1フレーム分の遅れを含む
+- `-framerate 30` だけで計測用の PNG も同時に書き出した最初の配信は、受信が 55fps 前後で回り、44 秒遅れた。`fps=30` フィルタを足して PNG の出力を外すと解消した。同時に変えたので、どちらが原因かは切り分けていない
+
+本実装で別に要るもの: 配信の認証と暗号化、Mac の画面収録の権限、減光の要求。キーボードとマウスの中継は持たず、
+Mac 側のものを使う。
+
+### 道 B: Spatial Containers
+
+**1 つ目の確認で止まった。** どちらの AVD も `android.software.xr.api.spatial=3` で、`XR_EXT_spatial_container` と
+`XR_EXT_spatial_container_self_rendering` を返さない。Spatial API Level 4 以上という要件を満たさないので、
+他社アプリとの同時表示、フォーカスが移ったときの発話、今の作りとの両立は試していない。
+
+- ★ **イメージの名前と端末の版は別物。** 「Preview API v4」のイメージでも `spatial=3` を返す。`XR_ANDROID_global_passthrough_dimming` など
+  v4 で入った拡張の一部は返すが、Spatial Containers は無い。rev.3 も rev.4 も同じ。`sdkmanager --channel=3` にも新しい XR イメージは無かった
+- ★ **`XRSpatialContainerFeature` に `supportsBounded` は無い。** C# で見られるのは `IsExtensionEnabled` / `TryGetBounds` / `TryGetState`
+- Extensions 1.5.0 で確認された組み合わせは `androidxr-openxr` 1.4.1 / AR Foundation 6.6.2 で、こちらの 1.5.1 / 6.7.1 より古い
+- `XrStage` は頭を基準に XR Origin を動かすが、コンテナは箱の中心が原点で、外は切り取られる。道 B を採るなら配置の作り直しが要る
+- XREAL Aura の Spatial API Level は未確認（[#100](https://github.com/schwarz9791/chatter-agent/issues/100)）
+
+★ イメージを更新すると AVD に入れたアプリが消えた。素材を入れ直す手間を見込むこと。
 
 ## エミュレータでは測れないもの
 

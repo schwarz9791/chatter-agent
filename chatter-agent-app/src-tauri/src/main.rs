@@ -230,7 +230,7 @@ fn main() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             let t = text::current();
-            let settings_path = app.path().app_config_dir()?.join("settings.json");
+            let settings_path = settings_file(app.handle())?;
             let visible = Settings::load(&settings_path).mascot_visible;
             let status_item = MenuItemBuilder::with_id("status", t.status(&Status::Stopped))
                 .enabled(false)

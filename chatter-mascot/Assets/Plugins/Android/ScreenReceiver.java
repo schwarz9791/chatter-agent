@@ -59,6 +59,7 @@ public final class ScreenReceiver {
     private static final int STREAM_TIMEOUT_MS = 6000;
     private static final long APPROVAL_NOTICE_MS = 1000;
     private static final long SURFACE_TIMEOUT_MS = 15000;
+    private static final long OUTPUT_POLL_US = 10000;
     private static final int MAX_FRAME = 16 * 1024 * 1024;
 
     private static final String[] STATE_NAMES = {"IDLE", "CONNECTING", "WAITING_APPROVAL", "READY", "STREAMING", "CERT_MISMATCH"};
@@ -130,7 +131,7 @@ public final class ScreenReceiver {
             gen.generateKeyPair();
         }
         String fp = fingerprint(ks.getCertificate(KEY_ALIAS).getEncoded());
-        confirmCode = (fp.substring(0, 4) + "-" + fp.substring(4, 8)).toUpperCase();
+        confirmCode = (fp.substring(0, 4) + "-" + fp.substring(4, 8) + "-" + fp.substring(8, 12) + "-" + fp.substring(12, 16)).toUpperCase();
         return ks;
     }
 
@@ -141,7 +142,6 @@ public final class ScreenReceiver {
         Session previous;
         final Thread thread = new Thread(this, "ScreenReceiver");
         final Object surfaceLock = new Object();
-        final MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
 
         volatile boolean stopped;
         volatile int state = CONNECTING;
@@ -152,11 +152,11 @@ public final class ScreenReceiver {
         volatile int height;
         volatile Socket raw;
         volatile SSLSocket tls;
+        volatile MediaCodec codec;
 
         Surface surface;
         String candidateFingerprint;
-        MediaCodec codec;
-        boolean firstFrameLogged;
+        Thread outputThread;
 
         Session(Context context, String host, int port, Session previous) {
             this.context = context;
@@ -308,16 +308,54 @@ public final class ScreenReceiver {
             format.setInteger(MediaFormat.KEY_PRIORITY, 0);
             // 文字の多い画面のキーフレームは大きい。入らないと繋ぎ直しを繰り返す
             format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, w * h);
-            MediaCodec c = MediaCodec.createDecoderByType("video/avc");
+            final MediaCodec c = MediaCodec.createDecoderByType("video/avc");
             codec = c;
             c.configure(format, s, null, 0);
             c.start();
+            // 映像は止まることがあるので、次のフレームが来なくても描けるように出力を別のスレッドで取る
+            Thread t = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    render(c);
+                }
+            }, "ScreenReceiverOutput");
+            t.setDaemon(true);
+            outputThread = t;
+            t.start();
+        }
+
+        void render(MediaCodec c) {
+            MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+            boolean firstFrameLogged = false;
+            try {
+                while (codec == c) {
+                    int idx = c.dequeueOutputBuffer(info, OUTPUT_POLL_US);
+                    if (idx < 0) continue;
+                    c.releaseOutputBuffer(idx, true);
+                    if (!firstFrameLogged) {
+                        firstFrameLogged = true;
+                        Log.i(TAG, LOG + "first frame rendered");
+                    }
+                }
+            } catch (IllegalStateException e) {
+                if (stopped) return;
+                // 映像が止まっていると入力側は失敗に気づけないので、ここで畳んで繋ぎ直しに任せる
+                Log.w(TAG, LOG + "decoder failed: " + e);
+                halt();
+            }
         }
 
         void releaseCodec() {
             MediaCodec c = codec;
             if (c == null) return;
             codec = null;
+            Thread t = outputThread;
+            if (t != null) {
+                try {
+                    t.join();
+                } catch (InterruptedException ignored) {
+                }
+            }
             try {
                 c.stop();
             } catch (Exception ignored) {
@@ -330,7 +368,6 @@ public final class ScreenReceiver {
 
         void feed(byte[] data) {
             while (!stopped) {
-                drain();
                 int idx = codec.dequeueInputBuffer(10000);
                 if (idx >= 0) {
                     ByteBuffer b = codec.getInputBuffer(idx);
@@ -338,22 +375,6 @@ public final class ScreenReceiver {
                     b.put(data);
                     codec.queueInputBuffer(idx, 0, data.length, System.nanoTime() / 1000, 0);
                     break;
-                }
-            }
-            drain();
-        }
-
-        void drain() {
-            while (true) {
-                int idx = codec.dequeueOutputBuffer(info, 0);
-                if (idx >= 0) {
-                    codec.releaseOutputBuffer(idx, true);
-                    if (!firstFrameLogged) {
-                        firstFrameLogged = true;
-                        Log.i(TAG, LOG + "first frame rendered");
-                    }
-                } else if (idx != MediaCodec.INFO_OUTPUT_FORMAT_CHANGED && idx != MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
-                    return;
                 }
             }
         }

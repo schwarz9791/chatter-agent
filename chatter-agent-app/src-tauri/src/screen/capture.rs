@@ -5,7 +5,7 @@ use std::ffi::c_void;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr::{null_mut, NonNull};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 
 use block2::RcBlock;
 use dispatch2::DispatchQueue;
@@ -25,8 +25,8 @@ use objc2_foundation::{NSError, NSObject, NSObjectProtocol};
 use objc2_screen_capture_kit::{
     SCContentFilter, SCContentSharingPicker, SCContentSharingPickerConfiguration,
     SCContentSharingPickerMode, SCContentSharingPickerObserver, SCFrameStatus, SCStream,
-    SCStreamConfiguration, SCStreamDelegate, SCStreamFrameInfoStatus, SCStreamOutput,
-    SCStreamOutputType,
+    SCStreamConfiguration, SCStreamDelegate, SCStreamErrorCode, SCStreamFrameInfoStatus,
+    SCStreamOutput, SCStreamOutputType,
 };
 use objc2_video_toolbox::{
     kVTCompressionPropertyKey_AllowFrameReordering, kVTCompressionPropertyKey_AverageBitRate,
@@ -39,9 +39,11 @@ use objc2_video_toolbox::{
 
 use super::wire::{self, Frame};
 use super::Hub;
+use crate::server::lock;
 
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|e| e.into_inner())
+/// ログは英語だけにするので、OS の言語で返る説明文は使わない。
+fn describe(error: &NSError) -> String {
+    format!("{} {}", error.domain(), error.code())
 }
 
 /// 取得とエンコードのスレッドを跨いで持つ Objective-C / CF のオブジェクト。
@@ -80,7 +82,7 @@ define_class!(
 
         #[unsafe(method(contentSharingPickerStartDidFailWithError:))]
         fn start_failed(&self, error: &NSError) {
-            let msg = error.localizedDescription().to_string();
+            let msg = describe(error);
             let _ = catch_unwind(AssertUnwindSafe(|| {
                 self.ivars()
                     .inner
@@ -113,12 +115,9 @@ define_class!(
             if iv.generation != iv.inner.generation.load(Ordering::SeqCst) {
                 return;
             }
-            let msg = error.localizedDescription().to_string();
-            let _ = catch_unwind(AssertUnwindSafe(|| {
-                iv.inner
-                    .hub
-                    .capture_ended(Some(format!("stream stopped: {msg}")))
-            }));
+            let reason = (error.code() != SCStreamErrorCode::UserStopped.0)
+                .then(|| format!("stream stopped: {}", describe(error)));
+            let _ = catch_unwind(AssertUnwindSafe(|| iv.inner.hub.capture_ended(reason)));
         }
     }
 );
@@ -360,7 +359,7 @@ struct Inner {
     objects: Mutex<Objects>,
     generation: AtomicU64,
     encoder: Mutex<Option<Encoder>>,
-    /// 画面が静止している間はフレームが来ないので、最後の1枚を持っておく。
+    /// 窓を最小化した間などはフレームが来ないので、最後の1枚を持っておく。
     latest: Mutex<Option<Unsync<CFRetained<CVImageBuffer>>>>,
     force_key: AtomicBool,
     streaming: AtomicBool,
@@ -418,7 +417,7 @@ impl Capture {
         });
     }
 
-    /// 視聴者が付いたとき、静止した画面でも最初のキーフレームを出す。
+    /// 視聴者が付いたとき、フレームが来ない間でも最初のキーフレームを出す。
     pub fn request_keyframe(&self) {
         self.inner.force_key.store(true, Ordering::SeqCst);
         let held = lock(&self.inner.latest)
@@ -536,14 +535,11 @@ impl Inner {
                     SCStreamOutputType::Screen,
                     Some(&queue),
                 )
-                .map_err(|e| format!("addStreamOutput failed: {}", e.localizedDescription()))?;
+                .map_err(|e| format!("addStreamOutput failed: {}", describe(&e)))?;
             let hub = self.hub.clone();
             let started = RcBlock::new(move |err: *mut NSError| {
                 if let Some(e) = err.as_ref() {
-                    hub.capture_ended(Some(format!(
-                        "startCapture failed: {}",
-                        e.localizedDescription()
-                    )));
+                    hub.capture_ended(Some(format!("startCapture failed: {}", describe(e))));
                 }
             });
             stream.startCaptureWithCompletionHandler(Some(&started));

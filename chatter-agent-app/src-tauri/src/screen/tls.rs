@@ -63,13 +63,14 @@ pub fn fingerprint(cert_der: &[u8]) -> String {
         .collect()
 }
 
-/// 指紋の先頭 8 桁を `XXXX-XXXX` で。
+/// 指紋の先頭 16 桁を `XXXX-XXXX-XXXX-XXXX` で。
+/// 短いと中間者が同じコードの証明書を探し当てられ、端末の証明書は変わらないので探す時間に期限が無い。
 pub fn confirm_code(fp: &str) -> String {
-    let head = fp.get(..8).unwrap_or(fp).to_uppercase();
-    match head.split_at_checked(4) {
-        Some((a, b)) => format!("{a}-{b}"),
-        None => head,
-    }
+    let head: Vec<char> = fp.chars().take(16).flat_map(char::to_uppercase).collect();
+    head.chunks(4)
+        .map(|c| c.iter().collect::<String>())
+        .collect::<Vec<_>>()
+        .join("-")
 }
 
 /// どの証明書も通すが、TLS 1.3 の署名は実際に検証する。指紋の判定は接続の後に呼び出し側が行う。
@@ -399,7 +400,7 @@ mod tests {
             fp,
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
-        assert_eq!(confirm_code(&fp), "BA78-16BF");
+        assert_eq!(confirm_code(&fp), "BA78-16BF-8F01-CFEA");
     }
 
     #[test]

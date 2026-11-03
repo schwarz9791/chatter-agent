@@ -1,0 +1,19 @@
+{
+    "name": "ChatterMascot.XrSpike",
+    "rootNamespace": "ChatterMascot.XrSpike",
+    "references": [
+        "ChatterMascot.Vrm",
+        "Unity.XR.Management",
+        "Unity.XR.OpenXR",
+        "Unity.XR.CompositionLayers"
+    ],
+    "includePlatforms": ["Editor", "Android"],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -117,6 +117,6 @@ test("not_lan は専用の文言", () => {
 });
 
 test("許可済み端末の行は IP・確認コード・許可した日", () => {
-  const peer = { fingerprint: "ba7816bf8f01cfea", label: "192.168.0.5", approvedAt: "2026-11-03T10:20:30+09:00" };
-  assert.equal(screenPeerLine(peer), "192.168.0.5 · BA78-16BF · 2026-11-03");
+  const peer = { fingerprint: "ba7816bf8f01cfea41414140de5dae22", label: "192.168.0.5", approvedAt: "2026-11-03T10:20:30+09:00" };
+  assert.equal(screenPeerLine(peer), "192.168.0.5 · BA78-16BF-8F01-CFEA · 2026-11-03");
 });

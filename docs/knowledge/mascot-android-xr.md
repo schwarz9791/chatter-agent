@@ -1288,11 +1288,15 @@ Spatial Containers は、Spatial API Level 4 以上という要件を満たす�
 配信の契約は [`../protocol.md`](../protocol.md)「画面の配信」、Mac 側の許可は [`agent.md`](./agent.md)「画面の取得はピッカーなら許可が要らない」。
 
 2026-11-03。`XR_Glasses` と `XR_Headset_API_34`（上の表と同じイメージ）。接続先は Mac の Wi-Fi の IP（エミュレータの NAT 越し。LAN は通っていない）。
-Android Keystore の EC 鍵での mTLS、初回の承認と解除、拒否、証明書なしと TLS 1.2 の拒否、アプリを離れて戻る、止まった窓、回線断、
+Android Keystore の EC 鍵での mTLS、初回の承認と解除、拒否、証明書なしと TLS 1.2 の拒否、アプリを離れて戻る、最小化した窓、回線断、
 Mac が黙ったときの 6 秒の期限（`kill -STOP`）がすべて通った。握手の完了から最初のフレームまでは約 0.9 秒（承認済みの端末）、
 画面全体（2022×1138）を映している間の ChatterAgent の CPU は 4% 前後。
 
 ★ **Surface はレイヤーを作った直後には取れない。** すぐ取りに行くと `Failed to get Android Surface Object` がエラーログに出る。作ってから間を空ける。
+
+★ **`MediaCodec` の出力は入力と同期しない。** `queueInputBuffer` の直後に `dequeueOutputBuffer(info, 0)` で取っても、まだ復号が終わっていない。
+入力のたびに取る形だと、次のフレームが来るまで描かれない。映像が流れ続ける間は表に出ず、連続配信の検証では見つからない。
+最小化した窓に繋ぐとフレームは 1 枚しか来ないので、届いた 1 枚・描画 0 枚のまま 25 秒待っても板に何も映らなかった。出力を専用のスレッドで取ると、届いてから約 30 ミリ秒で描かれた（`XR_Glasses`）。
 
 ★ **未確認。** 送信待ちが溢れる経路。`adb emu network speed gsm` で 24 秒絞っても動きの少ない窓では切れず、遅れも残らなかったが、絞れていたのかは確かめていない。
 キューの規則は `screen/wire.rs` のテストだけで見ている（LAN と実機は [#100](https://github.com/schwarz9791/chatter-agent/issues/100)）。

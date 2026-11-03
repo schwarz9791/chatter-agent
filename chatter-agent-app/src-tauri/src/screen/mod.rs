@@ -9,8 +9,8 @@ use std::io::Write;
 use std::net::{IpAddr, Shutdown, TcpListener, TcpStream};
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -18,7 +18,8 @@ use rustls::{ServerConfig, ServerConnection, StreamOwned};
 use tauri::{AppHandle, Manager as _};
 use tauri_plugin_dialog::{DialogExt as _, MessageDialogKind};
 
-use crate::server::Manager;
+use crate::control::Failure;
+use crate::server::{lock, Manager};
 use crate::{text, update_settings, ScreenPeer, Settings};
 use capture::Capture;
 use tls::Decision;
@@ -27,13 +28,11 @@ use wire::{Frame, SendQueue};
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 const KEEPALIVE_AFTER: Duration = Duration::from_secs(2);
+/// 認証の前の相手がアプリ全体の記述子を食い潰せないようにする。握手には期限があるので枠はすぐ空く。
+const MAX_CONNECTIONS: usize = 16;
 const ACCEPT_POLL: Duration = Duration::from_millis(100);
 /// 詰まりをカーネルに隠さず、送信待ちの上限で受けるための小さな送信バッファ。
 const SEND_BUFFER: libc::c_int = 256 * 1024;
-
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|e| e.into_inner())
-}
 
 /// メニューに映す状態。
 pub struct View {
@@ -81,6 +80,7 @@ pub struct Hub {
     asking: AtomicBool,
     encode_failure_logged: AtomicBool,
     next_id: AtomicU64,
+    connections: AtomicUsize,
 }
 
 /// tauri の管理下に置く入口。
@@ -106,6 +106,7 @@ impl Screen {
             asking: AtomicBool::new(false),
             encode_failure_logged: AtomicBool::new(false),
             next_id: AtomicU64::new(0),
+            connections: AtomicUsize::new(0),
         })))
     }
 
@@ -117,23 +118,37 @@ impl Screen {
         }
         let t = text::current();
         let env = hub.app.state::<Manager>().env();
-        let Ok((host, port)) = crate::control::server_listen(&env) else {
-            hub.notice(t.screen_no_server.into());
-            return;
+        let (host, port) = match crate::control::server_listen(&env) {
+            Ok(listen) => listen,
+            Err(Failure::UnsupportedHost) => {
+                hub.notice(t.screen_unsupported_host.into());
+                return;
+            }
+            Err(_) => {
+                hub.notice(t.screen_no_server.into());
+                return;
+            }
         };
-        hub.encode_failure_logged.store(false, Ordering::SeqCst);
         let capture = Arc::new(Capture::new(hub.app.clone(), hub.clone()));
-        *lock(&hub.share) = Some(Share {
-            id: hub.next_id.fetch_add(1, Ordering::SeqCst) + 1,
-            capture: capture.clone(),
-            host,
-            port,
-            listening: false,
-            stop: Arc::new(AtomicBool::new(false)),
-            size: None,
-            denied_fingerprints: HashSet::new(),
-            denied_ips: HashSet::new(),
-        });
+        {
+            // 応答を待つ間に別の操作が先に始めていたら、そちらに任せる
+            let mut share = lock(&hub.share);
+            if share.is_some() {
+                return;
+            }
+            hub.encode_failure_logged.store(false, Ordering::SeqCst);
+            *share = Some(Share {
+                id: hub.next_id.fetch_add(1, Ordering::SeqCst) + 1,
+                capture: capture.clone(),
+                host,
+                port,
+                listening: false,
+                stop: Arc::new(AtomicBool::new(false)),
+                size: None,
+                denied_fingerprints: HashSet::new(),
+                denied_ips: HashSet::new(),
+            });
+        }
         hub.changed();
         capture.present();
     }
@@ -224,7 +239,7 @@ impl Hub {
         self.stop_sharing();
         if let Some(r) = reason {
             self.log(&format!("Screen sharing ended: {r}"));
-            self.notice(text::current().screen_failed(&r));
+            self.notice(text::current().screen_failed.into());
         }
     }
 
@@ -258,9 +273,15 @@ impl Hub {
         self.log(&format!("Listening for screen viewers on {host}:{port}"));
         let hub = self.clone();
         thread::spawn(move || {
+            let mut failing = false;
             while !stop.load(Ordering::SeqCst) {
                 match listener.accept() {
                     Ok((tcp, peer)) => {
+                        failing = false;
+                        if hub.connections.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
+                            hub.connections.fetch_sub(1, Ordering::SeqCst);
+                            continue;
+                        }
                         let hub = hub.clone();
                         thread::spawn(move || hub.serve(id, tcp, peer.ip()));
                     }
@@ -268,8 +289,12 @@ impl Hub {
                         thread::sleep(ACCEPT_POLL)
                     }
                     Err(e) => {
-                        hub.log(&format!("Screen listener stopped: {e}"));
-                        break;
+                        // 記述子の枯渇などは一時的なので、待ち受けを止めない
+                        if !failing {
+                            failing = true;
+                            hub.log(&format!("Screen listener accept failed: {e}"));
+                        }
+                        thread::sleep(ACCEPT_POLL);
                     }
                 }
             }
@@ -282,7 +307,9 @@ impl Hub {
     }
 
     fn serve(self: Arc<Self>, id: u64, tcp: TcpStream, ip: IpAddr) {
-        if let Err(e) = self.serve_inner(id, tcp, ip) {
+        let result = self.serve_inner(id, tcp, ip);
+        self.connections.fetch_sub(1, Ordering::SeqCst);
+        if let Err(e) = result {
             self.log(&format!("Screen viewer {ip} disconnected: {e}"));
         }
     }

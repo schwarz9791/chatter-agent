@@ -32,6 +32,7 @@ namespace ChatterMascot.Xr
         private const float PollSeconds = 0.1f;
         private const float SurfacePollSeconds = 0.5f;
         private const float RetrySeconds = 5f;
+        private const float ApprovalToastSeconds = 5f;
 
         private XROrigin _origin;
         private VrmStage _stage;
@@ -152,7 +153,7 @@ namespace ChatterMascot.Xr
                 java.CallStatic("start", activity, host, port);
             }
 
-            var approvalShown = false;
+            var nextApprovalToastAt = 0f;
             var attached = false;
             var nextSurfaceAt = 0f;
             while (_focused)
@@ -171,9 +172,10 @@ namespace ChatterMascot.Xr
                     yield break;
                 }
 
-                if (state == ScreenState.WaitingApproval && !approvalShown)
+                // トーストは数秒で消えるが Mac のダイアログは答えるまで残るので、いつでも比べられるように出し直す
+                if (state == ScreenState.WaitingApproval && Time.unscaledTime >= nextApprovalToastAt)
                 {
-                    approvalShown = true;
+                    nextApprovalToastAt = Time.unscaledTime + ApprovalToastSeconds;
                     DeviceToast.Show(UiText.For(Application.systemLanguage).XrScreenApprove(Receiver<string>("confirmCode")));
                 }
 

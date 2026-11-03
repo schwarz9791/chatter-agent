@@ -258,8 +258,8 @@ export interface ScreenPeer {
   approvedAt: string;
 }
 
-/** 許可済み端末の1行。確認コードは端末に出るものと同じ（指紋の先頭 8 桁）、日付は許可した日 */
+/** 許可済み端末の1行。確認コードは端末に出るものと同じ（指紋の先頭 16 桁）、日付は許可した日 */
 export function screenPeerLine(p: ScreenPeer): string {
-  const head = p.fingerprint.slice(0, 8).toUpperCase();
-  return [p.label, `${head.slice(0, 4)}-${head.slice(4)}`, p.approvedAt.slice(0, 10)].join(" · ");
+  const code = (p.fingerprint.slice(0, 16).toUpperCase().match(/.{1,4}/g) ?? []).join("-");
+  return [p.label, code, p.approvedAt.slice(0, 10)].join(" · ");
 }

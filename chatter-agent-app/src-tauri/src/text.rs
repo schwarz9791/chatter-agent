@@ -33,7 +33,8 @@ pub struct Text {
     pub screen_title: &'static str,
     pub screen_no_server: &'static str,
     screen_bind_failed: fn(&str) -> String,
-    screen_failed: fn(&str) -> String,
+    pub screen_failed: &'static str,
+    pub screen_unsupported_host: &'static str,
     screen_confirm: fn(&str, &str) -> String,
     pub screen_allow: &'static str,
     pub screen_deny: &'static str,
@@ -91,7 +92,8 @@ pub const JA: Text = Text {
     screen_title: "画面の共有",
     screen_no_server: "サーバーに繋がらないため、画面を共有できません。",
     screen_bind_failed: |e| format!("画面の共有を始められません。\n\n{e}"),
-    screen_failed: |e| format!("画面の共有が終了しました。\n\n{e}"),
+    screen_failed: "画面の共有が終了しました。",
+    screen_unsupported_host: "host が LAN の特定アドレスのため、画面を共有できません。host を 0.0.0.0 にしてください。",
     screen_confirm: |ip, code| format!("{ip} の端末が、共有している画面の表示を求めています。\n\n確認コード: {code}\n\n端末に出ているコードと同じときだけ許可してください。"),
     screen_allow: "許可",
     screen_deny: "拒否",
@@ -162,7 +164,8 @@ pub const EN: Text = Text {
     screen_title: "Screen Sharing",
     screen_no_server: "Cannot share the screen because the server is not responding.",
     screen_bind_failed: |e| format!("Could not start sharing the screen.\n\n{e}"),
-    screen_failed: |e| format!("Screen sharing ended.\n\n{e}"),
+    screen_failed: "Screen sharing ended.",
+    screen_unsupported_host: "Cannot share the screen because host is set to a specific LAN address. Set host to 0.0.0.0.",
     screen_confirm: |ip, code| format!("The device at {ip} wants to show the screen you are sharing.\n\nConfirmation code: {code}\n\nAllow it only if the device shows the same code."),
     screen_allow: "Allow",
     screen_deny: "Deny",
@@ -249,10 +252,6 @@ impl Text {
 
     pub fn screen_bind_failed(&self, e: &str) -> String {
         (self.screen_bind_failed)(e)
-    }
-
-    pub fn screen_failed(&self, e: &str) -> String {
-        (self.screen_failed)(e)
     }
 
     pub fn screen_confirm(&self, ip: &str, code: &str) -> String {

@@ -1,4 +1,3 @@
-using ChatterMascot.Vrm;
 using Unity.XR.CoreUtils;
 using UnityEngine;
 #if UNITY_ANDROID && !UNITY_EDITOR
@@ -10,6 +9,7 @@ using Unity.XR.CompositionLayers;
 using Unity.XR.CompositionLayers.Extensions;
 using Unity.XR.CompositionLayers.Layers;
 using Unity.XR.CompositionLayers.Services;
+using UnityEngine.Rendering;
 using UnityEngine.XR.OpenXR;
 using UnityEngine.XR.OpenXR.CompositionLayers;
 #endif
@@ -17,7 +17,7 @@ using UnityEngine.XR.OpenXR.CompositionLayers;
 namespace ChatterMascot.Xr
 {
     /// <summary>
-    /// Mac の画面を、キャラクターの奥に固定した板（Composition Layer）へ映す。
+    /// Mac の画面を、部屋に固定した板（Composition Layer）へ映す。つまんで動かし、角で拡縮できる。
     /// 受信・復号は <c>ScreenReceiver.java</c>、契約は <c>docs/protocol.md</c>「画面の配信」。
     ///
     /// ★ 板は映像が届いている間だけ在る。アプリが前面を離れたら受信とレイヤーを必ず畳む
@@ -34,22 +34,39 @@ namespace ChatterMascot.Xr
         private const float RetrySeconds = 5f;
         private const float ApprovalToastSeconds = 5f;
 
+        /// <summary>角のハンドルを、板か角を指さなくなってからも出しておく秒数。</summary>
+        private const float HandleLingerSeconds = 3f;
+
+        private const float HandleRadiusMeters = 0.02f;
+
+        /// <summary>ハンドルを穴あけの板より手前へ浮かせる（同じ深さだと競る）。</summary>
+        private const float HandleLiftMeters = 0.005f;
+
         private XROrigin _origin;
-        private VrmStage _stage;
         private MascotRunner _runner;
 
-        // 板の位置と幅は最初に出すときに決め、以後のセッションでも変えない
-        private bool _hasPose;
+        // 板の位置は最初に出すときに決め、以後のセッションでも保つ。幅は位置を決め直しても保つ
         private Vector3 _position;
         private Quaternion _rotation;
-        private float _width;
+        private float _width = XrBoardRules.DefaultWidth;
+
+        // 映像の縦横比。繋ぎ直しで変わりうるので、幅が変わるたびに _size を引き直す
+        private float _aspect = 9f / 16f;
+        private Vector2 _size;
+
+        private float _handlesUntil;
+        private bool _handlesShown = false;
+        private BoardPart _dragPart;
+        private bool _hasDragBase;
+        private BoardDrag _drag;
+        private Vector3 _grabPoint;
+        private float _widthAtGrab;
 
         private readonly WaitForSeconds _poll = new WaitForSeconds(PollSeconds);
 
-        public void Begin(XROrigin origin, VrmStage stage)
+        public void Begin(XROrigin origin)
         {
             _origin = origin;
-            _stage = stage;
 #if UNITY_ANDROID && !UNITY_EDITOR
             if (!OpenXRRuntime.IsExtensionEnabled("XR_KHR_android_surface_swapchain"))
             {
@@ -62,6 +79,125 @@ namespace ChatterMascot.Xr
 #else
             enabled = false;
 #endif
+        }
+
+        /// <summary>板が出ているか。エディタでは常に false。</summary>
+        public bool Shown
+        {
+            get
+            {
+#if UNITY_ANDROID && !UNITY_EDITOR
+                return _layer != null;
+#else
+                return false;
+#endif
+            }
+        }
+
+        /// <summary>
+        /// レイが板のどこに当たるか。見えていない角は掴ませない
+        /// （同じフレームの <see cref="Hover"/> で出す前の、実際に見えていた状態で決める）。
+        /// </summary>
+        public BoardPart Pick(Ray ray, out float distance)
+        {
+            distance = 0f;
+            if (!Shown) return BoardPart.None;
+            return XrBoardRules.Pick(ray, _position, _rotation, _size, _handlesShown, out distance);
+        }
+
+        /// <summary>板か角を指している間、ハンドルを出し続ける。</summary>
+        public void Hover(Ray ray)
+        {
+            if (!Shown) return;
+            if (XrBoardRules.Pick(ray, _position, _rotation, _size, true, out _) != BoardPart.None) ShowHandles();
+        }
+
+        public void ShowHandles()
+        {
+            if (Shown) _handlesUntil = Time.unscaledTime + HandleLingerSeconds;
+        }
+
+        public void BeginDrag(BoardPart part)
+        {
+            _dragPart = part;
+            _hasDragBase = false;
+            ShowHandles();
+        }
+
+        /// <summary>
+        /// 基準は、レイが板や球に交わった最初のフレームで取り、そのフレームでは動かさない。
+        /// 以後、交わらないフレームは最後の姿勢を保つ。
+        /// </summary>
+        public void Drag(Ray ray)
+        {
+            if (!Shown || _dragPart == BoardPart.None || _origin.Camera == null) return;
+            ShowHandles();
+            var head = _origin.Camera.transform.position;
+
+            if (_dragPart == BoardPart.Body)
+            {
+                if (!_hasDragBase)
+                {
+                    _hasDragBase = BoardDrag.TryBegin(ray, head, _position, out _drag);
+                    return;
+                }
+                if (!_drag.TryMove(ray, head, out var position, out var rotation)) return;
+                _position = position;
+                _rotation = rotation;
+            }
+            else
+            {
+                if (!XrBoardRules.TryPlanePoint(ray, _position, _rotation, out var point)) return;
+                if (!_hasDragBase)
+                {
+                    _grabPoint = point;
+                    _widthAtGrab = _width;
+                    _hasDragBase = true;
+                    return;
+                }
+                _width = XrBoardRules.ResizedWidth(_widthAtGrab, _position, _grabPoint, point);
+                _size = new Vector2(_width, _width * _aspect);
+            }
+            Apply();
+        }
+
+        public void EndDrag()
+        {
+            if (_dragPart == BoardPart.None) return;
+            _dragPart = BoardPart.None;
+            LogPose("drag ended");
+        }
+
+        /// <summary>
+        /// 位置を今の視点の正面へ戻す。大きさは保つ。出ていなければ、次に出すときに決め直す。
+        /// </summary>
+        public void ResetPosition()
+        {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            _dragPart = BoardPart.None;
+            if (!Shown || _origin.Camera == null)
+            {
+                _hasPose = false;
+                return;
+            }
+            var camera = _origin.Camera.transform;
+            (_position, _rotation) = XrBoardRules.InitialPose(camera.position, camera.forward);
+            Apply();
+            LogPose("position reset");
+#endif
+        }
+
+#if !(UNITY_ANDROID && !UNITY_EDITOR)
+        private static void Apply() { }
+#endif
+
+        private void LogPose(string what)
+        {
+            var camera = _origin.Camera;
+            if (camera == null) return;
+            var toBoard = _position - camera.transform.position;
+            Debug.Log($"[Mascot] XR screen: {what} distance={toBoard.magnitude:F3} " +
+                      $"elevation={XrBoardRules.Elevation(toBoard):F1} width={_width:F3}");
         }
 
         /// <summary>覚えている Mac の証明書の指紋を忘れる（Mac を入れ替えたときに繋ぎ直せるようにする）。</summary>
@@ -88,12 +224,16 @@ namespace ChatterMascot.Xr
 #if UNITY_ANDROID && !UNITY_EDITOR
         private static bool _certToasted;
 
+        private bool _hasPose;
         private bool _focused = true;
         private bool _retryNow;
         private CompositionLayer _layer;
         private int _layerId;
         private bool _hasLayerId;
         private GameObject _punch;
+        private readonly GameObject[] _handles = new GameObject[4];
+        private Material _handleMaterial;
+        private Mesh _handleMesh;
 
         private void OnApplicationFocus(bool hasFocus)
         {
@@ -206,24 +346,22 @@ namespace ChatterMascot.Xr
         private bool BuildBoard(int width, int height)
         {
             if (width <= 0 || height <= 0) return false;
+            _aspect = (float)height / width;
             if (!_hasPose)
             {
                 var camera = _origin.Camera;
-                if (camera == null || _stage == null || _stage.ModelAnchor == null) return false;
-                (_position, _rotation) = XrBoardRules.InitialPose(
-                    camera.transform.position, _stage.ModelAnchor.position, camera.transform.forward);
-                _width = XrBoardRules.DefaultWidth;
+                if (camera == null) return false;
+                (_position, _rotation) = XrBoardRules.InitialPose(camera.transform.position, camera.transform.forward);
                 _hasPose = true;
             }
-
-            var boardHeight = _width * height / width;
+            _size = new Vector2(_width, _width * _aspect);
 
             // 構成し終えるまで有効にしない
             var go = new GameObject("ScreenBoardLayer");
             go.SetActive(false);
             var layer = go.AddComponent<CompositionLayer>();
             layer.ChangeLayerDataType<QuadLayerData>();
-            ((QuadLayerData)layer.LayerData).Size = new Vector2(_width, boardHeight);
+            ((QuadLayerData)layer.LayerData).Size = _size;
             var textures = go.AddComponent<TexturesExtension>();
             textures.sourceTexture = TexturesExtension.SourceTextureEnum.AndroidSurface;
             textures.Resolution = new Vector2(width, height);
@@ -237,12 +375,76 @@ namespace ChatterMascot.Xr
             _punch = GameObject.CreatePrimitive(PrimitiveType.Quad);
             _punch.name = "ScreenBoardPunch";
             Destroy(_punch.GetComponent<Collider>());
-            _punch.transform.SetPositionAndRotation(_position, _rotation);
-            _punch.transform.localScale = new Vector3(_width, boardHeight, 1f);
             _punch.GetComponent<Renderer>().sharedMaterial = new Material(Resources.Load<Shader>("ScreenPunch"));
 
+            BuildHandles();
+            Apply();
+
             Debug.Log($"[Mascot] XR screen: board shown {width}x{height}");
+            LogPose("board placed");
             return true;
+        }
+
+        private void BuildHandles()
+        {
+            var source = Resources.Load<Material>("WalkArea");
+            if (source == null)
+            {
+                Debug.LogWarning("[Mascot] XR screen: could not load the WalkArea material, not drawing the corner handles");
+                return;
+            }
+            _handleMaterial = new Material(source);
+            _handleMaterial.SetColor("_BaseColor", XrWalkAreaView.RimColor);
+            _handleMesh = XrWalkAreaView.BuildRingMesh(0f, 1f);
+            for (var i = 0; i < _handles.Length; i++)
+            {
+                var handle = new GameObject("ScreenBoardHandle" + i);
+                handle.AddComponent<MeshFilter>().sharedMesh = _handleMesh;
+                var renderer = handle.AddComponent<MeshRenderer>();
+                renderer.sharedMaterial = _handleMaterial;
+                renderer.shadowCastingMode = ShadowCastingMode.Off;
+                renderer.receiveShadows = false;
+                handle.SetActive(false);
+                _handles[i] = handle;
+            }
+            _handlesShown = false;
+        }
+
+        // 板の姿勢と大きさの反映先は、ここ一箇所にそろえる
+        private void Apply()
+        {
+            if (_layer == null) return;
+            _layer.transform.SetPositionAndRotation(_position, _rotation);
+            ((QuadLayerData)_layer.LayerData).Size = _size;
+
+            if (_punch != null)
+            {
+                _punch.transform.SetPositionAndRotation(_position, _rotation);
+                _punch.transform.localScale = new Vector3(_size.x, _size.y, 1f);
+            }
+
+            var handleRotation = _rotation * Quaternion.Euler(90f, 0f, 0f);
+            for (var i = 0; i < _handles.Length; i++)
+            {
+                if (_handles[i] == null) continue;
+                var sx = (i & 1) == 0 ? -1f : 1f;
+                var sy = (i & 2) == 0 ? -1f : 1f;
+                var local = new Vector3(sx * _size.x * 0.5f, sy * _size.y * 0.5f, -HandleLiftMeters);
+                _handles[i].transform.SetPositionAndRotation(_position + _rotation * local, handleRotation);
+                _handles[i].transform.localScale = Vector3.one * HandleRadiusMeters;
+            }
+        }
+
+        // 手ごとの呼び出しの空振りで消えないよう、見せるかどうかはここで一度だけ決める
+        private void LateUpdate()
+        {
+            var visible = _layer != null && Time.unscaledTime < _handlesUntil;
+            if (visible == _handlesShown) return;
+            _handlesShown = visible;
+            foreach (var handle in _handles)
+            {
+                if (handle != null) handle.SetActive(visible);
+            }
         }
 
         private void DestroyBoard()
@@ -250,6 +452,18 @@ namespace ChatterMascot.Xr
             if (_layer != null) Destroy(_layer.gameObject);
             _layer = null;
             _hasLayerId = false;
+            _dragPart = BoardPart.None;
+            _handlesUntil = 0f;
+            _handlesShown = false;
+            for (var i = 0; i < _handles.Length; i++)
+            {
+                if (_handles[i] != null) Destroy(_handles[i]);
+                _handles[i] = null;
+            }
+            if (_handleMaterial != null) Destroy(_handleMaterial);
+            if (_handleMesh != null) Destroy(_handleMesh);
+            _handleMaterial = null;
+            _handleMesh = null;
             if (_punch == null) return;
             Destroy(_punch.GetComponent<Renderer>().sharedMaterial);
             Destroy(_punch);

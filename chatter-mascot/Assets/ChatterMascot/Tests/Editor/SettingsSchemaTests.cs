@@ -350,7 +350,7 @@ namespace ChatterMascot.Tests
                 null, SettingKeys.MotionPreview, SettingKeys.MotionPreviewPlay,
                 SettingKeys.Walk, SettingKeys.CursorGaze, SettingKeys.Blink,
                 null, SettingKeys.PairingOpen,
-                null, SettingKeys.ResetPosition, SettingKeys.ResetAll,
+                null, SettingKeys.ResetPosition, SettingKeys.ResetScreenPosition, SettingKeys.ResetAll,
                 null,
             }));
         }
@@ -493,6 +493,13 @@ namespace ChatterMascot.Tests
         {
             var spec = Find(SettingsSchema.BuildXr(XrContext()), SettingKeys.ResetPosition);
             Assert.That(spec.Label, Is.EqualTo("キャラクターの位置をリセット"));
+        }
+
+        [Test]
+        public void XrResetScreenPositionHasItsOwnRow()
+        {
+            var spec = Find(SettingsSchema.BuildXr(XrContext()), SettingKeys.ResetScreenPosition);
+            Assert.That(spec.Label, Is.EqualTo("画面の位置をリセット"));
         }
 
         /// <summary>★ モデルファイルは消さない。note で接続先が残ることだけ伝える</summary>

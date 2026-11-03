@@ -39,6 +39,7 @@ namespace ChatterMascot.Xr
         private XROrigin _origin;
         private XrGrab _grab;
         private XrWalk _walk;
+        private XrScreenBoard _board;
 
         private XrSettingsPanel _panel;
         private GameObject _gear;
@@ -74,12 +75,13 @@ namespace ChatterMascot.Xr
 
         private MascotRunner _runner;
 
-        public void Begin(VrmStage stage, XROrigin origin, XrGrab grab, XrWalk walk)
+        public void Begin(VrmStage stage, XROrigin origin, XrGrab grab, XrWalk walk, XrScreenBoard board)
         {
             _stage = stage;
             _origin = origin;
             _grab = grab;
             _walk = walk;
+            _board = board;
             // ★ XR で端末の言語を読むのはここだけ（→ UiText.For）
             _context.Text = UiText.For(Application.systemLanguage);
             _context.AppVersion = Application.version;
@@ -481,6 +483,11 @@ namespace ChatterMascot.Xr
 
                 case SettingKeys.ResetPosition:
                     _grab.ResetPosition();
+                    Refresh();
+                    return;
+
+                case SettingKeys.ResetScreenPosition:
+                    _board.ResetPosition();
                     Refresh();
                     return;
 

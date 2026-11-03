@@ -47,6 +47,7 @@ namespace ChatterMascot.Ui
         public override string XrWalk => "歩く";
         public override string XrCursorGaze => "指している先を目で追う";
         public override string XrResetPosition => "キャラクターの位置をリセット";
+        public override string XrResetScreenPosition => "画面の位置をリセット";
         public override string XrResetAll => "すべての設定をリセット";
         public override string XrResetAllNote => "接続先は残します";
         public override string XrResetAllConfirmNote => "もう一度押すとすべての設定をリセットします";

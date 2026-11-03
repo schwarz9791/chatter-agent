@@ -28,7 +28,7 @@ namespace ChatterMascot.Xr
         private const float HandleGrabMargin = 2f;
 
         private static readonly Color FillColor = new Color(0.35f, 0.45f, 0.85f, 0.45f);
-        private static readonly Color RimColor = new Color(0.15f, 0.25f, 0.85f, 1f);
+        internal static readonly Color RimColor = new Color(0.15f, 0.25f, 0.85f, 1f);
 
         private Transform _fill;
         private Transform _rim;
@@ -150,7 +150,7 @@ namespace ChatterMascot.Xr
         /// 単位半径の扇／環メッシュ（XZ 平面、法線 +Y）。<paramref name="innerRadius"/> が 0 なら扇（塗り）、
         /// それ以外なら環（フチ）——同じヘルパを使い回す。
         /// </summary>
-        private static Mesh BuildRingMesh(float innerRadius, float outerRadius)
+        internal static Mesh BuildRingMesh(float innerRadius, float outerRadius)
         {
             var vertexCount = (RingSegments + 1) * 2;
             var vertices = new Vector3[vertexCount];

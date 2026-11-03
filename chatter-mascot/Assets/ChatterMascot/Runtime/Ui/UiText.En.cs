@@ -47,6 +47,7 @@ namespace ChatterMascot.Ui
         public override string XrWalk => "Walk";
         public override string XrCursorGaze => "Eyes follow pointer";
         public override string XrResetPosition => "Reset Character Position";
+        public override string XrResetScreenPosition => "Reset Screen Position";
         public override string XrResetAll => "Reset All Settings";
         public override string XrResetAllNote => "Keeps the server connection.";
         public override string XrResetAllConfirmNote => "Press again to reset everything.";

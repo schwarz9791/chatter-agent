@@ -54,6 +54,7 @@ namespace ChatterMascot.Settings
         public const string PairingClaim = "pairingClaim";
 
         public const string ResetPosition = "resetPosition";
+        public const string ResetScreenPosition = "resetScreenPosition";
         public const string ResetAll = "resetAll";
     }
 
@@ -116,6 +117,8 @@ namespace ChatterMascot.Settings
             // ── リセット ─────────────────────────────────────
             items.Add(SettingSpec.Section(text.SectionReset));
             items.Add(SettingSpec.Button(SettingKeys.ResetPosition, text.XrResetPosition));
+            // ★ 板が出ていなくても行は出す。有無が変わるとパネルが行を作り直してずれる
+            items.Add(SettingSpec.Button(SettingKeys.ResetScreenPosition, text.XrResetScreenPosition));
             // ★ モデルファイルは消さない。
             //   同期して取ってきたものを次の起動でまた取りに行けばよいので、消す必要が無い
             items.Add(SettingSpec.Button(

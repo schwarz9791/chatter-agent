@@ -53,5 +53,28 @@ namespace ChatterMascot.Tests
         {
             Assert.That(ServerUrl.FromHostPort(host, port), Is.EqualTo(expected));
         }
+
+        [TestCase("ws://192.168.1.5:8570", "192.168.1.5", 8571)]
+        [TestCase("ws://mac.local:8570", "mac.local", 8571)]
+        [TestCase("ws://[::1]:8570", "::1", 8571)]
+        [TestCase("wss://mascot.example:8570", "mascot.example", 8571)]
+        [TestCase("ws://mac.local", "mac.local", 81)]
+        [TestCase("wss://mac.local", "mac.local", 444)]
+        public void DerivesScreenEndpoint(string url, string expectedHost, int expectedPort)
+        {
+            Assert.That(ServerUrl.ToScreenEndpoint(url, out var host, out var port), Is.True);
+            Assert.That(host, Is.EqualTo(expectedHost));
+            Assert.That(port, Is.EqualTo(expectedPort));
+        }
+
+        [TestCase("ws://mac.local:65535")]
+        [TestCase("http://mac.local:8570")]
+        [TestCase("garbage")]
+        [TestCase("")]
+        [TestCase(null)]
+        public void RejectsScreenEndpoint(string url)
+        {
+            Assert.That(ServerUrl.ToScreenEndpoint(url, out _, out _), Is.False);
+        }
     }
 }

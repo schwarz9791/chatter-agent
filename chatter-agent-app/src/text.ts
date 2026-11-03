@@ -59,6 +59,11 @@ export type Text = {
   hotKeyNeedsModifier: string;
   hotKeyClashRejected(label: string): string;
 
+  sectionScreen: string;
+  screenPeersEmpty: string;
+  screenPeersNote: string;
+  screenRevoke: string;
+
   sectionReset: string;
   resetAll: string;
   resetAllNote: string;
@@ -162,6 +167,11 @@ export const JA: Text = {
   hotKeyHide: "キャラクターの表示切り替え",
   hotKeyNeedsModifier: "修飾キー（⌃ ⌥ ⇧ ⌘）を1つ以上選んでください",
   hotKeyClashRejected: (label) => `「${label}」と同じ組み合わせです`,
+
+  sectionScreen: "画面共有",
+  screenPeersEmpty: "許可している端末はありません",
+  screenPeersNote: "許可した端末は、画面を共有している間、確認なしで画面を見られます",
+  screenRevoke: "解除",
 
   sectionReset: "リセット",
   resetAll: "すべての設定をリセット…",
@@ -267,6 +277,11 @@ export const EN: Text = {
   hotKeyHide: "Show/hide character",
   hotKeyNeedsModifier: "Choose at least one modifier (⌃ ⌥ ⇧ ⌘).",
   hotKeyClashRejected: (label) => `Already used by "${label}".`,
+
+  sectionScreen: "Screen sharing",
+  screenPeersEmpty: "No devices are allowed",
+  screenPeersNote: "Allowed devices can see the screen without asking while you are sharing it",
+  screenRevoke: "Revoke",
 
   sectionReset: "Reset",
   resetAll: "Reset All Settings…",

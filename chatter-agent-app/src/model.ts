@@ -249,3 +249,17 @@ export function pairingView(state: PairingState): PairingView {
       return { message: "expired", showPin: false, showReissue: true, keepPolling: false };
   }
 }
+
+// ── 画面共有 ──
+
+export interface ScreenPeer {
+  fingerprint: string;
+  label: string;
+  approvedAt: string;
+}
+
+/** 許可済み端末の1行。確認コードは端末に出るものと同じ（指紋の先頭 8 桁）、日付は許可した日 */
+export function screenPeerLine(p: ScreenPeer): string {
+  const head = p.fingerprint.slice(0, 8).toUpperCase();
+  return [p.label, `${head.slice(0, 4)}-${head.slice(4)}`, p.approvedAt.slice(0, 10)].join(" · ");
+}

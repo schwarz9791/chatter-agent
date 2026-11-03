@@ -62,7 +62,7 @@ There are four deliverables.
 | **Server** (`chatter-agent-server`) | Works |
 | **CLI player** (`chatter-agent-player`) | Works. Also doubles as the reference implementation of the protocol |
 | **macOS client** (`chatter-mascot`) | Works. Sits resident in a transparent window, and the VRM reads speech aloud with facial expressions, motion, and lip sync. Settings can be changed from the app |
-| **Android XR client** (same Unity project. Targets XREAL Aura / Galaxy XR) | Emulator only. Stands in space in OpenXR's Full Space, and the room shows through the background on both glasses and headsets. Connects to the server over LAN. **Not yet verified on real hardware**. See [Try it on XREAL Aura](#try-it-on-xreal-aura-android-xr). |
+| **Android XR client** (same Unity project. Targets XREAL Aura / Galaxy XR) | Emulator only. Stands in space in OpenXR's Full Space, and the room shows through the background on both glasses and headsets. Connects to the server over LAN. Can show your Mac's screen on a board ("Share Screen…" in the ChatterAgent menu). **Not yet verified on real hardware**. See [Try it on XREAL Aura](#try-it-on-xreal-aura-android-xr). |
 
 ## Try it on XREAL Aura (Android XR)
 

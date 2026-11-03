@@ -9,6 +9,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.XR.Management;
 using UnityEngine.XR.OpenXR;
+using UnityEngine.XR.OpenXR.Features.CompositionLayers;
 using UnityEngine.XR.OpenXR.Features;
 using UnityEngine.XR.OpenXR.Features.Android;
 using UnityEngine.XR.OpenXR.Features.Interactions;
@@ -210,7 +211,7 @@ namespace ChatterMascot.EditorTools
         /// <summary>
         /// Android XR を動かす必須の Android XR Support、背景に部屋を透かす自前の See-Through Blend、
         /// キャラを手やマウスで置き直すのに要る Hand Interaction Profile / Android Mouse Interaction Profile /
-        /// AR Session / AR Plane だけを有効化する。それ以外の feature には触れない。
+        /// AR Session / AR Plane、画面の板に要る Composition Layers Support だけを有効化する。それ以外の feature には触れない。
         ///
         /// ★ 自前の feature は、設定アセットに登録されるまで <c>GetFeature</c> で見つからない。
         ///   Editor の UI を開かない batchmode でも登録させるため、先に <c>RefreshFeatures</c> する。
@@ -235,6 +236,7 @@ namespace ChatterMascot.EditorTools
             changed |= EnableFeature<XrSeeThroughBlendFeature>(settings, "Chatter Mascot: See-Through Blend");
             changed |= EnableFeature<HandInteractionProfile>(settings, "Hand Interaction Profile");
             changed |= EnableFeature<AndroidMouseInteractionProfile>(settings, "Android Mouse Interaction Profile");
+            changed |= EnableFeature<OpenXRCompositionLayersFeature>(settings, "Composition Layers Support");
             return changed;
         }
 

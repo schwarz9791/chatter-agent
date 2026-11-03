@@ -21,6 +21,23 @@ namespace ChatterMascot.Net
         }
 
         /// <summary>
+        /// 画面の配信の口（同じ host の <c>port + 1</c>。→ <c>docs/protocol.md</c>）。
+        /// <paramref name="host"/> は IPv6 でも角括弧なし（Java の <c>InetSocketAddress</c> 向け）。
+        /// ポート省略は <see cref="Uri"/> の既定（ws=80、wss=443）に従う。
+        /// </summary>
+        public static bool ToScreenEndpoint(string url, out string host, out int port)
+        {
+            host = null;
+            port = 0;
+            if (!IsValid(url)) return false;
+            var uri = new Uri(url);
+            if (uri.Port >= 65535) return false;
+            host = uri.DnsSafeHost;
+            port = uri.Port + 1;
+            return true;
+        }
+
+        /// <summary>
         /// 探索で得た <paramref name="host"/> と <paramref name="port"/> から <c>ws://host:port</c> を組む。
         /// 組めない（ホストが空・ポートが範囲外・URL として不正）ときは <c>null</c>。
         /// IPv6 リテラルは角括弧で包む。

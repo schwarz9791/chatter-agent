@@ -1281,8 +1281,23 @@ Spatial Containers は、Spatial API Level 4 以上という要件を満たす�
 - 受信側は次のフレームの先頭が届いてから今のフレームを送るので、1フレーム分の遅れを含む
 - `-framerate 30` だけで計測用の PNG も同時に書き出した最初の配信は、受信が 55fps 前後で回り、44 秒遅れた。`fps=30` フィルタを足して PNG の出力を外すと解消した。同時に変えたので、どちらが原因かは切り分けていない
 
-本実装で別に要るもの: 配信の認証と暗号化、Mac の画面収録の権限、減光の要求。キーボードとマウスの中継は持たず、
-Mac 側のものを使う。
+キーボードとマウスの中継は持たず、Mac 側のものを使う。
+
+### 本実装で確かめたこと（[#237](https://github.com/schwarz9791/chatter-agent/issues/237)）
+
+配信の契約は [`../protocol.md`](../protocol.md)「画面の配信」、Mac 側の許可は [`agent.md`](./agent.md)「画面の取得はピッカーなら許可が要らない」。
+
+2026-11-03。`XR_Glasses` と `XR_Headset_API_34`（上の表と同じイメージ）。接続先は Mac の Wi-Fi の IP（エミュレータの NAT 越し。LAN は通っていない）。
+Android Keystore の EC 鍵での mTLS、初回の承認と解除、拒否、証明書なしと TLS 1.2 の拒否、アプリを離れて戻る、止まった窓、回線断、
+Mac が黙ったときの 6 秒の期限（`kill -STOP`）がすべて通った。握手の完了から最初のフレームまでは約 0.9 秒（承認済みの端末）、
+画面全体（2022×1138）を映している間の ChatterAgent の CPU は 4% 前後。
+
+★ **Surface はレイヤーを作った直後には取れない。** すぐ取りに行くと `Failed to get Android Surface Object` がエラーログに出る。作ってから間を空ける。
+
+★ **未確認。** 送信待ちが溢れる経路。`adb emu network speed gsm` で 24 秒絞っても動きの少ない窓では切れず、遅れも残らなかったが、絞れていたのかは確かめていない。
+キューの規則は `screen/wire.rs` のテストだけで見ている（LAN と実機は [#100](https://github.com/schwarz9791/chatter-agent/issues/100)）。
+
+★ エミュレータのマスコットも server に繋がるので、Mac のマスコットと文を取り合う。確認の間だけにして、後で片方に戻す。
 
 ### Spatial Containers で既製アプリと並べる
 

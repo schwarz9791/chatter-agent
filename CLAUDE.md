@@ -20,7 +20,7 @@ Android XR）が鳴らして VRM に反映する。macOS では ChatterAgent が
 | `core/src/core/` | 契約と基盤（型・パス・設定・ロック・キュー） |
 | `core/src/text/` `emotion/` `prompt/` `summarizer/` `tts/` | 整形・感情判定・応答待ち通知・AI要約（既定ON）・合成クライアント |
 | `chatter-mascot/` | 表示側アプリ（Unity + UniVRM）。macOS と Android XR を1プロジェクトから |
-| `chatter-agent-app/` | ChatterAgent（Tauri）。メニューバー常駐で `chatter-agent-server` を起動・停止する。設定パネル（サーバーの設定とマスコットの設定）を持つ |
+| `chatter-agent-app/` | ChatterAgent（Tauri）。メニューバー常駐で `chatter-agent-server` を起動・停止する。設定パネル（サーバーの設定とマスコットの設定）を持ち、Mac の画面を XR へ配信する |
 | `docs/` | 基本設計・ファイル構成・コマンド |
 | `docs/knowledge/` | 実装で踏んだこと・なぜそうしたか・実測値 |
 
@@ -54,7 +54,8 @@ chatter-mascot               表示側アプリ（Unity）。再生 → VRM描�
 
 ChatterAgent（macOS 常駐）──▶ chatter-agent-server を起動・停止する（配信の経路には入らない）
                           ├─▶ `bin-path` に同梱の実行ファイルのパスを書く（hook が CLI を起こす先）
-                          └─▶ 設定パネル: /v1/*（Rust から）と mascot/settings.json を書く
+                          ├─▶ 設定パネル: /v1/*（Rust から）と mascot/settings.json を書く
+                          └─▶ Mac の画面を XR の板へ（TLS。port + 1。server を通らない）
 ```
 
 設計の芯は3つ。
@@ -235,7 +236,7 @@ npm run build            # → ChatterAgent.app
 
 | 文書 | 読むとき |
 |---|---|
-| [`docs/protocol.md`](./docs/protocol.md) | **発話の契約。** `SpeechRecord`、配信キュー、WebSocket と ack、制御 API。クライアントを書くときはここだけで足りる |
+| [`docs/protocol.md`](./docs/protocol.md) | **発話の契約。** `SpeechRecord`、配信キュー、WebSocket と ack、制御 API、画面の配信。クライアントを書くときはここだけで足りる |
 | [`docs/core.md`](./docs/core.md) | `core/` を触るとき。区画の分け方、tsconfig の制約、バンドル方針、ランタイムのファイル配置 |
 | [`docs/plugin.md`](./docs/plugin.md) | `plugin/` を触るとき。bash hook の制約、spool 命名、`hooks.json` の3種 |
 | [`docs/mascot.md`](./docs/mascot.md) | `chatter-mascot/` を触るとき。セットアップ、構成、探索順、ビルドと実行 |

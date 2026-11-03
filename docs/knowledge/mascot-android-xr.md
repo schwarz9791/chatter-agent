@@ -1202,8 +1202,18 @@ Android版 Claude アプリ等と並べられる。引き換えに空間的な�
 
 ## Mac の画面を XR 側に出す（[#236](https://github.com/schwarz9791/chatter-agent/issues/236)）
 
-**Full Space のまま Composition Layer に映す道（道 A）は、エミュレータで最後まで動いた。** Spatial Containers で
-既製アプリと並べる道（道 B）は、試せるイメージが無く入口で止まった。**道 A を採る。** 検証のコードは main に入れず、
+マスコットは unmanaged Full Space で動くので、他のアプリは隠れる。Mac の画面を XR 側へ持ってくる方法を2つ比べた。
+
+- **Composition Layer に映す** —— Mac の画面を H.264 で流し、XR 側で `MediaCodec` から Android Surface を通して板（quad レイヤー）に出す。Full Space のまま動く
+- **Spatial Containers で既製アプリと並べる** —— マスコットを managed Full Space の bounded コンテナ（箱）に入れ、Chrome リモートデスクトップなどの既製アプリを横に開く。映像も操作も既製アプリに任せられる
+
+**Composition Layer に映す方を採る。** エミュレータで最後まで動いた。依存が増えず、キャラの歩行と置き直しが箱の中に
+限られない。その代わり、映像の配信と、その認証と暗号化を自前で持つ。
+
+Spatial Containers は、Spatial API Level 4 以上という要件を満たすイメージが無く、試せなかった。要件を満たす端末か
+イメージが手に入ったら、配信を自前で持つコストと比べ直す。
+
+本実装は [#237](https://github.com/schwarz9791/chatter-agent/issues/237)。検証のコードは main に入れず、
 [`spike/issue-236-surface`](https://github.com/schwarz9791/chatter-agent/tree/spike/issue-236-surface) に残してある。
 
 測定条件（2026-11-03。実機の代わりにしないこと）:
@@ -1218,7 +1228,7 @@ Android版 Claude アプリ等と並べられる。引き換えに空間的な�
 | 映像 | 1920×1080、H.264、`h264_videotoolbox`、B フレームなし、30fps。デコーダーは `c2.goldfish.h264.decoder` |
 | 板 | 幅 1.2m の quad。視点から奥行き 1.1m、キャラの 0.5m 奥 |
 
-### 道 A: Composition Layer + Android Surface
+### Composition Layer に映す
 
 | 確認項目 | 結果 |
 |---|---|
@@ -1274,17 +1284,17 @@ Android版 Claude アプリ等と並べられる。引き換えに空間的な�
 本実装で別に要るもの: 配信の認証と暗号化、Mac の画面収録の権限、減光の要求。キーボードとマウスの中継は持たず、
 Mac 側のものを使う。
 
-### 道 B: Spatial Containers
+### Spatial Containers で既製アプリと並べる
 
-**1 つ目の確認で止まった。** どちらの AVD も `android.software.xr.api.spatial=3` で、`XR_EXT_spatial_container` と
+**端末の要件を確かめる段階で止まった。** どちらの AVD も `android.software.xr.api.spatial=3` で、`XR_EXT_spatial_container` と
 `XR_EXT_spatial_container_self_rendering` を返さない。Spatial API Level 4 以上という要件を満たさないので、
-他社アプリとの同時表示、フォーカスが移ったときの発話、今の作りとの両立は試していない。
+既製アプリを横に開けるか、そちらへフォーカスが移ってもマスコットが喋り続けるか、今の作りと両立するかは試していない。
 
 - ★ **イメージの名前と端末の版は別物。** 「Preview API v4」のイメージでも `spatial=3` を返す。`XR_ANDROID_global_passthrough_dimming` など
   v4 で入った拡張の一部は返すが、Spatial Containers は無い。rev.3 も rev.4 も同じ。`sdkmanager --channel=3` にも新しい XR イメージは無かった
 - ★ **`XRSpatialContainerFeature` に `supportsBounded` は無い。** C# で見られるのは `IsExtensionEnabled` / `TryGetBounds` / `TryGetState`
 - Extensions 1.5.0 で確認された組み合わせは `androidxr-openxr` 1.4.1 / AR Foundation 6.6.2 で、こちらの 1.5.1 / 6.7.1 より古い
-- `XrStage` は頭を基準に XR Origin を動かすが、コンテナは箱の中心が原点で、外は切り取られる。道 B を採るなら配置の作り直しが要る
+- `XrStage` は頭を基準に XR Origin を動かすが、コンテナは箱の中心が原点で、外は切り取られる。Spatial Containers を採るなら配置の作り直しが要る
 - XREAL Aura の Spatial API Level は未確認（[#100](https://github.com/schwarz9791/chatter-agent/issues/100)）
 
 ★ イメージを更新すると AVD に入れたアプリが消えた。素材を入れ直す手間を見込むこと。

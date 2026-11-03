@@ -27,6 +27,16 @@ pub struct Text {
     pub settings_title: &'static str,
     pub pairing: &'static str,
     pub pairing_title: &'static str,
+    pub screen_share: &'static str,
+    pub screen_stop: &'static str,
+    screen_stop_viewer: fn(&str) -> String,
+    pub screen_title: &'static str,
+    pub screen_no_server: &'static str,
+    screen_bind_failed: fn(&str) -> String,
+    screen_failed: fn(&str) -> String,
+    screen_confirm: fn(&str, &str) -> String,
+    pub screen_allow: &'static str,
+    pub screen_deny: &'static str,
     pub autostart: &'static str,
     pub quit: &'static str,
     pub mute: &'static str,
@@ -75,6 +85,16 @@ pub const JA: Text = Text {
     settings_title: "Chatter Agent 設定",
     pairing: "Android とペアリング…",
     pairing_title: "Android とペアリング",
+    screen_share: "画面を共有…",
+    screen_stop: "画面の共有を止める",
+    screen_stop_viewer: |ip| format!("画面の共有を止める（{ip} が表示中）"),
+    screen_title: "画面の共有",
+    screen_no_server: "サーバーに繋がらないため、画面を共有できません。",
+    screen_bind_failed: |e| format!("画面の共有を始められません。\n\n{e}"),
+    screen_failed: |e| format!("画面の共有が終了しました。\n\n{e}"),
+    screen_confirm: |ip, code| format!("{ip} の端末が、共有している画面の表示を求めています。\n\n確認コード: {code}\n\n端末に出ているコードと同じときだけ許可してください。"),
+    screen_allow: "許可",
+    screen_deny: "拒否",
     autostart: "ログイン時に起動",
     quit: "終了",
     mute: "ミュート",
@@ -136,6 +156,16 @@ pub const EN: Text = Text {
     settings_title: "Chatter Agent Settings",
     pairing: "Pair with Android…",
     pairing_title: "Pair with Android",
+    screen_share: "Share Screen…",
+    screen_stop: "Stop Sharing Screen",
+    screen_stop_viewer: |ip| format!("Stop Sharing Screen (shown to {ip})"),
+    screen_title: "Screen Sharing",
+    screen_no_server: "Cannot share the screen because the server is not responding.",
+    screen_bind_failed: |e| format!("Could not start sharing the screen.\n\n{e}"),
+    screen_failed: |e| format!("Screen sharing ended.\n\n{e}"),
+    screen_confirm: |ip, code| format!("The device at {ip} wants to show the screen you are sharing.\n\nConfirmation code: {code}\n\nAllow it only if the device shows the same code."),
+    screen_allow: "Allow",
+    screen_deny: "Deny",
     autostart: "Launch at Login",
     quit: "Quit",
     mute: "Mute",
@@ -211,6 +241,22 @@ impl Text {
 
     pub fn mascot_not_found(&self, places: &str) -> String {
         (self.mascot_not_found)(places)
+    }
+
+    pub fn screen_stop_viewer(&self, ip: &str) -> String {
+        (self.screen_stop_viewer)(ip)
+    }
+
+    pub fn screen_bind_failed(&self, e: &str) -> String {
+        (self.screen_bind_failed)(e)
+    }
+
+    pub fn screen_failed(&self, e: &str) -> String {
+        (self.screen_failed)(e)
+    }
+
+    pub fn screen_confirm(&self, ip: &str, code: &str) -> String {
+        (self.screen_confirm)(ip, code)
     }
 
     pub fn mascot_launch_failed(&self, e: &str) -> String {

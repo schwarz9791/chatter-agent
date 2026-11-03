@@ -62,7 +62,7 @@ Claude Code
 | **サーバー**（`chatter-agent-server`） | 動きます |
 | **CLI プレーヤー**（`chatter-agent-player`） | 動きます。プロトコルの参照実装も兼ねています |
 | **macOS クライアント**（`chatter-mascot`） | 動きます。透過ウィンドウで常駐し、VRM が表情・モーション・リップシンク付きで読み上げます。設定はアプリから変えられます |
-| **Android XR クライアント**（同じ Unity プロジェクト。XREAL Aura / Galaxy XR 想定） | エミュレータまで。OpenXR の Full Space で空間に立ち、グラスでもヘッドセットでも背景に部屋が透けます。LAN 越しにサーバーへ繋がります。**実機は未確認**。[XREAL Aura で試す](#xreal-aura-で試すandroid-xr)を見てください |
+| **Android XR クライアント**（同じ Unity プロジェクト。XREAL Aura / Galaxy XR 想定） | エミュレータまで。OpenXR の Full Space で空間に立ち、グラスでもヘッドセットでも背景に部屋が透けます。LAN 越しにサーバーへ繋がります。Mac の画面を板に映せます（ChatterAgent のメニュー「画面を共有…」）。**実機は未確認**。[XREAL Aura で試す](#xreal-aura-で試すandroid-xr)を見てください |
 
 ## XREAL Aura で試す（Android XR）
 

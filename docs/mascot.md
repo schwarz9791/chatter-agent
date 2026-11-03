@@ -797,6 +797,23 @@ DN を見る。release 鍵なら `CN=ChatterMascot`、debug 鍵なら `CN=Androi
 build-tools の `aapt2 dump badging <apk>` が出す `versionName` / `versionCode` で見る。版は起動ログの
 `[Mascot] version:` と、XR の設定パネルの末尾でも確かめられる。
 
+### Mac の画面を板に映す（XR）
+
+Mac の ChatterAgent で「画面を共有…」を選ぶと、XR に板（Composition Layer）が出る。XR 側の操作は要らない。
+**キーボードとマウスは Mac のものをそのまま使う。**
+
+1. ChatterAgent のメニューで「画面を共有…」を選び、画面かウインドウを選ぶ
+2. 初めての端末なら、Mac にダイアログ、端末に確認コードが出る。同じコードなら「許可」を押す
+3. 止めるのは Mac のメニューの「画面の共有を止める」
+
+板はキャラの奥に出て、キャラとの前後は穴あけの板で合わせている。受信は `ScreenReceiver.java`、板は `Xr/XrScreenBoard.cs`。
+アプリを離れると受信を止めて板を消し、戻ると繋ぎ直す。
+
+★ Mac の証明書が変わると「すべての設定をリセット」するまで繋がらない（端末は最初の接続で覚えた証明書以外を拒否する）。
+
+なぜこの形か・検証の結果は [`mascot-android-xr.md`](./knowledge/mascot-android-xr.md)「Mac の画面を XR 側に出す」、
+契約は [`protocol.md`](./protocol.md)「画面の配信」。
+
 ### Android 側の必須設定
 
 `AndroidManifest.xml` に最終的に要るもの（`INTERNET` / `usesCleartextTraffic` 以外はビルド時に

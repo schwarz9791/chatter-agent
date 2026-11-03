@@ -9,6 +9,7 @@ import {
   mascotGet,
   motionPreviewState,
   pairingView,
+  screenPeerLine,
   parseHotKey,
   sameCombination,
 } from "./model.ts";
@@ -113,4 +114,9 @@ test("not_lan は専用の文言", () => {
   const err = { status: 409, body: JSON.stringify({ error: "not_lan" }) };
   assert.equal(errorMessage(err, err, "", JA), JA.pairingNotLan);
   assert.equal(errorMessage(err, err, "", EN), EN.pairingNotLan);
+});
+
+test("許可済み端末の行は IP・確認コード・許可した日", () => {
+  const peer = { fingerprint: "ba7816bf8f01cfea", label: "192.168.0.5", approvedAt: "2026-11-03T10:20:30+09:00" };
+  assert.equal(screenPeerLine(peer), "192.168.0.5 · BA78-16BF · 2026-11-03");
 });

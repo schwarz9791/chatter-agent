@@ -631,6 +631,7 @@ namespace ChatterMascot.Xr
             _walk.SetEnabled(next.Walk);
             RescaleTo(next.XrHeight);
             _grab.ResetPosition();
+            XrScreenBoard.ForgetMac();
 
             Refresh();
         }

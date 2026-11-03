@@ -4,6 +4,8 @@ mod clients;
 mod control;
 mod mascot;
 mod mascot_app;
+#[cfg(target_os = "macos")]
+mod screen;
 mod server;
 mod text;
 mod update;
@@ -34,6 +36,18 @@ struct Settings {
     /// 検証用に、更新の取得元を `owner/repo` で差し替える。
     #[serde(default)]
     dev_update_repo: Option<String>,
+    /// 画面の表示を許可した端末。
+    #[serde(default)]
+    screen_peers: Vec<ScreenPeer>,
+}
+
+/// 許可した端末。`label` は許可したときの IP。
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScreenPeer {
+    fingerprint: String,
+    label: String,
+    approved_at: String,
 }
 
 fn yes() -> bool {
@@ -47,6 +61,7 @@ impl Default for Settings {
             mascot_visible: true,
             check_updates: true,
             dev_update_repo: None,
+            screen_peers: Vec::new(),
         }
     }
 }
@@ -104,6 +119,34 @@ fn about(app: tauri::AppHandle) -> About {
         version: app.package_info().version.to_string(),
         notice: include_str!("../../../NOTICE"),
     }
+}
+
+fn settings_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_config_dir()
+        .map_err(|e| e.to_string())?
+        .join("settings.json"))
+}
+
+#[tauri::command]
+fn screen_peers(app: tauri::AppHandle) -> Result<Vec<ScreenPeer>, String> {
+    Ok(Settings::read(&settings_file(&app)?)
+        .map_err(|e| e.to_string())?
+        .screen_peers)
+}
+
+#[tauri::command]
+fn screen_revoke(app: tauri::AppHandle, fingerprint: String) -> Result<(), String> {
+    update_settings(&settings_file(&app)?, |s| {
+        s.screen_peers.retain(|p| p.fingerprint != fingerprint)
+    })
+    .map_err(|e| e.to_string())?;
+    #[cfg(target_os = "macos")]
+    if let Some(screen) = app.try_state::<screen::Screen>() {
+        screen.disconnect_fingerprint(&fingerprint);
+    }
+    Ok(())
 }
 
 /// 設定窓を前面に出す。無ければ作る。
@@ -177,6 +220,8 @@ fn main() {
             text::lang,
             update::update_info,
             update::update_set_auto,
+            screen_peers,
+            screen_revoke,
             about,
         ])
         .setup(|app| {
@@ -202,6 +247,11 @@ fn main() {
             .build(app)?;
             let settings_item = MenuItemBuilder::with_id("settings", t.settings).build(app)?;
             let pairing_item = MenuItemBuilder::with_id("pairing", t.pairing).build(app)?;
+            // 画面の取得に使うピッカーは macOS 14 から。
+            #[cfg(target_os = "macos")]
+            let screen_item = objc2::available!(macos = 14.0)
+                .then(|| MenuItemBuilder::with_id("screen", t.screen_share).build(app))
+                .transpose()?;
             let update_item = MenuItemBuilder::with_id("update", t.update_check).build(app)?;
             let restart_item = MenuItemBuilder::with_id("restart", t.start)
                 .enabled(false)
@@ -211,13 +261,18 @@ fn main() {
                 .checked(app.autolaunch().is_enabled().unwrap_or(false))
                 .build(app)?;
             let quit_item = MenuItemBuilder::with_id("quit", t.quit).build(app)?;
-            let menu = MenuBuilder::new(app)
+            let mut menu = MenuBuilder::new(app)
                 .item(&status_item)
                 .item(&PredefinedMenuItem::separator(app)?)
                 .item(&mute_item)
                 .item(&visible_item)
                 .item(&PredefinedMenuItem::separator(app)?)
-                .item(&settings_item)
+                .item(&settings_item);
+            #[cfg(target_os = "macos")]
+            if let Some(item) = &screen_item {
+                menu = menu.item(item);
+            }
+            let menu = menu
                 .item(&pairing_item)
                 .item(&update_item)
                 .item(&restart_item)
@@ -277,6 +332,21 @@ fn main() {
             clients.attach(manager.clone());
             app.manage(manager.clone());
             app.manage(clients.clone());
+            #[cfg(target_os = "macos")]
+            if let Some(item) = screen_item.clone() {
+                match screen::Screen::new(app.handle().clone(), settings_path.clone(), move |v| {
+                    let _ = item.set_text(match (v.sharing, v.viewer) {
+                        (false, _) => t.screen_share.into(),
+                        (true, None) => t.screen_stop.into(),
+                        (true, Some(ip)) => t.screen_stop_viewer(&ip.to_string()),
+                    });
+                }) {
+                    Ok(screen) => {
+                        app.manage(screen);
+                    }
+                    Err(e) => manager.log(&format!("Screen sharing is unavailable: {e}")),
+                }
+            }
             app.manage(update::Updates::new(
                 app.handle(),
                 update_item,
@@ -310,6 +380,15 @@ fn main() {
                     }
                     "settings" => open_settings(app, t.settings_title),
                     "pairing" => open_pairing(app, t.pairing_title),
+                    #[cfg(target_os = "macos")]
+                    "screen" => {
+                        let app = app.clone();
+                        thread::spawn(move || {
+                            if let Some(screen) = app.try_state::<screen::Screen>() {
+                                screen.toggle();
+                            }
+                        });
+                    }
                     "update" => {
                         let app = app.clone();
                         thread::spawn(move || update::run_from_menu(app));

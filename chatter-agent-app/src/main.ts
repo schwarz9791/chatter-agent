@@ -10,10 +10,12 @@ import {
   mascotGet,
   motionPreviewState,
   parseHotKey,
+  screenPeerLine,
   type ConfigSnapshot,
   type HotKey,
   type MascotKey,
   type PanelKey,
+  type ScreenPeer,
 } from "./model.ts";
 import {
   asServerError,
@@ -27,6 +29,8 @@ import {
   mascotState,
   mascotVersion,
   pickVrm,
+  screenPeers,
+  screenRevoke,
   updateInfo,
   updateSetAuto,
   type UpdateInfo,
@@ -51,6 +55,7 @@ let busyPreview = false;
 let mascotRunning = false;
 let motions: string[] | null = null;
 let selectedMotion = "";
+let peers: ScreenPeer[] = [];
 
 /** 行ごとの一時的な注記（失敗理由など）。成功すると消える */
 const flash: Record<string, string> = {};
@@ -240,8 +245,32 @@ async function loadUpdateInfo(): Promise<void> {
   updates = await updateInfo().catch(() => updates);
 }
 
+async function loadPeers(): Promise<void> {
+  peers = await screenPeers().catch(() => peers);
+}
+
+async function revokePeer(fingerprint: string): Promise<void> {
+  try {
+    await screenRevoke(fingerprint);
+    delete flash.screenPeers;
+    warn.delete("screenPeers");
+  } catch (e) {
+    flash.screenPeers = String(e);
+    warn.add("screenPeers");
+  }
+  await loadPeers();
+  render();
+}
+
 async function reloadAll(): Promise<void> {
-  await Promise.all([loadConfig(), loadMascot(), loadMascotState(), loadMascotVersion(), loadUpdateInfo()]);
+  await Promise.all([
+    loadConfig(),
+    loadMascot(),
+    loadMascotState(),
+    loadMascotVersion(),
+    loadUpdateInfo(),
+    loadPeers(),
+  ]);
   render();
 }
 
@@ -421,6 +450,13 @@ function build(): void {
   hotKeyRow(s, "mute", "audio.muteHotKey", "ui.hideHotKey", () => t.hotKeyMute, () => t.hotKeyHide);
   hotKeyRow(s, "hide", "ui.hideHotKey", "audio.muteHotKey", () => t.hotKeyHide, () => t.hotKeyMute);
 
+  // 画面共有
+  s = section(() => t.sectionScreen);
+  const peerList = el("div");
+  ui.peers = peerList;
+  s.append(peerList);
+  row(s, "screenPeers", () => "", [], { staticNote: () => t.screenPeersNote });
+
   // リセット
   s = section(() => t.sectionReset);
   const reset = el("button");
@@ -599,6 +635,8 @@ function render(): void {
   const vrm = mascotGet(mascot, "character.vrm");
   ui.vrmName.textContent = vrm || t.bundledModelNote;
 
+  renderPeers();
+
   // 無効化と注記
   for (const [id, r] of Object.entries(rows)) {
     const env = r.envKey?.() ?? null;
@@ -622,6 +660,31 @@ function render(): void {
     r.note.textContent = text;
     r.note.classList.toggle("warn", warn.has(id) && !!flash[id]);
   }
+}
+
+/** 許可済み端末の一覧。変わっていないときは描き直さない */
+function renderPeers(): void {
+  const list = ui.peers;
+  const sig = JSON.stringify(peers);
+  if (list.dataset.sig === sig) return;
+  list.dataset.sig = sig;
+  if (peers.length === 0) {
+    list.replaceChildren(el("div", "note", t.screenPeersEmpty));
+    return;
+  }
+  list.replaceChildren(
+    ...peers.map((p) => {
+      const revoke = el("button", "", t.screenRevoke);
+      revoke.addEventListener("click", () => void revokePeer(p.fingerprint));
+      const ctl = el("div", "ctl");
+      ctl.append(revoke);
+      const line = el("div", "line");
+      line.append(el("span", "", screenPeerLine(p)), ctl);
+      const r = el("div", "row");
+      r.append(line);
+      return r;
+    }),
+  );
 }
 
 function previewText(state: ReturnType<typeof motionPreviewState>): string {

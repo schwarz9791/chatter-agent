@@ -52,6 +52,13 @@ so ChatterAgent runs only one of them). The macOS app is looked up as `ChatterMa
 ⌃⌥M toggles mute and ⌃⌥H shows or hides the mascot; only ChatterAgent registers them). Details are in
 [`docs/agent.md`](../docs/agent.md).
 
+### Screen sharing (XR)
+
+"Share Screen…" in the menu shows your Mac's screen or a window on a board in XR (macOS 14 or later). When a new device
+connects, the Mac asks for permission and the device shows a confirmation code; allow it if the codes match. You can revoke
+allowed devices under "Screen Sharing" in the settings window. The screen is encrypted with TLS and sent only to allowed devices.
+If the macOS firewall is on, it asks you to allow incoming connections on the first connection.
+
 ### Updates
 
 ChatterAgent asks GitHub for new releases at launch and every 6 hours (you can turn this off under "About Chatter Agent" in the settings window).

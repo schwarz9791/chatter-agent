@@ -95,5 +95,7 @@ namespace ChatterMascot.Ui
         public abstract string UpdateAvailableToast(string version);
         public abstract string PairingDialogMessage { get; }
         public abstract string Cancel { get; }
+        public abstract string XrScreenApprove(string code);
+        public abstract string XrScreenCertChanged { get; }
     }
 }

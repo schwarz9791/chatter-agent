@@ -81,5 +81,9 @@ namespace ChatterMascot.Ui
         public override string PairingDialogMessage =>
             "Mac の ChatterAgent のメニュー「Android とペアリング…」に出る 4 桁の PIN を入力してください";
         public override string Cancel => "キャンセル";
+        public override string XrScreenApprove(string code) =>
+            $"Mac で画面の共有を許可してください\n確認コード {code}";
+        public override string XrScreenCertChanged =>
+            "Mac の証明書が変わったため、画面を表示できません\nすべての設定をリセットすると、繋ぎ直せます";
     }
 }

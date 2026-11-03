@@ -229,6 +229,24 @@ fn call(
     }
 }
 
+/// server が待ち受けている host / port。答えなければ `Unreachable`。
+#[cfg(target_os = "macos")]
+pub fn server_listen(env: &Env) -> Result<(String, u16), Failure> {
+    let target = resolve_target(env)?;
+    let bytes = call(&target, "GET", "/v1/config", None).map_err(|_| Failure::Unreachable)?;
+    let v: Value = serde_json::from_slice(&bytes).map_err(|_| Failure::BadResponse)?;
+    let values = v.get("values").ok_or(Failure::BadResponse)?;
+    let host = values
+        .get("host")
+        .and_then(Value::as_str)
+        .ok_or(Failure::BadResponse)?;
+    let port = values
+        .get("port")
+        .and_then(parse_port)
+        .ok_or(Failure::BadResponse)?;
+    Ok((host.into(), port))
+}
+
 /// 同期コマンドはメインスレッドで走りトレイごと固まるので、`async` にしてブロッキング用スレッドへ逃がす。
 #[tauri::command]
 pub async fn server_request(

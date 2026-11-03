@@ -1,6 +1,8 @@
 // Rust 側のコマンドの型付きラッパ。`withGlobalTauri` が注入する invoke を使い、`@tauri-apps/api` は入れない。
 // サーバーは WebView から fetch しない（Origin が付いて拒否される）ので、必ず Rust を経由する。
 
+import type { ScreenPeer } from "./model.ts";
+
 declare global {
   interface Window {
     __TAURI__: { core: { invoke(cmd: string, args?: Record<string, unknown>): Promise<unknown> } };
@@ -57,6 +59,8 @@ export const mascotState = () => invoke<{ running: boolean; motions: string[] | 
 export const mascotVersion = () => invoke<string | null>("mascot_version");
 export const mascotRequest = (kind: "resetWindow" | "playMotion", id?: string) =>
   invoke<void>("mascot_request", { kind, id });
+export const screenPeers = () => invoke<ScreenPeer[]>("screen_peers");
+export const screenRevoke = (fingerprint: string) => invoke<void>("screen_revoke", { fingerprint });
 export const about = () => invoke<{ version: string; notice: string }>("about");
 export interface UpdateInfo {
   agent: string | null;

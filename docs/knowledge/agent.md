@@ -281,3 +281,35 @@ ad-hoc で公証していないので rejected と答える）。
   `createUpdaterArtifacts` が作るものとはパスの集合が同じで、並び順だけが違う（updater は親を作りながら展開するので並びは効かない）
 - マスコットだけの更新では、「更新」を押してから zip を落として署名を確かめる間は読み上げが続き、止まるのはマスコットを閉じて
   入れ替える間だけだった（話している途中の1文は言い切ってから閉じる）。起き直したマスコットは、止まっていた間の分から続きを読んだ
+
+## 画面の取得はピッカーなら許可が要らない
+
+画面収録の許可（TCC）は署名の designated requirement で引かれる。ad-hoc 署名には安定した DR が無いので、
+更新のたびに許可が外れ、一覧ではオンに見えたまま拒否される
+（[Apple Developer Forums の DTS の回答](https://developer.apple.com/forums/thread/795739)）。ChatterAgent は ad-hoc なので、
+`SCShareableContent` で取る形だと更新のたびに許可を取り直すことになる。`SCContentSharingPicker` なら選択そのものが同意になる。
+
+Apple の文書にこの扱いの明記は見つからず、開発者の報告しかなかったので確かめた。
+
+- 2026-11-03（macOS 27.2。ad-hoc 署名の `LSUIElement` の確認用アプリ。Swift で書いた小さな `.app`）:
+  - `CGPreflightScreenCaptureAccess()` は最初から最後まで `false` のまま、`SCStream` からフレームが届いた
+  - ビルドし直して cdhash を変えても、確認は出ずに同じように動いた
+  - `replayd` のログは `Client already accepted acknowledgement for capture or does not require alert, skipping alert presentation`
+  - ピッカーは `activate` を呼ばなくても前面に出た
+- ChatterAgent 本体（同じ Mac。ad-hoc、`LSUIElement`）でも、画面収録の許可を設定せずに配信できた
+- ★ **未確認:** 月次の通知（macOS 15 以降）。[ピッカーでも通知が出たという投稿](https://developer.apple.com/forums/tags/screencapturekit?page=4)があり、短い確認では分からない
+
+★ `filter.contentRect` × `pointPixelScale` は、4K ディスプレイのウインドウで 3840×4260 になった。そのまま符号化しない（`fit_size`）。
+
+### macOS のファイアウォール
+
+ChatterAgent 自身が待ち受けるのは画面共有が初めて。ファイアウォールが有効な Mac で、最初の接続の TLS が
+約 30 秒進まず、その後 `socketfilterfw --listapps` にこのビルドが「Allow incoming connections」で載っていた
+（2026-11-03。同じ Mac）。**クライアントの TCP 接続は成功するので、クライアント側からは握手が止まって見える。**
+ログには `Found known filter app by signing identifier` が出る。更新で cdhash が変わったときに聞き直されるかは未確認。
+
+## ローカルで作った証明書は v3 にする
+
+macOS の `openssl req -x509`（LibreSSL）は、拡張を指定しないと X.509 **v1** を作る。rustls の検証は v1 を
+`UnsupportedCertVersion` で拒否する。動作確認に使う自作の証明書は `x509_extensions` で v3 にすること。
+Android Keystore の証明書はそのまま通る。

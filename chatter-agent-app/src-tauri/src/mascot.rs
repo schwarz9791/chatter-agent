@@ -323,16 +323,23 @@ pub async fn confirm(
     ok: String,
     cancel: String,
 ) -> Result<bool, String> {
-    blocking(move || {
-        Ok(app
-            .dialog()
-            .message(message)
-            .title(title)
-            .kind(MessageDialogKind::Warning)
-            .buttons(MessageDialogButtons::OkCancelCustom(ok, cancel))
-            .blocking_show())
-    })
-    .await
+    blocking(move || Ok(confirm_blocking(&app, title, message, ok, cancel))).await
+}
+
+/// メインスレッドで呼ぶとデッドロックする。
+pub(crate) fn confirm_blocking(
+    app: &tauri::AppHandle,
+    title: String,
+    message: String,
+    ok: String,
+    cancel: String,
+) -> bool {
+    app.dialog()
+        .message(message)
+        .title(title)
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(ok, cancel))
+        .blocking_show()
 }
 
 /// 失敗は `ResetOutcome.error` に載せる。`Err` はルートを決められないときだけ。

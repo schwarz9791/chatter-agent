@@ -296,6 +296,7 @@ namespace ChatterMascot.Xr
                 var settings = _origin.gameObject.AddComponent<XrSettingsBridge>();
                 settings.Begin(_stage, _origin, grab, walk);
                 grab.Begin(_origin, _stage, walk, settings);
+                _origin.gameObject.AddComponent<XrScreenBoard>().Begin(_origin, _stage);
 
                 // ★ 目で追う（XR 版）。CursorProvider は Desktop 側と同じ注入の形——
                 //   手を追跡できていなければ null を返すだけで、ON/OFF の分岐はここに書かない

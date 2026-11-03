@@ -41,6 +41,7 @@ namespace ChatterMascot.XrSpike
         public float width = 1.2f;
         public int resW = 1920;
         public int resH = 1080;
+        public bool punch;
     }
 
     public sealed class SurfaceSpikeBehaviour : MonoBehaviour
@@ -188,6 +189,16 @@ namespace ChatterMascot.XrSpike
 
             go.transform.SetPositionAndRotation(position, rotation);
             go.SetActive(true);
+
+            if (_config.punch)
+            {
+                var hole = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                hole.name = "SpikePunch";
+                Destroy(hole.GetComponent<Collider>());
+                hole.transform.SetPositionAndRotation(boardPos, rotation);
+                hole.transform.localScale = new Vector3(_config.width, height, 1f);
+                hole.GetComponent<Renderer>().sharedMaterial = new Material(Resources.Load<Shader>("SpikePunch"));
+            }
 
             Debug.Log("[Spike] board position=" + boardPos + " layer transform=" + position + " character=" + character + " viewer=" + viewer +
                       " shape=" + _config.shape + " size=" + _config.width.ToString("F2") + "x" + height.ToString("F2"));

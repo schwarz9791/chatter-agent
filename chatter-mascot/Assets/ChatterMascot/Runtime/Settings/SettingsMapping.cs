@@ -61,6 +61,23 @@ namespace ChatterMascot.Settings
         public const float XrFeetBelowEyeMax = 2.0f;
         public const float XrDefaultFeetBelowEye = 0.2f;
 
+        public const float XrDimmingMin = 0f;
+        public const float XrDimmingMax = 1f;
+        public const float XrDimmingStep = 0.25f;
+        public const float XrDefaultDimming = 0.5f;
+
+        /// <summary>減光の選択肢（0〜100%）。表記は言語によらないので <c>UiText</c> を取らない。</summary>
+        public static IReadOnlyList<SettingChoice> XrDimmingChoices()
+        {
+            var choices = new List<SettingChoice>();
+            for (var i = 0; i <= 4; i++)
+            {
+                var level = XrDimmingMin + i * XrDimmingStep;
+                choices.Add(new SettingChoice(Format(level), (i * 25) + "%"));
+            }
+            return choices;
+        }
+
         /// <summary>
         /// 古い書式の <c>xr.scale</c> を <see cref="MascotSettings.XrLegacyScale"/> として
         /// 読むときの範囲。値の意味は「モデルの一様倍率」——単位も意味も <see cref="XrHeightMin"/>

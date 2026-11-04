@@ -40,6 +40,9 @@ namespace ChatterMascot.Settings
         /// <summary>XR で歩行範囲の円を出し、指した先へ歩かせるか。XR の設定パネルだけに出す</summary>
         public const string Walk = "walk";
 
+        /// <summary>画面を映す間の減光。XR の設定パネルだけに出す</summary>
+        public const string XrDimming = "xrDimming";
+
         /// <summary>ペアリングのサブページを開く／閉じる。XR の設定パネルだけに出す</summary>
         public const string PairingOpen = "pairingOpen";
         public const string PairingBack = "pairingBack";
@@ -85,6 +88,12 @@ namespace ChatterMascot.Settings
             var items = new List<SettingSpec>();
 
             items.Add(SettingSpec.Bool(SettingKeys.Mute, text.Mute, settings.Muted));
+            if (c.XrDimmingSupported)
+            {
+                items.Add(SettingSpec.Choice(
+                    SettingKeys.XrDimming, text.XrDimming,
+                    SettingsMapping.Format(settings.XrDimming), SettingsMapping.XrDimmingChoices()));
+            }
 
             // ── キャラクター ─────────────────────────────────
             items.Add(SettingSpec.Section(text.SectionCharacter));

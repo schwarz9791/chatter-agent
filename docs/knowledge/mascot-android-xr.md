@@ -1268,8 +1268,28 @@ Spatial Containers は、Spatial API Level 4 以上という要件を満たす�
 「Dimmer is disabled」が出て変わらない（`PassthroughDimmerManager: Showing dimmer disabled toast due to current state pt=Disabled, vr=AppOpenXr(enabled=true, ...)`）。
 [`XR_ANDROID_global_passthrough_dimming`](https://developer.android.com/develop/xr/openxr/extensions/XR_ANDROID_global_passthrough_dimming)
 によると、アプリが減光を指定しなければ、パススルー有効時の既定は 0.0（透明）。Full Space を起動するとシェードが
-透明になるのは、この既定と合う。rev.4 はこの拡張を返すので、アプリから要求できる見込みはあるが、試していない
-（`XrFrameEndInfo` へ `XrGlobalDimmingFrameEndInfoANDROID` を繋ぐ必要がある）。`XR_Headset_API_34` は確かめていない。
+透明になるのは、この既定と合う。アプリからの要求は `ARCameraFeature` を有効にしなくても通る。拡張を自前の feature の `OpenxrExtensionStrings` で有効にし、static の `TryRequestGlobalDimmingLevel` を呼ぶ。ネイティブ側で頼っているのは有効な `OpenXRLifeCycleFeature` だけで、`xrEndFrame` のフックが `XrGlobalDimmingFrameEndInfoANDROID` を毎フレーム繋ぐ。
+
+★★ **ADDITIVE の間は要求が無視される。** `XR_Glasses`（2026-11-04）で、構造体が `xrEndFrame` に繋がって戻り値も成功なのに、現在値は 0.0039 のままで、HAL にも届かなかった。
+
+| blend mode | 要求 | `xrGetGlobalDimmingLevelANDROID` |
+|---|---|---|
+| ADDITIVE | なし | 0.0039 |
+| OPAQUE | なし | 0.9961 |
+| OPAQUE | 0.25 / 0.5 / 0.75 | そのまま（約 0.1 秒で HAL に届く） |
+| ADDITIVE に戻す | 0.75 のまま | 0.75（部屋だけ暗くなる） |
+| ADDITIVE | 0.25 | 0.75 のまま |
+
+OPAQUE で値を届けて戻せば、部屋だけを暗くできる。値が残るのは仕様に書かれた動きではないので、実機で確かめる（[#100](https://github.com/schwarz9791/chatter-agent/issues/100)）。OPAQUE の間はエミュレータだと背景が真っ黒になる。ランタイムの `oxr_session_frame_end` は blend mode を見ずに値を渡しているので、無視しているのはコンポジタ側（SurfaceFlinger の中の CPM）と見られる。バイナリを読めないので、理由までは確かめていない。
+
+対応レベルは `emulator.dev.xr.dimming_levels` と同じ 0.0039 / 0.25 / 0.5 / 0.75 / 0.9961。`XR_Headset_API_34` は同じランタイムのバイナリだが、`IsSystemExtensionEnabled` が false で非対応。
+
+減光を掛けたままアプリを離れたとき（`XR_Glasses`、75%）:
+
+- ホームに出ると、部屋は元の明るさに戻る。アプリのアイコンから戻ると、板を出し直すときに掛け直して 0.75 に届く
+- `am force-stop` で落としても、約 0.7 秒でシステムが 0.0039 に戻す。暗いまま残らない
+
+★ **`adb shell input keyevent KEYCODE_HOME` と `am start` で戻すと、画面が映らなくなる。** セッションは FOCUSED で `first frame rendered` も出るのに、部屋だけ（減光 0% でも同じ）か真っ白のままで、`current=0.00` のまま値も届かない。そのあと `screencap` が空になり、1〜2 分で QEMU のハング検知でエミュレータが落ちた（2 回。別のセッションで Mac の負荷が高い間。`main` のビルドとは比べていない）。アイコンから戻れば、同じ負荷でも起きない。アプリを行き来する確認は手で行う。
 
 ★ **Surface はアプリに戻ると作り直される。** Chrome を開いて戻ると別のオブジェクトになるので、渡し直す
 （渡し直してから 0.28 秒ほどで次のフレームが出た。`XR_Headset_API_34`）。離れている間もデコーダーは回り続けるので、

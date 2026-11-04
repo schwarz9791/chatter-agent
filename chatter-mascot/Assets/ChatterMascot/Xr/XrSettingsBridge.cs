@@ -102,6 +102,7 @@ namespace ChatterMascot.Xr
             // ★ Apply 経由の自分起点の変更は ChangedExternally が来ないので、起動時の値は
             //   ここで一度だけ直接伝える（→ HandleSetting の Walk の case も同様に直接伝える）
             _walk.SetEnabled(host != null ? host.Current.Walk : MascotSettings.Defaults.Walk);
+            _board.SetDimming(host != null ? host.Current.XrDimming : MascotSettings.Defaults.XrDimming);
         }
 
         private void OnDestroy()
@@ -317,6 +318,7 @@ namespace ChatterMascot.Xr
         private void OnSettingsChangedExternally(MascotSettings previous, MascotSettings next)
         {
             _walk.SetEnabled(next.Walk);
+            if (previous.XrDimming != next.XrDimming) _board.SetDimming(next.XrDimming);
             // ★ 大きさが外から変わったら実際の縮尺も追いつかせる。保存は不要（既に next が確定値）
             if (previous.XrHeight != next.XrHeight) RescaleTo(next.XrHeight);
             Refresh();
@@ -333,6 +335,7 @@ namespace ChatterMascot.Xr
         {
             var host = MascotSettingsHost.Instance;
             _context.Settings = host != null ? host.Current : MascotSettings.Defaults;
+            _context.XrDimmingSupported = _board.DimmingSupported;
 
             var realCm = _stage.RealHeightCm;
             _context.XrHeightChoices = realCm.HasValue
@@ -460,6 +463,16 @@ namespace ChatterMascot.Xr
                     host.Apply(host.Current.WithWalk(on));
                     // ★ Apply は自分起点の変更なので ChangedExternally が来ない。ここで直接伝える
                     _walk.SetEnabled(on);
+                    Refresh();
+                    return;
+                }
+
+                case SettingKeys.XrDimming:
+                {
+                    var level = SettingsMapping.Parse(value, host.Current.XrDimming);
+                    host.Apply(host.Current.WithXrDimming(level));
+                    // ★ Apply は自分起点の変更なので ChangedExternally が来ない。ここで直接伝える
+                    _board.SetDimming(level);
                     Refresh();
                     return;
                 }
@@ -639,6 +652,7 @@ namespace ChatterMascot.Xr
             host.Apply(next);
             // ★ Apply は自分起点の変更なので ChangedExternally が来ない。ここで直接伝える
             _walk.SetEnabled(next.Walk);
+            _board.SetDimming(next.XrDimming);
             RescaleTo(next.XrHeight);
             _grab.ResetPosition();
             XrScreenBoard.ForgetMac();

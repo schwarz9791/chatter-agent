@@ -11,6 +11,7 @@ using Unity.XR.CompositionLayers.Layers;
 using Unity.XR.CompositionLayers.Services;
 using UnityEngine.XR.OpenXR;
 using UnityEngine.XR.OpenXR.CompositionLayers;
+using UnityEngine.XR.OpenXR.Features.Android;
 #endif
 
 namespace ChatterMascot.Xr
@@ -32,6 +33,15 @@ namespace ChatterMascot.Xr
         private const float SurfacePollSeconds = 0.5f;
         private const float RetrySeconds = 5f;
         private const float ApprovalToastSeconds = 5f;
+
+        /// <summary>部屋を透かしたまま要求した値が届くのを待つ秒数。</summary>
+        private const float DimmingDirectSeconds = 0.25f;
+
+        /// <summary>OPAQUE にして値が届くのを待つ上限の秒数。</summary>
+        private const float DimmingHoldSeconds = 0.5f;
+
+        /// <summary>要求と読み返しの差がこれ以内なら届いたとみなす。ランタイムは両端を丸める。</summary>
+        private const float DimmingTolerance = 0.01f;
 
         /// <summary>角のハンドルを、板か角を指さなくなってからも出しておく秒数。</summary>
         private const float HandleLingerSeconds = 3f;
@@ -92,6 +102,30 @@ namespace ChatterMascot.Xr
                 return false;
 #endif
             }
+        }
+
+        /// <summary>この端末で部屋を暗くできるか。エディタでは常に false。</summary>
+        public bool DimmingSupported
+        {
+            get
+            {
+#if UNITY_ANDROID && !UNITY_EDITOR
+                if (!enabled) return false;
+                if (!_dimmingSupported.HasValue) _dimmingSupported = ProbeDimming();
+                return _dimmingSupported.Value;
+#else
+                return false;
+#endif
+            }
+        }
+
+        /// <summary>板が出ている間の減光（0〜1）。消えている間は覚えるだけで、次に出すときに効く。</summary>
+        public void SetDimming(float level)
+        {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            _dimming = level;
+            if (Shown) ApplyDimming(level);
+#endif
         }
 
         /// <summary>
@@ -223,6 +257,10 @@ namespace ChatterMascot.Xr
         private static bool _certToasted;
 
         private bool _hasPose;
+        private float _dimming;
+        private bool? _dimmingSupported;
+        private Coroutine _dimmingRun;
+        private bool _holdingOpaque;
         private bool _focused = true;
         private bool _retryNow;
         private CompositionLayer _layer;
@@ -242,7 +280,7 @@ namespace ChatterMascot.Xr
                 return;
             }
             Receiver("stop");
-            DestroyBoard();
+            HideBoard();
         }
 
         private void OnDestroy()
@@ -263,7 +301,7 @@ namespace ChatterMascot.Xr
                     yield return Session(host, port);
 
                 Receiver("stop");
-                DestroyBoard();
+                HideBoard();
 
                 // ponytail: 共有の開始を知らせる経路が無いので、一定間隔で繋ぎに行く。
                 // 上げるなら mDNS の広告か発話側のフレームで開始を知らせる
@@ -376,6 +414,7 @@ namespace ChatterMascot.Xr
 
             BuildHandles();
             Apply();
+            ApplyDimming(_dimming);
 
             Debug.Log($"[Mascot] XR screen: board shown {width}x{height}");
             LogPose("board placed");
@@ -440,6 +479,12 @@ namespace ChatterMascot.Xr
             }
         }
 
+        private void HideBoard()
+        {
+            if (_layer != null) ApplyDimming(0f);
+            DestroyBoard();
+        }
+
         private void DestroyBoard()
         {
             if (_layer != null) Destroy(_layer.gameObject);
@@ -461,6 +506,92 @@ namespace ChatterMascot.Xr
             Destroy(_punch.GetComponent<Renderer>().sharedMaterial);
             Destroy(_punch);
             _punch = null;
+        }
+
+        private static bool ProbeDimming()
+        {
+            var supported = false;
+            try
+            {
+                supported = OpenXRRuntime.IsExtensionEnabled(XrSeeThroughBlendFeature.DimmingExtension)
+                    && !ARCameraFeature.TryGetGlobalDimmingLevel().status.IsError();
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[Mascot] XR screen: could not check dimming support: " + e.Message);
+            }
+            Debug.Log($"[Mascot] XR screen: dimming supported={supported}");
+            return supported;
+        }
+
+        private void ApplyDimming(float level)
+        {
+            if (!DimmingSupported) return;
+            if (_dimmingRun != null) StopCoroutine(_dimmingRun);
+            _dimmingRun = StartCoroutine(ApplyDimmingRun(level));
+        }
+
+        // ランタイムによっては、部屋を透かすモードの間は減光の要求を無視する。OPAQUE の間に届けた値は、戻しても残る
+        private IEnumerator ApplyDimmingRun(float level)
+        {
+            RequestDimming(level);
+            var held = _holdingOpaque;
+            yield return WaitForDimming(level, DimmingDirectSeconds);
+            if (!DimmingReached(level, out _))
+            {
+                held = true;
+                HoldOpaque(true);
+                yield return WaitForDimming(level, DimmingHoldSeconds);
+            }
+            HoldOpaque(false);
+            DimmingReached(level, out var current);
+            Debug.Log($"[Mascot] XR screen: dimming requested={level:F2} current={current:F2} heldOpaque={held}");
+            _dimmingRun = null;
+        }
+
+        // ponytail: 段が粗い端末では届いたと判定できず、毎回上限まで待つ。対応レベルを列挙して丸め先と比べれば直る
+        private IEnumerator WaitForDimming(float level, float seconds)
+        {
+            var deadline = Time.unscaledTime + seconds;
+            while (Time.unscaledTime < deadline && !DimmingReached(level, out _)) yield return null;
+        }
+
+        private void HoldOpaque(bool hold)
+        {
+            if (hold == _holdingOpaque) return;
+            _holdingOpaque = hold;
+            XrSeeThroughBlendFeature.HoldOpaque(hold);
+        }
+
+        private static void RequestDimming(float level)
+        {
+            // セッションを畳む途中では例外になりうる。減光の失敗で後始末を止めない
+            try
+            {
+                var status = ARCameraFeature.TryRequestGlobalDimmingLevel(level);
+                if (status.IsError()) Debug.LogWarning($"[Mascot] XR screen: dimming request failed: {status.statusCode}");
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[Mascot] XR screen: dimming request failed: " + e.Message);
+            }
+        }
+
+        private static bool DimmingReached(float level, out float current)
+        {
+            current = 0f;
+            try
+            {
+                var result = ARCameraFeature.TryGetGlobalDimmingLevel();
+                if (result.status.IsError()) return false;
+                current = result.value;
+                return Mathf.Abs(current - level) <= DimmingTolerance;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[Mascot] XR screen: could not read the dimming level: " + e.Message);
+                return false;
+            }
         }
 
         private static void AttachSurface(IntPtr surface)

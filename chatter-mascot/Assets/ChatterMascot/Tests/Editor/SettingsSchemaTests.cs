@@ -221,6 +221,7 @@ namespace ChatterMascot.Tests
             return new SettingsContext
             {
                 XrHeightChoices = SettingsMapping.XrHeightChoices(SettingsMapping.XrHeightSteps(160f), UiText.Ja),
+                XrDimmingSupported = true,
             };
         }
 
@@ -345,7 +346,7 @@ namespace ChatterMascot.Tests
 
             Assert.That(keys, Is.EqualTo(new[]
             {
-                SettingKeys.Mute,
+                SettingKeys.Mute, SettingKeys.XrDimming,
                 null, SettingKeys.XrHeight, SettingKeys.AssetSync, SettingKeys.AssetSyncNow,
                 null, SettingKeys.MotionPreview, SettingKeys.MotionPreviewPlay,
                 SettingKeys.Walk, SettingKeys.CursorGaze, SettingKeys.Blink,
@@ -353,6 +354,32 @@ namespace ChatterMascot.Tests
                 null, SettingKeys.ResetPosition, SettingKeys.ResetScreenPosition, SettingKeys.ResetAll,
                 null,
             }));
+        }
+
+        [Test]
+        public void XrOmitsTheDimmingRowWhenUnsupported()
+        {
+            var context = XrContext();
+            context.XrDimmingSupported = false;
+
+            Assert.That(Find(SettingsSchema.BuildXr(context), SettingKeys.XrDimming), Is.Null);
+            Assert.That(Find(SettingsSchema.BuildXr(new SettingsContext()), SettingKeys.XrDimming), Is.Null);
+        }
+
+        [TestCase(0f)]
+        [TestCase(0.25f)]
+        [TestCase(0.5f)]
+        [TestCase(0.75f)]
+        [TestCase(1f)]
+        public void XrDimmingValueExistsInItsChoices(float level)
+        {
+            var context = XrContext();
+            context.Settings = MascotSettings.Defaults.WithXrDimming(level);
+
+            var spec = Find(SettingsSchema.BuildXr(context), SettingKeys.XrDimming);
+
+            Assert.That(spec.Choices.Select(c => c.Value), Contains.Item(spec.Value));
+            Assert.That(spec.Value, Is.EqualTo(SettingsMapping.Format(level)));
         }
 
         [Test]

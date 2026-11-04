@@ -620,6 +620,34 @@ namespace ChatterMascot.Tests
         }
 
         [Test]
+        public void RoundTripsXrDimming()
+        {
+            var written = SettingsJson.Write(MascotSettings.Defaults.WithXrDimming(0.75f));
+
+            Assert.That(Parse(written).XrDimming, Is.EqualTo(0.75f));
+            Assert.That(_warnings, Is.Empty);
+        }
+
+        [Test]
+        public void RoundsXrDimmingToTheStep()
+        {
+            Assert.That(Parse("{\"xr\":{\"dimming\":0.3}}").XrDimming, Is.EqualTo(0.25f));
+        }
+
+        [Test]
+        public void ClampsXrDimmingToTheRange()
+        {
+            Assert.That(Parse("{\"xr\":{\"dimming\":1.5}}").XrDimming, Is.EqualTo(1f));
+            Assert.That(Parse("{\"xr\":{\"dimming\":-1}}").XrDimming, Is.EqualTo(0f));
+        }
+
+        [Test]
+        public void UsesTheDefaultXrDimmingWhenTheKeyIsMissing()
+        {
+            Assert.That(Parse("{\"xr\":{\"height\":60}}").XrDimming, Is.EqualTo(SettingsMapping.XrDefaultDimming));
+        }
+
+        [Test]
         public void IgnoresUnknownKeysUnderXr()
         {
             Parse("{\"xr\":{\"nope\":1}}");

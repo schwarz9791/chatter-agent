@@ -10,6 +10,7 @@
         "Unity.XR.ARFoundation",
         "Unity.XR.ARSubsystems",
         "Unity.XR.OpenXR",
+        "Unity.XR.AndroidOpenXR",
         "Unity.XR.CompositionLayers",
         "Unity.XR.Hands",
         "UnityEngine.UI"

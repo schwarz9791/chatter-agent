@@ -78,6 +78,7 @@ namespace ChatterMascot.Settings
                 ["distance"] = settings.XrDistance,
                 ["azimuth"] = settings.XrAzimuth,
                 ["feetBelowEye"] = settings.XrFeetBelowEye,
+                ["dimming"] = Round(settings.XrDimming, SettingsMapping.XrDimmingStep),
             };
             // ★ 未換算の倍率（古い書式の xr.scale）が残っている間は書き戻す。
             //   height が確定した（= 0 に戻った）ら書かない——両方書き続けると、
@@ -418,6 +419,13 @@ namespace ChatterMascot.Settings
                         settings = settings.WithXrFeetBelowEye(ReadXrNumber(
                             property.Value, "xr.feetBelowEye", settings.XrFeetBelowEye,
                             SettingsMapping.XrFeetBelowEyeMin, SettingsMapping.XrFeetBelowEyeMax, warn));
+                        break;
+
+                    case "dimming":
+                        settings = settings.WithXrDimming(ReadNumber(
+                            property.Value, "xr.dimming", settings.XrDimming,
+                            SettingsMapping.XrDimmingMin, SettingsMapping.XrDimmingMax,
+                            SettingsMapping.XrDimmingStep, warn));
                         break;
 
                     default:

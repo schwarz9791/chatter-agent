@@ -946,7 +946,7 @@ MonoBehaviour:
   nameUi: 'Chatter Mascot: See-Through Blend'
   version: 0.1.0
   featureIdInternal: tech.sukima.chattermascot.see-through-blend
-  openxrExtensionStrings: 
+  openxrExtensionStrings: XR_ANDROID_global_passthrough_dimming
   company: sukima.tech
   priority: 0
   targetOpenXRApiVersion: 

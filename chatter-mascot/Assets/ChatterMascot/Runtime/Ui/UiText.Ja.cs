@@ -45,6 +45,7 @@ namespace ChatterMascot.Ui
         public override string XrSyncNowNote => "サーバーから取り直します";
         public override string XrSyncNotStarted => "同期を始められませんでした";
         public override string XrWalk => "歩く";
+        public override string XrDimming => "画面を映す間の減光";
         public override string XrCursorGaze => "指している先を目で追う";
         public override string XrResetPosition => "キャラクターの位置をリセット";
         public override string XrResetScreenPosition => "画面の位置をリセット";

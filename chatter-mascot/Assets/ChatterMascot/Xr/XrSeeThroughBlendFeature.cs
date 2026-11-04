@@ -23,18 +23,22 @@ namespace ChatterMascot.Xr
     ///   応じて ALPHA_BLEND / OPAQUE を要求し、ADDITIVE は要求しない。グラスでは OPAQUE に戻される。併用すると、
     ///   カメラ停止時の OPAQUE の予約でこちらの要求が上書きされうる。
     /// ★ 呼ばれるのはセッションの準備時（<c>XrSetupConfigValues</c>）だけ（<c>ARCameraFeature</c> と同じ形）。
+    /// ★ <b>減光の拡張もここで有効にする。</b> 減光の API は <c>ARCameraFeature</c> にあるが、上の理由でその feature は有効にできない。
     /// </summary>
 #if UNITY_EDITOR
     [OpenXRFeature(UiName = "Chatter Mascot: See-Through Blend",
         BuildTargetGroups = new[] { BuildTargetGroup.Android },
         Company = "sukima.tech",
-        Desc = "Selects the additive or alpha-blend environment blend mode so the room shows through unrendered pixels.",
+        Desc = "Selects the additive or alpha-blend environment blend mode so the room shows through unrendered pixels, and enables global passthrough dimming.",
+        OpenxrExtensionStrings = DimmingExtension,
         FeatureId = FeatureId,
         Version = "0.1.0")]
 #endif
     public sealed class XrSeeThroughBlendFeature : OpenXRFeature
     {
         public const string FeatureId = "tech.sukima.chattermascot.see-through-blend";
+
+        public const string DimmingExtension = "XR_ANDROID_global_passthrough_dimming";
 
         /// <summary><c>XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO</c>。</summary>
         private const int PrimaryStereo = 2;
@@ -49,6 +53,7 @@ namespace ChatterMascot.Xr
 
         private ulong _instance;
         private ulong _systemId;
+        private static XrEnvironmentBlendMode s_seeThroughMode;
 
         protected override bool OnInstanceCreate(ulong xrInstance)
         {
@@ -71,10 +76,18 @@ namespace ChatterMascot.Xr
                 Debug.Log($"[Mascot] XR: environment blend mode has only OPAQUE, so {mode} is kept (available modes: {list})");
                 return;
             }
+            s_seeThroughMode = target;
             if (target == mode) return;
 
             SetEnvironmentBlendMode(target);
             Debug.Log($"[Mascot] XR: requested environment blend mode {target} (was {mode}; available modes: {list})");
+        }
+
+        /// <summary>減光の値を届ける間だけ OPAQUE にする。部屋を透かすモードが無い端末では何もしない。</summary>
+        public static void HoldOpaque(bool hold)
+        {
+            if (s_seeThroughMode == 0) return;
+            SetEnvironmentBlendMode(hold ? XrEnvironmentBlendMode.Opaque : s_seeThroughMode);
         }
 
         private int[] EnumerateBlendModes()

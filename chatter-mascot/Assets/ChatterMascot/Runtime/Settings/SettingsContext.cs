@@ -42,6 +42,9 @@ namespace ChatterMascot.Settings
         /// <summary>ビルドの版。この型の中では <c>Application.*</c> を呼ばない（スキーマを純粋関数のまま保つ）ので、呼び出し側が渡す。</summary>
         public string AppVersion { get; set; } = "";
 
+        /// <summary>この端末で部屋を暗くできるか。XR だけが使う。起動中に変わらないので、行の有無でパネルがずれることはない。</summary>
+        public bool XrDimmingSupported { get; set; }
+
         /// <summary>モデルとモーションの同期が走っているか。XR だけが使う。</summary>
         public bool AssetSyncRunning { get; set; }
 

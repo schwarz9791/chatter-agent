@@ -13,17 +13,20 @@ namespace ChatterMascot.Xr
     /// <summary>画面を映す板の初期配置・当たり判定・ドラッグ。<b>純粋関数。</b> Physics は使わない。</summary>
     public static class XrBoardRules
     {
-        /// <summary>板の幅（m）。</summary>
-        public const float DefaultWidth = 1.2f;
+        /// <summary>板の長辺の既定（m）。</summary>
+        public const float DefaultLongSide = 1.2f;
 
         /// <summary>最初に置くときの、視点から板の中心までの距離（m）。</summary>
         public const float DefaultDistance = 1.5f;
 
-        public const float MinWidth = 0.3f;
-        public const float MaxWidth = 3f;
+        public const float MinLongSide = 0.3f;
+        public const float MaxLongSide = 3f;
 
         /// <summary>真上・真下で <c>LookRotation</c> が定まらなくなるため、板を上げ下げできる範囲を絞る。</summary>
         public const float MaxElevationDegrees = 60f;
+
+        /// <summary>真上・真下に近い点ではヨーが定まらず、少し動いただけで板が大きく飛ぶ。これより上下を指している間は動かさない。</summary>
+        public const float MaxPointElevationDegrees = 75f;
 
         /// <summary>角をつまめる範囲の半径（m）。</summary>
         public const float CornerGrabRadius = 0.05f;
@@ -71,14 +74,30 @@ namespace ChatterMascot.Xr
 
         /// <summary>
         /// 角をつまんだ点 <paramref name="grabPoint"/> から中心までの距離に対する、いまの点の
-        /// 中心方向への進み具合を倍率にした幅。中心の反対側へ行っても下限で止まる。
+        /// 中心方向への進み具合を倍率にした長辺。中心の反対側へ行っても下限で止まる。
         /// </summary>
-        public static float ResizedWidth(float widthAtGrab, Vector3 center, Vector3 grabPoint, Vector3 point)
+        public static float ResizedLongSide(float longSideAtGrab, Vector3 center, Vector3 grabPoint, Vector3 point)
         {
             var from = grabPoint - center;
-            if (from.sqrMagnitude < Epsilon * Epsilon) return widthAtGrab;
+            if (from.sqrMagnitude < Epsilon * Epsilon) return longSideAtGrab;
             var scale = Vector3.Dot(point - center, from) / from.sqrMagnitude;
-            return Mathf.Clamp(widthAtGrab * scale, MinWidth, MaxWidth);
+            return Mathf.Clamp(longSideAtGrab * scale, MinLongSide, MaxLongSide);
+        }
+
+        /// <summary>長辺と縦横比（高さ / 幅）から板の大きさを求める。縦長の映像でも長辺の長さがそろう。</summary>
+        public static Vector2 Size(float longSide, float aspect)
+        {
+            var width = longSide / Mathf.Max(1f, aspect);
+            return new Vector2(width, width * aspect);
+        }
+
+        /// <summary>レイが球を指す点への、頭からのベクトル。交わらないか、真上・真下に近ければ false。</summary>
+        internal static bool TryDragPoint(Ray ray, Vector3 head, float radius, out Vector3 toPoint)
+        {
+            toPoint = default;
+            if (!TrySphereFar(ray, head, radius, out var point)) return false;
+            toPoint = point - head;
+            return Mathf.Abs(Elevation(toPoint)) <= MaxPointElevationDegrees;
         }
 
         /// <summary>レイと球の交点のうち遠い方。始点が球の内でも外でも連続する。</summary>
@@ -138,9 +157,8 @@ namespace ChatterMascot.Xr
             var toCenter = center - head;
             var radius = toCenter.magnitude;
             if (radius < 1e-3f) return false;
-            if (!XrBoardRules.TrySphereFar(ray, head, radius, out var p0)) return false;
+            if (!XrBoardRules.TryDragPoint(ray, head, radius, out var toGrab)) return false;
 
-            var toGrab = p0 - head;
             drag = new BoardDrag(
                 radius,
                 Mathf.DeltaAngle(XrBoardRules.Yaw(toGrab), XrBoardRules.Yaw(toCenter)),
@@ -148,14 +166,13 @@ namespace ChatterMascot.Xr
             return true;
         }
 
-        /// <summary>交わらなければ false。呼び出し側は最後の姿勢を保つ。</summary>
+        /// <summary>交わらないか、真上・真下に近ければ false。呼び出し側は最後の姿勢を保つ。</summary>
         public bool TryMove(Ray ray, Vector3 head, out Vector3 position, out Quaternion rotation)
         {
             position = default;
             rotation = default;
-            if (!XrBoardRules.TrySphereFar(ray, head, _radius, out var p)) return false;
+            if (!XrBoardRules.TryDragPoint(ray, head, _radius, out var toPoint)) return false;
 
-            var toPoint = p - head;
             var yaw = XrBoardRules.Yaw(toPoint) + _yawOffset;
             var elevation = Mathf.Clamp(
                 XrBoardRules.Elevation(toPoint) + _elevationOffset,

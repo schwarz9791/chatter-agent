@@ -116,17 +116,20 @@ namespace ChatterMascot.Xr
 
         private GameObject BuildRing(string name, float innerRadius, float outerRadius, Material material)
         {
-            var go = new GameObject(name);
+            var go = BuildFlat(name, BuildRingMesh(innerRadius, outerRadius), material);
             go.transform.SetParent(transform, false);
+            return go;
+        }
 
-            var filter = go.AddComponent<MeshFilter>();
-            filter.sharedMesh = BuildRingMesh(innerRadius, outerRadius);
-
+        /// <summary>影を落とさない平らなメッシュの GameObject。</summary>
+        internal static GameObject BuildFlat(string name, Mesh mesh, Material material)
+        {
+            var go = new GameObject(name);
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
             var renderer = go.AddComponent<MeshRenderer>();
             renderer.sharedMaterial = material;
             renderer.shadowCastingMode = ShadowCastingMode.Off;
             renderer.receiveShadows = false;
-
             return go;
         }
 

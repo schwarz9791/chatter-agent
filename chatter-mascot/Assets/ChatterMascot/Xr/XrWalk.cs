@@ -160,14 +160,14 @@ namespace ChatterMascot.Xr
         /// ★ <b>円が消えている間は掴ませない。</b> 見えていないものを掴めると、キャラクターを
         ///   掴もうとしたつまみがハンドルに吸われる。
         /// </summary>
-        public bool TryGrabHandle(Ray ray)
+        public bool TryGrabHandle(Ray ray, float maxDistance)
         {
             if (!Active || !CircleVisible || _view == null || _view.HandleCollider == null) return false;
 
             // ★ ハンドルは毎フレーム動かしているので、Raycast の前に当たり判定を取り直すこと
             //   （autoSyncTransforms はオフ。XrGrab.SyncedModelCollider と同じ理由）
             Physics.SyncTransforms();
-            if (!_view.HandleCollider.Raycast(ray, out _, float.PositiveInfinity)) return false;
+            if (!_view.HandleCollider.Raycast(ray, out _, maxDistance)) return false;
 
             _handleHeld = true;
             return true;

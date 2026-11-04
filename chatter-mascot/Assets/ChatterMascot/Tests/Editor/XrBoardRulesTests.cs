@@ -253,5 +253,70 @@ namespace ChatterMascot.Tests
             Assert.That(XrBoardRules.ResizedLongSide(1.2f, Center, grab, Center - (grab - Center)),
                 Is.EqualTo(XrBoardRules.MinLongSide));
         }
+
+        // ── DimmingReached ──────────────────────────────────────────
+
+        private static readonly float[] FineLevels = { 0.0039f, 0.25f, 0.5f, 0.75f, 0.9961f };
+
+        [Test]
+        public void DimmingReachedWhenTheValueEqualsTheRequest()
+        {
+            Assert.That(XrBoardRules.DimmingReached(0.5f, 0.5f, FineLevels), Is.True);
+        }
+
+        [Test]
+        public void DimmingReachedAtTheRoundedEnds()
+        {
+            Assert.That(XrBoardRules.DimmingReached(0.0039f, 0f, FineLevels), Is.True);
+            Assert.That(XrBoardRules.DimmingReached(0.9961f, 1f, FineLevels), Is.True);
+        }
+
+        [Test]
+        public void DimmingNotReachedForAStaleValue()
+        {
+            Assert.That(XrBoardRules.DimmingReached(0.5f, 0.75f, FineLevels), Is.False);
+        }
+
+        [Test]
+        public void DimmingReachedComparesWithTheClosestOfCoarseLevels()
+        {
+            var levels = new[] { 0f, 0.4f, 1f };
+            Assert.That(XrBoardRules.DimmingReached(0.4f, 0.5f, levels), Is.True);
+            Assert.That(XrBoardRules.DimmingReached(1f, 0.5f, levels), Is.False);
+        }
+
+        [Test]
+        public void DimmingReachedAcceptsEitherOfEquallyCloseLevels()
+        {
+            var levels = new[] { 0f, 0.5f, 1f };
+            Assert.That(XrBoardRules.DimmingReached(0f, 0.25f, levels), Is.True);
+            Assert.That(XrBoardRules.DimmingReached(0.5f, 0.25f, levels), Is.True);
+            Assert.That(XrBoardRules.DimmingReached(1f, 0.25f, levels), Is.False);
+        }
+
+        [Test]
+        public void DimmingReachedAcceptsTheLevelBelowTheRequest()
+        {
+            var levels = new[] { 0.0039f, 0.4f, 0.9961f };
+            Assert.That(XrBoardRules.DimmingReached(0.0039f, 0.25f, levels), Is.True);
+            Assert.That(XrBoardRules.DimmingReached(0.4f, 0.75f, levels), Is.True);
+            Assert.That(XrBoardRules.DimmingReached(0.0039f, 0.75f, levels), Is.False);
+        }
+
+        [Test]
+        public void DimmingNotReachedForTheLevelAboveThatIsNotTheClosest()
+        {
+            var levels = new[] { 0.0039f, 0.4f, 0.9961f };
+            Assert.That(XrBoardRules.DimmingReached(0.9961f, 0.5f, levels), Is.False);
+        }
+
+        [Test]
+        public void DimmingReachedWithoutLevelsComparesWithTheRequest()
+        {
+            var none = new float[0];
+            Assert.That(XrBoardRules.DimmingReached(0.25f, 0.25f, none), Is.True);
+            Assert.That(XrBoardRules.DimmingReached(0.5f, 0.25f, none), Is.False);
+            Assert.That(XrBoardRules.DimmingReached(0.0039f, 0f, none), Is.True);
+        }
     }
 }

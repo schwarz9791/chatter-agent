@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace ChatterMascot.Xr
@@ -10,7 +11,7 @@ namespace ChatterMascot.Xr
         Corner,
     }
 
-    /// <summary>画面を映す板の初期配置・当たり判定・ドラッグ。<b>純粋関数。</b> Physics は使わない。</summary>
+    /// <summary>画面を映す板の初期配置・当たり判定・ドラッグ、部屋の減光が届いたかの判定。<b>純粋関数。</b> Physics は使わない。</summary>
     public static class XrBoardRules
     {
         /// <summary>板の長辺の既定（m）。</summary>
@@ -30,6 +31,9 @@ namespace ChatterMascot.Xr
 
         /// <summary>角をつまめる範囲の半径（m）。</summary>
         public const float CornerGrabRadius = 0.05f;
+
+        /// <summary>減光の読み返しと丸め先の差がこれ以内なら一致とみなす。</summary>
+        private const float DimmingTolerance = 0.01f;
 
         private const float Epsilon = 1e-4f;
 
@@ -131,6 +135,24 @@ namespace ChatterMascot.Xr
         {
             v.y = 0f;
             return v.sqrMagnitude < 1e-4f ? Vector3.zero : v.normalized;
+        }
+
+        /// <summary>
+        /// 減光の要求が届いたか。要求を対応レベルへどう丸めるかはランタイムしだいなので、
+        /// 最も近いレベルでも、要求以下で最も近いレベルでも届いたとみなす。
+        /// 対応レベルが無いときは任意の値を出せるので、要求そのものと比べる。
+        /// </summary>
+        public static bool DimmingReached(float current, float requested, IReadOnlyList<float> levels)
+        {
+            var gap = levels.Count == 0 ? 0f : float.MaxValue;
+            var below = float.NegativeInfinity;
+            foreach (var level in levels)
+            {
+                gap = Mathf.Min(gap, Mathf.Abs(level - requested));
+                if (level <= requested) below = Mathf.Max(below, level);
+            }
+            return Mathf.Abs(current - requested) <= gap + DimmingTolerance
+                || Mathf.Abs(current - below) <= DimmingTolerance;
         }
     }
 

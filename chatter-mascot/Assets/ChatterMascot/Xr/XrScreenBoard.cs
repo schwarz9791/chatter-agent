@@ -5,6 +5,7 @@ using System;
 using System.Collections;
 using ChatterMascot.Net;
 using ChatterMascot.Ui;
+using Unity.Collections;
 using Unity.XR.CompositionLayers;
 using Unity.XR.CompositionLayers.Extensions;
 using Unity.XR.CompositionLayers.Layers;
@@ -40,8 +41,8 @@ namespace ChatterMascot.Xr
         /// <summary>OPAQUE にして値が届くのを待つ上限の秒数。</summary>
         private const float DimmingHoldSeconds = 0.5f;
 
-        /// <summary>要求と読み返しの差がこれ以内なら届いたとみなす。ランタイムは両端を丸める。</summary>
-        private const float DimmingTolerance = 0.01f;
+        /// <summary>OPAQUE から戻した後、値が落ち着くのを待つ秒数。</summary>
+        private const float DimmingSettleSeconds = 0.5f;
 
         /// <summary>角のハンドルを、板か角を指さなくなってからも出しておく秒数。</summary>
         private const float HandleLingerSeconds = 3f;
@@ -259,8 +260,9 @@ namespace ChatterMascot.Xr
         private bool _hasPose;
         private float _dimming;
         private bool? _dimmingSupported;
-        private Coroutine _dimmingRun;
-        private bool _holdingOpaque;
+        private float[] _dimmingLevels = Array.Empty<float>();
+        private float _dimmingTarget;
+        private bool _dimmingRunning;
         private bool _focused = true;
         private bool _retryNow;
         private CompositionLayer _layer;
@@ -508,59 +510,75 @@ namespace ChatterMascot.Xr
             _punch = null;
         }
 
-        private static bool ProbeDimming()
+        private bool ProbeDimming()
         {
             var supported = false;
             try
             {
                 supported = OpenXRRuntime.IsExtensionEnabled(XrSeeThroughBlendFeature.DimmingExtension)
                     && !ARCameraFeature.TryGetGlobalDimmingLevel().status.IsError();
+                if (supported)
+                {
+                    var levels = ARCameraFeature.TryGetSupportedDimmingLevels(Allocator.Temp);
+                    if (!levels.status.IsError())
+                    {
+                        _dimmingLevels = levels.value.ToArray();
+                        levels.value.Dispose();
+                    }
+                }
             }
             catch (Exception e)
             {
                 Debug.LogWarning("[Mascot] XR screen: could not check dimming support: " + e.Message);
             }
-            Debug.Log($"[Mascot] XR screen: dimming supported={supported}");
+            Debug.Log($"[Mascot] XR screen: dimming supported={supported} levels={string.Join(", ", Array.ConvertAll(_dimmingLevels, l => l.ToString("F4")))}");
             return supported;
         }
 
         private void ApplyDimming(float level)
         {
             if (!DimmingSupported) return;
-            if (_dimmingRun != null) StopCoroutine(_dimmingRun);
-            _dimmingRun = StartCoroutine(ApplyDimmingRun(level));
+            _dimmingTarget = level;
+            if (_dimmingRunning) return;
+            _dimmingRunning = true;
+            StartCoroutine(ApplyDimmingRun());
         }
 
-        // ランタイムによっては、部屋を透かすモードの間は減光の要求を無視する。OPAQUE の間に届けた値は、戻しても残る
-        private IEnumerator ApplyDimmingRun(float level)
+        // ランタイムによっては、部屋を透かすモードの間は減光の要求を無視する。OPAQUE の間に届けた値は、戻しても残る。
+        // OPAQUE の途中で値を変えると届かないことがあるので、次の値は、今の値を届けて戻してから要求する
+        private IEnumerator ApplyDimmingRun()
         {
+            var level = _dimmingTarget;
+            var held = false;
+            var retried = false;
             RequestDimming(level);
-            var held = _holdingOpaque;
             yield return WaitForDimming(level, DimmingDirectSeconds);
-            if (!DimmingReached(level, out _))
+
+            // 戻した後にも値は変わる（システムが上書きする）。点滅を繰り返さないよう、掛け直しは 1 回だけ
+            while (level == _dimmingTarget)
             {
-                held = true;
-                HoldOpaque(true);
-                yield return WaitForDimming(level, DimmingHoldSeconds);
+                if (!DimmingReached(level, out _))
+                {
+                    held = true;
+                    XrSeeThroughBlendFeature.HoldOpaque(true);
+                    yield return WaitForDimming(level, DimmingHoldSeconds);
+                    XrSeeThroughBlendFeature.HoldOpaque(false);
+                }
+                yield return new WaitForSecondsRealtime(DimmingSettleSeconds);
+                if (retried || DimmingReached(level, out _)) break;
+                retried = true;
             }
-            HoldOpaque(false);
+
             DimmingReached(level, out var current);
-            Debug.Log($"[Mascot] XR screen: dimming requested={level:F2} current={current:F2} heldOpaque={held}");
-            _dimmingRun = null;
+            Debug.Log($"[Mascot] XR screen: dimming requested={level:F2} current={current:F2} heldOpaque={held} retried={retried}");
+            _dimmingRunning = level != _dimmingTarget;
+            if (_dimmingRunning) StartCoroutine(ApplyDimmingRun());
         }
 
-        // ponytail: 段が粗い端末では届いたと判定できず、毎回上限まで待つ。対応レベルを列挙して丸め先と比べれば直る
         private IEnumerator WaitForDimming(float level, float seconds)
         {
             var deadline = Time.unscaledTime + seconds;
             while (Time.unscaledTime < deadline && !DimmingReached(level, out _)) yield return null;
-        }
-
-        private void HoldOpaque(bool hold)
-        {
-            if (hold == _holdingOpaque) return;
-            _holdingOpaque = hold;
-            XrSeeThroughBlendFeature.HoldOpaque(hold);
         }
 
         private static void RequestDimming(float level)
@@ -577,7 +595,7 @@ namespace ChatterMascot.Xr
             }
         }
 
-        private static bool DimmingReached(float level, out float current)
+        private bool DimmingReached(float level, out float current)
         {
             current = 0f;
             try
@@ -585,7 +603,7 @@ namespace ChatterMascot.Xr
                 var result = ARCameraFeature.TryGetGlobalDimmingLevel();
                 if (result.status.IsError()) return false;
                 current = result.value;
-                return Mathf.Abs(current - level) <= DimmingTolerance;
+                return XrBoardRules.DimmingReached(current, level, _dimmingLevels);
             }
             catch (Exception e)
             {

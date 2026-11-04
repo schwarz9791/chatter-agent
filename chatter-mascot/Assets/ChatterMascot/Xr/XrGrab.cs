@@ -15,7 +15,7 @@ namespace ChatterMascot.Xr
     /// 出すだけにする。掴む対象はモデル本体・歩行範囲の円のハンドル（<see cref="XrWalk"/>）・
     /// Mac の画面の板（<see cref="XrScreenBoard"/>）の3つ —— aim レイ・pinchValue のヒステリシス・
     /// 掴みの排他はここに一本化したまま、先に設定パネル・歯車、次にハンドル、最後にモデルと板の
-    /// うち手前のものを見る。
+    /// うち手前のものを見る。板より奥の歯車とハンドルは見えないので飛ばす。
     /// どれにも当たらなかったつまみは、歩行範囲の中を指した「行き先の指示」として扱う。
     ///
     /// ★ <b>手の入力を増やすのではなく、掴む対象を増やす。</b> 設定パネル・歯車の当たり判定も
@@ -81,13 +81,13 @@ namespace ChatterMascot.Xr
             Model,
             WalkHandle,
             Board,
-            BoardCorner,
         }
 
         /// <summary>掴んでいる対象。<see cref="_grabbedHand"/> が null でない間だけ意味を持つ。</summary>
         private Grabbed _grabbed;
 
-        private bool GrabbingBoard => _grabbed == Grabbed.Board || _grabbed == Grabbed.BoardCorner;
+        /// <summary>板を掴んでいるとき、どの部分か。</summary>
+        private BoardPart _grabbedBoardPart;
 
         /// <summary>掴んだモデルや板をドラッグとして動かしているか。<see cref="TapMaxSeconds"/> が経つまでは false。</summary>
         private bool _dragging;
@@ -150,7 +150,7 @@ namespace ChatterMascot.Xr
             {
                 // ★ 掴んでいた対象に応じて外す。歩行範囲のハンドルを外し損ねると、
                 //   「掴んでいる間は円を消さない」判定が真のまま残ってしまう。板は歩行に関わらない
-                if (GrabbingBoard) _board.EndDrag();
+                if (_grabbed == Grabbed.Board) _board.EndDrag();
                 else if (_grabbed == Grabbed.WalkHandle) _walk?.ReleaseHandle();
                 else _walk?.SetModelGrabbed(false);
                 _grabbedHand = null;
@@ -280,25 +280,29 @@ namespace ChatterMascot.Xr
             {
                 // ★ つまみに「入った瞬間」だけを契機にする。つまんだままレイを動かして
                 //   キャラに当てても掴まない（意図しない掴みを防ぐ）。
-                if (!wasPinching && hand.Pinching) TryGrab(hand, offset);
+                if (!wasPinching && hand.Pinching) TryGrab(hand, aim);
                 return;
             }
 
             if (_grabbedHand != hand) return;
 
-            if (hand.Pinching) UpdateHeld(hand, offset);
+            if (hand.Pinching) UpdateHeld(aim);
             else Release();
         }
 
-        private void TryGrab(Hand hand, Transform offset)
+        private void TryGrab(Hand hand, Ray ray)
         {
-            var ray = ReadAimRay(hand, offset);
+            // ★ 板は深度を書くので、奥の歯車とハンドルは隠れて見えない。見えないものにつまみを吸わせない
+            var boardPart = BoardPart.None;
+            var boardDistance = 0f;
+            if (_board != null) boardPart = _board.Pick(ray, out boardDistance);
+            var visibleReach = boardPart != BoardPart.None ? boardDistance : float.PositiveInfinity;
 
             // ★ 設定パネル・歯車を先に見る。当たっていればそちらを押して、
             //   キャラ・歩行範囲の掴みには進まない
-            if (_settings != null && _settings.TryHandlePinch(ray)) return;
+            if (_settings != null && _settings.TryHandlePinch(ray, visibleReach)) return;
 
-            if (_walk != null && _walk.TryGrabHandle(ray))
+            if (_walk != null && _walk.TryGrabHandle(ray, visibleReach))
             {
                 _grabbedHand = hand;
                 _grabbed = Grabbed.WalkHandle;
@@ -312,16 +316,13 @@ namespace ChatterMascot.Xr
 
             // ★ 板とキャラクターは手前の方を掴む。板をつまんで歩き出さないよう、板に当たったら
             //   「行き先の指示」には進まない
-            var boardPart = BoardPart.None;
-            var boardDistance = 0f;
-            if (_board != null) boardPart = _board.Pick(ray, out boardDistance);
             if (boardPart != BoardPart.None && (!modelHit || boardDistance < hit.distance))
             {
                 _grabbedHand = hand;
-                _grabbed = boardPart == BoardPart.Corner ? Grabbed.BoardCorner : Grabbed.Board;
+                _grabbed = Grabbed.Board;
+                _grabbedBoardPart = boardPart;
                 _dragging = false;
                 _grabbedAt = Time.unscaledTime;
-                _board.ShowHandles();
                 Debug.Log($"[Mascot] XR grab: grabbed the screen board part={boardPart} hand={hand.Name}");
                 return;
             }
@@ -391,15 +392,15 @@ namespace ChatterMascot.Xr
             return _stage.Model.GetComponentInChildren<Collider>();
         }
 
-        private void UpdateHeld(Hand hand, Transform offset)
+        private void UpdateHeld(Ray ray)
         {
             if (_grabbed == Grabbed.WalkHandle)
             {
-                _walk.DragHandle(ReadAimRay(hand, offset));
+                _walk.DragHandle(ray);
                 return;
             }
 
-            if (GrabbingBoard)
+            if (_grabbed == Grabbed.Board)
             {
                 if (_board == null || !_board.Shown)
                 {
@@ -412,9 +413,9 @@ namespace ChatterMascot.Xr
                 {
                     if (Time.unscaledTime - _grabbedAt < TapMaxSeconds) return;
                     _dragging = true;
-                    _board.BeginDrag(_grabbed == Grabbed.BoardCorner ? BoardPart.Corner : BoardPart.Body);
+                    _board.BeginDrag(_grabbedBoardPart);
                 }
-                _board.Drag(ReadAimRay(hand, offset));
+                _board.Drag(ray);
                 return;
             }
 
@@ -432,8 +433,6 @@ namespace ChatterMascot.Xr
                 _slip += moved;
                 _grabOffset += moved;
             }
-
-            var ray = ReadAimRay(hand, offset);
 
             // ★ 水平面を指していれば、指した点に足元を置く（掴んだ瞬間のずれは指した点が
             //   動くぶんだけ縮める）。面を外れた後も、最後に指した面の高さとレイの交点に足元を
@@ -487,10 +486,9 @@ namespace ChatterMascot.Xr
                 return;
             }
 
-            if (GrabbingBoard)
+            if (_grabbed == Grabbed.Board)
             {
-                if (_dragging) _board.EndDrag();
-                else _board.ShowHandles();
+                _board.EndDrag();
                 _dragging = false;
                 Debug.Log("[Mascot] XR grab: released the screen board");
                 return;

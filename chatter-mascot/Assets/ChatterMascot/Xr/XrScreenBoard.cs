@@ -9,7 +9,6 @@ using Unity.XR.CompositionLayers;
 using Unity.XR.CompositionLayers.Extensions;
 using Unity.XR.CompositionLayers.Layers;
 using Unity.XR.CompositionLayers.Services;
-using UnityEngine.Rendering;
 using UnityEngine.XR.OpenXR;
 using UnityEngine.XR.OpenXR.CompositionLayers;
 #endif
@@ -45,14 +44,15 @@ namespace ChatterMascot.Xr
         private XROrigin _origin;
         private MascotRunner _runner;
 
-        // 板の位置は最初に出すときに決め、以後のセッションでも保つ。幅は位置を決め直しても保つ
+        // 板の位置は最初に出すときに決め、以後のセッションでも保つ。長辺は位置を決め直しても保つ
         private Vector3 _position;
         private Quaternion _rotation;
-        private float _width = XrBoardRules.DefaultWidth;
+        private float _longSide = XrBoardRules.DefaultLongSide;
 
-        // 映像の縦横比。繋ぎ直しで変わりうるので、幅が変わるたびに _size を引き直す
-        private float _aspect = 9f / 16f;
-        private Vector2 _size;
+        // 映像の縦横比（高さ / 幅）。繋ぎ直しで変わりうる
+        private float _aspect = 1f;
+
+        private Vector2 Size => XrBoardRules.Size(_longSide, _aspect);
 
         private float _handlesUntil;
         private bool _handlesShown = false;
@@ -60,7 +60,7 @@ namespace ChatterMascot.Xr
         private bool _hasDragBase;
         private BoardDrag _drag;
         private Vector3 _grabPoint;
-        private float _widthAtGrab;
+        private float _longSideAtGrab;
 
         private readonly WaitForSeconds _poll = new WaitForSeconds(PollSeconds);
 
@@ -102,26 +102,25 @@ namespace ChatterMascot.Xr
         {
             distance = 0f;
             if (!Shown) return BoardPart.None;
-            return XrBoardRules.Pick(ray, _position, _rotation, _size, _handlesShown, out distance);
+            return XrBoardRules.Pick(ray, _position, _rotation, Size, _handlesShown, out distance);
         }
 
         /// <summary>板か角を指している間、ハンドルを出し続ける。</summary>
         public void Hover(Ray ray)
         {
             if (!Shown) return;
-            if (XrBoardRules.Pick(ray, _position, _rotation, _size, true, out _) != BoardPart.None) ShowHandles();
+            if (XrBoardRules.Pick(ray, _position, _rotation, Size, true, out _) != BoardPart.None) ShowHandles();
         }
 
-        public void ShowHandles()
+        private void ShowHandles()
         {
-            if (Shown) _handlesUntil = Time.unscaledTime + HandleLingerSeconds;
+            _handlesUntil = Time.unscaledTime + HandleLingerSeconds;
         }
 
         public void BeginDrag(BoardPart part)
         {
             _dragPart = part;
             _hasDragBase = false;
-            ShowHandles();
         }
 
         /// <summary>
@@ -151,12 +150,11 @@ namespace ChatterMascot.Xr
                 if (!_hasDragBase)
                 {
                     _grabPoint = point;
-                    _widthAtGrab = _width;
+                    _longSideAtGrab = _longSide;
                     _hasDragBase = true;
                     return;
                 }
-                _width = XrBoardRules.ResizedWidth(_widthAtGrab, _position, _grabPoint, point);
-                _size = new Vector2(_width, _width * _aspect);
+                _longSide = XrBoardRules.ResizedLongSide(_longSideAtGrab, _position, _grabPoint, point);
             }
             Apply();
         }
@@ -197,7 +195,7 @@ namespace ChatterMascot.Xr
             if (camera == null) return;
             var toBoard = _position - camera.transform.position;
             Debug.Log($"[Mascot] XR screen: {what} distance={toBoard.magnitude:F3} " +
-                      $"elevation={XrBoardRules.Elevation(toBoard):F1} width={_width:F3}");
+                      $"elevation={XrBoardRules.Elevation(toBoard):F1} size={Size.x:F3}x{Size.y:F3}");
         }
 
         /// <summary>覚えている Mac の証明書の指紋を忘れる（Mac を入れ替えたときに繋ぎ直せるようにする）。</summary>
@@ -354,14 +352,13 @@ namespace ChatterMascot.Xr
                 (_position, _rotation) = XrBoardRules.InitialPose(camera.transform.position, camera.transform.forward);
                 _hasPose = true;
             }
-            _size = new Vector2(_width, _width * _aspect);
 
             // 構成し終えるまで有効にしない
             var go = new GameObject("ScreenBoardLayer");
             go.SetActive(false);
             var layer = go.AddComponent<CompositionLayer>();
             layer.ChangeLayerDataType<QuadLayerData>();
-            ((QuadLayerData)layer.LayerData).Size = _size;
+            ((QuadLayerData)layer.LayerData).Size = Size;
             var textures = go.AddComponent<TexturesExtension>();
             textures.sourceTexture = TexturesExtension.SourceTextureEnum.AndroidSurface;
             textures.Resolution = new Vector2(width, height);
@@ -398,12 +395,7 @@ namespace ChatterMascot.Xr
             _handleMesh = XrWalkAreaView.BuildRingMesh(0f, 1f);
             for (var i = 0; i < _handles.Length; i++)
             {
-                var handle = new GameObject("ScreenBoardHandle" + i);
-                handle.AddComponent<MeshFilter>().sharedMesh = _handleMesh;
-                var renderer = handle.AddComponent<MeshRenderer>();
-                renderer.sharedMaterial = _handleMaterial;
-                renderer.shadowCastingMode = ShadowCastingMode.Off;
-                renderer.receiveShadows = false;
+                var handle = XrWalkAreaView.BuildFlat("ScreenBoardHandle" + i, _handleMesh, _handleMaterial);
                 handle.SetActive(false);
                 _handles[i] = handle;
             }
@@ -414,13 +406,14 @@ namespace ChatterMascot.Xr
         private void Apply()
         {
             if (_layer == null) return;
+            var size = Size;
             _layer.transform.SetPositionAndRotation(_position, _rotation);
-            ((QuadLayerData)_layer.LayerData).Size = _size;
+            ((QuadLayerData)_layer.LayerData).Size = size;
 
             if (_punch != null)
             {
                 _punch.transform.SetPositionAndRotation(_position, _rotation);
-                _punch.transform.localScale = new Vector3(_size.x, _size.y, 1f);
+                _punch.transform.localScale = new Vector3(size.x, size.y, 1f);
             }
 
             var handleRotation = _rotation * Quaternion.Euler(90f, 0f, 0f);
@@ -429,7 +422,7 @@ namespace ChatterMascot.Xr
                 if (_handles[i] == null) continue;
                 var sx = (i & 1) == 0 ? -1f : 1f;
                 var sy = (i & 2) == 0 ? -1f : 1f;
-                var local = new Vector3(sx * _size.x * 0.5f, sy * _size.y * 0.5f, -HandleLiftMeters);
+                var local = new Vector3(sx * size.x * 0.5f, sy * size.y * 0.5f, -HandleLiftMeters);
                 _handles[i].transform.SetPositionAndRotation(_position + _rotation * local, handleRotation);
                 _handles[i].transform.localScale = Vector3.one * HandleRadiusMeters;
             }

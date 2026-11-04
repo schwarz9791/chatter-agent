@@ -134,9 +134,25 @@ namespace ChatterMascot.Tests
         public void DragClampsElevation()
         {
             var drag = Begin(Center, Center);
-            drag.TryMove(RayTo(Head + new Vector3(0f, 5f, 1f)), Head, out var position, out _);
+            Assert.That(drag.TryMove(RayTo(Head + new Vector3(0f, 2f, 1f)), Head, out var position, out _), Is.True);
             var elevation = Mathf.Asin((position.y - Head.y) / Vector3.Distance(position, Head)) * Mathf.Rad2Deg;
             Assert.That(elevation, Is.EqualTo(XrBoardRules.MaxElevationDegrees).Within(1e-2f));
+        }
+
+        [Test]
+        public void DragHoldsWhenPointingNearlyStraightUpOrDown()
+        {
+            var drag = Begin(Center, Center);
+            Assert.That(drag.TryMove(RayTo(Head + new Vector3(0f, 5f, 1f)), Head, out _, out _), Is.False);
+            Assert.That(drag.TryMove(RayTo(Head + new Vector3(0f, -5f, 1f)), Head, out _, out _), Is.False);
+        }
+
+        [Test]
+        public void DragStillMovesJustBelowThePointLimit()
+        {
+            var drag = Begin(Center, Center);
+            Assert.That(drag.TryMove(RayTo(Head + new Vector3(0.2f, 3f, 1f)), Head, out var position, out _), Is.True);
+            Assert.That(position.x, Is.GreaterThan(0f));
         }
 
         [Test]
@@ -171,39 +187,71 @@ namespace ChatterMascot.Tests
             Assert.That(BoardDrag.TryBegin(new Ray(Head, Vector3.forward), Head, Head, out _), Is.False);
         }
 
-        // ── ResizedWidth ─────────────────────────────────
+        [Test]
+        public void BeginFailsWhenGrabbingNearlyStraightUp()
+        {
+            Assert.That(BoardDrag.TryBegin(RayTo(Head + new Vector3(0f, 5f, 1f)), Head, Center, out _), Is.False);
+        }
+
+        // ── Size ─────────────────────────────────────────
 
         [Test]
-        public void ResizedWidthIsUnchangedAtTheSamePoint()
+        public void SizeOfALandscapeVideoIsTheLongSideWide()
         {
-            var grab = Center + new Vector3(0.6f, 0.375f, 0f);
-            Assert.That(XrBoardRules.ResizedWidth(1.2f, Center, grab, grab), Is.EqualTo(1.2f).Within(Tolerance));
+            var size = XrBoardRules.Size(1.2f, 9f / 16f);
+            Assert.That(size.x, Is.EqualTo(1.2f).Within(Tolerance));
+            Assert.That(size.y, Is.EqualTo(0.675f).Within(Tolerance));
         }
 
         [Test]
-        public void ResizedWidthScalesWithTheDistanceFromTheCentre()
+        public void SizeOfAPortraitVideoIsTheLongSideTall()
+        {
+            var size = XrBoardRules.Size(1.2f, 16f / 9f);
+            Assert.That(size.x, Is.EqualTo(0.675f).Within(Tolerance));
+            Assert.That(size.y, Is.EqualTo(1.2f).Within(Tolerance));
+        }
+
+        [Test]
+        public void SizeOfASquareVideoIsSquare()
+        {
+            var size = XrBoardRules.Size(1.2f, 1f);
+            Assert.That(size.x, Is.EqualTo(1.2f).Within(Tolerance));
+            Assert.That(size.y, Is.EqualTo(1.2f).Within(Tolerance));
+        }
+
+        // ── ResizedLongSide ─────────────────────────────────
+
+        [Test]
+        public void ResizedLongSideIsUnchangedAtTheSamePoint()
+        {
+            var grab = Center + new Vector3(0.6f, 0.375f, 0f);
+            Assert.That(XrBoardRules.ResizedLongSide(1.2f, Center, grab, grab), Is.EqualTo(1.2f).Within(Tolerance));
+        }
+
+        [Test]
+        public void ResizedLongSideScalesWithTheDistanceFromTheCentre()
         {
             var grab = Center + new Vector3(0.6f, 0.375f, 0f);
             var doubled = Center + new Vector3(1.2f, 0.75f, 0f);
-            Assert.That(XrBoardRules.ResizedWidth(1.2f, Center, grab, doubled), Is.EqualTo(2.4f).Within(Tolerance));
+            Assert.That(XrBoardRules.ResizedLongSide(1.2f, Center, grab, doubled), Is.EqualTo(2.4f).Within(Tolerance));
         }
 
         [Test]
-        public void ResizedWidthIsClamped()
+        public void ResizedLongSideIsClamped()
         {
             var grab = Center + new Vector3(0.6f, 0.375f, 0f);
-            Assert.That(XrBoardRules.ResizedWidth(1.2f, Center, grab, Center + (grab - Center) * 10f),
-                Is.EqualTo(XrBoardRules.MaxWidth));
-            Assert.That(XrBoardRules.ResizedWidth(1.2f, Center, grab, Center + (grab - Center) * 0.01f),
-                Is.EqualTo(XrBoardRules.MinWidth));
+            Assert.That(XrBoardRules.ResizedLongSide(1.2f, Center, grab, Center + (grab - Center) * 10f),
+                Is.EqualTo(XrBoardRules.MaxLongSide));
+            Assert.That(XrBoardRules.ResizedLongSide(1.2f, Center, grab, Center + (grab - Center) * 0.01f),
+                Is.EqualTo(XrBoardRules.MinLongSide));
         }
 
         [Test]
-        public void ResizedWidthStopsAtTheMinimumOnTheOtherSide()
+        public void ResizedLongSideStopsAtTheMinimumOnTheOtherSide()
         {
             var grab = Center + new Vector3(0.6f, 0.375f, 0f);
-            Assert.That(XrBoardRules.ResizedWidth(1.2f, Center, grab, Center - (grab - Center)),
-                Is.EqualTo(XrBoardRules.MinWidth));
+            Assert.That(XrBoardRules.ResizedLongSide(1.2f, Center, grab, Center - (grab - Center)),
+                Is.EqualTo(XrBoardRules.MinLongSide));
         }
     }
 }

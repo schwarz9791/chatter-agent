@@ -257,17 +257,20 @@ namespace ChatterMascot.Xr
         /// ★ <b>手のひらボタンを出している手自身でつまんでも区別しない。</b> レイの始点がボタンの
         ///   近くにあれば当たり判定に含める（<see cref="TryPressButton"/>）ので、その手自身で
         ///   ボタンの近くをつまんでも開く——害がないので、開く手を特別扱いしない。
+        ///
+        /// <paramref name="gearMaxDistance"/> より奥の歯車は押せない。手前の板に隠れて見えないものを
+        /// 押させないための上限で、パネルと手のひらのボタンには効かせない。
         /// </summary>
-        public bool TryHandlePinch(Ray ray)
+        public bool TryHandlePinch(Ray ray, float gearMaxDistance)
         {
             if (_panel.IsOpen) return _panel.TryPress(ray);
 
-            if (TryPressButton(_palmButton, _palmButtonCollider, ray)) { OpenPanel(); return true; }
-            if (TryPressButton(_gear, _gearCollider, ray)) { OpenPanel(); return true; }
+            if (TryPressButton(_palmButton, _palmButtonCollider, ray, float.PositiveInfinity)) { OpenPanel(); return true; }
+            if (TryPressButton(_gear, _gearCollider, ray, gearMaxDistance)) { OpenPanel(); return true; }
             return false;
         }
 
-        private static bool TryPressButton(GameObject button, SphereCollider collider, Ray ray)
+        private static bool TryPressButton(GameObject button, SphereCollider collider, Ray ray, float maxDistance)
         {
             if (button == null || !button.activeSelf || collider == null) return false;
 
@@ -277,7 +280,7 @@ namespace ChatterMascot.Xr
             //   押しに来る手はボタンへ近づくので、その状態も当たり判定に含める。
             //   SphereCollider 前提で球として判定する（bounds は AABB なので Contains だと
             //   角が半径の√3倍まで伸びてしまう）
-            return RayOriginInsideCollider(collider, ray.origin) || collider.Raycast(ray, out _, float.PositiveInfinity);
+            return RayOriginInsideCollider(collider, ray.origin) || collider.Raycast(ray, out _, maxDistance);
         }
 
         private bool HitsGear(Ray ray)

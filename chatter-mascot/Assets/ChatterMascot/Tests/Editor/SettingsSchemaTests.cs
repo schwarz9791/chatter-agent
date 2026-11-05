@@ -222,6 +222,7 @@ namespace ChatterMascot.Tests
             {
                 XrHeightChoices = SettingsMapping.XrHeightChoices(SettingsMapping.XrHeightSteps(160f), UiText.Ja),
                 XrDimmingSupported = true,
+                XrPlanesAvailable = true,
             };
         }
 
@@ -346,7 +347,7 @@ namespace ChatterMascot.Tests
 
             Assert.That(keys, Is.EqualTo(new[]
             {
-                SettingKeys.Mute, SettingKeys.XrDimming,
+                SettingKeys.Mute, SettingKeys.XrDimming, SettingKeys.XrShowPlanes,
                 null, SettingKeys.XrHeight, SettingKeys.AssetSync, SettingKeys.AssetSyncNow,
                 null, SettingKeys.MotionPreview, SettingKeys.MotionPreviewPlay,
                 SettingKeys.Walk, SettingKeys.CursorGaze, SettingKeys.Blink,
@@ -364,6 +365,16 @@ namespace ChatterMascot.Tests
 
             Assert.That(Find(SettingsSchema.BuildXr(context), SettingKeys.XrDimming), Is.Null);
             Assert.That(Find(SettingsSchema.BuildXr(new SettingsContext()), SettingKeys.XrDimming), Is.Null);
+        }
+
+        [Test]
+        public void XrOmitsTheShowPlanesRowWhenUnavailable()
+        {
+            var context = XrContext();
+            context.XrPlanesAvailable = false;
+
+            Assert.That(Find(SettingsSchema.BuildXr(context), SettingKeys.XrShowPlanes), Is.Null);
+            Assert.That(Find(SettingsSchema.BuildXr(new SettingsContext()), SettingKeys.XrShowPlanes), Is.Null);
         }
 
         [TestCase(0f)]

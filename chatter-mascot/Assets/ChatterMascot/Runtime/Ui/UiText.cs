@@ -65,6 +65,7 @@ namespace ChatterMascot.Ui
         public abstract string XrSyncNotStarted { get; }
         public abstract string XrWalk { get; }
         public abstract string XrDimming { get; }
+        public abstract string XrShowPlanes { get; }
         public abstract string XrCursorGaze { get; }
         public abstract string XrResetPosition { get; }
         public abstract string XrResetScreenPosition { get; }

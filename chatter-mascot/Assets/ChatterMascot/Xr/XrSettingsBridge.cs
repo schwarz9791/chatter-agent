@@ -40,6 +40,7 @@ namespace ChatterMascot.Xr
         private XrGrab _grab;
         private XrWalk _walk;
         private XrScreenBoard _board;
+        private XrPlaneWires _planeWires;
 
         private XrSettingsPanel _panel;
         private GameObject _gear;
@@ -75,13 +76,14 @@ namespace ChatterMascot.Xr
 
         private MascotRunner _runner;
 
-        public void Begin(VrmStage stage, XROrigin origin, XrGrab grab, XrWalk walk, XrScreenBoard board)
+        public void Begin(VrmStage stage, XROrigin origin, XrGrab grab, XrWalk walk, XrScreenBoard board, XrPlaneWires planeWires)
         {
             _stage = stage;
             _origin = origin;
             _grab = grab;
             _walk = walk;
             _board = board;
+            _planeWires = planeWires;
             // ★ XR で端末の言語を読むのはここだけ（→ UiText.For）
             _context.Text = UiText.For(Application.systemLanguage);
             _context.AppVersion = Application.version;
@@ -103,6 +105,7 @@ namespace ChatterMascot.Xr
             //   ここで一度だけ直接伝える（→ HandleSetting の Walk の case も同様に直接伝える）
             _walk.SetEnabled(host != null ? host.Current.Walk : MascotSettings.Defaults.Walk);
             _board.SetDimming(host != null ? host.Current.XrDimming : MascotSettings.Defaults.XrDimming);
+            _planeWires.SetVisible(host != null ? host.Current.XrShowPlanes : MascotSettings.Defaults.XrShowPlanes);
         }
 
         private void OnDestroy()
@@ -319,6 +322,7 @@ namespace ChatterMascot.Xr
         {
             _walk.SetEnabled(next.Walk);
             if (previous.XrDimming != next.XrDimming) _board.SetDimming(next.XrDimming);
+            if (previous.XrShowPlanes != next.XrShowPlanes) _planeWires.SetVisible(next.XrShowPlanes);
             // ★ 大きさが外から変わったら実際の縮尺も追いつかせる。保存は不要（既に next が確定値）
             if (previous.XrHeight != next.XrHeight) RescaleTo(next.XrHeight);
             Refresh();
@@ -336,6 +340,7 @@ namespace ChatterMascot.Xr
             var host = MascotSettingsHost.Instance;
             _context.Settings = host != null ? host.Current : MascotSettings.Defaults;
             _context.XrDimmingSupported = _board.DimmingSupported;
+            _context.XrPlanesAvailable = _planeWires.Available;
 
             var realCm = _stage.RealHeightCm;
             _context.XrHeightChoices = realCm.HasValue
@@ -473,6 +478,16 @@ namespace ChatterMascot.Xr
                     host.Apply(host.Current.WithXrDimming(level));
                     // ★ Apply は自分起点の変更なので ChangedExternally が来ない。ここで直接伝える
                     _board.SetDimming(level);
+                    Refresh();
+                    return;
+                }
+
+                case SettingKeys.XrShowPlanes:
+                {
+                    var on = SettingsPanelJson.ParseBool(value, host.Current.XrShowPlanes);
+                    host.Apply(host.Current.WithXrShowPlanes(on));
+                    // ★ Apply は自分起点の変更なので ChangedExternally が来ない。ここで直接伝える
+                    _planeWires.SetVisible(on);
                     Refresh();
                     return;
                 }
@@ -653,6 +668,7 @@ namespace ChatterMascot.Xr
             // ★ Apply は自分起点の変更なので ChangedExternally が来ない。ここで直接伝える
             _walk.SetEnabled(next.Walk);
             _board.SetDimming(next.XrDimming);
+            _planeWires.SetVisible(next.XrShowPlanes);
             RescaleTo(next.XrHeight);
             _grab.ResetPosition();
             XrScreenBoard.ForgetMac();

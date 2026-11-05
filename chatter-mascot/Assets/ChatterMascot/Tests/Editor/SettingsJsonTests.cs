@@ -629,6 +629,28 @@ namespace ChatterMascot.Tests
         }
 
         [Test]
+        public void RoundTripsXrShowPlanes()
+        {
+            var written = SettingsJson.Write(MascotSettings.Defaults.WithXrShowPlanes(true));
+
+            Assert.That(Parse(written).XrShowPlanes, Is.True);
+            Assert.That(_warnings, Is.Empty);
+        }
+
+        [Test]
+        public void UsesTheDefaultXrShowPlanesWhenTheKeyIsMissing()
+        {
+            Assert.That(Parse("{\"xr\":{\"height\":60}}").XrShowPlanes, Is.False);
+        }
+
+        [Test]
+        public void KeepsTheDefaultXrShowPlanesWhenTheTypeIsWrong()
+        {
+            Assert.That(Parse("{\"xr\":{\"showPlanes\":\"yes\"}}").XrShowPlanes, Is.False);
+            Assert.That(_warnings, Is.Not.Empty);
+        }
+
+        [Test]
         public void RoundsXrDimmingToTheStep()
         {
             Assert.That(Parse("{\"xr\":{\"dimming\":0.3}}").XrDimming, Is.EqualTo(0.25f));

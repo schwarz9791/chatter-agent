@@ -43,6 +43,9 @@ namespace ChatterMascot.Settings
         /// <summary>画面を映す間の減光。XR の設定パネルだけに出す</summary>
         public const string XrDimming = "xrDimming";
 
+        /// <summary>検知した平面をワイヤーフレームで描くか。XR の設定パネルだけに出す</summary>
+        public const string XrShowPlanes = "xrShowPlanes";
+
         /// <summary>ペアリングのサブページを開く／閉じる。XR の設定パネルだけに出す</summary>
         public const string PairingOpen = "pairingOpen";
         public const string PairingBack = "pairingBack";
@@ -94,6 +97,7 @@ namespace ChatterMascot.Settings
                     SettingKeys.XrDimming, text.XrDimming,
                     SettingsMapping.Format(settings.XrDimming), SettingsMapping.XrDimmingChoices()));
             }
+            if (c.XrPlanesAvailable) items.Add(SettingSpec.Bool(SettingKeys.XrShowPlanes, text.XrShowPlanes, settings.XrShowPlanes));
 
             // ── キャラクター ─────────────────────────────────
             items.Add(SettingSpec.Section(text.SectionCharacter));

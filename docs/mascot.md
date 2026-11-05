@@ -99,6 +99,7 @@ Assets/ChatterMascot/
     XrGrab.cs                       手でつまんで置き直す。配置の直後に生やす（シーンに置かない）
     XrSettingsPanel.cs              設定パネルのレンダラ（world-space uGUI）。キーを1つも書かない
     XrSettingsBridge.cs             設定パネルのキーの意味を知る唯一の場所。呼び出し口（歯車／手のひらボタン）も持つ
+    XrPlaneWires.cs                 検知した平面の輪郭を線で描く（設定パネルから ON/OFF）
     XrHandTracking.cs               XRHandSubsystem から手のひらの向きを読む唯一の場所（つまみ判定には使わない）
     XrCursorGazeSource.cs           aim レイ → 「目で追う」の入力（XrGrab のレイを流用）
   Desktop/                          ChatterMascot.Desktop — Editor + macOS/Windows のみ
@@ -373,7 +374,7 @@ ChatterAgent の設定パネルで行う。やり取りの仕組み（依頼箱�
   "character": { "idleMotion": true, "cursorGaze": true, "blink": true, "vrm": "", "walk": true, "scale": 1.0 },
   "display": { "frameRate": 30 },
   "connection": { "serverUrl": "", "token": "", "assetSync": "auto" },
-  "xr": { "height": 25, "distance": 0.6, "azimuth": 20, "feetBelowEye": 0.2, "dimming": 0.5 }
+  "xr": { "height": 25, "distance": 0.6, "azimuth": 20, "feetBelowEye": 0.2, "dimming": 0.5, "showPlanes": false }
 }
 ```
 
@@ -396,6 +397,9 @@ XR の設定パネルの「歩く」からその場で切り替えられる（�
 部屋を透かすモードの間は要求を無視する端末があり、その場合は値を届ける間だけ一瞬 OPAQUE にするので、背景が暗くなることがある。
 戻した後に値がずれていれば、1 回だけ掛け直す
 （→ [`knowledge/mascot-android-xr.md`](./knowledge/mascot-android-xr.md)「Mac の画面を XR 側に出す」）。
+
+`xr.showPlanes`（既定 `false`）は、検知した平面の輪郭をワイヤーフレームで描くか。その場で反映される。
+XR の設定パネルには、平面検知が動いている間だけ行を出す。
 
 `display.frameRate` は `30` か `60` のみ（既定 `30`。それ以外は既定へフォールバック）。反映は
 デスクトップ限定——Android はこのキーを読むだけで反映しない（XR ではランタイムがフレームペーシングを握る）。
@@ -546,6 +550,7 @@ $ADB shell chmod -R 777 $D/animations
 |---|---|
 | ミュート | ON/OFF。**その場で反映**される |
 | 画面を映す間の減光 | 0 / 25 / 50 / 75 / 100%。板が出ている間だけ部屋を暗くする。**その場で反映**される。部屋を暗くできない端末では行を出さない |
+| 検知した平面を表示 | ON/OFF。検知した平面の輪郭をワイヤーフレームで描く。**その場で反映**される。平面検知が動いていない間は行を出さない |
 | 大きさ | 下の「置き場所と大きさ」。**その場で反映**される |
 | 接続 / ペアリング… | LAN の server とペアリングしてトークンを受け取る。押すとサブページへ移る（下の「ペアリング」）。**繋ぎ直しはその場で反映**される |
 | モデルとモーションを同期 | ON/OFF。**次回の起動から反映**（→ 上「モデルとモーションを入れる」） |

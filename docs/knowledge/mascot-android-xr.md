@@ -1042,15 +1042,38 @@ Android XR は Vulkan 必須なので、この機能を切って回避するこ�
   2回目の表示では「Don't allow」が「今後表示しない」になる
 - 平面はエミュレータでも来る（`HorizontalUp` が4枚）。いちばん低い面（床）は目の高さからかなり下にあり、
   そこへ落とすとグラスの視野の外に出る（下を向けば見える）
-- ★ `androidxr-openxr` 1.5.1 の `XR_Glasses` では、平面の多角形（`ARPlane.boundary`）の X が `extents` の約 11 分の 1 に
+- ★ Google Play XR Preview API v4 rev.4 の image では、平面の多角形（`ARPlane.boundary`）の X が `extents` の約 11 分の 1 に
   潰れていて、頂点も輪郭順に並んでいない。多角形の中と数えられるのは外接矩形の 4〜7% で、机や床の真ん中の細い帯にしか
   着地できない。外れると `plane=none` になり歩行範囲が出ないので、確認するときは真ん中に置く（→ [#240](https://github.com/schwarz9791/chatter-agent/issues/240)）
+- ★ 平面の輪郭を描くのに `ARPlaneMeshVisualizer` は使わない（`XrPlaneWires` が `ARPlane.boundary` を `LineRenderer` へ直接書く）。
+  表示の条件に `ARSession.state` があるが、このプロジェクトは `ARSession` を置いていないので線が常に消える。
+  また多角形の分割に失敗すると線も更新しない
+- `xr.showPlanes` で線を出すと、上の潰れた多角形がそのまま見える。机は輪郭にならず、細長く折れ返した線になる。
+  線の中で離すと着地し、線から離れた所では `plane=none` のままで、線と着地の判定は一致した
+  （2026-11-05 / `XR_Glasses` / エミュレータ 37.2.13 / Google Play XR Preview API v4 rev.4）
+- ★ `pm revoke` で権限なしの状態を作るときは、`HAND_TRACKING` と `SCENE_UNDERSTANDING_COARSE` の両方を取り消す。
+  同じグループなので、片方が許可されたままだと、ダイアログを出さずに許可し直される
 - Hand tracking モードでは、aim がマウスを追い、クリック／ドラッグで `pinchValue` が 0 → 1。右手のみ
 - ADDITIVE にすると部屋（シミュレートされた室内）が見え、目のアイコンのスライダー（Environment Visibility）で
   濃さを変えられる。離したキャラが机（`plane=-0.39`）と床（`plane=-0.87`）のどちらにも乗ることを目視で確かめた
 - 掴んで動かせる／何も無いところでは掴まない／離すと平面に乗ってこちらを向く／見下ろすと顔が
   上を向いてこちらを見る／横へドラッグすると（体は離すまで向きを変えない）首がこちらへ回る、を確認した
 - 権限を拒否（今後表示しない）しても落ちず、#99 の配置のまま。権限エラーは出続けない
+
+★ **多角形の潰れは image の違いで起きる。** パッケージの版でも、眼鏡とヘッドセットの違いでもない。机の平面の値
+（2026-11-05 / エミュレータ 37.2.13）:
+
+| パッケージ | image | 動作 | `extents` | 頂点の最大（x, y） |
+|---|---|---|---|---|
+| 1.4.1 | Preview API v4 rev.4 | 眼鏡（Additive） | (0.612, 0.613) | (0.055, 0.613) |
+| 1.4.1 | Preview API v4 rev.4 | ヘッドセット（AlphaBlend） | (0.612, 0.613) | (0.055, 0.613) |
+| 1.4.1 | XR API v3 rev.2 | ヘッドセット（AlphaBlend） | (0.306, 0.306) | (0.612, 0.613) |
+
+- パッケージ 1.5.1 と Preview API v4 rev.4、眼鏡の組み合わせ（[#240](https://github.com/schwarz9791/chatter-agent/issues/240)）も、上の 1・2 行目と同じ値になる
+- v3 rev.2 は多角形の大きさが合っている代わりに、`extents` が半分になる
+- 机の 8 頂点が輪郭順でないのは、どちらの image でも同じ。床の 17 頂点は輪郭順
+- v3 rev.2 は AVD の `hw.device.name` を `xr_glasses_device` にしても、ヘッドセット（AlphaBlend）として動く
+- 実機で同じことが起きるかは、まだ確かめていない（[#100](https://github.com/schwarz9791/chatter-agent/issues/100)）
 
 ### ビルド設定（`AndroidPlayerSettings.FixAll`）
 

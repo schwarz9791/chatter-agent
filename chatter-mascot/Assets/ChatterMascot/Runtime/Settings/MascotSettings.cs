@@ -45,6 +45,7 @@ namespace ChatterMascot.Settings
             float xrHeight, float xrLegacyScale, float xrDistance, float xrAzimuth, float xrFeetBelowEye,
             bool walk,
             float xrDimming,
+            bool xrShowPlanes,
             float scale)
         {
             Muted = muted;
@@ -64,6 +65,7 @@ namespace ChatterMascot.Settings
             XrFeetBelowEye = xrFeetBelowEye;
             Walk = walk;
             XrDimming = xrDimming;
+            XrShowPlanes = xrShowPlanes;
             Scale = scale;
         }
 
@@ -192,6 +194,9 @@ namespace ChatterMascot.Settings
         /// <summary>Android XR で、画面を映している間に部屋を暗くする割合（0〜1）。デスクトップの設定パネルには出さない。</summary>
         public float XrDimming { get; }
 
+        /// <summary>Android XR で、検知した平面をワイヤーフレームで描くか。既定は <b>false</b>。デスクトップの設定パネルには出さない。</summary>
+        public bool XrShowPlanes { get; }
+
         /// <summary>
         /// デスクトップのキャラクターの大きさ（ウィンドウの倍率。<b>0.5〜2.0</b>、既定 1.0）。
         ///
@@ -216,6 +221,7 @@ namespace ChatterMascot.Settings
                     SettingsMapping.XrDefaultAzimuth, SettingsMapping.XrDefaultFeetBelowEye,
                     true,
                     SettingsMapping.XrDefaultDimming,
+                    false,
                     SettingsMapping.DefaultScale);
             }
         }
@@ -238,6 +244,7 @@ namespace ChatterMascot.Settings
             float? xrDistance = null, float? xrAzimuth = null, float? xrFeetBelowEye = null,
             bool? walk = null,
             float? xrDimming = null,
+            bool? xrShowPlanes = null,
             float? scale = null)
         {
             return new MascotSettings(
@@ -258,6 +265,7 @@ namespace ChatterMascot.Settings
                 xrFeetBelowEye ?? XrFeetBelowEye,
                 walk ?? Walk,
                 xrDimming ?? XrDimming,
+                xrShowPlanes ?? XrShowPlanes,
                 scale ?? Scale);
         }
 
@@ -278,6 +286,7 @@ namespace ChatterMascot.Settings
         public MascotSettings WithXrFeetBelowEye(float value) => Copy(xrFeetBelowEye: value);
         public MascotSettings WithWalk(bool value) => Copy(walk: value);
         public MascotSettings WithXrDimming(float value) => Copy(xrDimming: value);
+        public MascotSettings WithXrShowPlanes(bool value) => Copy(xrShowPlanes: value);
         public MascotSettings WithScale(float value) => Copy(scale: value);
 
         /// <summary>
@@ -314,6 +323,7 @@ namespace ChatterMascot.Settings
                 && XrFeetBelowEye.Equals(other.XrFeetBelowEye)
                 && Walk == other.Walk
                 && XrDimming.Equals(other.XrDimming)
+                && XrShowPlanes == other.XrShowPlanes
                 && Scale.Equals(other.Scale);
         }
 
@@ -341,6 +351,7 @@ namespace ChatterMascot.Settings
             hash = (hash * 397) ^ XrFeetBelowEye.GetHashCode();
             hash = (hash * 397) ^ (Walk ? 1 : 0);
             hash = (hash * 397) ^ XrDimming.GetHashCode();
+            hash = (hash * 397) ^ (XrShowPlanes ? 1 : 0);
             hash = (hash * 397) ^ Scale.GetHashCode();
             return hash;
         }

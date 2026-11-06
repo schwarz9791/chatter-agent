@@ -5,10 +5,10 @@ using UnityEngine.XR.ARFoundation;
 namespace ChatterMascot.Xr
 {
     /// <summary>
-    /// 検知した平面の輪郭を線で描くだけの係。<b>状態は表示の ON/OFF だけ</b>。
+    /// 着地できる面の輪郭を線で描くだけの係。<b>状態は表示の ON/OFF だけ</b>。
     ///
-    /// ★ 描く形は着地の判定が見ている形そのものなので、<b>何も間引かない</b>
-    ///   （<c>ARPlaneManager.Raycast</c> は trackables の全部を対象にする）。
+    /// ★ 描く面は着地の判定と同じ条件（<see cref="XrGrab.CanLandOn"/>）で絞る。線の中が、
+    ///   そのまま着地できる範囲になる。
     /// ★ <c>ARPlaneMeshVisualizer</c> は使わない。表示の条件に <c>ARSession.state</c> があるが、
     ///   このプロジェクトは <c>ARSession</c> を置いていないので線が常に消える。多角形の分割に
     ///   失敗すると線も更新しない。
@@ -27,7 +27,7 @@ namespace ChatterMascot.Xr
         private bool _built;
         private bool _buildFailed;
 
-        /// <summary>平面検知が動いている（<c>ARPlaneManager</c> が見つかっている）か。</summary>
+        /// <summary>平面検知を始めている（<c>ARPlaneManager</c> が見つかっている）か。</summary>
         public bool Available
         {
             get
@@ -60,6 +60,7 @@ namespace ChatterMascot.Xr
             // ponytail: ON の間は毎フレーム書き直す。重くなったら ARPlane.boundaryChanged へ
             foreach (var plane in _manager.trackables)
             {
+                if (!XrGrab.CanLandOn(plane)) continue;
                 if (!plane.TryGetComponent<LineRenderer>(out var line)) line = Setup(plane.gameObject);
                 var boundary = plane.boundary;
                 line.positionCount = boundary.Length;

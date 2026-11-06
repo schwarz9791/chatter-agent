@@ -584,7 +584,7 @@ namespace ChatterMascot.Xr
             foreach (var hit in hits)
             {
                 var plane = _planeManager.GetPlane(hit.trackableId);
-                if (plane == null || plane.alignment != PlaneAlignment.HorizontalUp) continue;
+                if (plane == null || !CanLandOn(plane)) continue;
 
                 var worldPoint = trackablesParent.TransformPoint(hit.pose.position);
                 var worldDistance = Vector3.Distance(worldRay.origin, worldPoint);
@@ -597,6 +597,11 @@ namespace ChatterMascot.Xr
 
             return found;
         }
+
+        /// <summary>
+        /// 着地できる面か。<see cref="XrPlaneWires"/> も同じ条件で描く面を絞り、描いた線と着地の判定をそろえる。
+        /// </summary>
+        internal static bool CanLandOn(ARPlane plane) => plane.alignment == PlaneAlignment.HorizontalUp;
 
         /// <summary>
         /// 片手（またはマウス）ぶんの入力と、つまみの状態。

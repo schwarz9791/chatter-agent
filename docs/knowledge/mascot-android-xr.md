@@ -1378,6 +1378,15 @@ Mac が黙ったときの 6 秒の期限（`kill -STOP`）がすべて通った�
 
 - ★ **イメージの名前と端末の版は別物。** 「Preview API v4」のイメージでも `spatial=3` を返す。`XR_ANDROID_global_passthrough_dimming` など
   v4 で入った拡張の一部は返すが、Spatial Containers は無い。rev.3 も rev.4 も同じ。`sdkmanager --channel=3` にも新しい XR イメージは無かった
+- ★ **SDK で手に入る XR イメージは、どれも Level 4 に届かない。** `pm list features` の値は次のとおり（2026-11-06、エミュレータ 37.2.13）。
+  v3 と v1 は一時的な AVD を起動して値を読んだだけで、マスコットは入れていない
+
+  | イメージ | `spatial` |
+  |---|---|
+  | Google Play XR Preview API v4 4.0.0 | 3 |
+  | Google Play XR API v3 3.0.0 | 3 |
+  | Google Play XR API v1（`google-xr` canary 8.0.0） | 1 |
+
 - ★ **`XRSpatialContainerFeature` に `supportsBounded` は無い。** C# で見られるのは `IsExtensionEnabled` / `TryGetBounds` / `TryGetState`
 - Extensions 1.5.0 で確認された組み合わせは `androidxr-openxr` 1.4.1 / AR Foundation 6.6.2 で、こちらの 1.5.1 / 6.7.1 より古い
 - `XrStage` は頭を基準に XR Origin を動かすが、コンテナは箱の中心が原点で、外は切り取られる。Spatial Containers を採るなら配置の作り直しが要る

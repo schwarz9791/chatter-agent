@@ -472,7 +472,11 @@ def _render_still(camera, frame, path, w, h):
     scene.render.resolution_x = w
     scene.render.resolution_y = h
     scene.render.resolution_percentage = 100
-    scene.render.image_settings.file_format = "PNG"
+    # video() の後でも静止画を書けるよう、出力の種類を戻してから形式を選ぶ
+    settings = scene.render.image_settings
+    if hasattr(settings, "media_type"):
+        settings.media_type = "IMAGE"
+    settings.file_format = "PNG"
     scene.render.filepath = path
     bpy.ops.render.render(write_still=True)
 

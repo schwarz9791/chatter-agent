@@ -28,11 +28,13 @@ FRONT = 0.275
 FLAT = 0.14  # 接地のうち、足裏が着き切るまでの割合
 HEEL_UP = 14.0  # かかとで着くときにつま先を上げる角度
 TRAIL_KNEE = 7.0  # 後ろへ流れる脚は膝がここまで伸びたら、あとはかかとを上げて届かせる
+SOFT = 0.001  # 届かなくなる手前から、かかとを上げ始める幅（m）。膝が TRAIL_KNEE に当たって急に止まらないように
 PUSH = 0.44  # 後ろの脚が膝を曲げて蹴り始める位相（もう片方の足が着く少し前）
 PUSH_KNEE = 30.0  # 床を離れる瞬間の膝の曲げ
 KICK = 0.03  # 振り出しの前半に、足をさらに上げる高さ
 INWARD = 0.035  # 着地点を中心線へ寄せる量
 OUTWARD = 0.02  # 振り出す途中は外へ逃がす（軸足とぶつからないように）
+TOE_OUT = 5.0  # つま先を外へ向ける角度
 
 # 腰の高さ: 前の足が着いた直後がいちばん低く、軸脚の真上を過ぎた頃がいちばん高い。
 # 着いた脚が伸びきらず、曲がりすぎもしない高さに合わせる（下の検算の膝の角度で見る）
@@ -99,21 +101,26 @@ def stance(side, t):
     """接地中（t: 0〜1）の足首のずれと足の傾き。床に着いた点（かかと → 足裏 → つま先）は床と一緒に流れる。"""
     sx = 1 if side == "left" else -1
     flat = Vector((-sx * INWARD, -FRONT + TRAVEL * t, 0.0))
+    # 足は外へ向けてから傾けるので、支点まわりのずれも同じ向きに回す（回さないと床に着いた点が横へ滑る）
+    turn = v.rot(("z", sx * TOE_OUT))
     if t < FLAT:  # かかとで着いて、すぐ足裏を下ろす
         pitch = -HEEL_UP * (1 - t / FLAT) ** 2
-        return flat + pivot_lift(pitch, HEEL), pitch
+        return flat + turn @ pivot_lift(pitch, HEEL), pitch
     # 後ろへ流れた足に脚が届かなくなったぶんだけ、かかとを上げる。終わりは膝を曲げて蹴る
     u = max(0.0, (t * STANCE - PUSH) / (STANCE - PUSH))
     far = reach(TRAIL_KNEE + (PUSH_KNEE - TRAIL_KNEE) * (2 - u) * u * u)
     hip = hip_joint(side, t * STANCE + (0.0 if side == "left" else 0.5))
+    d0 = (flat - hip).length
+    if d0 > far - 8 * SOFT:  # 届かなくなる境目を滑らかにする（十分届くあいだは元のまま）
+        far = min(d0, far) - SOFT * math.log(1 + math.exp(-abs(d0 - far) / SOFT))
     lo, hi = 0.0, 80.0
     for _ in range(24):
         pitch = (lo + hi) / 2
-        if (flat + pivot_lift(pitch, TOE) - hip).length > far:
+        if (flat + turn @ pivot_lift(pitch, TOE) - hip).length > far:
             lo = pitch
         else:
             hi = pitch
-    return flat + pivot_lift(hi, TOE), hi
+    return flat + turn @ pivot_lift(hi, TOE), hi
 
 
 def edge(side, t, dt):
@@ -142,7 +149,7 @@ def foot(side, p):
         pos.z += KICK * math.sin(math.pi * 2.5 * t / (1 + 1.5 * t)) ** 2
         pos.x += sx * OUTWARD * math.sin(math.pi * t) ** 2
         pitch = (pa + dpa * t) * (1 - smooth(min(1.0, t / 0.6))) + pb * smooth(max(0.0, (t - 0.4) / 0.6))
-    return {"lift": tuple(pos), "pitch": pitch, "yaw": sx * 5}
+    return {"lift": tuple(pos), "pitch": pitch, "yaw": sx * TOE_OUT}
 
 
 for f in range(END + 1):
@@ -173,12 +180,12 @@ for f in range(END + 1):
     m.at(f, drop=drop, shift=(sway, 0.0), lag=None,
          feet={"left": foot("left", p), "right": foot("right", p - 0.5)}, **parts)
 
-# 検算: 足首が狙った位置に来ているか（脚が届かないと浮く）と、膝の角度の範囲
+# 検算: 足首が狙った位置に来ているか（脚が届かないと浮く）と、膝の角度の範囲。崩れていたら書き出さない
 import bpy  # noqa: E402
 
 arm = rig.arm
-worst = {"left": 0.0, "right": 0.0}
-knee = []
+worst = {s: 0.0 for s in SIDES}
+knee = {s: [] for s in SIDES}
 for f in range(END + 1):
     bpy.context.scene.frame_set(f)
     p = f / END
@@ -186,10 +193,14 @@ for f in range(END + 1):
         want = ANKLE[side] + Vector(foot(side, ph)["lift"])
         got = arm.matrix_world @ arm.pose.bones[rig.bone[f"{side}Foot"]].head
         worst[side] = max(worst[side], (got - want).length)
-    hip, mid, end = (arm.pose.bones[rig.bone[f"left{b}"]].head for b in ("UpperLeg", "LowerLeg", "Foot"))
-    knee.append(math.degrees((mid - hip).angle(end - mid)))
+        hip, mid, end = (arm.pose.bones[rig.bone[f"{side}{b}"]].head for b in ("UpperLeg", "LowerLeg", "Foot"))
+        knee[side].append(math.degrees((mid - hip).angle(end - mid)))
+low = min(min(k) for k in knee.values())
 print("ik worst error (mm):", {k: round(val * 1000, 2) for k, val in worst.items()})
-print("knee (deg): at heel strike", round(knee[0], 1), "min", round(min(knee), 1), "max", round(max(knee), 1))
+print("knee (deg): at heel strike", round(knee["left"][0], 1), "min", round(low, 1),
+      "max", round(max(max(k) for k in knee.values()), 1))
 print("ground speed (m/s):", round(SPEED, 3), "stance travel (m):", round(TRAVEL, 3))
+assert max(worst.values()) < 1e-4, f"a leg does not reach its ankle target: {worst}"
+assert low > 3.0, f"a knee locks straight: {low:.1f} deg"
 
 m.finish(OUT, "model-walk", detail=range(0, END + 1, 3), detail_views=("Side", "Front"))

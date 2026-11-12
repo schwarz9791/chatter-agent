@@ -103,10 +103,10 @@ namespace ChatterMascot.Xr
             if (host != null) host.ChangedExternally += OnSettingsChangedExternally;
             // ★ Apply 経由の自分起点の変更は ChangedExternally が来ないので、起動時の値は
             //   ここで一度だけ直接伝える（→ HandleSetting の Walk の case も同様に直接伝える）
-            _walk.SetEnabled(host != null ? host.Current.Walk : MascotSettings.Defaults.Walk);
             var startSettings = host != null ? host.Current : MascotSettings.Defaults;
+            _walk.SetEnabled(startSettings.Walk);
             _board.SetDimming(startSettings.XrNormalDimming, startSettings.XrSharingDimming);
-            _planeWires.SetVisible(host != null ? host.Current.XrShowPlanes : MascotSettings.Defaults.XrShowPlanes);
+            _planeWires.SetVisible(startSettings.XrShowPlanes);
         }
 
         private void OnDestroy()
@@ -342,6 +342,7 @@ namespace ChatterMascot.Xr
             var host = MascotSettingsHost.Instance;
             _context.Settings = host != null ? host.Current : MascotSettings.Defaults;
             _context.XrDimmingSupported = _board.DimmingSupported;
+            _context.XrScreenAvailable = _board.enabled;
             _context.XrPlanesAvailable = _planeWires.Available;
 
             var realCm = _stage.RealHeightCm;

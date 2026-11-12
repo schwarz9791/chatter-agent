@@ -222,6 +222,7 @@ namespace ChatterMascot.Tests
             {
                 XrHeightChoices = SettingsMapping.XrHeightChoices(SettingsMapping.XrHeightSteps(160f), UiText.Ja),
                 XrDimmingSupported = true,
+                XrScreenAvailable = true,
                 XrPlanesAvailable = true,
             };
         }
@@ -371,6 +372,17 @@ namespace ChatterMascot.Tests
             Assert.That(keys.Count(k => k == null), Is.EqualTo(supportedNulls - 1));
             Assert.That(Find(SettingsSchema.BuildXr(new SettingsContext()), SettingKeys.XrNormalDimming), Is.Null);
             Assert.That(Find(SettingsSchema.BuildXr(new SettingsContext()), SettingKeys.XrSharingDimming), Is.Null);
+        }
+
+        [Test]
+        public void XrOmitsTheSharingDimmingRowWithoutTheScreenBoard()
+        {
+            var context = XrContext();
+            context.XrScreenAvailable = false;
+
+            var items = SettingsSchema.BuildXr(context);
+            Assert.That(Find(items, SettingKeys.XrNormalDimming), Is.Not.Null);
+            Assert.That(Find(items, SettingKeys.XrSharingDimming), Is.Null);
         }
 
         [Test]

@@ -279,7 +279,7 @@ namespace ChatterMascot.Xr
             _focused = hasFocus;
             if (hasFocus)
             {
-                // 離れている間にシステムが減光を戻すので、戻ってきたら今の状態の値を要求し直す
+                // 離れている間に値が保たれる保証は無いので、戻ってきたら今の状態の値を要求し直す
                 ApplyDimming(Shown ? _sharingDimming : _normalDimming);
                 _retryNow = true;
                 return;

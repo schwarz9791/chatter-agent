@@ -103,9 +103,12 @@ namespace ChatterMascot.Settings
                 items.Add(SettingSpec.Choice(
                     SettingKeys.XrNormalDimming, text.XrNormalDimming,
                     SettingsMapping.Format(settings.XrNormalDimming), SettingsMapping.XrDimmingChoices()));
-                items.Add(SettingSpec.Choice(
-                    SettingKeys.XrSharingDimming, text.XrSharingDimming,
-                    SettingsMapping.Format(settings.XrSharingDimming), SettingsMapping.XrDimmingChoices()));
+                if (c.XrScreenAvailable)
+                {
+                    items.Add(SettingSpec.Choice(
+                        SettingKeys.XrSharingDimming, text.XrSharingDimming,
+                        SettingsMapping.Format(settings.XrSharingDimming), SettingsMapping.XrDimmingChoices()));
+                }
             }
 
             // ── キャラクター ─────────────────────────────────

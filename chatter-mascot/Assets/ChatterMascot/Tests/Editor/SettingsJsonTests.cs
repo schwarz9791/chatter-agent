@@ -620,12 +620,30 @@ namespace ChatterMascot.Tests
         }
 
         [Test]
-        public void RoundTripsXrDimming()
+        public void RoundTripsXrSharingDimming()
         {
-            var written = SettingsJson.Write(MascotSettings.Defaults.WithXrDimming(0.75f));
+            var written = SettingsJson.Write(MascotSettings.Defaults.WithXrSharingDimming(0.75f));
 
-            Assert.That(Parse(written).XrDimming, Is.EqualTo(0.75f));
+            Assert.That(Parse(written).XrSharingDimming, Is.EqualTo(0.75f));
             Assert.That(_warnings, Is.Empty);
+        }
+
+        [Test]
+        public void RoundTripsXrNormalDimming()
+        {
+            var written = SettingsJson.Write(MascotSettings.Defaults.WithXrNormalDimming(0.75f));
+
+            Assert.That(Parse(written).XrNormalDimming, Is.EqualTo(0.75f));
+            Assert.That(_warnings, Is.Empty);
+        }
+
+        [Test]
+        public void ReadsAnOldFileWithOnlyDimmingAsTheSharingLevel()
+        {
+            var parsed = Parse("{\"xr\":{\"dimming\":0.5}}");
+
+            Assert.That(parsed.XrSharingDimming, Is.EqualTo(0.5f));
+            Assert.That(parsed.XrNormalDimming, Is.EqualTo(SettingsMapping.XrDefaultNormalDimming));
         }
 
         [Test]
@@ -651,22 +669,41 @@ namespace ChatterMascot.Tests
         }
 
         [Test]
-        public void RoundsXrDimmingToTheStep()
+        public void RoundsXrSharingDimmingToTheStep()
         {
-            Assert.That(Parse("{\"xr\":{\"dimming\":0.3}}").XrDimming, Is.EqualTo(0.25f));
+            Assert.That(Parse("{\"xr\":{\"dimming\":0.3}}").XrSharingDimming, Is.EqualTo(0.25f));
         }
 
         [Test]
-        public void ClampsXrDimmingToTheRange()
+        public void ClampsXrSharingDimmingToTheRange()
         {
-            Assert.That(Parse("{\"xr\":{\"dimming\":1.5}}").XrDimming, Is.EqualTo(1f));
-            Assert.That(Parse("{\"xr\":{\"dimming\":-1}}").XrDimming, Is.EqualTo(0f));
+            Assert.That(Parse("{\"xr\":{\"dimming\":1.5}}").XrSharingDimming, Is.EqualTo(1f));
+            Assert.That(Parse("{\"xr\":{\"dimming\":-1}}").XrSharingDimming, Is.EqualTo(0f));
         }
 
         [Test]
-        public void UsesTheDefaultXrDimmingWhenTheKeyIsMissing()
+        public void UsesTheDefaultXrSharingDimmingWhenTheKeyIsMissing()
         {
-            Assert.That(Parse("{\"xr\":{\"height\":60}}").XrDimming, Is.EqualTo(SettingsMapping.XrDefaultDimming));
+            Assert.That(Parse("{\"xr\":{\"height\":60}}").XrSharingDimming, Is.EqualTo(SettingsMapping.XrDefaultSharingDimming));
+        }
+
+        [Test]
+        public void RoundsXrNormalDimmingToTheStep()
+        {
+            Assert.That(Parse("{\"xr\":{\"normalDimming\":0.3}}").XrNormalDimming, Is.EqualTo(0.25f));
+        }
+
+        [Test]
+        public void ClampsXrNormalDimmingToTheRange()
+        {
+            Assert.That(Parse("{\"xr\":{\"normalDimming\":1.5}}").XrNormalDimming, Is.EqualTo(1f));
+            Assert.That(Parse("{\"xr\":{\"normalDimming\":-1}}").XrNormalDimming, Is.EqualTo(0f));
+        }
+
+        [Test]
+        public void UsesTheDefaultXrNormalDimmingWhenTheKeyIsMissing()
+        {
+            Assert.That(Parse("{\"xr\":{\"height\":60}}").XrNormalDimming, Is.EqualTo(0f));
         }
 
         [Test]

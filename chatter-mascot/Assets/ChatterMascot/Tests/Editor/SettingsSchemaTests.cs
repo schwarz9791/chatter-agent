@@ -347,7 +347,8 @@ namespace ChatterMascot.Tests
 
             Assert.That(keys, Is.EqualTo(new[]
             {
-                SettingKeys.Mute, SettingKeys.XrDimming, SettingKeys.XrShowPlanes,
+                SettingKeys.Mute, SettingKeys.XrShowPlanes,
+                null, SettingKeys.XrNormalDimming, SettingKeys.XrSharingDimming,
                 null, SettingKeys.XrHeight, SettingKeys.AssetSync, SettingKeys.AssetSyncNow,
                 null, SettingKeys.MotionPreview, SettingKeys.MotionPreviewPlay,
                 SettingKeys.Walk, SettingKeys.CursorGaze, SettingKeys.Blink,
@@ -358,13 +359,18 @@ namespace ChatterMascot.Tests
         }
 
         [Test]
-        public void XrOmitsTheDimmingRowWhenUnsupported()
+        public void XrOmitsTheDimmingRowsWhenUnsupported()
         {
             var context = XrContext();
             context.XrDimmingSupported = false;
 
-            Assert.That(Find(SettingsSchema.BuildXr(context), SettingKeys.XrDimming), Is.Null);
-            Assert.That(Find(SettingsSchema.BuildXr(new SettingsContext()), SettingKeys.XrDimming), Is.Null);
+            var supportedNulls = SettingsSchema.BuildXr(XrContext()).Count(s => s.Key == null);
+            var keys = SettingsSchema.BuildXr(context).Select(s => s.Key).ToList();
+            Assert.That(keys, Does.Not.Contain(SettingKeys.XrNormalDimming));
+            Assert.That(keys, Does.Not.Contain(SettingKeys.XrSharingDimming));
+            Assert.That(keys.Count(k => k == null), Is.EqualTo(supportedNulls - 1));
+            Assert.That(Find(SettingsSchema.BuildXr(new SettingsContext()), SettingKeys.XrNormalDimming), Is.Null);
+            Assert.That(Find(SettingsSchema.BuildXr(new SettingsContext()), SettingKeys.XrSharingDimming), Is.Null);
         }
 
         [Test]
@@ -382,15 +388,18 @@ namespace ChatterMascot.Tests
         [TestCase(0.5f)]
         [TestCase(0.75f)]
         [TestCase(1f)]
-        public void XrDimmingValueExistsInItsChoices(float level)
+        public void XrDimmingValuesExistInTheirChoices(float level)
         {
             var context = XrContext();
-            context.Settings = MascotSettings.Defaults.WithXrDimming(level);
+            context.Settings = MascotSettings.Defaults.WithXrNormalDimming(level).WithXrSharingDimming(level);
 
-            var spec = Find(SettingsSchema.BuildXr(context), SettingKeys.XrDimming);
+            foreach (var key in new[] { SettingKeys.XrNormalDimming, SettingKeys.XrSharingDimming })
+            {
+                var spec = Find(SettingsSchema.BuildXr(context), key);
 
-            Assert.That(spec.Choices.Select(c => c.Value), Contains.Item(spec.Value));
-            Assert.That(spec.Value, Is.EqualTo(SettingsMapping.Format(level)));
+                Assert.That(spec.Choices.Select(c => c.Value), Contains.Item(spec.Value));
+                Assert.That(spec.Value, Is.EqualTo(SettingsMapping.Format(level)));
+            }
         }
 
         [Test]

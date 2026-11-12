@@ -40,8 +40,11 @@ namespace ChatterMascot.Settings
         /// <summary>XR で歩行範囲の円を出し、指した先へ歩かせるか。XR の設定パネルだけに出す</summary>
         public const string Walk = "walk";
 
+        /// <summary>板を出していないときの減光。XR の設定パネルだけに出す</summary>
+        public const string XrNormalDimming = "xrNormalDimming";
+
         /// <summary>画面を映す間の減光。XR の設定パネルだけに出す</summary>
-        public const string XrDimming = "xrDimming";
+        public const string XrSharingDimming = "xrSharingDimming";
 
         /// <summary>検知した平面をワイヤーフレームで描くか。XR の設定パネルだけに出す</summary>
         public const string XrShowPlanes = "xrShowPlanes";
@@ -91,13 +94,19 @@ namespace ChatterMascot.Settings
             var items = new List<SettingSpec>();
 
             items.Add(SettingSpec.Bool(SettingKeys.Mute, text.Mute, settings.Muted));
+            if (c.XrPlanesAvailable) items.Add(SettingSpec.Bool(SettingKeys.XrShowPlanes, text.XrShowPlanes, settings.XrShowPlanes));
+
+            // ── 減光 ─────────────────────────────────────────
             if (c.XrDimmingSupported)
             {
+                items.Add(SettingSpec.Section(text.SectionDimming));
                 items.Add(SettingSpec.Choice(
-                    SettingKeys.XrDimming, text.XrDimming,
-                    SettingsMapping.Format(settings.XrDimming), SettingsMapping.XrDimmingChoices()));
+                    SettingKeys.XrNormalDimming, text.XrNormalDimming,
+                    SettingsMapping.Format(settings.XrNormalDimming), SettingsMapping.XrDimmingChoices()));
+                items.Add(SettingSpec.Choice(
+                    SettingKeys.XrSharingDimming, text.XrSharingDimming,
+                    SettingsMapping.Format(settings.XrSharingDimming), SettingsMapping.XrDimmingChoices()));
             }
-            if (c.XrPlanesAvailable) items.Add(SettingSpec.Bool(SettingKeys.XrShowPlanes, text.XrShowPlanes, settings.XrShowPlanes));
 
             // ── キャラクター ─────────────────────────────────
             items.Add(SettingSpec.Section(text.SectionCharacter));

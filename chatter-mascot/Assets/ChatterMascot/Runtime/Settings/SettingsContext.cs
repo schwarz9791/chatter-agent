@@ -45,6 +45,9 @@ namespace ChatterMascot.Settings
         /// <summary>この端末で部屋を暗くできるか。XR だけが使う。起動中に変わらないので、行の有無でパネルがずれることはない。</summary>
         public bool XrDimmingSupported { get; set; }
 
+        /// <summary>この端末で Mac の画面を板に出せるか。XR だけが使う。起動中に変わらない。</summary>
+        public bool XrScreenAvailable { get; set; }
+
         /// <summary>平面検知を始めているか。XR だけが使う。始めていない間は行を出さない。</summary>
         public bool XrPlanesAvailable { get; set; }
 

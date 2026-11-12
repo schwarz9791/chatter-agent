@@ -105,13 +105,12 @@ namespace ChatterMascot.Xr
             }
         }
 
-        /// <summary>この端末で部屋を暗くできるか。エディタでは常に false。</summary>
+        /// <summary>この端末で部屋を暗くできるか。板が使える状態かには依らない。エディタでは常に false。</summary>
         public bool DimmingSupported
         {
             get
             {
 #if UNITY_ANDROID && !UNITY_EDITOR
-                if (!enabled) return false;
                 if (!_dimmingSupported.HasValue) _dimmingSupported = ProbeDimming();
                 return _dimmingSupported.Value;
 #else
@@ -120,12 +119,13 @@ namespace ChatterMascot.Xr
             }
         }
 
-        /// <summary>板が出ている間の減光（0〜1）。消えている間は覚えるだけで、次に出すときに効く。</summary>
-        public void SetDimming(float level)
+        /// <summary>減光（0〜1）。板が出ていない間は <paramref name="normal"/>、出ている間は <paramref name="sharing"/> を、その場で効かせる。</summary>
+        public void SetDimming(float normal, float sharing)
         {
 #if UNITY_ANDROID && !UNITY_EDITOR
-            _dimming = level;
-            if (Shown) ApplyDimming(level);
+            _normalDimming = normal;
+            _sharingDimming = sharing;
+            ApplyDimming(Shown ? sharing : normal);
 #endif
         }
 
@@ -258,7 +258,8 @@ namespace ChatterMascot.Xr
         private static bool _certToasted;
 
         private bool _hasPose;
-        private float _dimming;
+        private float _normalDimming;
+        private float _sharingDimming;
         private bool? _dimmingSupported;
         private float[] _dimmingLevels = Array.Empty<float>();
         private float _dimmingTarget;
@@ -278,6 +279,8 @@ namespace ChatterMascot.Xr
             _focused = hasFocus;
             if (hasFocus)
             {
+                // 離れている間に値が保たれる保証は無いので、戻ってきたら今の状態の値を要求し直す
+                ApplyDimming(Shown ? _sharingDimming : _normalDimming);
                 _retryNow = true;
                 return;
             }
@@ -416,7 +419,7 @@ namespace ChatterMascot.Xr
 
             BuildHandles();
             Apply();
-            ApplyDimming(_dimming);
+            ApplyDimming(_sharingDimming);
 
             Debug.Log($"[Mascot] XR screen: board shown {width}x{height}");
             LogPose("board placed");
@@ -483,7 +486,7 @@ namespace ChatterMascot.Xr
 
         private void HideBoard()
         {
-            if (_layer != null) ApplyDimming(0f);
+            if (_layer != null) ApplyDimming(_normalDimming);
             DestroyBoard();
         }
 

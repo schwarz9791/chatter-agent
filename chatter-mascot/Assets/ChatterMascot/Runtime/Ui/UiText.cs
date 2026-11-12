@@ -27,6 +27,9 @@ namespace ChatterMascot.Ui
         // ── モーションの確認 ──────────────────────────────────
         public abstract string NoMotionToPlay { get; }
 
+        // ── 減光 ──────────────────────────────────
+        public abstract string SectionDimming { get; }
+
         // ── キャラクター ──────────────────────────────────
         public abstract string SectionCharacter { get; }
         public abstract string Size { get; }
@@ -64,7 +67,8 @@ namespace ChatterMascot.Ui
         public abstract string XrSyncNowNote { get; }
         public abstract string XrSyncNotStarted { get; }
         public abstract string XrWalk { get; }
-        public abstract string XrDimming { get; }
+        public abstract string XrNormalDimming { get; }
+        public abstract string XrSharingDimming { get; }
         public abstract string XrShowPlanes { get; }
         public abstract string XrCursorGaze { get; }
         public abstract string XrResetPosition { get; }

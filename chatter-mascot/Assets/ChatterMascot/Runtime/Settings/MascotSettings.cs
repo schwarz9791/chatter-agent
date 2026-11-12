@@ -44,7 +44,8 @@ namespace ChatterMascot.Settings
             string serverUrl, string token, string assetSync,
             float xrHeight, float xrLegacyScale, float xrDistance, float xrAzimuth, float xrFeetBelowEye,
             bool walk,
-            float xrDimming,
+            float xrNormalDimming,
+            float xrSharingDimming,
             bool xrShowPlanes,
             float scale)
         {
@@ -64,7 +65,8 @@ namespace ChatterMascot.Settings
             XrAzimuth = xrAzimuth;
             XrFeetBelowEye = xrFeetBelowEye;
             Walk = walk;
-            XrDimming = xrDimming;
+            XrNormalDimming = xrNormalDimming;
+            XrSharingDimming = xrSharingDimming;
             XrShowPlanes = xrShowPlanes;
             Scale = scale;
         }
@@ -191,8 +193,11 @@ namespace ChatterMascot.Settings
         /// </summary>
         public bool Walk { get; }
 
+        /// <summary>Android XR で、画面を映していないときに部屋を暗くする割合（0〜1）。デスクトップの設定パネルには出さない。</summary>
+        public float XrNormalDimming { get; }
+
         /// <summary>Android XR で、画面を映している間に部屋を暗くする割合（0〜1）。デスクトップの設定パネルには出さない。</summary>
-        public float XrDimming { get; }
+        public float XrSharingDimming { get; }
 
         /// <summary>Android XR で、検知した平面をワイヤーフレームで描くか。既定は <b>false</b>。デスクトップの設定パネルには出さない。</summary>
         public bool XrShowPlanes { get; }
@@ -220,7 +225,8 @@ namespace ChatterMascot.Settings
                     SettingsMapping.XrDefaultHeight, 0f, SettingsMapping.XrDefaultDistance,
                     SettingsMapping.XrDefaultAzimuth, SettingsMapping.XrDefaultFeetBelowEye,
                     true,
-                    SettingsMapping.XrDefaultDimming,
+                    SettingsMapping.XrDefaultNormalDimming,
+                    SettingsMapping.XrDefaultSharingDimming,
                     false,
                     SettingsMapping.DefaultScale);
             }
@@ -243,7 +249,8 @@ namespace ChatterMascot.Settings
             float? xrHeight = null, float? xrLegacyScale = null,
             float? xrDistance = null, float? xrAzimuth = null, float? xrFeetBelowEye = null,
             bool? walk = null,
-            float? xrDimming = null,
+            float? xrNormalDimming = null,
+            float? xrSharingDimming = null,
             bool? xrShowPlanes = null,
             float? scale = null)
         {
@@ -264,7 +271,8 @@ namespace ChatterMascot.Settings
                 xrAzimuth ?? XrAzimuth,
                 xrFeetBelowEye ?? XrFeetBelowEye,
                 walk ?? Walk,
-                xrDimming ?? XrDimming,
+                xrNormalDimming ?? XrNormalDimming,
+                xrSharingDimming ?? XrSharingDimming,
                 xrShowPlanes ?? XrShowPlanes,
                 scale ?? Scale);
         }
@@ -285,7 +293,8 @@ namespace ChatterMascot.Settings
         public MascotSettings WithXrAzimuth(float value) => Copy(xrAzimuth: value);
         public MascotSettings WithXrFeetBelowEye(float value) => Copy(xrFeetBelowEye: value);
         public MascotSettings WithWalk(bool value) => Copy(walk: value);
-        public MascotSettings WithXrDimming(float value) => Copy(xrDimming: value);
+        public MascotSettings WithXrNormalDimming(float value) => Copy(xrNormalDimming: value);
+        public MascotSettings WithXrSharingDimming(float value) => Copy(xrSharingDimming: value);
         public MascotSettings WithXrShowPlanes(bool value) => Copy(xrShowPlanes: value);
         public MascotSettings WithScale(float value) => Copy(scale: value);
 
@@ -322,7 +331,8 @@ namespace ChatterMascot.Settings
                 && XrAzimuth.Equals(other.XrAzimuth)
                 && XrFeetBelowEye.Equals(other.XrFeetBelowEye)
                 && Walk == other.Walk
-                && XrDimming.Equals(other.XrDimming)
+                && XrNormalDimming.Equals(other.XrNormalDimming)
+                && XrSharingDimming.Equals(other.XrSharingDimming)
                 && XrShowPlanes == other.XrShowPlanes
                 && Scale.Equals(other.Scale);
         }
@@ -350,7 +360,8 @@ namespace ChatterMascot.Settings
             hash = (hash * 397) ^ XrAzimuth.GetHashCode();
             hash = (hash * 397) ^ XrFeetBelowEye.GetHashCode();
             hash = (hash * 397) ^ (Walk ? 1 : 0);
-            hash = (hash * 397) ^ XrDimming.GetHashCode();
+            hash = (hash * 397) ^ XrNormalDimming.GetHashCode();
+            hash = (hash * 397) ^ XrSharingDimming.GetHashCode();
             hash = (hash * 397) ^ (XrShowPlanes ? 1 : 0);
             hash = (hash * 397) ^ Scale.GetHashCode();
             return hash;

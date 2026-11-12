@@ -103,9 +103,10 @@ namespace ChatterMascot.Xr
             if (host != null) host.ChangedExternally += OnSettingsChangedExternally;
             // ★ Apply 経由の自分起点の変更は ChangedExternally が来ないので、起動時の値は
             //   ここで一度だけ直接伝える（→ HandleSetting の Walk の case も同様に直接伝える）
-            _walk.SetEnabled(host != null ? host.Current.Walk : MascotSettings.Defaults.Walk);
-            _board.SetDimming(host != null ? host.Current.XrDimming : MascotSettings.Defaults.XrDimming);
-            _planeWires.SetVisible(host != null ? host.Current.XrShowPlanes : MascotSettings.Defaults.XrShowPlanes);
+            var startSettings = host != null ? host.Current : MascotSettings.Defaults;
+            _walk.SetEnabled(startSettings.Walk);
+            _board.SetDimming(startSettings.XrNormalDimming, startSettings.XrSharingDimming);
+            _planeWires.SetVisible(startSettings.XrShowPlanes);
         }
 
         private void OnDestroy()
@@ -321,7 +322,8 @@ namespace ChatterMascot.Xr
         private void OnSettingsChangedExternally(MascotSettings previous, MascotSettings next)
         {
             _walk.SetEnabled(next.Walk);
-            if (previous.XrDimming != next.XrDimming) _board.SetDimming(next.XrDimming);
+            if (previous.XrNormalDimming != next.XrNormalDimming || previous.XrSharingDimming != next.XrSharingDimming)
+                _board.SetDimming(next.XrNormalDimming, next.XrSharingDimming);
             if (previous.XrShowPlanes != next.XrShowPlanes) _planeWires.SetVisible(next.XrShowPlanes);
             // ★ 大きさが外から変わったら実際の縮尺も追いつかせる。保存は不要（既に next が確定値）
             if (previous.XrHeight != next.XrHeight) RescaleTo(next.XrHeight);
@@ -340,6 +342,7 @@ namespace ChatterMascot.Xr
             var host = MascotSettingsHost.Instance;
             _context.Settings = host != null ? host.Current : MascotSettings.Defaults;
             _context.XrDimmingSupported = _board.DimmingSupported;
+            _context.XrScreenAvailable = _board.enabled;
             _context.XrPlanesAvailable = _planeWires.Available;
 
             var realCm = _stage.RealHeightCm;
@@ -472,12 +475,16 @@ namespace ChatterMascot.Xr
                     return;
                 }
 
-                case SettingKeys.XrDimming:
+                case SettingKeys.XrNormalDimming:
+                case SettingKeys.XrSharingDimming:
                 {
-                    var level = SettingsMapping.Parse(value, host.Current.XrDimming);
-                    host.Apply(host.Current.WithXrDimming(level));
+                    var current = host.Current;
+                    var next = key == SettingKeys.XrNormalDimming
+                        ? current.WithXrNormalDimming(SettingsMapping.Parse(value, current.XrNormalDimming))
+                        : current.WithXrSharingDimming(SettingsMapping.Parse(value, current.XrSharingDimming));
+                    host.Apply(next);
                     // ★ Apply は自分起点の変更なので ChangedExternally が来ない。ここで直接伝える
-                    _board.SetDimming(level);
+                    _board.SetDimming(next.XrNormalDimming, next.XrSharingDimming);
                     Refresh();
                     return;
                 }
@@ -667,7 +674,7 @@ namespace ChatterMascot.Xr
             host.Apply(next);
             // ★ Apply は自分起点の変更なので ChangedExternally が来ない。ここで直接伝える
             _walk.SetEnabled(next.Walk);
-            _board.SetDimming(next.XrDimming);
+            _board.SetDimming(next.XrNormalDimming, next.XrSharingDimming);
             _planeWires.SetVisible(next.XrShowPlanes);
             RescaleTo(next.XrHeight);
             _grab.ResetPosition();

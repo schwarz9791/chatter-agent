@@ -64,7 +64,8 @@ namespace ChatterMascot.Settings
         public const float XrDimmingMin = 0f;
         public const float XrDimmingMax = 1f;
         public const float XrDimmingStep = 0.25f;
-        public const float XrDefaultDimming = 0.5f;
+        public const float XrDefaultNormalDimming = 0f;
+        public const float XrDefaultSharingDimming = 0.5f;
 
         /// <summary>減光の選択肢（0〜100%）。表記は言語によらないので <c>UiText</c> を取らない。</summary>
         public static IReadOnlyList<SettingChoice> XrDimmingChoices()

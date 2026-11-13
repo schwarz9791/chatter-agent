@@ -629,6 +629,37 @@ collections / burst / mathematics / shadergraph / render-pipelines.core も）�
 毎 `BuildPlayer` の前に作り `OnPostprocessBuild` で消すが、ビルドが throw すると後始末が走らない。
 我々のものではない。**消すだけでよく、コミットしないこと。**
 
+## Unity の版を上げたときに変わったこと（#250: 6000.3.14f1 → 6000.3.28f1）
+
+CVE-2026-111943（eMudhra）と CVE-2026-111497（Brotli）の修正を取り込むために上げた。28f1 のリリースノートは
+27f2 のセキュリティ修正を再掲していないが、28f1 の Package Manager に埋め込まれた Node が v24.22.1（27f2 で上げた版。
+14f1 は v22.19.0）であることで、28f1 にも入っていると判断した。
+
+測定条件: 2026-11-13、Apple M1 Max、エミュレータ 37.2.13 の `XR_Glasses`。
+
+★ **28f1 で開くと、手で触っていないファイルを Unity が書き直す。** どれも残してよい（戻しても、開くたびに書き直される）。
+
+- `Packages/manifest.json` / `packages-lock.json`: 推奨版への更新と、キーの並べ替え。XR の推移的な依存もマイナー版で
+  上がる（`com.unity.xr.compositionlayers` 2.4.0 → 2.6.1、`com.unity.xr.management` 4.5.4 → 4.6.1）。
+  画面共有の板は 2.6.1 でも出て、映像も減光も届いた
+- `SettingsIcon.png.meta`: Single の sprite が `spriteSheet` に書き出される。読み込みは `Resources.Load<Sprite>("SettingsIcon")`
+  で名前から引くので、参照は切れない
+- `ProjectSettings.asset`: iOS の thermal state のキーが3つ増える
+
+★★ **APK のマニフェストに `unity.run-without-focus=true` が増える。** 14f1 の APK には無かった。`Run In Background`
+（オン）は触っていない（→ [`mascot-desktop.md`](./mascot-desktop.md) の `Run In Background`）。XR のホームのパネルを開くと、
+セッションは `FOCUSED → VISIBLE` になり、アプリは見えたままフォーカスだけを失う。その間も読み上げとモーションが続いた。
+アイコンから戻ると、減光の要求し直し → 板の作り直し → 最初のフレームの順で戻る。
+
+★ **28f1 の既知の不具合 UUM-159613 は、このプロジェクトでは出ない。** `Run In Background` と `Predictive Back Support` が
+両方オンだと、バックグラウンドから戻った後の戻る操作でアプリが閉じる、というもの（このプロジェクトは両方オン）。
+ただし Full Space のアプリには、戻る操作がもともと効かない（`KEYCODE_BACK` は届くが、アプリは反応しない）。
+ホームから戻った後も閉じなかった。XR 実機では確かめていない。
+
+★ **同梱の OpenJDK は 17.0.18 のままで、eMudhra の対策が入っていない**（Unity は Adoptium の更新待ちとしている）。
+Android ビルドで Gradle が依存を取りに行く TLS はこれを通るので、JDK が更新されるまでは、release ビルドを
+信頼できるネットワークで行う。
+
 ## ★ `ChatterMascot.Runtime` を描画に依存しない層のまま保つ
 
 契約・状態機械・探索順・画角の計算が **EditMode だけでテストできている**のは、

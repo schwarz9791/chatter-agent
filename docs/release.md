@@ -118,6 +118,9 @@ gh release create agent-v0.2.0 --draft --verify-tag --title "ChatterAgent 0.2.0"
 - ★ ChatterAgent はこれらのアセットを Releases の API で名前を指して引く。**`ChatterMascot-macOS.zip` / `.zip.sig` /
   `.app.tar.gz` / `latest.json` の名前を変えない**
 - draft に今回の変更点を書き足してから publish する
+- マスコットと ChatterAgent を続けて publish するとき、順番と「Latest」の付き方は気にしなくてよい。ChatterAgent の
+  更新確認（`update.rs`）も Android のマスコットの更新の案内（`ReleaseCheck.cs`）も、Releases の一覧からタグの接頭辞ごとに
+  最大の版を取り、`releases/latest` を見ない
 - ★ **ChatterAgent とマスコットの macOS 版は publish の前に、別の Mac（無ければ同じ Mac の別ユーザー）でブラウザから
   draft の zip をダウンロードして**（quarantine が付く経路で）、ノートの開き方で開けることを確かめる。マスコットは
   開いたあと、ChatterAgent から表示できることも確かめる。確かめたら publish

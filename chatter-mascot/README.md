@@ -12,7 +12,7 @@ For the overall picture (how it works, current state, setup), see the [root READ
 
 ### Prerequisites
 
-- **Unity 6000.3.14f1** — requires the macOS / Android build support modules
+- **Unity 6000.3.28f1** — requires the macOS / Android build support modules
 - **Unity CLI** (`unity` command) — `chatter-mascot/scripts/*.sh` run the Editor through it
 - **Git LFS** — the mascot's bundled model, motion and icons are LFS-tracked. Cloning without it builds with pointer files in their place, and if you rely on the bundled model only a Cube appears (if already cloned, run `git lfs install` then `git lfs pull`, and rebuild)
 - **Android SDK platform-tools** (`adb`) — when installing the Android version onto a device

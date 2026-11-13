@@ -555,9 +555,9 @@ Unity 本体の作り（「`-runTests` に `-quit` を付けない」「`-execut
 - ★ **CLI のバージョンは固定しない。** CI に Unity を起動するジョブがまだ無く（#54 が未着手）、
   固定する先が存在しない。CLI は beta なので、壊れたら `unity --version` を見て対応表を
   確かめ直す運用にする
-- ★ `unity editors` が `6000.3.14f1` に対して `6000.3.24f1` へのアップグレードを示唆してくるが、
-  **プロジェクトは `6000.3.14f1` 固定**（`ProjectSettings/ProjectVersion.txt` が唯一の版の書き場所。
-  [#97](https://github.com/schwarz9791/chatter-agent/issues/97) で `6000.5.8f1` から切り替えた）。
+- ★ プロジェクトは **`6000.3.28f1` 固定**（`ProjectSettings/ProjectVersion.txt` が唯一の版の書き場所）。
+  `6000.3.27f2` より前の版は、鍵が漏れた eMudhra の中間 CA を拒む修正（CVE-2026-111943）と
+  Brotli デコーダーの修正（CVE-2026-111497）を欠くので、`6000.3.27f2` 以上に保つ。
   `UNITY_VERSION` 環境変数は `test.sh` / `build.sh` / `run.sh` / `build-android.sh` の4本すべてで
   Unity CLI の `--editor-version` として渡る。渡さなければ CLI が `ProjectVersion.txt` の版で走る
 

@@ -10,7 +10,7 @@ Android にだけ割り当てる（→「XR（Full Space）」）。
 delegate で外す」）。
 
 [#97](https://github.com/schwarz9791/chatter-agent/issues/97) で **Android（XR なし）のビルドが通っている。**
-Unity 6000.3.14f1 同梱の SDK / NDK / JDK だけで足りる（外部の SDK 設定は要らない）。
+Unity 同梱の SDK / NDK / JDK だけで足りる（外部の SDK 設定は要らない）。
 初回は約6分、差分ビルドは約1分、APK は約 68MB（2026-09-13 実測）。
 XR 自体は [#99](https://github.com/schwarz9791/chatter-agent/issues/99)、接続先の恒久化は
 [#98](https://github.com/schwarz9791/chatter-agent/issues/98)、実機は

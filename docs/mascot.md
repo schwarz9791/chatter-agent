@@ -10,7 +10,7 @@
 
 | | |
 |---|---|
-| Unity | **6**（開発は 6000.3.28f1） |
+| Unity | **6**（6000.3.27f2 以上。固定版は `ProjectSettings/ProjectVersion.txt`） |
 | レンダーパイプライン | **URP** |
 | VRM | [UniVRM](https://github.com/vrm-c/UniVRM) |
 | ウィンドウ制御（macOS） | [UniWindowController](https://github.com/kirurobo/UniWindowController) `com.kirurobo.uniwinc`（MIT） |
@@ -41,13 +41,12 @@ Build Support の枠がそのまま生える。要らないものを入れてお
 
 ### パッケージの導入
 
-`Packages/manifest.json` に入れてある（Package Manager の GUI でも同じ）。
+git 参照のパッケージは `Packages/manifest.json` に入れてある（Package Manager の GUI でも同じ）。
 
 ```json
 "com.kirurobo.uniwinc": "https://github.com/kirurobo/UniWindowController.git#upm",
 "com.vrmc.gltf": "https://github.com/vrm-c/UniVRM.git?path=/Packages/UniGLTF#v0.131.2",
-"com.vrmc.vrm": "https://github.com/vrm-c/UniVRM.git?path=/Packages/VRM10#v0.131.2",
-"com.unity.nuget.newtonsoft-json": "3.2.1"
+"com.vrmc.vrm": "https://github.com/vrm-c/UniVRM.git?path=/Packages/VRM10#v0.131.2"
 ```
 
 ★ **旧版（ネイティブプラグインがあった版）から上げたら `rm -rf chatter-mascot/Assets/Plugins/macOS` で
@@ -762,6 +761,7 @@ Gradle がビルドスクリプトをコンパイルしたキャッシュ（`GRA
 `build-android.sh` は release のとき、`Library/Bee` をビルドの前後で丸ごと消し、Gradle には使い捨ての
 `GRADLE_USER_HOME` を使わせて後で消すので、ビルドの後には残らない。引き換えに、release とその次のビルドは
 キャッシュ無しになり、release のたびに Gradle の依存をダウンロードし直す（ネットワークが要る）。
+同梱の JDK が eMudhra の対策を欠く間は、信頼できるネットワークで組む（→ [`mascot-unity.md`](./knowledge/mascot-unity.md)「Unity の版を上げたときに変わったこと」）。
 
 **鍵の作り方（一度だけ）。** keytool は Unity 同梱のもの
 （`/Applications/Unity/Hub/Editor/<版>/PlaybackEngines/AndroidPlayer/OpenJDK/bin/keytool`）。

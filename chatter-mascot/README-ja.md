@@ -12,7 +12,7 @@
 
 ### 前提
 
-- **Unity 6000.3.28f1** —— macOS / Android のビルドサポートモジュールが必要です
+- **Unity 6000.3.27f2 以上**（固定版は `ProjectSettings/ProjectVersion.txt`）—— macOS / Android のビルドサポートモジュールが必要です
 - **Unity CLI**（`unity` コマンド） —— `chatter-mascot/scripts/*.sh` がこれ経由で Editor を動かします
 - **Git LFS** —— マスコットの同梱モデル・モーション・アイコンは LFS 管理です。無しで clone するとポインタのままビルドされ、同梱モデルに頼っていれば Cube だけが出ます（clone 済みなら `git lfs install` → `git lfs pull` のあと、ビルドし直す）
 - **Android SDK の platform-tools**（`adb`）—— Android 版を端末へ入れるとき

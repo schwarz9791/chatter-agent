@@ -462,10 +462,8 @@ PNG は静止画なので OS 側では吸収されない。差し替えたら
 
 `unity` コマンド（[Unity CLI](https://unity.com/ja/blog/meet-the-unity-cli)）が
 手元に入っている。実体は `/Users/schwarz/.unity/bin/unity`、実測 **`1.0.0-beta.8`**（`unity --version`）。
-`unity doctor` は `auth.loggedIn true` と、インストール済みの Editor を `editor.0` / `editor.1`
-（現在は `6000.3.14f1 arm64` と `6000.5.8f1 arm64` の2本）として認識する。`unity editors` は
-両方を「Installed」列にパスつきで拾い、どちらも Android / Android SDK & NDK Tools / OpenJDK / Web の
-モジュールを持つ。導入は公式の
+`unity doctor` は `auth.loggedIn true` と、インストール済みの Editor を `editor.0` / `editor.1` … として
+認識する。`unity editors` はインストール済みの Editor を「Installed」列にパスとモジュールつきで拾う。導入は公式の
 
 ```bash
 curl -fsSL https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh | UNITY_CLI_CHANNEL=beta bash
@@ -555,9 +553,10 @@ Unity 本体の作り（「`-runTests` に `-quit` を付けない」「`-execut
 - ★ **CLI のバージョンは固定しない。** CI に Unity を起動するジョブがまだ無く（#54 が未着手）、
   固定する先が存在しない。CLI は beta なので、壊れたら `unity --version` を見て対応表を
   確かめ直す運用にする
-- ★ プロジェクトは **`6000.3.28f1` 固定**（`ProjectSettings/ProjectVersion.txt` が唯一の版の書き場所）。
+- ★ プロジェクトの版は **`ProjectSettings/ProjectVersion.txt` が唯一の書き場所**（docs と README には下限だけを書く）。
   `6000.3.27f2` より前の版は、鍵が漏れた eMudhra の中間 CA を拒む修正（CVE-2026-111943）と
   Brotli デコーダーの修正（CVE-2026-111497）を欠くので、`6000.3.27f2` 以上に保つ。
+  release は `UNITY_VERSION` が入っていると `require_release_tag` で止まる。
   `UNITY_VERSION` 環境変数は `test.sh` / `build.sh` / `run.sh` / `build-android.sh` の4本すべてで
   Unity CLI の `--editor-version` として渡る。渡さなければ CLI が `ProjectVersion.txt` の版で走る
 

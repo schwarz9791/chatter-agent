@@ -172,11 +172,11 @@ npm run build         # tsdown（CLI / server / player の3エントリ）
 **24.11 以上が要る。** tsdown の依存（`rolldown-plugin-dts`）が `^22.18.0 || >=24.11.0` を要求するため、
 `~/.npmrc` に `engine-strict=true` を置いている環境では、これを下回ると `npm install` の時点で弾かれる。
 
-リポジトリルートの `mise.toml` で `node = "24.19.0"` に固定してある。mise を使っていれば
+リポジトリルートの `mise.toml` で固定してある。mise を使っていれば
 ディレクトリに入った時点で切り替わる。`package.json` の `engines.node` も `>=24.11` にしてあるので、
 別の経路で古い Node を掴んでいても install で気づける。
 
-CI（`setup-node`）は `node-version: "24"` で、常に最新の 24 系が入るのでこの条件を満たす。
+CI（`setup-node`）は `node-version: "24"` で、ランナーにキャッシュされている 24 系を使う（最新とは限らない）。24.11 以上という条件は満たす。
 
 ### 受け入れ確認
 

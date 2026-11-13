@@ -66,6 +66,14 @@ if [[ -z "$key_pass" ]]; then
   fi
 fi
 
+# 同梱する Bun は mise.toml で固定した版にする。NOTICE がその版のタグを、静的リンクしたライブラリのソースの在処として示している。
+want_bun="$(sed -nE 's/^bun = "(.*)"$/\1/p' ../mise.toml)"
+have_bun="$(bun --version 2>/dev/null || true)"
+if [[ -z "$want_bun" || "$have_bun" != "$want_bun" ]]; then
+  echo "bun ${have_bun:-(not found)} does not match ${want_bun:-(unreadable)} pinned in mise.toml" >&2
+  exit 1
+fi
+
 # 同梱するバイナリは配る .app のときだけ要る。tauri.conf.json に書かないのは、開発と CI をバイナリ無しで回すため。
 npm --prefix ../core ci
 npm --prefix ../core run build:bin

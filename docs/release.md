@@ -92,7 +92,7 @@ git push origin agent-v0.2.0         # 版を確かめてから（下）
 - `build-release.sh` は作業ツリーがきれいで HEAD に `agent-v*` タグがちょうど1つ、かつ最大のときだけ通る。
   main かどうかは見ないので、マスコットと同じく origin と同じ main でタグを付ける
 - `build-release.sh` は core の `npm ci` と `build:bin` を先に走らせ、できた実行ファイルを `.app` に同梱する
-  （→ [`agent.md`](./agent.md)「ビルドと起動」）。bun はルートの `mise.toml` で固定している
+  （→ [`agent.md`](./agent.md)「ビルドと起動」）。bun はルートの `mise.toml` で固定していて、PATH の `bun` が違う版なら `build-release.sh` が止まる
 - 版は `defaults read "$PWD/build/ChatterAgent.app/Contents/Info.plist" CFBundleShortVersionString` か、
   起動して設定窓の情報欄で確かめる
 - arm64 だけのビルドになる（Intel Mac 向けは作らない）。`build-release.sh` は `uname -m` が `arm64` でなければ止まる

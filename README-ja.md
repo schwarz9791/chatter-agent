@@ -180,7 +180,7 @@ curl -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8570/v1/pairin
 
 ### 前提
 
-- **Node 24.11 以上**（`mise.toml` で 24.22.3 に固定しています）
+- **Node 24.11 以上**（`mise.toml` で固定しています）
 
 ### サーバーと CLI
 

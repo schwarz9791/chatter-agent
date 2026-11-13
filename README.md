@@ -180,7 +180,7 @@ Prebuilt APKs, the macOS mascot, and ChatterAgent (macOS) are on the [Releases p
 
 ### Prerequisites
 
-- **Node 24.11 or later** (pinned to 24.22.3 in `mise.toml`)
+- **Node 24.11 or later** (pinned in `mise.toml`)
 
 ### Server and CLIs
 

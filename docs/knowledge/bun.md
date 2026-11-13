@@ -98,7 +98,7 @@ Tauri の `externalBin` で `.app` に入れた。
   `BUN_BE_BUN=1` で bun として振る舞わせると、子は bun の CLI として cwd の `bunfig.toml`（`preload`）・`.env` と
   `~/.bunfig.toml` を読んでしまう（compile 時の `--no-compile-autoload-*` が効かない）。
   → `main.ts` の隠しサブコマンド `ollaya-child` で起こす。compile 版では `process.argv` が
-  `["bun", "/$bunfs/root/<実行ファイル名>", ...]` になる（bun 1.4.3 で実測。1.4.4 でも子が `<実行ファイル> ollaya-child` で起きることを `ps` で確かめた）ので、`/$bunfs/` で始まる `argv[1]` を
+  `["bun", "/$bunfs/root/<実行ファイル名>", ...]` になる（bun 1.4.3 で実測）ので、`/$bunfs/` で始まる `argv[1]` を
   見分けて、スクリプトのパスを挟まず実行ファイルへ直接サブコマンドを渡す。node のバンドルは `<script> ollaya-child`。
 - **Tauri の bundler は sidecar も ad-hoc で署名し直す**（`Signing …/Contents/MacOS/chatter-agent`）。
   - Identifier は `chatter-agent-<ハッシュ>` になる。

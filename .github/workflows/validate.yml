@@ -288,6 +288,18 @@ jobs:
       - name: Compile single binary
         run: npm run compile -- --outfile "$RUNNER_TEMP/chatter-agent"
 
+      # compile 版で Ollaya の子を起こす判定（`selfCommand`）は、`argv[1]` が `/$bunfs/` で始まることに頼っている。
+      # 崩れると子が起きず、感情判定が黙って辞書式へ落ちるので、Bun を上げたときにここで止める。
+      - name: Verify compiled argv[1] is under /$bunfs/
+        run: |
+          printf 'console.log(process.argv[1])\n' > "$RUNNER_TEMP/argv.ts"
+          bun build --compile "$RUNNER_TEMP/argv.ts" --outfile "$RUNNER_TEMP/argv"
+          out="$("$RUNNER_TEMP/argv")"
+          case "$out" in
+            '/$bunfs/'*) ;;
+            *) echo "::error::selfCommand relies on argv[1] starting with /\$bunfs/, got: $out"; exit 1 ;;
+          esac
+
       - name: Verify Ollaya child starts from binary
         run: |
           out="$(printf '%s' '{"texts":["x"],"baseUrl":"http://127.0.0.1:9","model":"m"}' | "$RUNNER_TEMP/chatter-agent" ollaya-child)"

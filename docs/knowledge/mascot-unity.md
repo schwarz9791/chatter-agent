@@ -462,10 +462,8 @@ PNG は静止画なので OS 側では吸収されない。差し替えたら
 
 `unity` コマンド（[Unity CLI](https://unity.com/ja/blog/meet-the-unity-cli)）が
 手元に入っている。実体は `/Users/schwarz/.unity/bin/unity`、実測 **`1.0.0-beta.8`**（`unity --version`）。
-`unity doctor` は `auth.loggedIn true` と、インストール済みの Editor を `editor.0` / `editor.1`
-（現在は `6000.3.14f1 arm64` と `6000.5.8f1 arm64` の2本）として認識する。`unity editors` は
-両方を「Installed」列にパスつきで拾い、どちらも Android / Android SDK & NDK Tools / OpenJDK / Web の
-モジュールを持つ。導入は公式の
+`unity doctor` は `auth.loggedIn true` と、インストール済みの Editor を `editor.0` / `editor.1` … として
+認識する。`unity editors` はインストール済みの Editor を「Installed」列にパスとモジュールつきで拾う。導入は公式の
 
 ```bash
 curl -fsSL https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh | UNITY_CLI_CHANNEL=beta bash
@@ -555,9 +553,10 @@ Unity 本体の作り（「`-runTests` に `-quit` を付けない」「`-execut
 - ★ **CLI のバージョンは固定しない。** CI に Unity を起動するジョブがまだ無く（#54 が未着手）、
   固定する先が存在しない。CLI は beta なので、壊れたら `unity --version` を見て対応表を
   確かめ直す運用にする
-- ★ `unity editors` が `6000.3.14f1` に対して `6000.3.24f1` へのアップグレードを示唆してくるが、
-  **プロジェクトは `6000.3.14f1` 固定**（`ProjectSettings/ProjectVersion.txt` が唯一の版の書き場所。
-  [#97](https://github.com/schwarz9791/chatter-agent/issues/97) で `6000.5.8f1` から切り替えた）。
+- ★ プロジェクトの版は **`ProjectSettings/ProjectVersion.txt` が唯一の書き場所**（docs と README には下限だけを書く）。
+  `6000.3.27f2` より前の版は、鍵が漏れた eMudhra の中間 CA を拒む修正（CVE-2026-111943）と
+  Brotli デコーダーの修正（CVE-2026-111497）を欠くので、`6000.3.27f2` 以上に保つ。
+  release は `UNITY_VERSION` が入っていると `require_release_tag` で止まる。
   `UNITY_VERSION` 環境変数は `test.sh` / `build.sh` / `run.sh` / `build-android.sh` の4本すべてで
   Unity CLI の `--editor-version` として渡る。渡さなければ CLI が `ProjectVersion.txt` の版で走る
 
@@ -628,6 +627,37 @@ collections / burst / mathematics / shadergraph / render-pipelines.core も）�
 `com.unity.test-framework.performance` の `TestRunBuilder`（`IPreprocessBuildWithReport`）が
 毎 `BuildPlayer` の前に作り `OnPostprocessBuild` で消すが、ビルドが throw すると後始末が走らない。
 我々のものではない。**消すだけでよく、コミットしないこと。**
+
+## Unity の版を上げたときに変わったこと（#250: 6000.3.14f1 → 6000.3.28f1）
+
+CVE-2026-111943（eMudhra）と CVE-2026-111497（Brotli）の修正を取り込むために上げた。28f1 のリリースノートは
+27f2 のセキュリティ修正を再掲していないが、28f1 の Package Manager に埋め込まれた Node が v24.22.1（27f2 で上げた版。
+14f1 は v22.19.0）であることで、28f1 にも入っていると判断した。
+
+測定条件: 2026-11-13、Apple M1 Max、エミュレータ 37.2.13 の `XR_Glasses`。
+
+★ **28f1 で開くと、手で触っていないファイルを Unity が書き直す。** どれも残してよい（戻しても、開くたびに書き直される）。
+
+- `Packages/manifest.json` / `packages-lock.json`: 推奨版への更新と、キーの並べ替え。XR の推移的な依存もマイナー版で
+  上がる（`com.unity.xr.compositionlayers` 2.4.0 → 2.6.1、`com.unity.xr.management` 4.5.4 → 4.6.1）。
+  画面共有の板は 2.6.1 でも出て、映像も減光も届いた
+- `SettingsIcon.png.meta`: Single の sprite が `spriteSheet` に書き出される。読み込みは `Resources.Load<Sprite>("SettingsIcon")`
+  で名前から引くので、参照は切れない
+- `ProjectSettings.asset`: iOS の thermal state のキーが3つ増える
+
+★★ **APK のマニフェストに `unity.run-without-focus=true` が増える。** 14f1 の APK には無かった。`Run In Background`
+（オン）は触っていない（→ [`mascot-desktop.md`](./mascot-desktop.md) の `Run In Background`）。XR のホームのパネルを開くと、
+セッションは `FOCUSED → VISIBLE` になり、アプリは見えたままフォーカスだけを失う。その間も読み上げとモーションが続いた。
+アイコンから戻ると、減光の要求し直し → 板の作り直し → 最初のフレームの順で戻る。
+
+★ **28f1 の既知の不具合 UUM-159613 は、このプロジェクトでは出ない。** `Run In Background` と `Predictive Back Support` が
+両方オンだと、バックグラウンドから戻った後の戻る操作でアプリが閉じる、というもの（このプロジェクトは両方オン）。
+ただし Full Space のアプリには、戻る操作がもともと効かない（`KEYCODE_BACK` は届くが、アプリは反応しない）。
+ホームから戻った後も閉じなかった。XR 実機では確かめていない。
+
+★ **同梱の OpenJDK は 17.0.18 のままで、eMudhra の対策が入っていない**（Unity は Adoptium の更新待ちとしている）。
+Android ビルドで Gradle が依存を取りに行く TLS はこれを通るので、JDK が更新されるまでは、release ビルドを
+信頼できるネットワークで行う。
 
 ## ★ `ChatterMascot.Runtime` を描画に依存しない層のまま保つ
 

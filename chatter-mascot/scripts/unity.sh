@@ -22,6 +22,7 @@ fi
 
 # ★ UNITY_VERSION は CLI の --editor-version へ渡す。渡さないと CLI は
 #   ProjectVersion.txt の版で走るので、**指定したつもりの版で走らない**。
+#   release では使えない（require_release_tag が止める）。
 #
 # ★ --non-interactive を必ず付ける。CLI がプロンプトを出す状態（未ログイン、Editor が
 #   未インストール）に入ると、出力は grep の裏・入力は端末のままで無言のハングに見える。
@@ -133,6 +134,11 @@ unity_build_player() {
 # 通ったら CHATTER_MASCOT_RELEASE_TAG に入れて export する。Unity を起動してからでは遅い失敗はここで先に止める。
 # タグの確かめ方は chatter-agent-app/scripts/build-release.sh と同じ形。直すときは両方を揃える。
 require_release_tag() {
+  # 配るものは ProjectVersion.txt の版の Editor で組む。別の版を指したままだと、修正の入っていない Editor で release ができる。
+  if [[ -n "${UNITY_VERSION:-}" ]]; then
+    echo "UNITY_VERSION is set ($UNITY_VERSION). Release builds use the version in ProjectVersion.txt; unset it and run again" >&2
+    exit 1
+  fi
   if [[ -n "$(git -C "$PROJECT_PATH" status --porcelain)" ]]; then
     echo "The working tree has uncommitted changes. Release builds run only from a committed state" >&2
     exit 1

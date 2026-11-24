@@ -242,6 +242,9 @@ namespace ChatterMascot.Vrm
         /// <summary>いま歩行を再生中か。</summary>
         public bool IsWalking => _motion?.IsPlayingWalk ?? false;
 
+        /// <summary>副作用なしで、いま <see cref="TryStartWalking"/> が成功するか。</summary>
+        public bool CanStartWalking => CanWalk && !(_motion?.IsPlaying ?? true);
+
         /// <summary>
         /// 歩行を始める。<see cref="MotionCategory.Walk"/> から1本選び、<see cref="MotionKind.Walk"/>
         /// で <see cref="VrmMotionPlayer.Play"/> に渡す——<see cref="PreviewMotion"/> と同じ経路だが、

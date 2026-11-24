@@ -20,7 +20,7 @@ namespace ChatterMascot.Xr
     /// ★ <b>呼び出し口（頭上の歯車 / 手のひらのボタン）もここが持つ。</b> 手のひらのボタンは
     ///   <see cref="XrHandTracking"/>（唯一の関節読み取り口）が手のひらを自分へ向けたと判定した
     ///   間だけ、歯車はキャラクターをつまんだ・離した後の一定時間だけ出す（<see cref="XrMenuRules"/>）。
-    ///   開くかどうかは <see cref="TryHandlePinch"/> が pinch の入りだけを見る——入力そのものの
+    ///   何に当たっているかは <see cref="Pick"/>、開くのは <see cref="Press"/>（pinch の入りだけを見る）——入力そのものの
     ///   読み取りは <see cref="XrGrab"/> に一本化したまま、ここはレイと関節姿勢を受け取って判定するだけ。
     /// </summary>
     [DisallowMultipleComponent]
@@ -28,6 +28,9 @@ namespace ChatterMascot.Xr
     {
         /// <summary>呼び出し口のどちらを出しているか。切り替わったときだけログを出す。</summary>
         private enum InvokerMode { None, Gear, Palm }
+
+        /// <summary>aim レイが指している設定まわりの対象。</summary>
+        internal enum Target { None, Panel, PalmButton, Gear }
 
         // ── 見た目の既定値（実測値ではない） ─────────────────────
         private const float InvokerCanvasPixels = 96f;
@@ -255,44 +258,66 @@ namespace ChatterMascot.Xr
         }
 
         /// <summary>
-        /// pinch に入った瞬間に呼ぶ（<c>XrGrab.TryGrab</c> の先頭）。パネル・手のひらボタン・歯車の
-        /// どれかに当たっていればそちらを押して <b>true</b> を返す——呼び出し側はキャラ・歩行範囲の
-        /// 掴みへ進まないこと。
+        /// aim レイが指している設定まわりの対象（副作用なし）。<see cref="Press"/> が押すものと
+        /// カーソルを描く位置は、どちらもこの結果から決める。
         ///
-        /// ★ <b>手のひらボタンを出している手自身でつまんでも区別しない。</b> レイの始点がボタンの
-        ///   近くにあれば当たり判定に含める（<see cref="TryPressButton"/>）ので、その手自身で
-        ///   ボタンの近くをつまんでも開く——害がないので、開く手を特別扱いしない。
+        /// ★ <b>パネルが開いている間は、パネルの外を指していても手のひらボタンと歯車は見ない。</b>
+        /// ★ <b>手のひらボタンを出している手自身でも区別しない。</b> レイの始点がボタンの近くにあれば
+        ///   当たり判定に含める（<see cref="HitsButton"/>）ので、その手自身でボタンの近くを
+        ///   つまんでも開く——害がないので、開く手を特別扱いしない。
         ///
-        /// <paramref name="gearMaxDistance"/> より奥の歯車は押せない。手前の板に隠れて見えないものを
+        /// <paramref name="gearMaxDistance"/> より奥の歯車は対象にしない。手前の板に隠れて見えないものを
         /// 押させないための上限で、パネルと手のひらのボタンには効かせない。
         /// </summary>
-        public bool TryHandlePinch(Ray ray, float gearMaxDistance)
+        internal Target Pick(Ray ray, float gearMaxDistance, out Vector3 point)
         {
-            if (_panel.IsOpen) return _panel.TryPress(ray);
+            if (_panel.IsOpen) return _panel.TryHit(ray, out point) ? Target.Panel : Target.None;
 
-            if (TryPressButton(_palmButton, _palmButtonCollider, ray, float.PositiveInfinity)) { OpenPanel(); return true; }
-            if (TryPressButton(_gear, _gearCollider, ray, gearMaxDistance)) { OpenPanel(); return true; }
-            return false;
+            if (HitsButton(_palmButton, _palmButtonCollider, ray, float.PositiveInfinity, out point)) return Target.PalmButton;
+            if (HitsButton(_gear, _gearCollider, ray, gearMaxDistance, out point)) return Target.Gear;
+            return Target.None;
         }
 
-        private static bool TryPressButton(GameObject button, SphereCollider collider, Ray ray, float maxDistance)
+        /// <summary>
+        /// pinch に入った瞬間に <see cref="Pick"/> の結果を渡して押す（<c>XrGrab.TryGrab</c>）。
+        /// </summary>
+        internal void Press(Target target, Ray ray)
         {
+            switch (target)
+            {
+                case Target.Panel:
+                    _panel.TryPress(ray);
+                    break;
+                case Target.PalmButton:
+                case Target.Gear:
+                    OpenPanel();
+                    break;
+            }
+        }
+
+        private static bool HitsButton(GameObject button, SphereCollider collider, Ray ray, float maxDistance, out Vector3 point)
+        {
+            point = default;
             if (button == null || !button.activeSelf || collider == null) return false;
 
             // ★ 直前のフレームで動かしていると古い当たり判定を見る（autoSyncTransforms オフ）
             Physics.SyncTransforms();
             // ★ レイの始点がコライダーの中にあると Raycast は当たらない扱いになる。
-            //   押しに来る手はボタンへ近づくので、その状態も当たり判定に含める。
+            //   押しに来る手はボタンへ近づくので、その状態も当たり判定に含める（点はボタンの中心）。
             //   SphereCollider 前提で球として判定する（bounds は AABB なので Contains だと
             //   角が半径の√3倍まで伸びてしまう）
-            return RayOriginInsideCollider(collider, ray.origin) || collider.Raycast(ray, out _, maxDistance);
+            if (RayOriginInsideCollider(collider, ray.origin))
+            {
+                point = collider.bounds.center;
+                return true;
+            }
+
+            if (!collider.Raycast(ray, out var hit, maxDistance)) return false;
+            point = hit.point;
+            return true;
         }
 
-        private bool HitsGear(Ray ray)
-        {
-            if (_gear == null || !_gear.activeSelf || _gearCollider == null) return false;
-            return RayOriginInsideCollider(_gearCollider, ray.origin) || _gearCollider.Raycast(ray, out _, float.PositiveInfinity);
-        }
+        private bool HitsGear(Ray ray) => HitsButton(_gear, _gearCollider, ray, float.PositiveInfinity, out _);
 
         /// <summary>レイの始点がコライダーの球（半径 = <c>bounds.extents.x</c>）の中にあるか。</summary>
         private static bool RayOriginInsideCollider(Collider collider, Vector3 origin)

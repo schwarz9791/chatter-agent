@@ -33,8 +33,8 @@ namespace ChatterMascot.Xr
         private const string SceneUnderstandingCoarsePermission = "android.permission.SCENE_UNDERSTANDING_COARSE";
 
         /// <summary>
-        /// 検知した面の高さから差し引く量（メートル）。XREAL Aura は面を実際より少し高く返し、乗せたキャラが
-        /// 浮いて見える。着地・つまんでいる間の足元・平面の表示（<see cref="XrPlaneWires"/>）を同じだけ下げる。
+        /// 検知した面の高さから差し引く量（メートル）。XREAL Aura では、検知した面に乗せたキャラが少し浮いて
+        /// 見える。着地・つまんでいる間の足元・平面の表示（<see cref="XrPlaneWires"/>）を同じだけ下げる。
         /// </summary>
         // ponytail: 端末も面も一律。端末や面によって違うと分かったら設定へ出す
         internal const float PlaneHeightBiasMeters = 0.01f;

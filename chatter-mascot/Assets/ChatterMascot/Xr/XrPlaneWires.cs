@@ -95,11 +95,12 @@ namespace ChatterMascot.Xr
 
                 var c = plane.centerInPlaneSpace;
                 var e = plane.extents;
-                line.SetPosition(0, new Vector3(c.x - e.x, 0f, c.y - e.y));
-                line.SetPosition(1, new Vector3(c.x + e.x, 0f, c.y - e.y));
-                line.SetPosition(2, new Vector3(c.x + e.x, 0f, c.y + e.y));
-                line.SetPosition(3, new Vector3(c.x - e.x, 0f, c.y + e.y));
-                fill.localPosition = new Vector3(c.x, 0f, c.y);
+                const float y = -XrGrab.PlaneHeightBiasMeters;
+                line.SetPosition(0, new Vector3(c.x - e.x, y, c.y - e.y));
+                line.SetPosition(1, new Vector3(c.x + e.x, y, c.y - e.y));
+                line.SetPosition(2, new Vector3(c.x + e.x, y, c.y + e.y));
+                line.SetPosition(3, new Vector3(c.x - e.x, y, c.y + e.y));
+                fill.localPosition = new Vector3(c.x, y, c.y);
                 fill.localScale = new Vector3(e.x * 2f, 1f, e.y * 2f);
                 Show(plane.transform, line, true);
             }

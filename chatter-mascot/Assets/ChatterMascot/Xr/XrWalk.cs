@@ -156,21 +156,28 @@ namespace ChatterMascot.Xr
         }
 
         /// <summary>
-        /// aim レイがハンドルに当たっていれば掴む。
+        /// aim レイがハンドルに当たっているか（副作用なし）。当たっていれば掴む操作は <see cref="GrabHandle"/>。
         /// ★ <b>円が消えている間は掴ませない。</b> 見えていないものを掴めると、キャラクターを
         ///   掴もうとしたつまみがハンドルに吸われる。
         /// </summary>
-        public bool TryGrabHandle(Ray ray, float maxDistance)
+        public bool HitsHandle(Ray ray, float maxDistance, out Vector3 point)
         {
+            point = default;
             if (!Active || !CircleVisible || _view == null || _view.HandleCollider == null) return false;
 
             // ★ ハンドルは毎フレーム動かしているので、Raycast の前に当たり判定を取り直すこと
             //   （autoSyncTransforms はオフ。XrGrab.SyncedModelCollider と同じ理由）
             Physics.SyncTransforms();
-            if (!_view.HandleCollider.Raycast(ray, out _, maxDistance)) return false;
+            if (!_view.HandleCollider.Raycast(ray, out var hit, maxDistance)) return false;
 
-            _handleHeld = true;
+            point = hit.point;
             return true;
+        }
+
+        /// <summary><see cref="HitsHandle"/> が当たったハンドルを掴む。</summary>
+        public void GrabHandle()
+        {
+            _handleHeld = true;
         }
 
         /// <summary>
@@ -201,9 +208,8 @@ namespace ChatterMascot.Xr
         /// </summary>
         public WalkToResult TryWalkTo(Ray ray)
         {
-            if (!Active || _wander == null || _character == null) return WalkToResult.Rejected;
-            if (!TryFloorPoint(ray, out var point)) return WalkToResult.Rejected;
-            if (Vector2.Distance(point, _center) > _radius * Wander.AreaScale(ColliderHeightMeters())) return WalkToResult.OutOfRange;
+            var aim = ClassifyWalkAim(ray, out var point);
+            if (aim != WalkToResult.Started) return aim;
 
             if (_character.Speaking)
             {
@@ -221,6 +227,32 @@ namespace ChatterMascot.Xr
             _wander.GoTo(now, point);
             _hideCircleAt = now + CircleVisibleSeconds;
             Debug.Log($"[Mascot] XR walk: walking to the pointed position ({point.x:F2}, {point.y:F2})");
+            return WalkToResult.Started;
+        }
+
+        /// <summary>
+        /// <see cref="TryWalkTo"/> が歩き出すかどうか（副作用なし）。<see cref="TryWalkTo"/> と
+        /// 判定を共有しているので、カーソルの表示と実際の挙動がずれない。歩き出すなら、
+        /// <paramref name="point"/> に行き先の床の点（ワールド）を返す。
+        /// </summary>
+        public bool WouldWalkTo(Ray ray, out Vector3 point)
+        {
+            point = default;
+            if (ClassifyWalkAim(ray, out var floorXz) != WalkToResult.Started) return false;
+            point = new Vector3(floorXz.x, _floorY, floorXz.y);
+            return !_character.Speaking && (_character.IsWalking || _character.CanStartWalking);
+        }
+
+        /// <summary>
+        /// 歩行の準備と範囲だけを見る。<c>Started</c> は「ここまでは通った」の意味で、
+        /// 発話中・他のモーション中かは呼び出し側が見る。
+        /// </summary>
+        private WalkToResult ClassifyWalkAim(Ray ray, out Vector2 point)
+        {
+            point = default;
+            if (!Active || _wander == null || _character == null) return WalkToResult.Rejected;
+            if (!TryFloorPoint(ray, out point)) return WalkToResult.Rejected;
+            if (Vector2.Distance(point, _center) > _radius * Wander.AreaScale(ColliderHeightMeters())) return WalkToResult.OutOfRange;
             return WalkToResult.Started;
         }
 

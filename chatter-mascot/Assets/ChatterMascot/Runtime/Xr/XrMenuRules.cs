@@ -135,7 +135,7 @@ namespace ChatterMascot.Xr
         /// 歯車の当たり判定の半径（m）。
         ///
         /// ★ 球を頭頂より下へ出さない。つまみは歯車を先に判定する
-        ///   （<c>XrGrab.TryGrab</c> → <c>XrSettingsBridge.TryHandlePinch</c>）ので、球が頭へ
+        ///   （<c>XrGrab.Pick</c> → <c>XrSettingsBridge.Pick</c>）ので、球が頭へ
         ///   かかっていると、歯車が出ている間に頭をつまむとパネルが開いてしまう。
         /// ★ 限界: 見下ろしてつまむと、頭の上面を狙ったレイは頭に届く前に球を通るので歯車に
         ///   取られる（見下ろす角度が深いほど範囲が広い）。キャラと歯車の近い方を優先しても、

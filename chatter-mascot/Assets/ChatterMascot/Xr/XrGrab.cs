@@ -54,27 +54,34 @@ namespace ChatterMascot.Xr
         private XrWalk _walk;
         private XrSettingsBridge _settings;
         private XrScreenBoard _board;
+        private XrCursorView _cursor;
 
         private bool _scenePermissionGranted;
 
         private ARPlaneManager _planeManager;
 
         /// <summary>
-        /// 並びの後ろほど優先する（マウス＞右手＞左手。簡単で説明できる決め打ち）。<see cref="TryGetAimRay"/>
+        /// 並びの後ろほど優先する（右手＞左手＞マウス）。<see cref="TryGetAimRay"/>
         /// が読む代表レイと、<see cref="Update"/> が手を回す順（＝設定パネルのホバーの先勝ち）は
         /// どちらもこの並びを後ろから読むことで揃える。
+        ///
+        /// ★ <b>マウスを手より先にしない。</b> 端末のタッチパッドがマウスとして、触っていなくても
+        ///   追跡中と報告されることがある。先にすると、手で指している間も代表レイがマウスのままになる。
         /// </summary>
         private readonly Hand[] _hands =
         {
-            new Hand("LeftHand", "<HandInteraction>{LeftHand}", "pointerPosition", "pointerRotation", "pinchValue", "isTracked"),
-            new Hand("RightHand", "<HandInteraction>{RightHand}", "pointerPosition", "pointerRotation", "pinchValue", "isTracked"),
             // ★ Android Mouse Interaction Profile（OpenXR）。click を pinchValue と同じ 0/1 として読み、
             //   ヒステリシス（XrGrabRules.IsPinching）をそのまま流用する
             new Hand("Mouse", "<AndroidMouseInteraction>", "aim/position", "aim/rotation", "click", "aim/isTracked"),
+            new Hand("LeftHand", "<HandInteraction>{LeftHand}", "pointerPosition", "pointerRotation", "pinchValue", "isTracked"),
+            new Hand("RightHand", "<HandInteraction>{RightHand}", "pointerPosition", "pointerRotation", "pinchValue", "isTracked"),
         };
 
         /// <summary>掴んでいる手。掴んでいなければ null。</summary>
         private Hand _grabbedHand;
+
+        /// <summary>マウスを最近触ったか（→ <see cref="XrMouseActivity"/>）。</summary>
+        private readonly XrMouseActivity _mouseActivity = new XrMouseActivity();
 
         private enum Grabbed
         {
@@ -133,6 +140,7 @@ namespace ChatterMascot.Xr
             _walk = walk;
             _settings = settings;
             _board = board;
+            _cursor = new GameObject("Aim Cursor").AddComponent<XrCursorView>();
             // ★ ここまで ModelAnchor を動かすものは無い（起動時の配置は XR Origin 側を動かすだけ）
             //   ので、いまの位置・向きがそのまま「起動時の位置」になる
             _initialAnchorPosition = stage.ModelAnchor.position;
@@ -168,6 +176,7 @@ namespace ChatterMascot.Xr
         private void OnDestroy()
         {
             foreach (var hand in _hands) hand.Dispose();
+            if (_cursor != null) Destroy(_cursor.gameObject);
         }
 
         /// <summary>
@@ -182,17 +191,44 @@ namespace ChatterMascot.Xr
             ray = default;
             if (_origin == null) return false;
 
-            var offset = _origin.CameraFloorOffsetObject.transform;
+            var hand = AimHand();
+            if (hand == null) return false;
+
+            ray = ReadAimRay(hand, _origin.CameraFloorOffsetObject.transform);
+            return true;
+        }
+
+        /// <summary>
+        /// 代表の手（追跡されている中で最も優先の高い手）。どれも追跡されていなければ null。
+        /// マウスは、しばらく動かしも押しもしていなければ追跡されていないものとして扱う
+        /// （→ <see cref="XrMouseActivity"/>）。
+        /// </summary>
+        private Hand AimHand()
+        {
             for (var i = _hands.Length - 1; i >= 0; i--)
             {
                 var hand = _hands[i];
-                if (!hand.IsTracked.IsPressed()) continue;
-
-                ray = ReadAimRay(hand, offset);
-                return true;
+                if (!hand.IsTracked.IsPressed() ||
+                    (hand == Mouse && _mouseActivity.IsIdle(Time.unscaledTimeAsDouble))) continue;
+                return hand;
             }
 
-            return false;
+            return null;
+        }
+
+        /// <summary>マウス（<see cref="_hands"/> の先頭）。</summary>
+        private Hand Mouse => _hands[0];
+
+        /// <summary>
+        /// マウスを動かした・押したかを <see cref="_mouseActivity"/> へ渡す。
+        /// </summary>
+        private void TrackMouseActivity(Transform offset)
+        {
+            var mouse = Mouse;
+            var tracked = mouse.IsTracked.IsPressed();
+            var world = tracked ? ReadAimRay(mouse, offset).direction : Vector3.zero;
+            var head = Quaternion.Inverse(_origin.Camera.transform.rotation) * world;
+            _mouseActivity.Update(tracked, world, head, mouse.Pinching, Time.unscaledTimeAsDouble);
         }
 
         private void Start()
@@ -231,12 +267,52 @@ namespace ChatterMascot.Xr
         {
             EnsurePlaneManager();
 
-            if (_origin == null || _stage == null || _stage.Model == null) return;
+            if (_origin == null || _stage == null || _stage.Model == null)
+            {
+                if (_cursor != null) _cursor.Hide();
+                return;
+            }
 
             // ★ 優先順は _hands の doc 参照。先勝ちのホバー（XrSettingsBridge.UpdateHover）が
             //   同じ順になるよう、優先の高い手から回す
             var offset = _origin.CameraFloorOffsetObject.transform;
             for (var i = _hands.Length - 1; i >= 0; i--) UpdateHand(_hands[i], offset);
+
+            TrackMouseActivity(offset);
+            UpdateCursor(offset);
+        }
+
+        /// <summary>
+        /// 代表の手のレイが指す先にカーソルを出す。位置と「つかめるか」は、つまみが作用する対象を決める
+        /// <see cref="Pick"/> と同じ結果から取る——表示と実際の挙動がずれないように。
+        /// </summary>
+        private void UpdateCursor(Transform offset)
+        {
+            if (_cursor == null) return;
+
+            // ★ 掴んでいる間は、掴んでいる入力に追従する。代表が入れ替わってもカーソルが別の手へ飛ばない
+            var hand = _grabbedHand ?? AimHand();
+            if (hand == null || !hand.IsTracked.IsPressed())
+            {
+                _cursor.Hide();
+                return;
+            }
+
+            var ray = ReadAimRay(hand, offset);
+            var aim = Pick(ray);
+            var camera = _origin.Camera.transform.position;
+            if (aim.Target == AimTarget.None)
+            {
+                // ★ 何にも当たっていなくても、指している向きは見せる。奥行きはキャラに揃える
+                //   （→ XrCursorGazeSource.PointNearModel）
+                _cursor.Show(XrCursorGazeSource.PointNearModel(ray, _stage), camera, XrCursorView.Look.Miss, hand.Pinching);
+                return;
+            }
+
+            var grabbable = aim.Target == AimTarget.Board ||
+                            aim.Target == AimTarget.WalkHandle ||
+                            (aim.Target == AimTarget.Model && !aim.WalksInstead);
+            _cursor.Show(aim.Point, camera, grabbable ? XrCursorView.Look.Grab : XrCursorView.Look.Point, hand.Pinching);
         }
 
         private void EnsurePlaneManager()
@@ -270,8 +346,16 @@ namespace ChatterMascot.Xr
             // ★ つまんでいなくても毎フレーム渡す。設定パネルが開いていればホバーの表示に、
             //   閉じていれば歯車を出し続けるかの判定に使う（追跡されている手だけ）
             var aim = ReadAimRay(hand, offset);
-            if (_settings != null) _settings.UpdateHover(aim);
-            if (_board != null) _board.Hover(aim);
+            // ★ マウスは、代表の入力のときだけホバーとクリックを効かせる。代表でない（手が追跡されている、
+            //   または触っていない）マウスのレイは、カーソルも出ない —— 見えない入力で押させない。
+            //   触っていないマウスへの最初のタップは、カーソルを戻すだけで何も押さない（次のタップから効く）。
+            //   すでに掴んでいるマウスのドラッグと離しは、代表でなくなっても続ける。
+            var inactiveMouse = hand == Mouse && AimHand() != hand;
+            if (!inactiveMouse)
+            {
+                if (_settings != null) _settings.UpdateHover(aim);
+                if (_board != null) _board.Hover(aim);
+            }
 
             var wasPinching = hand.Pinching;
             hand.Pinching = XrGrabRules.IsPinching(wasPinching, hand.PinchValue.ReadValue<float>());
@@ -280,7 +364,7 @@ namespace ChatterMascot.Xr
             {
                 // ★ つまみに「入った瞬間」だけを契機にする。つまんだままレイを動かして
                 //   キャラに当てても掴まない（意図しない掴みを防ぐ）。
-                if (!wasPinching && hand.Pinching) TryGrab(hand, aim);
+                if (!wasPinching && hand.Pinching && !inactiveMouse) TryGrab(hand, aim);
                 return;
             }
 
@@ -290,66 +374,164 @@ namespace ChatterMascot.Xr
             else Release();
         }
 
-        private void TryGrab(Hand hand, Ray ray)
+        /// <summary>
+        /// <see cref="Pick"/> が返す対象。<see cref="WalkTo"/> は歩行範囲の中の床（つまむと歩き出す）、
+        /// <see cref="Plane"/> は歩き出さない検知済みの平面、<see cref="None"/> は何も無い。
+        /// </summary>
+        private enum AimTarget
         {
-            // ★ 板は深度を書くので、奥の歯車とハンドルは隠れて見えない。見えないものにつまみを吸わせない
+            None,
+            Settings,
+            WalkHandle,
+            Board,
+            Model,
+            WalkTo,
+            Plane,
+        }
+
+        /// <summary><see cref="Pick"/> の結果。つまみが作用する対象と、カーソルを描く点。</summary>
+        private struct AimHit
+        {
+            public AimTarget Target;
+
+            /// <summary>レイが指している点（ワールド）。</summary>
+            public Vector3 Point;
+
+            public XrSettingsBridge.Target SettingsTarget;
+            public BoardPart BoardPart;
+            public RaycastHit ModelHit;
+
+            /// <summary>モデルの足元を指していて、掴まずに行き先の指示として扱う。</summary>
+            public bool WalksInstead;
+        }
+
+        /// <summary>
+        /// aim レイが何を指しているか（副作用なし）。<see cref="TryGrab"/> が作用する対象とカーソルの
+        /// 位置は、どちらもこの結果から決める。
+        ///
+        /// ★ 板は深度を書くので、奥の歯車とハンドルは隠れて見えない。見えないものにつまみを吸わせない。
+        /// ★ 設定パネル・歯車を先に見る。当たっていればそちらを押して、キャラ・歩行範囲の掴みには進まない。
+        /// ★ 板とキャラクターは手前の方を掴む。板をつまんで歩き出さないよう、板に当たったら
+        ///   「行き先の指示」には進まない。
+        /// ★ どれにも当たらなくても、歩行範囲の中の床を指していれば <see cref="AimTarget.WalkTo"/>
+        ///   （行き先の指示）。それも無ければ、検知した平面か、何も無い。
+        /// </summary>
+        private AimHit Pick(Ray ray)
+        {
+            var aim = new AimHit();
+
             var boardPart = BoardPart.None;
             var boardDistance = 0f;
             if (_board != null) boardPart = _board.Pick(ray, out boardDistance);
             var visibleReach = boardPart != BoardPart.None ? boardDistance : float.PositiveInfinity;
 
-            // ★ 設定パネル・歯車を先に見る。当たっていればそちらを押して、
-            //   キャラ・歩行範囲の掴みには進まない
-            if (_settings != null && _settings.TryHandlePinch(ray, visibleReach)) return;
-
-            if (_walk != null && _walk.TryGrabHandle(ray, visibleReach))
+            if (_settings != null)
             {
-                _grabbedHand = hand;
-                _grabbed = Grabbed.WalkHandle;
-                Debug.Log($"[Mascot] XR grab: grabbed the walk area handle hand={hand.Name}");
-                return;
+                var settingsTarget = _settings.Pick(ray, visibleReach, out var settingsPoint);
+                if (settingsTarget != XrSettingsBridge.Target.None)
+                {
+                    aim.Target = AimTarget.Settings;
+                    aim.SettingsTarget = settingsTarget;
+                    aim.Point = settingsPoint;
+                    return aim;
+                }
+            }
+
+            if (_walk != null && _walk.HitsHandle(ray, visibleReach, out var handlePoint))
+            {
+                aim.Target = AimTarget.WalkHandle;
+                aim.Point = handlePoint;
+                return aim;
             }
 
             var collider = SyncedModelCollider();
             RaycastHit hit = default;
             var modelHit = collider != null && collider.Raycast(ray, out hit, float.PositiveInfinity);
 
-            // ★ 板とキャラクターは手前の方を掴む。板をつまんで歩き出さないよう、板に当たったら
-            //   「行き先の指示」には進まない
             if (boardPart != BoardPart.None && (!modelHit || boardDistance < hit.distance))
             {
-                _grabbedHand = hand;
-                _grabbed = Grabbed.Board;
-                _grabbedBoardPart = boardPart;
-                _dragging = false;
-                _grabbedAt = Time.unscaledTime;
-                Debug.Log($"[Mascot] XR grab: grabbed the screen board part={boardPart} hand={hand.Name}");
-                return;
+                aim.Target = AimTarget.Board;
+                aim.BoardPart = boardPart;
+                aim.Point = ray.GetPoint(boardDistance);
+                return aim;
             }
 
-            // ★ ハンドルにも板にもキャラクターにも当たらないつまみは、歩行範囲の中を指した「行き先の指示」
-            if (!modelHit)
+            if (modelHit)
             {
-                // ★ 円を出すのは検知した平面を指したときだけ。床の無限平面はわずかに下向きの
-                //   レイもほとんど「範囲外」にするので、判定にだけ使い円は出さない。
-                if (_walk != null && _walk.TryWalkTo(ray) == WalkToResult.OutOfRange &&
-                    TryRaycastHorizontalPlane(ray, XrGrabRules.MaxHeldDistance, out _))
-                {
-                    _walk.ShowAreaBriefly();
-                }
+                aim.Target = AimTarget.Model;
+                aim.ModelHit = hit;
+                aim.Point = hit.point;
 
-                return;
+                // ★ 足元に当たったつまみは、歩ける範囲の中なら行き先の指示を優先する。当たり判定は
+                //   足先まで包むので、そのままだと足元の近くを指しても体を掴んで置き直しになる
+                aim.WalksInstead =
+                    hit.point.y < _stage.ModelAnchor.position.y + collider.bounds.size.y * FeetHeightFraction &&
+                    _walk != null && _walk.WouldWalkTo(ray, out _);
+                return aim;
             }
 
-            // ★ 足元に当たったつまみは、歩ける範囲の中なら行き先の指示を優先する。当たり判定は
-            //   足先まで包むので、そのままだと足元の近くを指しても体を掴んで置き直しになる
-            var bounds = collider.bounds;
-            if (hit.point.y < _stage.ModelAnchor.position.y + bounds.size.y * FeetHeightFraction &&
-                _walk != null && _walk.TryWalkTo(ray) == WalkToResult.Started)
+            // ★ 歩ける行き先は検知した平面より先に見る。TryGrab は歩行の判定に床の無限平面を使うので、
+            //   平面に当たらなくても歩き出す —— カーソルが「何も無い」を示したまま歩かせない
+            if (_walk != null && _walk.WouldWalkTo(ray, out var floorPoint))
             {
-                return;
+                aim.Target = AimTarget.WalkTo;
+                aim.Point = floorPoint;
+                return aim;
             }
 
+            if (TryRaycastHorizontalPlane(ray, XrGrabRules.MaxHeldDistance, out var planePoint))
+            {
+                aim.Target = AimTarget.Plane;
+                aim.Point = planePoint;
+            }
+
+            return aim;
+        }
+
+        private void TryGrab(Hand hand, Ray ray)
+        {
+            var aim = Pick(ray);
+
+            switch (aim.Target)
+            {
+                case AimTarget.Settings:
+                    _settings.Press(aim.SettingsTarget, ray);
+                    return;
+
+                case AimTarget.WalkHandle:
+                    _walk.GrabHandle();
+                    _grabbedHand = hand;
+                    _grabbed = Grabbed.WalkHandle;
+                    Debug.Log($"[Mascot] XR grab: grabbed the walk area handle hand={hand.Name}");
+                    return;
+
+                case AimTarget.Board:
+                    _grabbedHand = hand;
+                    _grabbed = Grabbed.Board;
+                    _grabbedBoardPart = aim.BoardPart;
+                    _dragging = false;
+                    _grabbedAt = Time.unscaledTime;
+                    Debug.Log($"[Mascot] XR grab: grabbed the screen board part={aim.BoardPart} hand={hand.Name}");
+                    return;
+
+                case AimTarget.Model:
+                    break;
+
+                default:
+                    // ★ ハンドルにも板にもキャラクターにも当たらないつまみは、歩行範囲の中を指した「行き先の指示」。
+                    //   円を出すのは検知した平面を指したときだけ。床の無限平面はわずかに下向きの
+                    //   レイもほとんど「範囲外」にするので、判定にだけ使い円は出さない。
+                    if (_walk != null && _walk.TryWalkTo(ray) == WalkToResult.OutOfRange && aim.Target == AimTarget.Plane)
+                    {
+                        _walk.ShowAreaBriefly();
+                    }
+
+                    return;
+            }
+
+            if (aim.WalksInstead && _walk.TryWalkTo(ray) == WalkToResult.Started) return;
+
+            var hit = aim.ModelHit;
             _grabbedHand = hand;
             _grabbed = Grabbed.Model;
             _heldDistance = hit.distance;

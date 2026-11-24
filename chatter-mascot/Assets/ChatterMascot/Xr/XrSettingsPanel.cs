@@ -215,7 +215,7 @@ namespace ChatterMascot.Xr
         {
             if (!IsOpen) return false;
 
-            if (!TryLocalPoint(ray, out var local))
+            if (!TryLocalPoint(ray, out var local, out _))
             {
                 ClearHover();
                 return false;
@@ -226,6 +226,16 @@ namespace ChatterMascot.Xr
         }
 
         /// <summary>
+        /// パネルが開いていて、レイがパネルの矩形の中に入っていれば、その平面上のワールド座標を返す。
+        /// カーソルを描く位置で、<see cref="TryPress"/> の当たり判定と同じ判定を通す。
+        /// </summary>
+        public bool TryHit(Ray ray, out Vector3 point)
+        {
+            point = default;
+            return IsOpen && TryLocalPoint(ray, out _, out point);
+        }
+
+        /// <summary>
         /// レイの下にある行を押す。<see cref="SettingChanged"/> か <see cref="Closed"/> が発火しうる。
         /// </summary>
         /// <returns>レイがパネルの矩形の中に入っていたか（当たっていれば、具体的な操作が無くても
@@ -233,7 +243,7 @@ namespace ChatterMascot.Xr
         public bool TryPress(Ray ray)
         {
             if (!IsOpen) return false;
-            if (!TryLocalPoint(ray, out var local)) return false;
+            if (!TryLocalPoint(ray, out var local, out _)) return false;
 
             UpdateHover(local);
 
@@ -308,15 +318,18 @@ namespace ChatterMascot.Xr
         // ★ レイとの交点はワールド座標の往復（TransformPoint / InverseTransformPoint）で求める。
         //   pivot・anchor の解釈を自分で追わなくても、実際の Transform 階層がそのまま答えになる。
 
-        /// <summary>レイとパネル平面の交点を、パネル自身のローカル座標で返す。矩形の外なら false。</summary>
-        private bool TryLocalPoint(Ray ray, out Vector2 local)
+        /// <summary>
+        /// レイとパネル平面の交点を、パネル自身のローカル座標とワールド座標で返す。矩形の外なら false。
+        /// </summary>
+        private bool TryLocalPoint(Ray ray, out Vector2 local, out Vector3 worldPoint)
         {
             local = default;
+            worldPoint = default;
 
             var plane = new Plane(transform.forward, transform.position);
             if (!plane.Raycast(ray, out var enter)) return false;
 
-            var worldPoint = ray.GetPoint(enter);
+            worldPoint = ray.GetPoint(enter);
             var localPoint = transform.InverseTransformPoint(worldPoint);
             local = new Vector2(localPoint.x, localPoint.y);
 
@@ -412,7 +425,8 @@ namespace ChatterMascot.Xr
 
         private static float PinBoxLeft(int column) => SidePaddingPixels + column * (PinBoxWidthPixels + PinBoxGapPixels);
 
-        private void ClearHover()
+        /// <summary>ホバーの表示を消す。どの入力もパネルに当てていないフレームに呼ぶ。</summary>
+        public void ClearHover()
         {
             if (_hoveredRow != null)
             {

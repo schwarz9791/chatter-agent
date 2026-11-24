@@ -23,8 +23,8 @@ namespace ChatterMascot.Xr
         private const float LogIntervalSeconds = 1f;
         private const string FillName = "PlaneFill";
 
-        private static readonly Color WireColor = new Color(0.15f, 0.45f, 0.65f, 0.6f);
-        private static readonly Color FillColor = new Color(0.08f, 0.2f, 0.55f, 0.15f);
+        private static readonly Color WireColor = new Color(0.15f, 0.45f, 0.65f, 0.4f);
+        private static readonly Color FillColor = new Color(0.08f, 0.2f, 0.55f, 0.08f);
 
         private ARPlaneManager _manager;
         private Material _wireMaterial;

@@ -698,7 +698,7 @@ namespace ChatterMascot.Xr
             {
                 groundY = foundGroundY;
                 anchor.position = new Vector3(anchor.position.x, foundGroundY, anchor.position.z);
-                landed = foundGroundY.ToString("F2");
+                landed = foundGroundY.ToString("F3");
             }
 
             var faced = XrGrabRules.TryYawToFace(anchor.position, _origin.Camera.transform.position, out var yaw);
@@ -724,15 +724,17 @@ namespace ChatterMascot.Xr
 
         /// <summary>
         /// <paramref name="feetWorld"/> の xz・<paramref name="searchFromYWorld"/> の高さから
-        /// 真下へ探し、最も近い水平面の高さ（ワールド）を返す。無ければ false。
+        /// 真下へ探し、足元の高さに最も近い水平面の高さ（ワールド）を返す。無ければ false。
         ///
         /// ★ <b>足元の高さから探さない。</b> 足元は下ろすと天板に潜り、掴んだ点も足元の近くだと
         ///   天板より下になる。当たり判定の上端から探せば、どこをつまんでいても体の下にある面が取れる。
+        /// ★ <b>上端から最初に当たる面を選ばない。</b> 天板の上に浮いた誤検知の面が体の途中を
+        ///   横切っていると、指した天板ではなくそちらに乗る。
         /// </summary>
         private bool TryFindGroundHeight(Vector3 feetWorld, float searchFromYWorld, out float groundY)
         {
             var worldOrigin = new Vector3(feetWorld.x, searchFromYWorld, feetWorld.z);
-            var found = TryRaycastHorizontalPlane(new Ray(worldOrigin, Vector3.down), float.PositiveInfinity, out var point);
+            var found = TryRaycastHorizontalPlane(new Ray(worldOrigin, Vector3.down), float.PositiveInfinity, out var point, feetWorld.y);
             groundY = point.y;
             return found;
         }
@@ -740,6 +742,7 @@ namespace ChatterMascot.Xr
         /// <summary>
         /// ワールドのレイが最初に当たる上向きの水平面上の点（ワールド）。<paramref name="maxDistance"/>
         /// （ワールド距離）より遠い当たりは無視する。平面検知が動いていない・当たらなければ false。
+        /// <paramref name="nearestToY"/> を渡すと、最初の当たりではなく、その高さに最も近い当たりを返す。
         ///
         /// ★ <c>InverseTransformRay</c> は使わない。core-utils と ARFoundation の拡張が
         ///   衝突する（CS0121）ので、<c>InverseTransformPoint</c> / <c>InverseTransformDirection</c>
@@ -748,8 +751,10 @@ namespace ChatterMascot.Xr
         ///   面が前提なので、上向き・水平のレイは無効として弾く。
         /// ★ <c>hit.distance</c> はトラッカブル空間のローカル距離。<paramref name="maxDistance"/> は
         ///   ワールド距離なので、当たった点をワールドへ戻してから比べる。
+        /// ★ 多角形（<c>boundary</c>）ではなく矩形（<c>extents</c>）で当てる。多角形は端末によって
+        ///   形が崩れたり、頂点が空のまま返ったりして、見えている面に着地できない。
         /// </summary>
-        private bool TryRaycastHorizontalPlane(Ray worldRay, float maxDistance, out Vector3 point)
+        private bool TryRaycastHorizontalPlane(Ray worldRay, float maxDistance, out Vector3 point, float? nearestToY = null)
         {
             point = default;
             if (_planeManager == null) return false;
@@ -760,9 +765,9 @@ namespace ChatterMascot.Xr
                 trackablesParent.InverseTransformPoint(worldRay.origin),
                 trackablesParent.InverseTransformDirection(worldRay.direction));
 
-            using var hits = _planeManager.Raycast(localRay, TrackableType.PlaneWithinPolygon, Allocator.Temp);
+            using var hits = _planeManager.Raycast(localRay, TrackableType.PlaneWithinBounds, Allocator.Temp);
             var found = false;
-            var closestDistance = float.MaxValue;
+            var bestScore = float.MaxValue;
             foreach (var hit in hits)
             {
                 var plane = _planeManager.GetPlane(hit.trackableId);
@@ -770,9 +775,10 @@ namespace ChatterMascot.Xr
 
                 var worldPoint = trackablesParent.TransformPoint(hit.pose.position);
                 var worldDistance = Vector3.Distance(worldRay.origin, worldPoint);
-                if (worldDistance > maxDistance || worldDistance >= closestDistance) continue;
+                var score = nearestToY.HasValue ? Mathf.Abs(worldPoint.y - nearestToY.Value) : worldDistance;
+                if (worldDistance > maxDistance || score >= bestScore) continue;
 
-                closestDistance = worldDistance;
+                bestScore = score;
                 point = worldPoint;
                 found = true;
             }
@@ -781,7 +787,7 @@ namespace ChatterMascot.Xr
         }
 
         /// <summary>
-        /// 着地できる面か。<see cref="XrPlaneWires"/> も同じ条件で描く面を絞り、描いた線と着地の判定をそろえる。
+        /// 着地できる面か。<see cref="XrPlaneWires"/> も同じ条件で描く面を絞り、描いた矩形と着地の判定をそろえる。
         /// </summary>
         internal static bool CanLandOn(ARPlane plane) => plane.alignment == PlaneAlignment.HorizontalUp;
 

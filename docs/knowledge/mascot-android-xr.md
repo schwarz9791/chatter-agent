@@ -650,13 +650,20 @@ aim は当てにならない（起動直後は使った覚えのない姿勢で�
 面と交わらないので、面を指すまでは掴んだ距離のまま動く。
 
 離すと、足元の xz・**当たり判定の上端**から真下へ `ARPlaneManager.Raycast` し、`HorizontalUp` の
-最も近い面に足元を乗せる（無ければ離した位置のまま）。続けて `ModelAnchor` のヨーを頭の方へ向ける
+面のうち**足元の高さに最も近い面**に足元を乗せる（無ければ離した位置のまま）。続けて `ModelAnchor` のヨーを頭の方へ向ける
 （`XrGrabRules.TryYawToFace`）。動かすのは常に `ModelAnchor`（起動時の配置と同じく、XR Origin には
 触らない —— Origin を動かすと部屋ごと動いて見える）。離した後は揺れもの（spring bone）を静止形に
 戻す（落下と向け直しは瞬間移動なので、慣性で髪などが振り回されないように。`VrmStage.ResetSpringBones`）。
 
 ★ **足元ではなく、当たり判定の上端から探す。** 足元は下ろすと天板に潜り、掴んだ点も足元の近くだと
 天板より下になる。上端からならどこをつまんでも体の下の面が取れる。
+
+★ **上端から最初に当たる面を選ばない。** XREAL Aura は昇降デスクの途中の高さの面を消さずに残す
+（→「XREAL Aura 実機の平面」）。体の途中を横切るその面に、指した天板ではなく乗ってしまう。
+
+★ **面には多角形（`boundary`）ではなく矩形（`extents`）で当てる**（`TrackableType.PlaneWithinBounds`）。
+XREAL Aura はほとんどの面を頂点 0 で返し、エミュレータの image では多角形が潰れる。どちらも
+`PlaneWithinPolygon` では見えている面に着地できない。
 
 ★ **XR Hands（`XRHandSubsystem`）はつまみ判定には使わない。** エミュレータの手
 （Hand tracking モード）は体の前に固定でマウスへ aim を向けるだけなので「キャラの近くでつまむ」判定が
@@ -934,8 +941,8 @@ hips の平行移動は 1cm 未満で、**root motion は焼かれていない**
 ★ **パネルのハイライトは、そのフレームにどの入力も当てていなければ消す**（`XrSettingsBridge.LateUpdate`）。
 追跡が外れた手や代表から外れたマウスは `UpdateHover` を呼ばなくなり、最後の行が光ったまま残る。
 
-★ **何にも当たっていないときも、キャラまでの距離にリングを出す。** XREAL Aura の夜の室内では平面が
-ほとんど検知されず（#255）、キャラと呼び出し口以外を指すと何も出なかった。奥行きは「目で追う」と同じ
+★ **何にも当たっていないときも、キャラまでの距離にリングを出す。** XREAL Aura の夜の室内では床が
+検知されず（#255）、キャラと呼び出し口以外を指すと何も出なかった。奥行きは「目で追う」と同じ
 関数（`XrCursorGazeSource.PointNearModel`）で決め、キャラを見ている目のピントのまま追えるようにする。
 距離は足元ではなく**当たり判定の手前の面まで**にする。当たり判定のカプセルは奥行きに合わせてあり、
 下ろした腕はその外に出る。足元までの距離だと腕より奥に置かれ、深度で腕に隠れる。
@@ -1090,14 +1097,10 @@ Android XR は Vulkan 必須なので、この機能を切って回避するこ�
 - 平面はエミュレータでも来る（`HorizontalUp` が4枚）。いちばん低い面（床）は目の高さからかなり下にあり、
   そこへ落とすとグラスの視野の外に出る（下を向けば見える）
 - ★ Google Play XR Preview API v4 rev.4 の image では、平面の多角形（`ARPlane.boundary`）の X が `extents` の約 11 分の 1 に
-  潰れていて、頂点も輪郭順に並んでいない。多角形の中と数えられるのは外接矩形の 4〜7% で、机や床の真ん中の細い帯にしか
-  着地できない。外れると `plane=none` になり歩行範囲が出ないので、確認するときは真ん中に置く（→ [#240](https://github.com/schwarz9791/chatter-agent/issues/240)）
-- ★ 平面の輪郭を描くのに `ARPlaneMeshVisualizer` は使わない（`XrPlaneWires` が `ARPlane.boundary` を `LineRenderer` へ直接書く）。
-  表示の条件に `ARSession.state` があるが、このプロジェクトは `ARSession` を置いていないので線が常に消える。
-  また多角形の分割に失敗すると線も更新しない
-- `xr.showPlanes` で線を出すと、上の潰れた多角形がそのまま見える。机は輪郭にならず、細長く折れ返した線になる。
-  線の中で離すと着地し、線から離れた所では `plane=none` のままで、線と着地の判定は一致した
-  （2026-11-05 / `XR_Glasses` / エミュレータ 37.2.13 / Google Play XR Preview API v4 rev.4）
+  潰れていて、頂点も輪郭順に並んでいない（→ [#240](https://github.com/schwarz9791/chatter-agent/issues/240)）。
+  着地と表示は `extents` の矩形で判定するので、この潰れの影響は受けない
+- ★ 平面を描くのに `ARPlaneMeshVisualizer` は使わない（`XrPlaneWires` が `extents` の矩形を `LineRenderer` と塗りのメッシュで描く）。
+  表示の条件に `ARSession.state` があるが、このプロジェクトは `ARSession` を置いていないので線が常に消える
 - ★ `pm revoke` で権限なしの状態を作るときは、`HAND_TRACKING` と `SCENE_UNDERSTANDING_COARSE` の両方を取り消す。
   同じグループなので、片方が許可されたままだと、ダイアログを出さずに許可し直される
 - Hand tracking モードでは、aim がマウスを追い、クリック／ドラッグで `pinchValue` が 0 → 1。右手のみ
@@ -1120,7 +1123,34 @@ Android XR は Vulkan 必須なので、この機能を切って回避するこ�
 - v3 rev.2 は多角形の大きさが合っている代わりに、`extents` が半分になる
 - 机の 8 頂点が輪郭順でないのは、どちらの image でも同じ。床の 17 頂点は輪郭順
 - v3 rev.2 は AVD の `hw.device.name` を `xr_glasses_device` にしても、ヘッドセット（AlphaBlend）として動く
-- 実機で同じことが起きるかは、まだ確かめていない（[#100](https://github.com/schwarz9791/chatter-agent/issues/100)）
+- 実機（XREAL Aura）では、潰れる以前にほとんどの面の頂点が空で返る（→ 次節）
+
+### XREAL Aura 実機の平面（[#255](https://github.com/schwarz9791/chatter-agent/issues/255)）
+
+2026-11-24 / XREAL Aura / ChatterMascot の debug ビルド / `com.unity.xr.androidxr-openxr` 1.5.1 /
+夜の室内、暗めの天板の昇降デスク（座りの高さ 72cm）。`xr.showPlanes` を ON にすると、平面の値が毎秒
+`XR planes:` の行でログに出る。
+
+- ★★ **同じ面を別の id で何枚も返す。** 実在の面 4 枚に対して `trackables` は 60 枚あった。重複は
+  位置・大きさが同じまま一緒に更新され、大半は `trackingState` が `Limited`（`Tracking` も面ごとに数枚ある）。
+  表示では中心が同じ面を 1 枚だけ描く（`XrPlaneWires`）。重ねて塗ると不透明になり、モデルを隠した
+- ★★ **多角形（`boundary`）がほぼ空。** 頂点があるのは 60 枚のうち 1 枚（`class=Table`）だけで、机の面は
+  重複も含めて全部 0 頂点だった。`PlaneWithinPolygon` では机に一度も着地できない
+- ★★ **昇降デスクを動かすと、途中の高さの面が消えずに残る。** 机の 26.5cm 上と 38cm 上に、机とほぼ同じ
+  大きさ・位置の面が残っていた（同じ日の朝に机を上げ下げし、キャラが天板について上がるのを見ている）。
+  分類は机と同じ `None` で、`Tracking` のものも混ざるので、アプリ側では机と見分けられない
+- **実行中に新しい面が増えなかった。** 起動し直しても同じ 60 個の id が返り、部屋をゆっくり見回しても
+  増えない。床は検知されなかった
+- 机に着地したキャラは、天板から 2cm ほど浮いて見える（目視）。平面の高さそのものが高めに出ている。
+  目線より下の面を高めに出す端末のクセかもしれない（机 1 つでの観察で、裏付けは無い）
+- ★ **深度への Raycast は当たらない。** 「Android XR: Raycasts」を有効にして `SCENE_UNDERSTANDING_FINE` を許可し、
+  `ARRaycastManager.Raycast(…, TrackableType.Depth)` を真下と視線（目 → 足元）の両方で計 14 回試して、
+  当たりは 0 だった（サブシステムは作られる）。FINE の確認を出す見返りが無いので使わない
+- ★ **`W operator(): Failed to get scene plane.` はフォーカス中に出る。** マスコットのプロセスから毎秒
+  約 7,400 行。重複した面の取得に失敗しているぶんと見ている（推測）。起動直後の数秒は `com.android.systemui` からも出る
+- **Home Space へ移ると、アプリは止まる**（`APP_CMD_LOST_FOCUS` の約 3 秒後に `PAUSE` → `STOP`）。止まっている間の
+  警告は 0 行で、戻った後も面は 60 枚のまま着地できた。エミュレータで見えた「フォーカスが無い間の警告の洪水」と
+  「戻った後に面が返らない」（[#158](https://github.com/schwarz9791/chatter-agent/issues/158)）は、実機では起きない
 
 ### ビルド設定（`AndroidPlayerSettings.FixAll`）
 

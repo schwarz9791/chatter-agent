@@ -130,6 +130,13 @@ namespace ChatterMascot.Xr
             WatchKeyboard();
         }
 
+        // ★ このフレームに誰もパネルへ当てなかったら、ハイライトを消す。UpdateHover を呼ばなくなった入力
+        //   （追跡を失った手、代表でなくなったマウス）が、最後に点けた行を残したままにしないため。
+        private void LateUpdate()
+        {
+            if (_panel.IsOpen && _hoverHitFrame != Time.frameCount) _panel.ClearHover();
+        }
+
         private TouchScreenKeyboard _keyboard;
 
         private void OpenKeyboard()

@@ -49,12 +49,6 @@ namespace ChatterMascot.Xr
         /// </summary>
         private const float TapMaxSeconds = 0.3f;
 
-        /// <summary>マウスを動かさず押さずにこれだけ経ったら、代表レイに使わない（秒）。既定値。</summary>
-        private const float MouseIdleSeconds = 3f;
-
-        /// <summary>マウスを動かしたとみなす向きの変化（度）。既定値。</summary>
-        private const float MouseMoveDegrees = 1f;
-
         private XROrigin _origin;
         private VrmStage _stage;
         private XrWalk _walk;
@@ -86,12 +80,8 @@ namespace ChatterMascot.Xr
         /// <summary>掴んでいる手。掴んでいなければ null。</summary>
         private Hand _grabbedHand;
 
-        /// <summary>マウスを最後に動かした・押した時刻（<c>Time.unscaledTime</c>）。</summary>
-        private float _mouseActiveAt = float.NegativeInfinity;
-
-        /// <summary>最後に動かしたとみなしたときのマウスの向き。ワールドから見たものと頭から見たもの。</summary>
-        private Vector3 _mouseWorldDirection;
-        private Vector3 _mouseHeadDirection;
+        /// <summary>マウスを最近触ったか（→ <see cref="XrMouseActivity"/>）。</summary>
+        private readonly XrMouseActivity _mouseActivity = new XrMouseActivity();
 
         private enum Grabbed
         {
@@ -211,14 +201,15 @@ namespace ChatterMascot.Xr
         /// <summary>
         /// 代表の手（追跡されている中で最も優先の高い手）。どれも追跡されていなければ null。
         /// マウスは、しばらく動かしも押しもしていなければ追跡されていないものとして扱う
-        /// （→ <see cref="TrackMouseActivity"/>）。
+        /// （→ <see cref="XrMouseActivity"/>）。
         /// </summary>
         private Hand AimHand()
         {
             for (var i = _hands.Length - 1; i >= 0; i--)
             {
                 var hand = _hands[i];
-                if (!hand.IsTracked.IsPressed() || IsIdleMouse(hand)) continue;
+                if (!hand.IsTracked.IsPressed() ||
+                    (hand == Mouse && _mouseActivity.IsIdle(Time.unscaledTimeAsDouble))) continue;
                 return hand;
             }
 
@@ -228,32 +219,16 @@ namespace ChatterMascot.Xr
         /// <summary>マウス（<see cref="_hands"/> の先頭）。</summary>
         private Hand Mouse => _hands[0];
 
-        /// <summary>しばらく動かしも押しもしていないマウスか（→ <see cref="TrackMouseActivity"/>）。</summary>
-        private bool IsIdleMouse(Hand hand) => hand == Mouse && Time.unscaledTime - _mouseActiveAt > MouseIdleSeconds;
-
         /// <summary>
-        /// マウスを動かした・押したかを見て、<see cref="_mouseActiveAt"/> を進める。
-        ///
-        /// ★ 端末のタッチパッドは、触っていなくても追跡中と報告され、向きも勝手に変わることがある
-        ///   （頭に付いてくる、空間に留まる）。<b>向きの変化は、ワールドから見ても頭から見ても
-        ///   変わったときだけ動かしたとみなす</b>——頭を振っただけでは、どちらか一方しか変わらない。
+        /// マウスを動かした・押したかを <see cref="_mouseActivity"/> へ渡す。
         /// </summary>
         private void TrackMouseActivity(Transform offset)
         {
             var mouse = Mouse;
-            if (!mouse.IsTracked.IsPressed()) return;
-
-            var world = ReadAimRay(mouse, offset).direction;
+            var tracked = mouse.IsTracked.IsPressed();
+            var world = tracked ? ReadAimRay(mouse, offset).direction : Vector3.zero;
             var head = Quaternion.Inverse(_origin.Camera.transform.rotation) * world;
-            var first = _mouseWorldDirection == Vector3.zero;
-            var moved = !first &&
-                        Vector3.Angle(world, _mouseWorldDirection) > MouseMoveDegrees &&
-                        Vector3.Angle(head, _mouseHeadDirection) > MouseMoveDegrees;
-            if (!first && !moved && !mouse.Pinching) return;
-
-            if (!first) _mouseActiveAt = Time.unscaledTime;
-            _mouseWorldDirection = world;
-            _mouseHeadDirection = head;
+            _mouseActivity.Update(tracked, world, head, mouse.Pinching, Time.unscaledTimeAsDouble);
         }
 
         private void Start()
@@ -315,8 +290,9 @@ namespace ChatterMascot.Xr
         {
             if (_cursor == null) return;
 
-            var hand = AimHand();
-            if (hand == null)
+            // ★ 掴んでいる間は、掴んでいる入力に追従する。代表が入れ替わってもカーソルが別の手へ飛ばない
+            var hand = _grabbedHand ?? AimHand();
+            if (hand == null || !hand.IsTracked.IsPressed())
             {
                 _cursor.Hide();
                 return;
@@ -327,10 +303,9 @@ namespace ChatterMascot.Xr
             var camera = _origin.Camera.transform.position;
             if (aim.Target == AimTarget.None)
             {
-                // ★ 何にも当たっていなくても、指している向きは見せる。奥行きはキャラまでの距離に
-                //   揃え、キャラを見ている目のピントのまま追えるようにする（XrCursorGazeSource と同じ考え方）
-                var distance = Vector3.Distance(ray.origin, _stage.ModelAnchor.position);
-                _cursor.Show(ray.GetPoint(distance), camera, XrCursorView.Look.Miss, hand.Pinching);
+                // ★ 何にも当たっていなくても、指している向きは見せる。奥行きはキャラに揃える
+                //   （→ XrCursorGazeSource.PointNearModel）
+                _cursor.Show(XrCursorGazeSource.PointNearModel(ray, _stage), camera, XrCursorView.Look.Miss, hand.Pinching);
                 return;
             }
 
@@ -371,9 +346,12 @@ namespace ChatterMascot.Xr
             // ★ つまんでいなくても毎フレーム渡す。設定パネルが開いていればホバーの表示に、
             //   閉じていれば歯車を出し続けるかの判定に使う（追跡されている手だけ）
             var aim = ReadAimRay(hand, offset);
-            // ★ 触っていないマウスのレイではホバーさせない。代表レイから外したもの（カーソルを出さない
-            //   もの）に、ハイライトだけ残さない
-            if (!IsIdleMouse(hand))
+            // ★ マウスは、代表の入力のときだけホバーとクリックを効かせる。代表でない（手が追跡されている、
+            //   または触っていない）マウスのレイは、カーソルも出ない —— 見えない入力で押させない。
+            //   触っていないマウスへの最初のタップは、カーソルを戻すだけで何も押さない（次のタップから効く）。
+            //   すでに掴んでいるマウスのドラッグと離しは、代表でなくなっても続ける。
+            var inactiveMouse = hand == Mouse && AimHand() != hand;
+            if (!inactiveMouse)
             {
                 if (_settings != null) _settings.UpdateHover(aim);
                 if (_board != null) _board.Hover(aim);
@@ -386,7 +364,7 @@ namespace ChatterMascot.Xr
             {
                 // ★ つまみに「入った瞬間」だけを契機にする。つまんだままレイを動かして
                 //   キャラに当てても掴まない（意図しない掴みを防ぐ）。
-                if (!wasPinching && hand.Pinching) TryGrab(hand, aim);
+                if (!wasPinching && hand.Pinching && !inactiveMouse) TryGrab(hand, aim);
                 return;
             }
 
@@ -396,6 +374,10 @@ namespace ChatterMascot.Xr
             else Release();
         }
 
+        /// <summary>
+        /// <see cref="Pick"/> が返す対象。<see cref="WalkTo"/> は歩行範囲の中の床（つまむと歩き出す）、
+        /// <see cref="Plane"/> は歩き出さない検知済みの平面、<see cref="None"/> は何も無い。
+        /// </summary>
         private enum AimTarget
         {
             None,
@@ -403,6 +385,7 @@ namespace ChatterMascot.Xr
             WalkHandle,
             Board,
             Model,
+            WalkTo,
             Plane,
         }
 
@@ -430,6 +413,8 @@ namespace ChatterMascot.Xr
         /// ★ 設定パネル・歯車を先に見る。当たっていればそちらを押して、キャラ・歩行範囲の掴みには進まない。
         /// ★ 板とキャラクターは手前の方を掴む。板をつまんで歩き出さないよう、板に当たったら
         ///   「行き先の指示」には進まない。
+        /// ★ どれにも当たらなくても、歩行範囲の中の床を指していれば <see cref="AimTarget.WalkTo"/>
+        ///   （行き先の指示）。それも無ければ、検知した平面か、何も無い。
         /// </summary>
         private AimHit Pick(Ray ray)
         {
@@ -481,7 +466,16 @@ namespace ChatterMascot.Xr
                 //   足先まで包むので、そのままだと足元の近くを指しても体を掴んで置き直しになる
                 aim.WalksInstead =
                     hit.point.y < _stage.ModelAnchor.position.y + collider.bounds.size.y * FeetHeightFraction &&
-                    _walk != null && _walk.WouldWalkTo(ray);
+                    _walk != null && _walk.WouldWalkTo(ray, out _);
+                return aim;
+            }
+
+            // ★ 歩ける行き先は検知した平面より先に見る。TryGrab は歩行の判定に床の無限平面を使うので、
+            //   平面に当たらなくても歩き出す —— カーソルが「何も無い」を示したまま歩かせない
+            if (_walk != null && _walk.WouldWalkTo(ray, out var floorPoint))
+            {
+                aim.Target = AimTarget.WalkTo;
+                aim.Point = floorPoint;
                 return aim;
             }
 

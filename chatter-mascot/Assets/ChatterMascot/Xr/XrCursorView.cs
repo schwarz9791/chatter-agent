@@ -26,7 +26,7 @@ namespace ChatterMascot.Xr
             Grab,
         }
 
-        // ── 見た目の既定値（実測値ではない。実機で調整する） ─────────────────
+        // ── 見た目の既定値（実測値ではない） ─────────────────
 
         /// <summary>カメラから見た半径（rad）。距離に比例させ、見かけの大きさを一定にする。</summary>
         private const float AngularRadius = 0.006f;

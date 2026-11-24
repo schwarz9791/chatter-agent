@@ -425,7 +425,8 @@ namespace ChatterMascot.Xr
 
         private static float PinBoxLeft(int column) => SidePaddingPixels + column * (PinBoxWidthPixels + PinBoxGapPixels);
 
-        private void ClearHover()
+        /// <summary>ホバーの表示を消す。どの入力もパネルに当てていないフレームに呼ぶ。</summary>
+        public void ClearHover()
         {
             if (_hoveredRow != null)
             {

@@ -232,11 +232,14 @@ namespace ChatterMascot.Xr
 
         /// <summary>
         /// <see cref="TryWalkTo"/> が歩き出すかどうか（副作用なし）。<see cref="TryWalkTo"/> と
-        /// 判定を共有しているので、カーソルの表示と実際の挙動がずれない。
+        /// 判定を共有しているので、カーソルの表示と実際の挙動がずれない。歩き出すなら、
+        /// <paramref name="point"/> に行き先の床の点（ワールド）を返す。
         /// </summary>
-        public bool WouldWalkTo(Ray ray)
+        public bool WouldWalkTo(Ray ray, out Vector3 point)
         {
-            if (ClassifyWalkAim(ray, out _) != WalkToResult.Started) return false;
+            point = default;
+            if (ClassifyWalkAim(ray, out var floorXz) != WalkToResult.Started) return false;
+            point = new Vector3(floorXz.x, _floorY, floorXz.y);
             return !_character.Speaking && (_character.IsWalking || _character.CanStartWalking);
         }
 

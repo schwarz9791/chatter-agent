@@ -199,7 +199,7 @@ namespace ChatterMascot.Settings
         /// <summary>Android XR で、画面を映している間に部屋を暗くする割合（0〜1）。デスクトップの設定パネルには出さない。</summary>
         public float XrSharingDimming { get; }
 
-        /// <summary>Android XR で、検知した平面をワイヤーフレームで描くか。既定は <b>false</b>。デスクトップの設定パネルには出さない。</summary>
+        /// <summary>Android XR で、検知した平面を矩形で描くか。既定は <b>false</b>。デスクトップの設定パネルには出さない。</summary>
         public bool XrShowPlanes { get; }
 
         /// <summary>

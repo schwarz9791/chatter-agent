@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Xml.Linq;
 using UnityEditor.Android;
 using UnityEditor.Build;
@@ -44,6 +45,8 @@ namespace ChatterMascot.EditorTools
         private const string HandTrackingPermission = "android.permission.HAND_TRACKING";
         private const string UnityGameActivityClass = "com.unity3d.player.UnityPlayerGameActivity";
         private const string LauncherActivityClass = "tech.sukima.chattermascot.ChatterMascotGameActivity";
+        private const string XrStartModeProperty = "android.window.PROPERTY_XR_ACTIVITY_START_MODE";
+        private const string XrStartModeManaged = "XR_ACTIVITY_START_MODE_FULL_SPACE_MANAGED";
 
         public int callbackOrder => 0;
 
@@ -100,14 +103,16 @@ namespace ChatterMascot.EditorTools
             }
 
             var renamedActivity = EnsureLauncherActivity(application);
+            var addedManaged = EnsureManagedStartMode(application);
             var addedInternet = EnsurePermission(manifest, InternetPermission);
             var addedHandTracking = EnsurePermission(manifest, HandTrackingPermission);
             var addedCleartext = EnsureCleartextTraffic(application);
             if (renamedActivity) Debug.Log($"[Build] AndroidManifest.xml: replaced launcher Activity with {LauncherActivityClass}");
+            if (addedManaged) Debug.Log("[Build] AndroidManifest.xml: set XR start mode FULL_SPACE_MANAGED");
             if (addedInternet) Debug.Log("[Build] AndroidManifest.xml: added INTERNET");
             if (addedHandTracking) Debug.Log("[Build] AndroidManifest.xml: added HAND_TRACKING");
             if (addedCleartext) Debug.Log("[Build] AndroidManifest.xml: added usesCleartextTraffic");
-            return renamedActivity || addedInternet || addedHandTracking || addedCleartext;
+            return renamedActivity || addedManaged || addedInternet || addedHandTracking || addedCleartext;
         }
 
         /// <summary>
@@ -128,6 +133,29 @@ namespace ChatterMascot.EditorTools
 
             throw new BuildFailedException(
                 $"[Build] AndroidManifest.xml has no activity for {UnityGameActivityClass}");
+        }
+
+        /// <summary>
+        /// 起動 Activity に MANAGED を書く（Unity のパッケージは property が無いときだけ UNMANAGED を書く）。
+        /// 変えたら true。
+        /// </summary>
+        private static bool EnsureManagedStartMode(XElement application)
+        {
+            var activity = application.Elements("activity")
+                .First(a => a.Attribute(AndroidNs + "name")?.Value == LauncherActivityClass);
+            var property = activity.Elements("property")
+                .FirstOrDefault(p => p.Attribute(AndroidNs + "name")?.Value == XrStartModeProperty);
+            if (property == null)
+            {
+                activity.Add(new XElement("property",
+                    new XAttribute(AndroidNs + "name", XrStartModeProperty),
+                    new XAttribute(AndroidNs + "value", XrStartModeManaged)));
+                return true;
+            }
+
+            if (property.Attribute(AndroidNs + "value")?.Value == XrStartModeManaged) return false;
+            property.SetAttributeValue(AndroidNs + "value", XrStartModeManaged);
+            return true;
         }
 
         /// <summary>足したら true。</summary>

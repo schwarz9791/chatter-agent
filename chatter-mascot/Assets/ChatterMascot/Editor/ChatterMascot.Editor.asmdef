@@ -16,6 +16,7 @@
         "Unity.XR.OpenXR",
         "Unity.XR.OpenXR.Editor",
         "Unity.XR.AndroidOpenXR",
+        "Google.XR.Extensions",
         "Unity.XR.CoreUtils.Editor"
     ],
     "includePlatforms": [

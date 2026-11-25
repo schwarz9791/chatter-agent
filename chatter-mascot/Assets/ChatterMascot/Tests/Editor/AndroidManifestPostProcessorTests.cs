@@ -99,15 +99,27 @@ namespace ChatterMascot.Tests
         public void DoesNotDuplicateExistingPermissions()
         {
             var document = BuildManifest(cleartext: "true", activityName: LauncherClass);
-            document.Root.Add(new XElement(
-                "uses-permission", new XAttribute(AndroidNs + "name", "android.permission.INTERNET")));
-            document.Root.Add(new XElement(
-                "uses-permission", new XAttribute(AndroidNs + "name", "android.permission.HAND_TRACKING")));
+            AndroidManifestPostProcessor.Apply(document);
 
             var changed = AndroidManifestPostProcessor.Apply(document);
 
             Assert.That(changed, Is.False);
             Assert.That(document.Root.Elements("uses-permission").Count(), Is.EqualTo(2));
+        }
+
+        [Test]
+        public void ReplacesUnmanagedStartModeWithManaged()
+        {
+            var document = BuildManifest(activityName: LauncherClass);
+            document.Root.Element("application").Element("activity").Add(new XElement(
+                "property",
+                new XAttribute(AndroidNs + "name", "android.window.PROPERTY_XR_ACTIVITY_START_MODE"),
+                new XAttribute(AndroidNs + "value", "XR_ACTIVITY_START_MODE_FULL_SPACE_UNMANAGED")));
+
+            AndroidManifestPostProcessor.Apply(document);
+
+            var values = document.Root.Descendants("property").Select(p => (string)p.Attribute(AndroidNs + "value")).ToList();
+            Assert.That(values, Is.EqualTo(new[] { "XR_ACTIVITY_START_MODE_FULL_SPACE_MANAGED" }));
         }
 
         [Test]

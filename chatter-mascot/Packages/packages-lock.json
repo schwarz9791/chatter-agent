@@ -1,5 +1,15 @@
 {
   "dependencies": {
+    "com.google.xr.extensions": {
+      "version": "file:com.google.xr.extensions.tgz",
+      "depth": 0,
+      "source": "local-tarball",
+      "dependencies": {
+        "com.unity.xr.openxr": "1.18.0",
+        "com.unity.xr.arfoundation": "6.4.0",
+        "com.unity.xr.management": "4.7.0"
+      }
+    },
     "com.kirurobo.uniwinc": {
       "version": "https://github.com/kirurobo/UniWindowController.git#upm",
       "depth": 0,
@@ -287,7 +297,7 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.xr.management": {
-      "version": "4.6.1",
+      "version": "4.7.0",
       "depth": 1,
       "source": "registry",
       "dependencies": {

@@ -11,6 +11,7 @@
         "Unity.XR.ARSubsystems",
         "Unity.XR.OpenXR",
         "Unity.XR.AndroidOpenXR",
+        "Google.XR.Extensions",
         "Unity.XR.CompositionLayers",
         "Unity.XR.Hands",
         "UnityEngine.UI"

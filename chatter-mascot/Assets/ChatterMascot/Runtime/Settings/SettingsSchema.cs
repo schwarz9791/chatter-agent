@@ -46,7 +46,7 @@ namespace ChatterMascot.Settings
         /// <summary>画面を映す間の減光。XR の設定パネルだけに出す</summary>
         public const string XrSharingDimming = "xrSharingDimming";
 
-        /// <summary>検知した平面をワイヤーフレームで描くか。XR の設定パネルだけに出す</summary>
+        /// <summary>検知した平面を矩形で描くか。XR の設定パネルだけに出す</summary>
         public const string XrShowPlanes = "xrShowPlanes";
 
         /// <summary>ペアリングのサブページを開く／閉じる。XR の設定パネルだけに出す</summary>

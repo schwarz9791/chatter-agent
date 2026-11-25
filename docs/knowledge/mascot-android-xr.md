@@ -1285,6 +1285,7 @@ XR が起動したかどうかに関わらず効くので、XR の無い端末�
 `XR_ACTIVITY_START_MODE` の値が **`XR_ACTIVITY_START_MODE_FULL_SPACE_UNMANAGED`** なのは、
 Spatial Containers を使わないから。`MANAGED` は Jetpack XR 専用ではなく、Spatial Containers には
 [standalone の OpenXR アプリでも `MANAGED` が要る](https://developer.android.com/develop/xr/openxr/spatial-containers)。
+`MANAGED` にしても他のアプリとは並ばないので、変える理由が無い（→「Spatial Containers で既製アプリと並べる」）。
 
 `uses-feature` は **`android.software.xr.api.openxr`**（`android.software.xr.immersive` ではない）。
 どちらも Unity 側で手書きしない（→「マニフェストは静的に置かず、Gradle 生成後に注入する」）。
@@ -1335,8 +1336,8 @@ Android版 Claude アプリ等と並べられる。引き換えに空間的な�
 **Composition Layer に映す方を採る。** エミュレータで最後まで動いた。依存が増えず、キャラの歩行と置き直しが箱の中に
 限られない。その代わり、映像の配信と、その認証と暗号化を自前で持つ。
 
-Spatial Containers は、Spatial API Level 4 以上という要件を満たすイメージが無く、試せなかった。要件を満たす端末か
-イメージが手に入ったら、配信を自前で持つコストと比べ直す。
+Spatial Containers は XREAL Aura の実機で試した。他のアプリを開くとマスコットの箱ごと最小化されるので、並べられない
+（→ 下「Spatial Containers で既製アプリと並べる」）。
 
 本実装は [#237](https://github.com/schwarz9791/chatter-agent/issues/237)。検証のコードは main に入れず、
 [`spike/issue-236-surface`](https://github.com/schwarz9791/chatter-agent/tree/spike/issue-236-surface) に残してある。
@@ -1469,11 +1470,51 @@ Mac が黙ったときの 6 秒の期限（`kill -STOP`）がすべて通った�
 
 ★ エミュレータのマスコットも server に繋がるので、Mac のマスコットと文を取り合う。確認の間だけにして、後で片方に戻す。
 
-### Spatial Containers で既製アプリと並べる
+### Spatial Containers で既製アプリと並べる（[#243](https://github.com/schwarz9791/chatter-agent/issues/243)）
 
-**端末の要件を確かめる段階で止まった。** どちらの AVD も `android.software.xr.api.spatial=3` で、`XR_EXT_spatial_container` と
-`XR_EXT_spatial_container_self_rendering` を返さない。Spatial API Level 4 以上という要件を満たさないので、
-既製アプリを横に開けるか、そちらへフォーカスが移ってもマスコットが喋り続けるか、今の作りと両立するかは試していない。
+**並べられない。他のアプリを開くと、システムがマスコットのタスクを最小化する。** managed にしても、他のアプリに対する振る舞いは
+unmanaged と変わらない（ランチャーとは共存し、別のアプリを開くと消える）。違うのは、消えるときに状態が通知されることだけ。
+今の Android XR の Spatial Containers は、1つのアプリの中で 3D の箱と窓を並べるためのもので、アプリをまたいで並べるものではない
+（[UploadVR](https://www.uploadvr.com/android-xr-gets-spatial-container-support-to-enable-multi-engine-apps/) の言う
+"multi-engine apps rather than cross-app spatial multitasking"）。拡張の仕様は他のアプリと並ぶ bounded を狙っている
+（[Khronos](https://www.khronos.org/blog/openxr-spatial-containers)）ので、Android XR がそこまで対応したら試し直す。
+
+検証のコードは main に入れず、
+[`spike/issue-243-spatial-containers`](https://github.com/schwarz9791/chatter-agent/tree/spike/issue-243-spatial-containers) に残してある。
+
+測定条件（2026-11-25）:
+
+| 項目 | 値 |
+|---|---|
+| 端末 | XREAL Aura（adb では `Android_XR_Puck`、Android 14）。`android.software.xr.api.spatial=4` |
+| ランタイム | システムのもの。`OpenXRRuntime` は `Android XR` 1.0.0 |
+| パッケージ | Unity 6000.3.28f1、`androidxr-openxr` 1.5.1、`openxr` 1.19.0、AR Foundation 6.7.1、Android XR Extensions for Unity 1.5.0（入れると `com.unity.xr.management` が 4.7.0 に上がる） |
+| 箱 | bounded。Suggested Bounds は既定の 2×2×2 m |
+
+| 確認項目 | 結果 |
+|---|---|
+| 端末の対応 | ランタイムは `XR_EXT_spatial_container` と `XR_EXT_spatial_container_self_rendering` を返す。bounded（`Visible, Interactive`、2 m 立方）で起動する |
+| 他のアプリと並ぶか | 並ばない。Chrome を開くと `DesktopManager` がタスクを `FULL_SPACE_MANAGED … MINIMIZED_BY_USER` にし、続いて `Visible` が落ちる |
+| 喋り続けるか | 続かない。`Visible` が落ちた直後に `OnApplicationPause(true)` が来て、フレームが止まる。フォーカスが外れただけ（ランチャーを開いた）なら、フレームは回り続ける |
+| 配置 | 今の `XrStage` のままだと、キャラの下半身が箱の下端で切れる。コンテナの空間では、頭が箱の中心から (−0.06, −0.84, −1.84) m にあった |
+| 透過 | 選べる blend mode に AlphaBlend が加わる（Opaque / Additive / AlphaBlend）。`XrSeeThroughBlendFeature` は今までどおり Additive を要求する |
+| パッケージ | 確認済みの組み合わせ（`androidxr-openxr` 1.4.1 / `openxr` 1.18.0 / AR Foundation 6.6.2）より新しい版のまま、Android ビルドと EditMode テストが通る。macOS ビルドは見ていない |
+| つまみ・歩行・板 | 見ていない（並ばないと分かった時点で打ち切った） |
+
+- ★★ **Extensions の手順どおりでは MANAGED にならない。** Extensions の `XRSessionFeatureBuildHooks` は、Unity の `androidxr-openxr` が
+  入っていると（`UNITY_OPEN_XR_ANDROID_XR`）MANAGED の注入を飛ばす。`androidxr-openxr` 1.5.1 の `AndroidXRManifest`（callbackOrder 1）は
+  Immersive XR のスイッチを持たず、起動 Activity に `android.window.PROPERTY_XR_ACTIVITY_START_MODE` が無ければ UNMANAGED を書く。
+  `AndroidManifestPostProcessor`（callbackOrder 0）で先に MANAGED を書けば通る
+- ★ 2つのパッケージがそれぞれ足すので、マニフェストに `SCENE_UNDERSTANDING_COARSE` と `uses-feature android.software.xr.api.openxr` が
+  2つずつ入る。インストールは通る
+- ★ `OnSpatialContainerStateChanged` は、変わったフラグ1つにつき1回届く（第2引数がそのフラグの新しい値）。隠れたときは
+  `Interactive` → `Visible` の順に2回来た
+- ★ 箱は開くときに 0.02 m から 2 m まで広がる。その間、bounds の変化が毎フレーム届く
+- ★ **`XRSpatialContainerFeature` に `supportsBounded` は無い。** bounded かどうかは `TryGetState` の `Immersive` が立っていないことで見る
+
+#### エミュレータでは試せない
+
+どちらの AVD も `android.software.xr.api.spatial=3` で、`XR_EXT_spatial_container` と `XR_EXT_spatial_container_self_rendering` を返さない。
 
 - ★ **イメージの名前と端末の版は別物。** 「Preview API v4」のイメージでも `spatial=3` を返す。`XR_ANDROID_global_passthrough_dimming` など
   v4 で入った拡張の一部は返すが、Spatial Containers は無い。rev.3 も rev.4 も同じ。`sdkmanager --channel=3` にも新しい XR イメージは無かった
@@ -1485,11 +1526,6 @@ Mac が黙ったときの 6 秒の期限（`kill -STOP`）がすべて通った�
   | Google Play XR Preview API v4 4.0.0 | 3 |
   | Google Play XR API v3 3.0.0 | 3 |
   | Google Play XR API v1（`google-xr` canary 8.0.0） | 1 |
-
-- ★ **`XRSpatialContainerFeature` に `supportsBounded` は無い。** C# で見られるのは `IsExtensionEnabled` / `TryGetBounds` / `TryGetState`
-- Extensions 1.5.0 で確認された組み合わせは `androidxr-openxr` 1.4.1 / AR Foundation 6.6.2 で、こちらの 1.5.1 / 6.7.1 より古い
-- `XrStage` は頭を基準に XR Origin を動かすが、コンテナは箱の中心が原点で、外は切り取られる。Spatial Containers を採るなら配置の作り直しが要る
-- XREAL Aura の Spatial API Level は未確認（[#100](https://github.com/schwarz9791/chatter-agent/issues/100)）
 
 ★ イメージを更新すると AVD に入れたアプリが消えた。素材を入れ直す手間を見込むこと。
 

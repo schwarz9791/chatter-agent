@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for trying the XR build. It has only run on an emulator so far, so **"it didn't work" reports are just as useful as working ones.**
+        Thanks for trying the XR build. It runs on XREAL Aura, but few people have tried it yet, so **"it didn't work" reports are just as useful as working ones.**
 
         Only **Environment** is required. Fill in whatever you checked and leave the rest empty.
         Setup steps: [Try it on XREAL Aura](https://github.com/schwarz9791/chatter-agent#try-it-on-xreal-aura-android-xr).

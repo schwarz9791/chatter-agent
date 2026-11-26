@@ -1,4 +1,4 @@
-ChatterMascot for macOS, Android and Android XR (aimed at XREAL Aura and similar). The XR build has not been run on real hardware yet. If you try it, please report with the [XREAL Aura test report](https://github.com/schwarz9791/chatter-agent/issues/new?template=xr-test-report.yml) form, even if it didn't work.
+ChatterMascot for macOS, Android and Android XR (aimed at XREAL Aura and similar). The XR build runs on XREAL Aura, but few people have tried it yet. If you try it on any device, please report with the [XREAL Aura test report](https://github.com/schwarz9791/chatter-agent/issues/new?template=xr-test-report.yml) form, even if it didn't work.
 
 ## Install (Android)
 

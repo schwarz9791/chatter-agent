@@ -13,8 +13,8 @@ delegate で外す」）。
 Unity 同梱の SDK / NDK / JDK だけで足りる（外部の SDK 設定は要らない）。
 初回は約6分、差分ビルドは約1分、APK は約 68MB（2026-09-13 実測）。
 XR 自体は [#99](https://github.com/schwarz9791/chatter-agent/issues/99)、接続先の恒久化は
-[#98](https://github.com/schwarz9791/chatter-agent/issues/98)、実機は
-[#100](https://github.com/schwarz9791/chatter-agent/issues/100)。
+[#98](https://github.com/schwarz9791/chatter-agent/issues/98)、実機で確かめた前提は
+下「XREAL Aura 実機で確かめた前提」。
 
 ★★ **`-buildTarget Android` はアクティブなビルドターゲットを Library に残す。** その後
 `test.sh` / `build.sh` を明示無しで開くと Android のまま動き、EditMode テストが Android の
@@ -31,8 +31,8 @@ VRM の読み込み直後、`VrmStage.Adopt` が `VrmMaterialCheck.Inspect` の�
 `UniGLTF/UniUnlit` へ差し替える。理由は MToon10 の陰影計算が Android で白飛びするため
 （原因は未特定 → [#110](https://github.com/schwarz9791/chatter-agent/issues/110)）。
 テクスチャと色は unlit 化前に読み直しているので正しく出るが、陰影・アウトライン・
-リムライトは失う（表情には影響しない）。実機で MToon10 がそのまま正しく出るなら
-外す判断は [#100](https://github.com/schwarz9791/chatter-agent/issues/100)。
+リムライトは失う（表情には影響しない）。実機（XREAL Aura）で MToon10 が正しく出るかは
+確かめていない（[#100](https://github.com/schwarz9791/chatter-agent/issues/100) は計測を省いて閉じた）。
 
 ### Player Settings は `AndroidPlayerSettings.FixAll` が書く（1回走らせてコミット）
 
@@ -397,8 +397,8 @@ Android のログは `adb logcat -s Unity`。★★ **Android では 401 と「�
 
 #### #97 の実機実測（2026-09-13 / Android XR エミュレータ `XR_Glasses` API 34 arm64 / `vita.vrm`）
 
-★ **エミュレータであって実機ではない。** 実機（XREAL Aura）は
-[#100](https://github.com/schwarz9791/chatter-agent/issues/100)。
+★ **エミュレータであって実機ではない。** 実機（XREAL Aura）では測っていない
+（[#100](https://github.com/schwarz9791/chatter-agent/issues/100) は計測を省いて閉じた）。
 
 | 確認したこと | 結果 |
 |---|---|
@@ -459,8 +459,8 @@ XR Headset（Google Play XR API v1 のイメージ）では同じ APK が不透�
 ジッタが支配する。消しても中央値で数 ms しか変わらず、`WavDecoder` の API を変える
 （`Decode` から `float[]` を返す形にする）価値が無い。
 
-★ **エミュレータであって実機ではない。** 実機（XREAL Aura）での再測定は
-[#100](https://github.com/schwarz9791/chatter-agent/issues/100)。計測コードはこの決定の後
+★ **エミュレータであって実機ではない。** 実機（XREAL Aura）では測っていない
+（[#100](https://github.com/schwarz9791/chatter-agent/issues/100) は計測を省いて閉じた）。計測コードはこの決定の後
 `AudioClipPlayer.cs` から取り除いてある。
 
 ## 素材配布（#117）
@@ -541,7 +541,7 @@ Android ビルドは OpenXR（`com.unity.xr.androidxr-openxr`）で Full Space �
 （[#121](https://github.com/schwarz9791/chatter-agent/issues/121)。→ 下「キャラを手で置き直す」）。
 背景は environment blend mode を ADDITIVE（グラス）か ALPHA_BLEND（ヘッドセット）にして部屋を透かす（→ 下「背景に部屋を透かす」）。
 Android XR Extensions for Unity（`com.google.xr.extensions`）は入れない（[#119](https://github.com/schwarz9791/chatter-agent/issues/119)。理由も同じ節）。
-実機（XREAL Aura）での見え方・視野・距離感は [#100](https://github.com/schwarz9791/chatter-agent/issues/100)。
+実機（XREAL Aura）での見え方・視野・距離感は、使えているが測ってはいない（[#100](https://github.com/schwarz9791/chatter-agent/issues/100) は計測を省いて閉じた）。
 
 ### 空間配置の決めごと
 
@@ -1316,6 +1316,23 @@ Unity / OpenXR / WebXR アプリは[そもそも Full Space でしか動かな�
 
 ターゲットの **XREAL Aura は光学シースルー**なので、Full Space が隠すのは「他の Android アプリ」だけで、
 レンズ越しに見える物理的な Mac の画面は実光として残る。**この一点が本プロジェクトの成立根拠**。
+実機でも成り立った（→ 次節）。
+
+## XREAL Aura 実機で確かめた前提（[#25](https://github.com/schwarz9791/chatter-agent/issues/25)）
+
+2026-11-26 / XREAL Aura（adb では `Android_XR_Puck`、Android 14）/ ChatterMascot 0.4.4。
+
+| 項目 | 結果 |
+|---|---|
+| Android XR の対応 | Full Space で動く。`android.software.xr.api.spatial=4`、`android.software.xr.api.openxr=65538`。blend mode は Opaque / Additive / AlphaBlend が選べる |
+| Full Space の間、レンズ越しに Mac の実画面が読めるか | 読める（目視） |
+| Aura を Mac の外部ディスプレイとして同時に使えるか | 使えない。外部ディスプレイの機能は別のアプリで、開くとマスコットが隠れる（他のアプリを開いたときと同じ。→ 下「Spatial Containers で既製アプリと並べる」） |
+| クライアント側にエンジンを置かずに音が出るか | 出る（サーバー合成） |
+| 床の平面検知 | 使える。精度は甘い（→ 上「XREAL Aura 実機の平面」） |
+
+★ **外部ディスプレイと Spatial Containers がどちらも排他なので、Mac の画面を XR に出す道は自前の配信だけ**（→ 下「Mac の画面を XR 側に出す」）。
+
+性能（fps・発熱・待機の電力・発話の遅れ）は測っていない（[#100](https://github.com/schwarz9791/chatter-agent/issues/100) は計測を省いて閉じた）。
 
 ## 代替案: Home Space + 2Dパネル（優先度低）
 
@@ -1324,7 +1341,7 @@ Unity / OpenXR / WebXR アプリは[そもそも Full Space でしか動かな�
 
 Unity を **XR機能なしの通常 Android アプリ**としてビルドすれば Home Space の2Dパネルとして動き、
 Android版 Claude アプリ等と並べられる。引き換えに空間的な実在感は失われる（#97 の APK がまさにこの形）。
-パネルには `_ × [] [ ]` のタイトルバーが付く。実機での見え方は [#100](https://github.com/schwarz9791/chatter-agent/issues/100)。
+パネルには `_ × [] [ ]` のタイトルバーが付く。実機では試していない。
 
 ## Mac の画面を XR 側に出す（[#236](https://github.com/schwarz9791/chatter-agent/issues/236)）
 
@@ -1403,7 +1420,7 @@ Spatial Containers は XREAL Aura の実機で試した。他のアプリを開�
 | ADDITIVE に戻す | 0.75 のまま | 0.75（部屋だけ暗くなる） |
 | ADDITIVE | 0.25 | 0.75 のまま |
 
-OPAQUE で値を届けて戻せば、部屋だけを暗くできる。5 段すべてで、ADDITIVE に戻して 0.5 秒後に読み直しても値は要求と一致した。値が残るのは仕様に書かれた動きではなく、仕様には「要求が今の値と違えばランタイムは honor しなければならない（must）」とあるので、実機では ADDITIVE のまま効くのかもしれない。実機で確かめる（[#100](https://github.com/schwarz9791/chatter-agent/issues/100)）。OPAQUE の間はエミュレータだと背景が真っ黒になる。ランタイムの `oxr_session_frame_end` は blend mode を見ずに値を渡しているので、無視しているのはコンポジタ側（SurfaceFlinger の中の CPM）と見られる。バイナリを読めないので、理由までは確かめていない。
+OPAQUE で値を届けて戻せば、部屋だけを暗くできる。5 段すべてで、ADDITIVE に戻して 0.5 秒後に読み直しても値は要求と一致した。値が残るのは仕様に書かれた動きではなく、仕様には「要求が今の値と違えばランタイムは honor しなければならない（must）」とあるので、実機では ADDITIVE のまま効くのかもしれない。実機では確かめていない（[#100](https://github.com/schwarz9791/chatter-agent/issues/100) は計測を省いて閉じた）。OPAQUE の間はエミュレータだと背景が真っ黒になる。ランタイムの `oxr_session_frame_end` は blend mode を見ずに値を渡しているので、無視しているのはコンポジタ側（SurfaceFlinger の中の CPM）と見られる。バイナリを読めないので、理由までは確かめていない。
 
 ★★ **OPAQUE の途中で要求を変えると、その値が届かないことがある。** `XR_Glasses`（2026-11-04）で、0 から 0.5 を要求して OPAQUE にし、すぐ 0 を要求すると、0.5 が HAL に届いたあと 0 が届かず、部屋が暗いまま残った。そのまま OPAQUE を 0.5 秒保っても、一度戻してもう一度 OPAQUE にしても届かない。同じ値のまま約 1.7 秒後の OPAQUE では届いた。`TryRequestGlobalDimmingLevel` は値を静的変数に書くだけなので、同じ値で呼び直しても何も変わらない。
 
@@ -1444,7 +1461,7 @@ OPAQUE で値を届けて戻せば、部屋だけを暗くできる。5 段す�
 遅延の測り方と、数字に含まれていないもの:
 
 - 検証ページのミリ秒時計とエミュレータの窓を同じ `screencapture` に写し、時計の差を読んだ
-- エミュレータは同じ Mac の上なので、ffmpeg を `127.0.0.1` で待ち受けて `10.0.2.2` から繋いだ。**LAN は通っていない。** LAN と実機の遅延は [#100](https://github.com/schwarz9791/chatter-agent/issues/100)
+- エミュレータは同じ Mac の上なので、ffmpeg を `127.0.0.1` で待ち受けて `10.0.2.2` から繋いだ。**LAN は通っていない。** 実機の遅れは [#254](https://github.com/schwarz9791/chatter-agent/issues/254)
 - 受信側は次のフレームの先頭が届いてから今のフレームを送るので、1フレーム分の遅れを含む
 - `-framerate 30` だけで計測用の PNG も同時に書き出した最初の配信は、受信が 55fps 前後で回り、44 秒遅れた。`fps=30` フィルタを足して PNG の出力を外すと解消した。同時に変えたので、どちらが原因かは切り分けていない
 
@@ -1466,7 +1483,7 @@ Mac が黙ったときの 6 秒の期限（`kill -STOP`）がすべて通った�
 最小化した窓に繋ぐとフレームは 1 枚しか来ないので、届いた 1 枚・描画 0 枚のまま 25 秒待っても板に何も映らなかった。出力を専用のスレッドで取ると、届いてから約 30 ミリ秒で描かれた（`XR_Glasses`）。
 
 ★ **未確認。** 送信待ちが溢れる経路。`adb emu network speed gsm` で 24 秒絞っても動きの少ない窓では切れず、遅れも残らなかったが、絞れていたのかは確かめていない。
-キューの規則は `screen/wire.rs` のテストだけで見ている（LAN と実機は [#100](https://github.com/schwarz9791/chatter-agent/issues/100)）。
+キューの規則は `screen/wire.rs` のテストだけで見ている（LAN と実機では確かめていない）。
 
 ★ エミュレータのマスコットも server に繋がるので、Mac のマスコットと文を取り合う。確認の間だけにして、後で片方に戻す。
 

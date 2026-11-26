@@ -888,16 +888,18 @@ Mac の ChatterAgent で「画面を共有…」を選ぶと、XR に板（Compo
 ヘッドセット（ビデオパススルー）で確かめるときは、**XR Headset** フォームファクタの AVD を
 **Google Play XR API v3** のイメージで作る（v1 は systemui が ANR する）。
 
-### 実機（XREAL Aura）で最初に確認すること
+### 実機（XREAL Aura）で確かめた前提
 
-| # | 項目 | 影響 |
-|---|---|---|
-| 1 | XREAL Aura の Android XR 対応レベル（Full Space の挙動、XR Glasses としての扱い） | 設計の前提そのもの |
-| 2 | Aura を Mac の外部ディスプレイとして**同時**利用できるか | 排他なら作業面は物理画面に限定される |
-| 3 | 光学シースルー越しに Mac の実画面が快適に読めるか | 読みづらいなら代替案の再検討材料 |
-| 4 | UniVRM の URP版 MToon が Android XR + Vulkan で正常動作するか | 公式検証情報なし。崩れるなら Unlit 等での代替 |
-| 5 | クライアント側にエンジンを置かずに音が出るか | サーバー合成の前提 |
-| 6 | spring bone / expression のパフォーマンス | |
+| 項目 | 結果 |
+|---|---|
+| Android XR の対応 | Full Space で動く。部屋を透かす blend mode（ADDITIVE）がある |
+| Full Space の間、レンズ越しに Mac の実画面が読めるか | 読める |
+| Aura を Mac の外部ディスプレイとして**同時に**使えるか | **使えない。** 外部ディスプレイの機能は別のアプリで、開くとマスコットが隠れる。Mac の画面は自前の配信で板に映す（→ [`mascot-android-xr.md`](./knowledge/mascot-android-xr.md)「Mac の画面を XR 側に出す」） |
+| クライアント側にエンジンを置かずに音が出るか | 出る（サーバー合成） |
+| MToon の描画 | 確かめていない。Android では UniUnlit に差し替えている（→ 同「Android では MToon10 を UniUnlit に差し替える」） |
+| spring bone / expression の負荷 | 測っていない |
+
+詳細と測定条件は [`mascot-android-xr.md`](./knowledge/mascot-android-xr.md)「XREAL Aura 実機で確かめた前提」。
 
 ## 踏んだことの索引
 

@@ -179,7 +179,11 @@ AppKit の内部で autorelease されたオブジェクトは、呼んだスレ
   macOS は聞き直さず、その規則は最初に許可したビルドのパスに紐づいているので当てはまらない。実際に踏んだのは、
   issue のワークツリーで許可したあとに main のワークツリーでビルドしたとき
 - **手当ては `signingIdentity: "-"`。** バンドルごと ad-hoc 署名され、識別子がバンドル ID になる。バンドル ID の
-  規則はパスを持たず、ビルドし直しても置き場所を変えても効く
+  規則はビルドし直しても効く
+- 2026-11-27（macOS 27.2.1）: バンドル ID の規則にも `Path` が付いていた（起動した場所ごとに1つ）。初めての場所
+  （`/Applications`）で起動するとダイアログが出て、その場所の規則が足された。2026-10-04（macOS 27）の時点では
+  パスを持たず、置き場所を変えても効いていた。`plutil -p` の出力は NSKeyedArchiver のままなので、規則ごとの
+  フィールドは `$objects` の参照をたどって読む
 - **Hardened Runtime は切る（`hardenedRuntime: false`）。** Tauri の既定では ad-hoc 署名にも付く
   （`codesign -dv` の `flags` に `runtime`）。公証しない ad-hoc 署名では得が無く、lldb・`sample`・Instruments が
   attach できなくなるだけ。なお、付けたビルドでも、マスコットを止める quit の Apple Event は entitlements 無しで通った
@@ -281,6 +285,14 @@ ad-hoc で公証していないので rejected と答える）。
   `createUpdaterArtifacts` が作るものとはパスの集合が同じで、並び順だけが違う（updater は親を作りながら展開するので並びは効かない）
 - マスコットだけの更新では、「更新」を押してから zip を落として署名を確かめる間は読み上げが続き、止まるのはマスコットを閉じて
   入れ替える間だけだった（話している途中の1文は言い切ってから閉じる）。起き直したマスコットは、止まっていた間の分から続きを読んだ
+- ★★ **聞かれないだけで、「ローカルネットワーク」は効いていない（→ #276）。** 2026-11-27（macOS 27.2.1。管理者ユーザー。
+  `"host": "0.0.0.0"`。`devUpdateRepo` で検証用リポジトリに向け、`/Applications` の ChatterAgent をメニューの「アップデート…」で
+  ad-hoc → ad-hoc、ad-hoc → 自己署名、自己署名 → 自己署名と3回入れ替えた）:
+  - 3回とも、updater が再起動した ChatterAgent では mDNS の広告がループバックにしか出なかった（`dns-sd -B` の `if` が `1` だけ）
+  - server の再起動でも、システム設定のスイッチのオフ → オンでも戻らなかった。メニューの「終了」から `open` で起こし直すと
+    en0 に出た（スイッチに触らずに戻ることも確かめた）
+  - 入れ替えた瞬間に nehelper が `Populating the cache with 0 UUID(s) for tech.sukima.chatter-agent` を出していた
+  - XR のマスコットからの接続（Mac へ入ってくる側）は、その間も切れずに読み上げが続いた。止まるのは新しく探す側（mDNS）
 
 ## 画面の取得はピッカーなら許可が要らない
 
@@ -288,6 +300,7 @@ ad-hoc で公証していないので rejected と答える）。
 更新のたびに許可が外れ、一覧ではオンに見えたまま拒否される
 （[Apple Developer Forums の DTS の回答](https://developer.apple.com/forums/thread/795739)）。ChatterAgent は ad-hoc なので、
 `SCShareableContent` で取る形だと更新のたびに許可を取り直すことになる。`SCContentSharingPicker` なら選択そのものが同意になる。
+自己署名の証明書で署名すれば、許可は更新の後も残る（→「自己署名の証明書で署名すれば、許可は更新の後も残る」）。
 
 Apple の文書にこの扱いの明記は見つからず、開発者の報告しかなかったので確かめた。
 
@@ -316,7 +329,44 @@ Apple の文書にこの扱いの明記は見つからず、開発者の報告�
 ChatterAgent 自身が待ち受けるのは画面共有が初めて。ファイアウォールが有効な Mac で、最初の接続の TLS が
 約 30 秒進まず、その後 `socketfilterfw --listapps` にこのビルドが「Allow incoming connections」で載っていた
 （2026-11-03。同じ Mac）。**クライアントの TCP 接続は成功するので、クライアント側からは握手が止まって見える。**
-ログには `Found known filter app by signing identifier` が出る。更新で cdhash が変わったときに聞き直されるかは未確認。
+ログには `Found known filter app by signing identifier` が出る。
+
+更新で入れ替えたときは聞き直されなかった（2026-11-27。macOS 27.2.1。同梱の server の待ち受けで、ad-hoc → 自己署名で
+server の識別子と cdhash が変わったときも。→「自己署名の証明書で署名すれば、許可は更新の後も残る」）。規則は場所で覚えていて、
+ログの `bundleid:` には入れ替える前の識別子が出たままだった。画面共有の待ち受けは、更新の前後で試していない。
+
+## 自己署名の証明書で署名すれば、許可は更新の後も残る
+
+TCC（画面収録・アクセシビリティ）は、許可した時点の designated requirement（DR）で照合する。ad-hoc 署名の DR は
+`cdhash H"…"` なので、ビルドが変わるたびに外れる。自己署名のコード署名証明書で署名すると DR が
+`identifier "<バンドル ID>" and certificate leaf = H"<証明書のハッシュ>"` になり、同じ証明書で署名し直したビルドにも当てはまる。
+
+- 2026-11-27（macOS 27.2.1。管理者ユーザー。`/usr/bin/openssl`（LibreSSL）で作った v3 の自己署名証明書。用途はコード署名だけ。
+  `security import -T /usr/bin/codesign` でログインキーチェーンに入れ、信頼の設定はしていない）:
+  - 確認用の `.app`（`LSUIElement`。`open` で起動）で比べた。許可したあと、中身を変えて同じ場所へ入れ替えると、ad-hoc では
+    `CGPreflightScreenCaptureAccess()` も `AXIsProcessTrusted()` も false に戻った。自己署名では両方 true のままで、
+    `SCShareableContent` も取れた。ad-hoc で外れたときも、システム設定の一覧ではオンに見えたままだった
+  - ChatterAgent 本体（`signingIdentity` を `--config` で証明書の名前にした）でも、メニューの「アップデート…」で入れ替えて
+    updater が再起動した後に、両方 true のままだった
+  - 証明書を信頼済みにしなくても、`codesign --verify --deep --strict` も許可の照合も通った（`security find-identity` には
+    `CSSMERR_TP_NOT_TRUSTED` と出る）。Tauri も証明書について警告を出さずに署名した
+  - ad-hoc から自己署名へ切り替わる更新で、ダイアログは出なかった（ファイアウォールは →「macOS のファイアウォール」、
+    「ローカルネットワーク」は →「更新で入れ替えた `.app` は…」）
+  - Gatekeeper の止め方は ad-hoc と同じだった。同じ Mac の別ユーザーでブラウザから落とした zip を、
+    「配った zip は Gatekeeper の「このまま開く」で開ける」と同じ4段で開けた。`spctl --assess` は `rejected` で、
+    `origin=` に証明書の名前が出るだけ
+- ★ **以前のビルドの行が一覧に残っていると、許可したように見えて効いていない。** 同じバンドル ID の古い行がオンのまま
+  並んでいて、新しいビルドの照合は通らない（tccd のログに `Failed to match existing code requirement for subject … and service
+  kTCCServiceAccessibility`）。`tccutil reset <サービス> <バンドル ID>` で消してから足し直したら通った
+- ★ **アクセシビリティは求めても確認が出ない。** `AXIsProcessTrustedWithOptions` に prompt を付けても何も出なかった
+  （`CGRequestScreenCaptureAccess()` は出た）。macOS 27 では、項目名が「デバイスの制御とデータへのアクセス」
+  （英語は Device Control and Data Access）に変わっている。`x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility`
+  でそのページが開く
+- ★ **同梱の server（`externalBin`）の識別子は署名で変わる。** ad-hoc では `chatter-agent-<UUID の16進>`、
+  証明書で署名すると `chatter-agent`
+- ★ **codesign が秘密鍵を使うたびに、キーチェーンの確認が出る。** `-T /usr/bin/codesign` を付けて取り込んでも出た。
+  「常に許可」を一度選べば以後は出ない（「許可」だと、1回の署名で何度も聞かれる）
+- ★ **証明書を作り直すと、利用者の許可は全部外れる。** DR が証明書のハッシュを指すため。期限が切れて作り直すときも同じ
 
 ## ローカルで作った証明書は v3 にする
 

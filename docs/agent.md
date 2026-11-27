@@ -464,7 +464,7 @@ mDNS での広告（`_chatter-agent._tcp`。→ [`protocol.md`](./protocol.md)�
 
 ★ **許可は署名の識別子で引かれる。ChatterAgent はバンドルごと ad-hoc 署名する**（`tauri.conf.json` の
 `bundle.macOS.signingIdentity: "-"`）。こうすると識別子がバンドル ID（`tech.sukima.chatter-agent`）になり、
-ビルドし直しても置き場所を変えても同じ許可が効く。外すと識別子はリンカが付ける `chatter_agent_app-<ハッシュ>` になり、
+ビルドし直しても同じ許可が効く（置き場所を変えると、macOS によっては聞き直される）。外すと識別子はリンカが付ける `chatter_agent_app-<ハッシュ>` になり、
 許可が最初に許可したビルドの**パス**に紐づく。別のパスのビルドは、一覧で「オン」に見えたまま黙って拒否され、
 ダイアログも出ない（→ [`knowledge/agent.md`](./knowledge/agent.md)）。識別子は `codesign -dv ChatterAgent.app` の
 `Identifier` で確かめる。

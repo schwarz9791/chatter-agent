@@ -87,7 +87,7 @@ XR 版は XREAL Aura で動いていますが、まだ試した人が多くあ�
    adb install ChatterMascot.apk
    ```
 
-2. **Mac に入れる ChatterAgent。** `agent-v*` から `ChatterAgent.zip` を取って展開し、`ChatterAgent.app` を `/Applications` へ移します。ad-hoc 署名で公証していないので、ダウンロードすると Gatekeeper に止められます。次のどちらかで開けます。
+2. **Mac に入れる ChatterAgent。** `agent-v*` から `ChatterAgent.zip` を取って展開し、`ChatterAgent.app` を `/Applications` へ移します。公証していないので、ダウンロードすると Gatekeeper に止められます。次のどちらかで開けます。
    - `xattr -dr com.apple.quarantine /Applications/ChatterAgent.app` を実行する
    - 一度開いてから、システム設定 → プライバシーとセキュリティで「このまま開く」を押す。続くダイアログでもう一度「このまま開く」を押し、Touch ID か管理者パスワードで認証する
 

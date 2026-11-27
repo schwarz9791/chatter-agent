@@ -231,7 +231,7 @@ frame を測ると **x が負**（画面の左外）で `screen` も取れない
 
 ## 配った zip は Gatekeeper の「このまま開く」で開ける
 
-ad-hoc 署名で公証していないので、ブラウザでダウンロードした zip（quarantine が付く）から出した `.app` は
+公証していないので、ブラウザでダウンロードした zip（quarantine が付く）から出した `.app` は
 Gatekeeper に止められる。マスコットの macOS 版も同じ。開き方は Release ノート（`.github/release-notes/agent.md` /
 `mascot.md`）に書いてある。
 
@@ -264,7 +264,7 @@ Gatekeeper に止められる。マスコットの macOS 版も同じ。開き�
 
 ChatterAgent（`tauri-plugin-updater`）もマスコット（reqwest で落として `ditto` で展開）も、自分で落としたファイルには
 quarantine が付かない。入れ替えた `.app` は Gatekeeper の評価を通らずに起動する（`spctl --assess` 自体は
-ad-hoc で公証していないので rejected と答える）。
+公証していないので rejected と答える）。
 
 - 2026-10-23（macOS 27.0.1。管理者ユーザー。server は `"host": "0.0.0.0"`。`devUpdateRepo` で検証用の公開リポジトリに向け、
   手元でビルドした `0.0.1` → `0.0.2`、`0.0.3` → `0.0.4` と、版だけ書き換えて ad-hoc で署名し直したマスコット
@@ -298,7 +298,7 @@ ad-hoc で公証していないので rejected と答える）。
 
 画面収録の許可（TCC）は署名の designated requirement で引かれる。ad-hoc 署名には安定した DR が無いので、
 更新のたびに許可が外れ、一覧ではオンに見えたまま拒否される
-（[Apple Developer Forums の DTS の回答](https://developer.apple.com/forums/thread/795739)）。ChatterAgent は ad-hoc なので、
+（[Apple Developer Forums の DTS の回答](https://developer.apple.com/forums/thread/795739)）。ad-hoc で署名したビルドでは、
 `SCShareableContent` で取る形だと更新のたびに許可を取り直すことになる。`SCContentSharingPicker` なら選択そのものが同意になる。
 自己署名の証明書で署名すれば、許可は更新の後も残る（→「自己署名の証明書で署名すれば、許可は更新の後も残る」）。
 

@@ -43,6 +43,12 @@ npm run dev        # 開発時（同梱の実行ファイルは無い。→「�
 npm test           # 設定窓の純粋な判定（node --test）
 ```
 
+- `npm run build` は ad-hoc 署名（`signingIdentity: "-"`）。画面収録・アクセシビリティなど macOS の許可を使う機能を作るときは、release と同じ証明書で署名する:
+  `APPLE_SIGNING_IDENTITY=ChatterAgent npm run build`（証明書がキーチェーンに要る。→ [`release.md`](./release.md)「コード署名の証明書」）。
+  ad-hoc だとビルドのたびに許可が外れる。照合の条件が release と同じになるので、開発ビルドは入れてある release と許可を共有する。
+  環境変数は `tauri.conf.json` より優先される。
+  ★ **ad-hoc のビルドで許可したことがあると、その行がオンのまま残って照合が通らない**（一覧ではオンに見え、確認も出ない）。
+  `tccutil reset <サービス> tech.sukima.chatter-agent` で消してから許可し直す（→ [`knowledge/agent.md`](./knowledge/agent.md)「自己署名の証明書で署名すれば、許可は更新の後も残る」）
 - `npm run dev` は Vite（`dev:web`、ポート 1420）も起こす。`npm run build` は先に `build:web`
   （`tsc --noEmit && vite build`）を走らせ、`dist/` を `.app` に取り込む
 - ★ **同梱は `src-tauri/tauri.bundle.conf.json` を `--config` で渡したときだけ**（`npm run build` と `build:release`）。
@@ -425,7 +431,7 @@ Finder から起動したアプリは薄い環境しか持たないので、同�
 プロセスの中で取得・エンコード・送信する。** 契約は [`protocol.md`](./protocol.md)「画面の配信」。
 
 - **取得:** ScreenCaptureKit の `SCContentSharingPicker`。選んだものだけを取るので、画面収録の許可は要らない
-  （ad-hoc 署名では更新のたびに許可が外れるので、この形で避けている。→ [`knowledge/agent.md`](./knowledge/agent.md)「画面の取得はピッカーなら許可が要らない」）
+  （→ [`knowledge/agent.md`](./knowledge/agent.md)「画面の取得はピッカーなら許可が要らない」）
 - **エンコード:** VideoToolbox の H.264。解像度の上限・fps・ビットレートは `screen/wire.rs` の定数。見ている相手がいない間はエンコードしない
 - ★ **フレームが来ない間がある**（ウインドウの最小化など。→ [`knowledge/agent.md`](./knowledge/agent.md)）。最後の 1 枚を持っておき、相手が繋がったときと送信待ちが溢れたときに再エンコードする
 - **待ち受け:** 選んでから止めるまでだけ。`GET /v1/config` の `host` と `port + 1` に bind する。server が答えなければ始めない。`host` が LAN の特定アドレスだと制御 API に繋げないので始めず、`0.0.0.0` を案内する
@@ -462,8 +468,9 @@ mDNS での広告（`_chatter-agent._tcp`。→ [`protocol.md`](./protocol.md)�
 広告が LAN に届いている証拠にはならない。確かめるには Mac で `dns-sd -B _chatter-agent._tcp local.` を引き、
 `if` 欄に Wi-Fi のインターフェース番号（`ifconfig -v en0` の `index`）が出ているかを見る。`1`（ループバック）だけなら届いていない。
 
-★ **許可は署名の識別子で引かれる。ChatterAgent はバンドルごと ad-hoc 署名する**（`tauri.conf.json` の
-`bundle.macOS.signingIdentity: "-"`）。こうすると識別子がバンドル ID（`tech.sukima.chatter-agent`）になり、
+★ **「ローカルネットワーク」の許可は署名の識別子で引かれる。ChatterAgent はバンドルごと署名する**（開発ビルドは ad-hoc で `tauri.conf.json` の
+`bundle.macOS.signingIdentity: "-"`、release は自己署名の証明書。→ [`release.md`](./release.md)「コード署名の証明書」）。
+どちらでも識別子がバンドル ID（`tech.sukima.chatter-agent`）になり、
 ビルドし直しても同じ許可が効く（置き場所を変えると、macOS によっては聞き直される）。外すと識別子はリンカが付ける `chatter_agent_app-<ハッシュ>` になり、
 許可が最初に許可したビルドの**パス**に紐づく。別のパスのビルドは、一覧で「オン」に見えたまま黙って拒否され、
 ダイアログも出ない（→ [`knowledge/agent.md`](./knowledge/agent.md)）。識別子は `codesign -dv ChatterAgent.app` の

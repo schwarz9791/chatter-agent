@@ -87,7 +87,7 @@ You need:
    adb install ChatterMascot.apk
    ```
 
-2. **ChatterAgent on the Mac.** Download `ChatterAgent.zip` from an `agent-v*` release, unzip it, and move `ChatterAgent.app` to `/Applications`. The app is ad-hoc signed and not notarized, so Gatekeeper blocks it after download. Do one of the following:
+2. **ChatterAgent on the Mac.** Download `ChatterAgent.zip` from an `agent-v*` release, unzip it, and move `ChatterAgent.app` to `/Applications`. The app is not notarized, so Gatekeeper blocks it after download. Do one of the following:
    - Run `xattr -dr com.apple.quarantine /Applications/ChatterAgent.app`
    - Open it once, then go to System Settings → Privacy & Security and click "Open Anyway". Click "Open Anyway" again in the dialog that follows, then authenticate with Touch ID or an administrator password
 

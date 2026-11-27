@@ -9,6 +9,8 @@
 - updater の秘密鍵がリポジトリの外にあり、パスワードがキーチェーン（サービス名 `chatter-agent-updater-key`）に
   入っていること。ChatterAgent の更新（ChatterAgent 自身とマスコットの macOS 版）は、この鍵で署名したものだけを受け付ける。
   作り方は下の「updater の鍵」
+- 自己署名のコード署名の証明書がログインキーチェーンにあること。利用者の macOS の許可（画面収録・アクセシビリティ）は
+  この証明書に結び付いている。作り方は下の「コード署名の証明書」
 - Unity のビルド環境（[`mascot.md`](./mascot.md)「環境」）
 - ネットワーク。release は Gradle の依存を毎回ダウンロードし直す（→ [`mascot.md`](./mascot.md)「署名と版」）
 
@@ -30,6 +32,49 @@ security add-generic-password -a "$USER" -s chatter-agent-updater-key -w
   （環境に `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` / `TAURI_SIGNING_PRIVATE_KEY` があっても、関門で読んで `unset` する）
 - ★ **秘密鍵とパスワードの両方をバックアップする（APK の keystore と同じ考え方。→ [`mascot.md`](./mascot.md)「署名と版」）。
   失うと、その公開鍵を入れた版の利用者に更新を配れなくなる**（以後は手で入れ替えてもらう）。パスワードは鍵と同じ場所に置かない
+
+## コード署名の証明書（一度だけ）
+
+```bash
+work="$(mktemp -d)" && chmod 700 "$work"
+cat > "$work/req.cnf" <<'EOF'
+[req]
+distinguished_name = dn
+x509_extensions = ext
+prompt = no
+[dn]
+CN = ChatterAgent
+[ext]
+basicConstraints = critical, CA:FALSE
+keyUsage = critical, digitalSignature
+extendedKeyUsage = critical, codeSigning
+subjectKeyIdentifier = hash
+EOF
+/usr/bin/openssl req -x509 -newkey rsa:4096 -nodes -days 10000 \
+  -config "$work/req.cnf" -keyout "$work/key.pem" -out "$work/cert.pem"
+read -rs P12_PASS && export P12_PASS
+/usr/bin/openssl pkcs12 -export -inkey "$work/key.pem" -in "$work/cert.pem" -name ChatterAgent \
+  -out <p12 の絶対パス> -passout env:P12_PASS
+# security -i は標準入力からコマンドを読むので、値が argv に出ない。-x で秘密鍵を書き出せなくする
+echo "import \"<p12 の絶対パス>\" -k \"$HOME/Library/Keychains/login.keychain-db\" -T /usr/bin/codesign -x -P \"$P12_PASS\"" | security -i
+unset P12_PASS; rm -rf "$work"
+security find-identity -p codesigning   # ChatterAgent の行の SHA-1 を build-release.sh の signing_cert に書く
+```
+
+- `build-release.sh` は証明書を名前でなく SHA-1 で固定している（`signing_cert`）。同名の別の証明書では署名しない
+- `/usr/bin/openssl`（LibreSSL）を使う。★ Homebrew の OpenSSL 3 で作った p12 は、`-legacy` なしでは macOS が読めない。
+  拡張を付けないと証明書が v1 になる（→ [`knowledge/agent.md`](./knowledge/agent.md)「ローカルで作った証明書は v3 にする」）
+- ★ パスワードに `"` と `\` を使わない（`security -i` に `"` で括って渡すため。[`mascot.md`](./mascot.md)「署名と版」の keystore と同じ）
+- 信頼済みにしなくてよい。`security find-identity` には `CSSMERR_TP_NOT_TRUSTED` と出るが、署名も検証も許可の照合も通る
+  （→ [`knowledge/agent.md`](./knowledge/agent.md)「自己署名の証明書で署名すれば、許可は更新の後も残る」）
+- 最初の署名でキーチェーンの確認が出る。「常に許可」を選ぶ（「許可」だと1回のビルドで何度も聞かれる）
+- 別の Mac でビルドするときは、控えの p12 を同じ `security import` で取り込む
+- ★ **作り直すと、利用者の許可が全部外れる**（照合の条件が証明書のハッシュを指すため）。期限が切れて出し直すときも同じなので、期限は長く取る。
+  期限を短くしても、漏れたときの守りにはならない（漏れた鍵は期限の内に使える。手当ては作り直すことだけ）
+- ★ **p12 とパスワードの両方をバックアップする。** リポジトリの外に置き、パスワードは p12 と同じ場所に置かない。
+  失っても更新は届く（updater の鍵とは別）。起きるのは、作り直した証明書で配る版から、利用者の許可が一度外れること
+- ★ **漏れたときの方が重い。** p12 があれば、利用者の Mac で ChatterAgent の許可を引き継ぐアプリを誰でも作れる。
+  漏れたら作り直して次の版を出す（利用者の許可は一度外れる）
 
 ## 版を決める
 
@@ -98,7 +143,9 @@ git push origin agent-v0.2.0         # 版を確かめてから（下）
 - arm64 だけのビルドになる（Intel Mac 向けは作らない）。`build-release.sh` は `uname -m` が `arm64` でなければ止まる
 - `ChatterAgent.app.tar.gz` は `tauri build` の後で `build-release.sh` が自分で固めて `tauri signer sign` で署名する
   （`createUpdaterArtifacts` は使わない。鍵を `tauri build` に渡さないため）
-- 署名は ad-hoc で、公証しない。開き方は Release ノート（`.github/release-notes/agent.md`）に書いてある
+- 自己署名の証明書（`build-release.sh` が SHA-1 で固定）で署名し、公証しない。証明書がキーチェーンに無いとき、
+  またできた `.app` がその証明書で署名されていないときは `build-release.sh` が止まる。
+  開き方は Release ノート（`.github/release-notes/agent.md`）に書いてある
 
 ## GitHub Release
 

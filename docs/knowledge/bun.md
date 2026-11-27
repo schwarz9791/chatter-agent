@@ -100,8 +100,8 @@ Tauri の `externalBin` で `.app` に入れた。
   → `main.ts` の隠しサブコマンド `ollaya-child` で起こす。compile 版では `process.argv` が
   `["bun", "/$bunfs/root/<実行ファイル名>", ...]` になる（bun 1.4.3 で実測）ので、`/$bunfs/` で始まる `argv[1]` を
   見分けて、スクリプトのパスを挟まず実行ファイルへ直接サブコマンドを渡す。node のバンドルは `<script> ollaya-child`。
-- **Tauri の bundler は sidecar も ad-hoc で署名し直す**（`Signing …/Contents/MacOS/chatter-agent`）。
-  - Identifier は `chatter-agent-<ハッシュ>` になる。
+- **Tauri の bundler は sidecar も `.app` と同じ署名で署名し直す**（`Signing …/Contents/MacOS/chatter-agent`）。
+  - Identifier は ad-hoc なら `chatter-agent-<ハッシュ>`、自己署名の証明書なら `chatter-agent`（→ [`agent.md`](./agent.md)「自己署名の証明書で署名すれば、許可は更新の後も残る」）。
   - `.app` の `codesign --verify --deep --strict` は通り、署名し直した後も実行ファイルは動く。
   - hardened runtime は付かないので、JIT の entitlements は要らない。
 - **quarantine が残ったままでも、同梱の実行ファイルは起動できる。** ダウンロード相当（zip に `com.apple.quarantine` を付けて

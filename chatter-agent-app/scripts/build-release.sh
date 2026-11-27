@@ -3,7 +3,7 @@
 #
 #   HEAD に agent-v<MAJOR>.<MINOR>.<PATCH> タグを付けてから、npm run build:release
 #
-# 更新用の署名鍵（CHATTER_AGENT_UPDATER_KEY）が要る。
+# 更新用の署名鍵（CHATTER_AGENT_UPDATER_KEY）と、ログインキーチェーンのコード署名の証明書が要る。
 # 版はタグから決まる。追跡ファイルは書き換えない（コミットされている版は手元ビルドの印 0.0.0-dev）。
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -40,6 +40,9 @@ if [[ "$tags" != "$latest_tag" ]]; then
   exit 1
 fi
 
+# 利用者の macOS の許可（画面収録・アクセシビリティ）はこの証明書に結び付いている。作り直すと全員の許可が外れるので、名前でなくハッシュで固定する（docs/release.md）。
+signing_cert="D2FA4560D5C64B95A18766D2589AD6DA9F775617"
+
 # updater の署名鍵の関門。chatter-mascot/scripts/build.sh の同名のブロックと同じ形。直すときは両方を揃える。
 # パスワードはシェル変数に持ち、署名のコマンドにだけ環境変数で渡す（ビルドの子プロセスには見せない）。
 if [[ "$(uname -m)" != "arm64" ]]; then
@@ -66,6 +69,13 @@ if [[ -z "$key_pass" ]]; then
   fi
 fi
 
+# 自己署名で信頼されていない証明書は -v の一覧に出ないので、-v は付けない。
+identities="$(security find-identity -p codesigning)"
+if [[ "$identities" != *"$signing_cert"* ]]; then
+  echo "The code-signing certificate $signing_cert is not in the keychain. Create or import it following docs/release.md" >&2
+  exit 1
+fi
+
 # 同梱する Bun は mise.toml で固定した版にする。NOTICE がその版のタグを、静的リンクしたライブラリのソースの在処として示している。
 want_bun="$(sed -nE 's/^bun = "(.*)"$/\1/p' ../mise.toml)"
 have_bun="$(bun --version 2>/dev/null || true)"
@@ -79,12 +89,19 @@ npm --prefix ../core ci
 npm --prefix ../core run build:bin
 
 # --config は設定にマージされ、package_info().version と Info.plist に入る。
-npm run tauri -- build --config src-tauri/tauri.bundle.conf.json --config "{\"version\":\"$version\"}"
+# 環境変数は設定より優先されるので、継承されたものに黙って置き換えられないよう明示して渡す。
+APPLE_SIGNING_IDENTITY="$signing_cert" npm run tauri -- build --config src-tauri/tauri.bundle.conf.json --config "{\"version\":\"$version\"}"
 
 bundle=src-tauri/target/release/bundle/macos
 rm -rf build/ChatterAgent.app build/ChatterAgent.zip build/ChatterAgent.app.tar.gz build/ChatterAgent.app.tar.gz.sig build/latest.json
 mkdir -p build
 cp -R "$bundle/ChatterAgent.app" build/
+# 別の署名で配ると、利用者の許可が黙って外れる。codesign は16進を小文字で出す。
+dr="$(codesign -d -r- build/ChatterAgent.app 2>&1)"
+if ! grep -qiF "certificate leaf = H\"$signing_cert\"" <<<"$dr"; then
+  echo "build/ChatterAgent.app is not signed with the pinned certificate $signing_cert. Do not distribute it (docs/release.md)" >&2
+  exit 1
+fi
 # 拡張属性は zip に入れない。入れると AppleDouble（._*）がバンドルの中に並び、ditto 以外で展開すると署名の封が壊れる。
 ditto -c -k --norsrc --keepParent build/ChatterAgent.app build/ChatterAgent.zip
 

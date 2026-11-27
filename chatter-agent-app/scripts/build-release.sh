@@ -97,7 +97,8 @@ rm -rf build/ChatterAgent.app build/ChatterAgent.zip build/ChatterAgent.app.tar.
 mkdir -p build
 cp -R "$bundle/ChatterAgent.app" build/
 # 別の署名で配ると、利用者の許可が黙って外れる。codesign は16進を小文字で出す。
-dr="$(codesign -d -r- build/ChatterAgent.app 2>&1)"
+# 未署名だと codesign が失敗するが、ここで落とさず下の判定で案内を出して止める。
+dr="$(codesign -d -r- build/ChatterAgent.app 2>&1)" || true
 if ! grep -qiF "certificate leaf = H\"$signing_cert\"" <<<"$dr"; then
   echo "build/ChatterAgent.app is not signed with the pinned certificate $signing_cert. Do not distribute it (docs/release.md)" >&2
   exit 1
